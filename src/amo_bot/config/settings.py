@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import os
+
+from dotenv import load_dotenv
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(env_file=None, env_file_encoding="utf-8", extra="ignore")
 
     bot_token: str = Field(alias="BOT_TOKEN")
     telegram_api_base: str = Field(default="https://api.telegram.org", alias="TELEGRAM_API_BASE")
@@ -31,4 +34,14 @@ class Settings(BaseSettings):
 
 
 def get_settings() -> Settings:
+    # Projekt-.env soll fuer lokale Starts Standard sein und alte Shell-Exports
+    # gezielt uebersteuern, um stille Fehlkonfigurationen zu vermeiden.
+    override_from_env_file = os.getenv("AMO_ENV_OVERRIDE", "1").strip().lower() not in {
+        "0",
+        "false",
+        "no",
+        "off",
+    }
+    dotenv_path = os.getenv("DOTENV_PATH", ".env")
+    load_dotenv(dotenv_path=dotenv_path, override=override_from_env_file)
     return Settings()

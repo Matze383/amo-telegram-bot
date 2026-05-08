@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
+{% block content %}
+  <h1>AMO Telegram Bot WebUI</h1>
+  <p>Status: Flask WebUI, lokal/LAN.</p>
+
+  <p>
+    <a href="{{ url_for('health.health') }}">Health</a>
+  </p>
+
+  <form method="post" action="{{ url_for('auth.logout_submit') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button type="submit">Logout</button>
+  </form>
+
+  <h2>Platzhalter</h2>
+  <p>User/Gruppen/Plugins kommen später.</p>
+{% endblock %}

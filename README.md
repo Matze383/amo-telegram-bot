@@ -29,6 +29,11 @@ cp .env.example .env
 
 Danach `.env` mit lokalen Werten fuellen (keine echten Secrets committen).
 
+Wichtig zur Config-Prioritaet:
+- Beim lokalen Start wird `.env` standardmaessig **ueber** bereits exportierte Shell-Variablen gelegt.
+- Damit gewinnen Projektwerte aus `.env` (z. B. `WEBUI_HOST=0.0.0.0`) gegen alte Shell-Altwerte.
+- Fuer einen bewussten Runtime-Override per Shell: `AMO_ENV_OVERRIDE=0` setzen.
+
 ## Start
 Bot-Polling:
 ```bash

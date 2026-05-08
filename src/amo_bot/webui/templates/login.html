@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}Login{% endblock %}
+{% block content %}
+  <h1>Login</h1>
+  {% if insecure_password %}
+    <p>Login deaktiviert: WEBUI_PASSWORD fehlt oder ist unsicher (change_me).</p>
+  {% endif %}
+  {% if error_message %}
+    <p>{{ error_message }}</p>
+  {% endif %}
+  <form method="post" action="{{ url_for('auth.login_submit') }}">
+    {{ form.csrf_token }}
+    <label for="password">Passwort</label>
+    {{ form.password(id='password') }}
+    {{ form.submit() }}
+  </form>
+
+  <form method="post" action="{{ url_for('auth.logout_submit') }}">
+    {{ form.csrf_token }}
+    <button type="submit">Logout</button>
+  </form>
+{% endblock %}
