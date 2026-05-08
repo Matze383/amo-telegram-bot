@@ -11,6 +11,7 @@ from amo_bot.db.base import create_session_factory
 from amo_bot.db.init_db import init_db
 from amo_bot.telegram.client import TelegramClient
 from amo_bot.telegram.commands import create_builtin_registry
+from amo_bot.telegram.chat_topic_persistence import ChatTopicPersistenceService
 from amo_bot.telegram.dispatcher import Dispatcher
 from amo_bot.telegram.polling import OffsetStore, run_polling
 from amo_bot.telegram.role_resolver import DBRoleResolver
@@ -33,7 +34,8 @@ def run() -> None:
     )
     offset_store = OffsetStore(settings.offset_state_file)
 
-    role_resolver = DBRoleResolver(create_session_factory(settings.database_url))
+    session_factory = create_session_factory(settings.database_url)
+    role_resolver = DBRoleResolver(session_factory)
     ai_service = AIService(
         OllamaClient(
             base_url=settings.ollama_base_url,
@@ -52,6 +54,7 @@ def run() -> None:
         role_resolver=role_resolver,
         send_text=send_text,
         bot_username=settings.bot_username,
+        message_persistence=ChatTopicPersistenceService(session_factory),
     )
 
     asyncio.run(

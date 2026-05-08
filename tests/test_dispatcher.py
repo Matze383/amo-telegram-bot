@@ -2,7 +2,7 @@ import asyncio
 
 from amo_bot.auth.roles import Role
 from amo_bot.telegram.commands import create_builtin_registry
-from amo_bot.telegram.dispatcher import Dispatcher
+from amo_bot.telegram.dispatcher import Dispatcher, MessagePersistence
 from amo_bot.telegram.role_resolver import InMemoryRoleResolver
 
 
@@ -130,6 +130,40 @@ def test_dispatcher_accepts_suffixed_command_for_configured_bot_username() -> No
             "from": {"id": 42, "is_bot": False, "first_name": "T", "username": "tester"},
             "chat": {"id": 99, "type": "private"},
             "text": "/ping@ConfiguredBot",
+        },
+    }
+
+    asyncio.run(dispatcher.handle_raw_update(raw_update))
+    assert sent == [(99, "pong")]
+
+
+class _FailingPersistence(MessagePersistence):
+    async def persist_message(self, message: object) -> None:
+        raise RuntimeError("db down")
+
+
+def test_dispatcher_continues_when_message_persistence_fails() -> None:
+    sent: list[tuple[int, str]] = []
+
+    async def fake_send(chat_id: int, text: str) -> object:
+        sent.append((chat_id, text))
+        return {"ok": True}
+
+    dispatcher = Dispatcher(
+        command_registry=create_builtin_registry(),
+        role_resolver=InMemoryRoleResolver({42: Role.NORMAL}),
+        send_text=fake_send,
+        bot_username="ConfiguredBot",
+        message_persistence=_FailingPersistence(),
+    )
+
+    raw_update = {
+        "update_id": 12,
+        "message": {
+            "message_id": 16,
+            "from": {"id": 42, "is_bot": False, "first_name": "T", "username": "tester"},
+            "chat": {"id": 99, "type": "private"},
+            "text": "/ping",
         },
     }
 

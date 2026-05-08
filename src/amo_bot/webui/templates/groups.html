@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% block title %}Groups{% endblock %}
+{% block content %}
+  <h1>Groups</h1>
+  <p><a href="{{ url_for('ui.dashboard') }}">Zurück zum Dashboard</a></p>
+
+  {% if owner_mutation_enabled %}
+    <p>Topic-Verwaltung ist aktiv.</p>
+  {% else %}
+    <p>Topic-Verwaltung deaktiviert: WEBUI_OWNER_TELEGRAM_ID nicht gesetzt.</p>
+  {% endif %}
+
+  {% if error_message %}
+    <p style="color: #b00020;">{{ error_message }}</p>
+  {% endif %}
+
+  {% if groups %}
+    {% for group in groups %}
+      <section style="margin-bottom: 2rem;">
+        <h2>{{ group.title or "(ohne Titel)" }}</h2>
+        <ul>
+          <li><strong>chat_id:</strong> {{ group.chat_id }}</li>
+          <li><strong>chat_type:</strong> {{ group.chat_type }}</li>
+          <li><strong>username:</strong> {{ group.username or "-" }}</li>
+          <li><strong>last_seen_at:</strong> {{ group.last_seen_at or "-" }}</li>
+          <li><strong>updated_at:</strong> {{ group.updated_at or "-" }}</li>
+        </ul>
+
+        {% if group.topics %}
+          <table>
+            <thead>
+              <tr>
+                <th>message_thread_id</th>
+                <th>telegram_topic_name</th>
+                <th>display_name</th>
+                <th>notes</th>
+                <th>enabled</th>
+                <th>Aktion</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for topic in group.topics %}
+                <tr>
+                  <td>{{ topic.message_thread_id }}</td>
+                  <td>{{ topic.telegram_topic_name or "-" }}</td>
+                  <td>{{ topic.display_name or "-" }}</td>
+                  <td>{{ topic.notes or "-" }}</td>
+                  <td>{{ "ja" if topic.enabled else "nein" }}</td>
+                  <td>
+                    <form method="post" action="{{ url_for('ui.update_topic_metadata', chat_id=group.chat_id, message_thread_id=topic.message_thread_id) }}">
+                      {{ topic_form.csrf_token }}
+                      <input type="text" name="display_name" value="{{ topic.display_name or '' }}" placeholder="Display Name">
+                      <textarea name="notes" rows="2" cols="24" placeholder="Notes">{{ topic.notes or '' }}</textarea>
+                      <label>
+                        <input type="checkbox" name="enabled" value="y" {% if topic.enabled %}checked{% endif %}>
+                        enabled
+                      </label>
+                      <button type="submit" {% if not owner_mutation_enabled %}disabled{% endif %}>Speichern</button>
+                    </form>
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        {% else %}
+          {% if owner_mutation_enabled %}
+            <form method="post" action="{{ url_for('ui.update_topic_metadata', chat_id=group.chat_id, message_thread_id=999999999) }}">
+              {{ topic_form.csrf_token }}
+              <button type="submit" hidden aria-hidden="true" tabindex="-1"></button>
+            </form>
+          {% endif %}
+          <p>Keine Topics vorhanden.</p>
+        {% endif %}
+      </section>
+    {% endfor %}
+  {% else %}
+    <p>Keine Gruppen vorhanden.</p>
+  {% endif %}
+{% endblock %}

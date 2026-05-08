@@ -1,0 +1,152 @@
+from __future__ import annotations
+
+import asyncio
+
+from sqlalchemy import select
+
+from amo_bot.auth.roles import Role
+from amo_bot.db.base import create_session_factory
+from amo_bot.db.init_db import init_db
+from amo_bot.db.models import TelegramChat, TelegramTopic
+from amo_bot.telegram.commands import create_builtin_registry
+from amo_bot.telegram.dispatcher import Dispatcher
+from amo_bot.telegram.role_resolver import InMemoryRoleResolver
+from amo_bot.telegram.chat_topic_persistence import ChatTopicPersistenceService
+
+
+def _mk_update(
+    *,
+    update_id: int,
+    user_id: int,
+    chat_id: int,
+    chat_type: str,
+    text: str = "/ping",
+    title: str | None = None,
+    username: str | None = None,
+    message_thread_id: int | None = None,
+) -> dict[str, object]:
+    chat: dict[str, object] = {"id": chat_id, "type": chat_type}
+    if title is not None:
+        chat["title"] = title
+    if username is not None:
+        chat["username"] = username
+
+    message: dict[str, object] = {
+        "message_id": update_id + 100,
+        "from": {"id": user_id, "is_bot": False, "first_name": "U", "username": f"u{user_id}"},
+        "chat": chat,
+        "text": text,
+    }
+    if message_thread_id is not None:
+        message["message_thread_id"] = message_thread_id
+
+    return {"update_id": update_id, "message": message}
+
+
+def _build_dispatcher(db_url: str) -> Dispatcher:
+    sf = create_session_factory(db_url)
+
+    async def _fake_send(_chat_id: int, _text: str) -> object:
+        return {"ok": True}
+
+    return Dispatcher(
+        command_registry=create_builtin_registry(),
+        role_resolver=InMemoryRoleResolver({42: Role.NORMAL}),
+        send_text=_fake_send,
+        bot_username="AmoBot",
+        message_persistence=ChatTopicPersistenceService(sf),
+    )
+
+
+def test_message_from_private_chat_persists_chat(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'persist_private.db'}"
+    init_db(db_url)
+    dispatcher = _build_dispatcher(db_url)
+
+    asyncio.run(
+        dispatcher.handle_raw_update(
+            _mk_update(update_id=1, user_id=42, chat_id=111, chat_type="private", username="private_name")
+        )
+    )
+
+    sf = create_session_factory(db_url)
+    with sf() as session:
+        row = session.scalar(select(TelegramChat).where(TelegramChat.chat_id == 111))
+        assert row is not None
+        assert row.chat_type == "private"
+        assert row.title is None
+        assert row.username == "private_name"
+
+
+def test_message_from_supergroup_persists_chat_title(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'persist_group.db'}"
+    init_db(db_url)
+    dispatcher = _build_dispatcher(db_url)
+
+    asyncio.run(
+        dispatcher.handle_raw_update(
+            _mk_update(
+                update_id=2,
+                user_id=42,
+                chat_id=-100123,
+                chat_type="supergroup",
+                title="My Group",
+                username="mygroup",
+            )
+        )
+    )
+
+    sf = create_session_factory(db_url)
+    with sf() as session:
+        row = session.scalar(select(TelegramChat).where(TelegramChat.chat_id == -100123))
+        assert row is not None
+        assert row.chat_type == "supergroup"
+        assert row.title == "My Group"
+        assert row.username == "mygroup"
+
+
+def test_message_with_thread_id_persists_topic(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'persist_topic.db'}"
+    init_db(db_url)
+    dispatcher = _build_dispatcher(db_url)
+
+    asyncio.run(
+        dispatcher.handle_raw_update(
+            _mk_update(
+                update_id=3,
+                user_id=42,
+                chat_id=-100777,
+                chat_type="supergroup",
+                title="Forum Group",
+                message_thread_id=55,
+            )
+        )
+    )
+
+    sf = create_session_factory(db_url)
+    with sf() as session:
+        topic = session.scalar(
+            select(TelegramTopic).where(
+                TelegramTopic.chat_id == -100777,
+                TelegramTopic.message_thread_id == 55,
+            )
+        )
+        assert topic is not None
+        assert topic.telegram_topic_name is None
+
+
+def test_message_without_thread_id_creates_no_topic(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'persist_no_topic.db'}"
+    init_db(db_url)
+    dispatcher = _build_dispatcher(db_url)
+
+    asyncio.run(
+        dispatcher.handle_raw_update(
+            _mk_update(update_id=4, user_id=42, chat_id=-100888, chat_type="group", title="Plain Group")
+        )
+    )
+
+    sf = create_session_factory(db_url)
+    with sf() as session:
+        topics = session.scalars(select(TelegramTopic).where(TelegramTopic.chat_id == -100888)).all()
+        assert topics == []

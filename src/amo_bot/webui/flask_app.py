@@ -8,6 +8,7 @@ from flask_wtf import CSRFProtect
 
 from amo_bot.config.settings import Settings, get_settings
 from amo_bot.db.base import create_session_factory
+from amo_bot.db.init_db import init_db
 from amo_bot.plugins.loader import PluginLoader
 from amo_bot.plugins.service import PluginService
 from amo_bot.webui.flask_blueprints import register_blueprints
@@ -37,6 +38,9 @@ def create_flask_app(
     )
 
     csrf.init_app(app)
+
+    # Ensure latest DB schema exists for WebUI usage (idempotent, non-destructive).
+    init_db(app_settings.database_url)
 
     session_factory = create_session_factory(app_settings.database_url)
     plugins = plugin_service or PluginService(

@@ -33,6 +33,7 @@ class TelegramMessage:
     from_user: TelegramUser
     chat: TelegramChat
     text: str
+    message_thread_id: int | None = None
 
     def parse_command(self, bot_username: str | None = None) -> CommandMatch | None:
         raw = self.text.strip()
@@ -112,11 +113,22 @@ def _parse_message(raw: Any) -> TelegramMessage | None:
     except (KeyError, TypeError, ValueError):
         return None
 
+    message_thread_id_raw = raw.get("message_thread_id")
+    message_thread_id: int | None
+    if message_thread_id_raw is None:
+        message_thread_id = None
+    else:
+        try:
+            message_thread_id = int(message_thread_id_raw)
+        except (TypeError, ValueError):
+            message_thread_id = None
+
     return TelegramMessage(
         message_id=message_id,
         from_user=from_user,
         chat=chat,
         text=text,
+        message_thread_id=message_thread_id,
     )
 
 

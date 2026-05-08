@@ -1,13 +1,20 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
-from typing import Awaitable, Callable
+from typing import Awaitable, Callable, Protocol
 
 from amo_bot.auth.permissions import can_use_bot
 from amo_bot.telegram.commands import CommandContext, CommandRegistry, RoleResolver
-from amo_bot.telegram.update_parser import parse_update
+from amo_bot.telegram.update_parser import TelegramMessage, parse_update
 
 SendTextFn = Callable[[int, str], Awaitable[object]]
+
+logger = logging.getLogger(__name__)
+
+
+class MessagePersistence(Protocol):
+    async def persist_message(self, message: TelegramMessage) -> None: ...
 
 
 @dataclass(slots=True)
@@ -16,6 +23,7 @@ class Dispatcher:
     role_resolver: RoleResolver
     send_text: SendTextFn
     bot_username: str | None = None
+    message_persistence: MessagePersistence | None = None
 
     async def handle_raw_update(self, raw_update: object) -> None:
         update = parse_update(raw_update)
@@ -23,6 +31,12 @@ class Dispatcher:
             return
 
         message = update.message
+        if self.message_persistence is not None:
+            try:
+                await self.message_persistence.persist_message(message)
+            except Exception:
+                logger.exception("Failed to persist Telegram message; continuing update handling")
+
         command = message.parse_command(bot_username=self.bot_username)
         if command is None:
             return
