@@ -124,7 +124,7 @@ def test_dashboard_contains_expected_text_after_login() -> None:
     assert dashboard.status_code == 200
     assert "AMO Telegram Bot WebUI" in html
     assert "Flask WebUI, lokal/LAN" in html
-    assert "User/Gruppen/Plugins kommen später" in html
+    assert '<a href="/users">Users</a>' in html
 
 
 def test_logout_blocks_dashboard_again() -> None:

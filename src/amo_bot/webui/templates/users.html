@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}Users{% endblock %}
+{% block content %}
+  <h1>Users</h1>
+  <p><a href="{{ url_for('ui.dashboard') }}">Zurück zum Dashboard</a></p>
+
+  {% if owner_mutation_enabled %}
+    <p>Rollenänderung ist aktiv.</p>
+  {% else %}
+    <p>Rollenänderung deaktiviert: WEBUI_OWNER_TELEGRAM_ID nicht gesetzt.</p>
+  {% endif %}
+
+  {% if error_message %}
+    <p style="color: #b00020;">{{ error_message }}</p>
+  {% endif %}
+
+  {% if users %}
+    <table>
+      <thead>
+        <tr>
+          <th>Telegram User ID</th>
+          <th>Rolle</th>
+          <th>Rolle ändern</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for user in users %}
+          <tr>
+            <td>{{ user.telegram_user_id }}</td>
+            <td>{{ user.role }}</td>
+            <td>
+              <form method="post" action="{{ url_for('ui.update_user_role', telegram_user_id=user.telegram_user_id) }}">
+                {{ role_form.csrf_token }}
+                <select name="role">
+                  {% for role_name in roles %}
+                    <option value="{{ role_name }}" {% if role_name == user.role %}selected{% endif %}>{{ role_name }}</option>
+                  {% endfor %}
+                </select>
+                <button type="submit" {% if not owner_mutation_enabled %}disabled{% endif %}>Speichern</button>
+              </form>
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p>Keine User vorhanden.</p>
+  {% endif %}
+{% endblock %}

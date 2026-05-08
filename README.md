@@ -10,7 +10,7 @@ Defensives initiales Python-Codegeruest fuer einen Telegram-Bot mit eigener Tele
 - Rollenbasis: `owner`, `admin`, `vip`, `normal`, `ignore`
 - Defensiver Plugin-Unterbau (Manifest + Loader + kontrollierte API)
 - Ollama-Client + `/ask` MVP (stateless, ohne Verlauf)
-- Lokale WebUI-MVP (FastAPI) mit minimaler Auth via Bearer-Token-Login
+- Lokale WebUI-MVP (Flask) mit Login-Session + CSRF
 
 ## Nicht im MVP
 - Produktivbetrieb
@@ -42,7 +42,7 @@ python -m amo_bot.main
 
 WebUI (lokal):
 ```bash
-uvicorn amo_bot.webui.app:app --host 127.0.0.1 --port 8080
+python -m amo_bot.main --webui
 ```
 
 ## Betatest
@@ -108,21 +108,16 @@ Optional fuer `/ask` mit lokalem Ollama:
 
 ## WebUI-Routen (MVP)
 - `GET /health` offen
-- `POST /auth/login` (Body: `{ "password": "..." }`) -> Bearer-Token (TTL via `WEBUI_SESSION_TTL_SECONDS`)
-- `POST /auth/logout` (Auth, invalidiert Token)
-- `GET /dashboard` (Auth)
-- `GET /users/{telegram_user_id}` (Auth)
-- `POST /users/set-role` (Auth, mutierend, auditierbar; Actor wird serverseitig aus `WEBUI_OWNER_TELEGRAM_ID` gesetzt)
-- `GET /plugins` (Auth)
-- `POST /plugins/activate` (Auth, mutierend, nur WebUI-Kontext)
-- `POST /plugins/deactivate` (Auth, mutierend)
+- `GET /login`
+- `POST /login`
+- `POST /logout`
+- `GET /dashboard` (Login erforderlich)
+- `GET /users` (Login erforderlich, HTML-Liste)
+- `POST /users/<telegram_user_id>/role` (Login erforderlich, CSRF, mutierend)
 
 Wichtige Hinweise:
-- Mutierende Routen sind deaktiviert, wenn `WEBUI_PASSWORD` fehlt oder auf unsicherem Placeholder (`change_me`) steht.
-- `POST /users/set-role` ist zusaetzlich deaktiviert, wenn `WEBUI_OWNER_TELEGRAM_ID` nicht gesetzt ist (Audit-Actor darf nicht aus Clientdaten kommen).
-- `POST /plugins/activate` und `POST /plugins/deactivate` sind ebenfalls deaktiviert, wenn `WEBUI_OWNER_TELEGRAM_ID` nicht gesetzt ist.
-- Client-Feld `actor_telegram_user_id` wird fuer `/users/set-role` ignoriert; Audit-Actor ist serverseitig.
-- Owner-Rollenvergabe ist ueber WebUI moeglich und wird als Audit-Event geschrieben. Diese Route nur lokal und owner-kontrolliert nutzen.
+- Rollenmutation ist deaktiviert, wenn `WEBUI_OWNER_TELEGRAM_ID` nicht gesetzt ist.
+- Audit-Actor wird serverseitig aus `WEBUI_OWNER_TELEGRAM_ID` gesetzt.
 
 ### Zusaetzliche WebUI-.env Variablen
 - `WEBUI_OWNER_TELEGRAM_ID` (required fuer mutierende WebUI-Routen inkl. `POST /users/set-role`, `POST /plugins/activate`, `POST /plugins/deactivate`)
