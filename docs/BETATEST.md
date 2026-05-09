@@ -79,16 +79,10 @@ source venv/bin/activate
 2. **Abhängigkeiten installieren:**
 
 ```bash
-pip install -r requirements-dev.txt
+pip install -r requirements.txt
 ```
 
-3. **Projekt lokal installierbar machen (wichtig fuer `python -m amo_bot.main`):**
-
-```bash
-pip install -e .
-```
-
-4. **Datenbank-Ordner erstellen:**
+3. **Projekt-Ordner vorbereiten:**
 
 ```bash
 mkdir -p data
@@ -122,7 +116,7 @@ python -m amo_bot.smoke
 
 ```bash
 source venv/bin/activate
-python -m amo_bot.main --serve
+python main.py
 ```
 
 **Erfolgsindikatoren:**
@@ -139,7 +133,7 @@ Bei `--serve` startet Bot + WebUI zusammen. Optional kannst du die WebUI separat
 ```bash
 cd /path/to/local/workspace
 source venv/bin/activate
-python -m amo_bot.main --webui
+python main.py --webui
 ```
 
 **Wichtig:** WebUI läuft nur lokal (`127.0.0.1`). Nicht ins Internet freigeben.
@@ -229,16 +223,11 @@ curl http://127.0.0.1:11434/api/tags
 ### Plugin-Test über WebUI
 
 1. Öffne http://127.0.0.1:8080 im Browser
-2. Melde dich an:
-   - POST /auth/login mit Body: `{"password": "dein_webui_passwort"}`
-   - Oder nutze die HTML-Oberfläche falls vorhanden
-3. Rufe `GET /plugins` auf – zeigt alle Plugins
-4. Aktiviere ein Plugin:
-   - `POST /plugins/activate` mit Body: `{"plugin_name": "demo_plugin"}`
-5. Deaktiviere ein Plugin:
-   - `POST /plugins/deactivate` mit Body: `{"plugin_name": "demo_plugin"}`
+2. Melde dich mit deinem `WEBUI_PASSWORD` an
+3. Gehe zur Plugin-Übersicht – zeigt alle Plugins
+4. Aktiviere/Deaktiviere Plugins über die Betriebsoberfläche
 
-**Hinweis:** Plugins müssen zuerst im `AMO_PLUGIN_DIR` liegen.
+**Hinweis:** Plugins müssen zuerst im `AMO_PLUGIN_DIR` liegen. Das Plugin-System unterstützt Command-, Scheduled- und Worker-Runtimes (MVP).
 
 ---
 
@@ -248,8 +237,7 @@ Folgende Features sind **nicht** im MVP enthalten:
 
 - Kanäle (nur private Chats und Gruppen)
 - Medienversand (Bilder, Videos, Dokumente)
-- Echte Plugin-Code-Ausführung (nur Manifest-Verwaltung)
-- Produktivbetrieb-Sicherheitsfeatures
+- Produktionsreife Sicherheitshärtung
 - Chat-Verlauf für `/ask`
 - Multi-User-WebUI (nur Owner-Login)
 
@@ -268,7 +256,7 @@ Folgende Features sind **nicht** im MVP enthalten:
 ### Fehlerdiagnose
 
 **Bot antwortet nicht:**
-- Prüfe Terminal: Läuft `python -m amo_bot.main`?
+- Prüfe Terminal: Läuft `python main.py`?
 - Prüfe `.env`: Ist `BOT_TOKEN` korrekt?
 - Prüfe Telegram: Hast du den Bot gestartet (im Chat auf "Start" geklickt)?
 
@@ -405,7 +393,7 @@ source venv/bin/activate
 2. **Install dependencies:**
 
 ```bash
-pip install -r requirements-dev.txt
+pip install -r requirements.txt
 ```
 
 3. **Create directories:**
@@ -442,7 +430,7 @@ python -m amo_bot.smoke
 
 ```bash
 source venv/bin/activate
-python -m amo_bot.main --serve
+python main.py
 ```
 
 **Success indicators:**
@@ -459,7 +447,7 @@ In a **second terminal**:
 ```bash
 cd /path/to/local/workspace
 source venv/bin/activate
-uvicorn amo_bot.webui.app:app --host 127.0.0.1 --port 8080
+python main.py --webui
 ```
 
 **Important:** WebUI runs locally only (`127.0.0.1`). Do not expose to the internet.
@@ -549,16 +537,11 @@ curl http://127.0.0.1:11434/api/tags
 ### Plugin Test via WebUI
 
 1. Open http://127.0.0.1:8080 in browser
-2. Log in:
-   - POST /auth/login with body: `{"password": "your_webui_password"}`
-   - Or use HTML interface if available
-3. Call `GET /plugins` – shows all plugins
-4. Activate a plugin:
-   - `POST /plugins/activate` with body: `{"plugin_name": "demo_plugin"}`
-5. Deactivate a plugin:
-   - `POST /plugins/deactivate` with body: `{"plugin_name": "demo_plugin"}`
+2. Log in with your `WEBUI_PASSWORD`
+3. Go to plugin overview – shows all plugins
+4. Activate/Deactivate plugins via the management interface
 
-**Note:** Plugins must first exist in `AMO_PLUGIN_DIR`.
+**Note:** Plugins must first exist in `AMO_PLUGIN_DIR`. The plugin system supports Command, Scheduled, and Worker runtimes (MVP).
 
 ---
 
@@ -568,8 +551,7 @@ The following features are **not** included in the MVP:
 
 - Channels (private chats and groups only)
 - Media sending (images, videos, documents)
-- Real plugin code execution (manifest management only)
-- Production security features
+- Production-ready security hardening
 - Chat history for `/ask`
 - Multi-user WebUI (owner login only)
 
@@ -588,7 +570,7 @@ The following features are **not** included in the MVP:
 ### Troubleshooting
 
 **Bot does not respond:**
-- Check terminal: Is `python -m amo_bot.main` running?
+- Check terminal: Is `python main.py` running?
 - Check `.env`: Is `BOT_TOKEN` correct?
 - Check Telegram: Did you start the bot (clicked "Start" in chat)?
 

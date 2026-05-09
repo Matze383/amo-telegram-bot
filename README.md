@@ -23,8 +23,7 @@ Defensives initiales Python-Codegeruest fuer einen Telegram-Bot mit eigener Tele
 cd /path/to/local/workspace
 python3.12 -m venv venv
 source venv/bin/activate
-pip install -r requirements-dev.txt
-pip install -e .
+pip install -r requirements.txt
 cp .env.example .env
 ```
 
@@ -43,12 +42,12 @@ python -m amo_bot.main
 
 WebUI (lokal):
 ```bash
-python -m amo_bot.main --webui
+python main.py --webui
 ```
 
 Bot + WebUI zusammen:
 ```bash
-python -m amo_bot.main --serve
+python main.py
 ```
 
 ## Betatest
@@ -62,10 +61,9 @@ Kurzablauf:
 ```bash
 python3.12 -m venv venv
 source venv/bin/activate
-pip install -r requirements-dev.txt
-pip install -e .
+pip install -r requirements.txt
 cp .env.example .env
-python -m amo_bot.main --serve
+python main.py
 pytest -q
 ```
 
