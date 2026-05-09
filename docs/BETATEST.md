@@ -79,10 +79,16 @@ source venv/bin/activate
 2. **Abhängigkeiten installieren:**
 
 ```bash
-pip install -e .[dev]
+pip install -r requirements-dev.txt
 ```
 
-3. **Datenbank-Ordner erstellen:**
+3. **Projekt lokal installierbar machen (wichtig fuer `python -m amo_bot.main`):**
+
+```bash
+pip install -e .
+```
+
+4. **Datenbank-Ordner erstellen:**
 
 ```bash
 mkdir -p data
@@ -116,7 +122,7 @@ python -m amo_bot.smoke
 
 ```bash
 source venv/bin/activate
-python -m amo_bot.main
+python -m amo_bot.main --serve
 ```
 
 **Erfolgsindikatoren:**
@@ -128,12 +134,12 @@ python -m amo_bot.main
 
 ### WebUI starten
 
-In einem **zweiten Terminal**:
+Bei `--serve` startet Bot + WebUI zusammen. Optional kannst du die WebUI separat starten:
 
 ```bash
 cd /path/to/local/workspace
 source venv/bin/activate
-uvicorn amo_bot.webui.app:app --host 127.0.0.1 --port 8080
+python -m amo_bot.main --webui
 ```
 
 **Wichtig:** WebUI läuft nur lokal (`127.0.0.1`). Nicht ins Internet freigeben.
@@ -399,7 +405,7 @@ source venv/bin/activate
 2. **Install dependencies:**
 
 ```bash
-pip install -e .[dev]
+pip install -r requirements-dev.txt
 ```
 
 3. **Create directories:**
@@ -436,7 +442,7 @@ python -m amo_bot.smoke
 
 ```bash
 source venv/bin/activate
-python -m amo_bot.main
+python -m amo_bot.main --serve
 ```
 
 **Success indicators:**

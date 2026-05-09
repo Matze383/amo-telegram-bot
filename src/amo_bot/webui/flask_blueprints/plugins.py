@@ -61,6 +61,13 @@ def disable_plugin(plugin_name: str):
     actor_id = _owner_actor_id()
     plugin_service = current_app.extensions["amo.plugin_service"]
     try:
+        manager = current_app.extensions.get("amo.worker_manager")
+        if manager is not None:
+            stop_worker = getattr(manager, "stop_sync", None) or getattr(manager, "stop", None)
+            if stop_worker is not None:
+                stop_result = stop_worker(plugin_name)
+                if hasattr(stop_result, "__await__"):
+                    abort(503, description="worker manager must expose sync methods for Flask routes")
         plugin_service.deactivate(plugin_name, context=ActionContext.WEBUI, actor_telegram_user_id=actor_id)
     except PluginPolicyError:
         abort(403, description="plugin deactivation denied")

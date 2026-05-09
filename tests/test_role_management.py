@@ -116,3 +116,61 @@ def test_audit_event_written_on_role_change(tmp_path) -> None:
     assert events[0].actor_telegram_user_id == 77
     assert '"target_telegram_user_id": 400' in events[0].payload_json
     assert '"new_role": "vip"' in events[0].payload_json
+
+
+def test_bootstrap_owner_from_settings_empty_db_creates_owner(tmp_path) -> None:
+    db_file = tmp_path / "test.db"
+    db_url = f"sqlite:///{db_file}"
+    init_db(db_url)
+
+    sf = create_session_factory(db_url)
+    with sf() as session:
+        from amo_bot.db.repositories import UserRoleRepository
+
+        changed = UserRoleRepository(session).bootstrap_owner_from_settings(owner_telegram_user_id=777)
+        assert changed is True
+
+    with sf() as session:
+        from amo_bot.db.repositories import UserRoleRepository
+
+        assert UserRoleRepository(session).get_user_role(777) == Role.OWNER
+
+
+def test_bootstrap_owner_from_settings_is_idempotent(tmp_path) -> None:
+    db_file = tmp_path / "test.db"
+    db_url = f"sqlite:///{db_file}"
+    init_db(db_url)
+
+    sf = create_session_factory(db_url)
+    with sf() as session:
+        from amo_bot.db.repositories import UserRoleRepository
+
+        repo = UserRoleRepository(session)
+        assert repo.bootstrap_owner_from_settings(owner_telegram_user_id=888) is True
+
+    with sf() as session:
+        from amo_bot.db.repositories import UserRoleRepository
+
+        repo = UserRoleRepository(session)
+        assert repo.bootstrap_owner_from_settings(owner_telegram_user_id=888) is False
+
+
+def test_bootstrap_owner_from_settings_without_owner_id_does_nothing(tmp_path) -> None:
+    from sqlalchemy import select
+
+    from amo_bot.db.models import AuditEvent
+
+    db_file = tmp_path / "test.db"
+    db_url = f"sqlite:///{db_file}"
+    init_db(db_url)
+
+    sf = create_session_factory(db_url)
+    with sf() as session:
+        from amo_bot.db.repositories import UserRoleRepository
+
+        changed = UserRoleRepository(session).bootstrap_owner_from_settings(owner_telegram_user_id=None)
+        assert changed is False
+
+    with sf() as session:
+        events = session.scalars(select(AuditEvent).where(AuditEvent.event_type == "role_set")).all()
+        assert events == []

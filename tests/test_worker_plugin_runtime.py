@@ -14,7 +14,14 @@ from amo_bot.plugins.loader import PluginLoader
 from amo_bot.plugins.worker_runtime import WorkerPluginManager
 
 
-def _write_worker_plugin(tmp_path, name: str, code: str, *, backoff_seconds: int = 30) -> PluginLoader:
+def _write_worker_plugin(
+    tmp_path,
+    name: str,
+    code: str,
+    *,
+    backoff_seconds: int = 30,
+    required_permissions: list[str] | None = None,
+) -> PluginLoader:
     plugins_dir = tmp_path / "plugins"
     plugin_dir = plugins_dir / name
     plugin_dir.mkdir(parents=True)
@@ -25,6 +32,7 @@ def _write_worker_plugin(tmp_path, name: str, code: str, *, backoff_seconds: int
                 "version": "1.0.0",
                 "worker": {"restart_backoff_seconds": backoff_seconds},
                 "required_roles": ["admin"],
+                "required_permissions": ["send_message"] if required_permissions is None else required_permissions,
             }
         ),
         encoding="utf-8",
@@ -33,8 +41,15 @@ def _write_worker_plugin(tmp_path, name: str, code: str, *, backoff_seconds: int
     return PluginLoader(str(plugins_dir))
 
 
-def _manager(tmp_path, db_url: str, plugin_name: str, code: str) -> WorkerPluginManager:
-    loader = _write_worker_plugin(tmp_path, plugin_name, code)
+def _manager(
+    tmp_path,
+    db_url: str,
+    plugin_name: str,
+    code: str,
+    *,
+    required_permissions: list[str] | None = None,
+) -> WorkerPluginManager:
+    loader = _write_worker_plugin(tmp_path, plugin_name, code, required_permissions=required_permissions)
     sf = create_session_factory(db_url)
     with sf() as session:
         repo = PluginRepository(session)
@@ -143,6 +158,38 @@ async def handle_worker(context, host_api):
     with sf() as session:
         events = [row.event_type for row in session.scalars(select(AuditEvent)).all()]
     assert "plugin_worker_skipped" in events
+
+
+def test_worker_missing_capability_errors_and_audits(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'worker5.db'}"
+    init_db(db_url)
+    manager = _manager(
+        tmp_path,
+        db_url,
+        "worker_no_cap",
+        """
+async def handle_worker(context, host_api):
+    await host_api.send_message(123, "blocked")
+""",
+        required_permissions=[],
+    )
+
+    async def _run() -> None:
+        assert await manager.start("worker_no_cap", now=datetime(2030, 1, 1, tzinfo=timezone.utc)) is True
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+
+    asyncio.run(_run())
+
+    sf = create_session_factory(db_url)
+    with sf() as session:
+        plugin = session.scalar(select(Plugin).where(Plugin.name == "worker_no_cap"))
+        assert plugin is not None
+        assert plugin.worker_state == "crashed"
+        events = session.scalars(select(AuditEvent)).all()
+        crashes = [row for row in events if row.event_type == "plugin_worker_crash"]
+    assert crashes
+    assert "requires capability 'send_message'" in (crashes[-1].payload_json or "")
 
 
 def test_worker_sync_start_uses_persistent_background_loop(tmp_path) -> None:

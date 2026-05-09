@@ -15,7 +15,8 @@
           <th>Commands</th>
           <th>Schedule</th>
           <th>Worker</th>
-          <th>Health</th>
+          <th>Laufhistorie</th>
+          <th>Worker-Status</th>
           <th>Rollen</th>
           <th>Capabilities</th>
           <th>Aktionen</th>
@@ -32,8 +33,16 @@
             <td>{{ plugin.schedule if plugin.schedule else "-" }}</td>
             <td>{{ plugin.worker if plugin.worker else "-" }}</td>
             <td>
-              {{ plugin.worker_state if plugin.worker_state else "-" }}
-              {% if plugin.worker_last_error %} ({{ plugin.worker_last_error }}){% endif %}
+              last_run_at: {{ plugin.last_run_at if plugin.last_run_at else "-" }}<br>
+              last_status: {{ plugin.last_status if plugin.last_status else "-" }}<br>
+              next_run_at: {{ plugin.next_run_at if plugin.next_run_at else "-" }}
+            </td>
+            <td>
+              state: {{ plugin.worker_state if plugin.worker_state else "-" }}<br>
+              restart_count: {{ plugin.worker_restart_count if plugin.worker_restart_count is not none else 0 }}<br>
+              next_restart_at: {{ plugin.worker_next_restart_at if plugin.worker_next_restart_at else "-" }}<br>
+              last_heartbeat_at: {{ plugin.worker_last_heartbeat_at if plugin.worker_last_heartbeat_at else "-" }}<br>
+              last_error: {{ plugin.worker_last_error if plugin.worker_last_error else "-" }}
             </td>
             <td>{{ plugin.required_roles | join(", ") if plugin.required_roles else "-" }}</td>
             <td>{{ plugin.required_permissions | join(", ") if plugin.required_permissions else "-" }}</td>

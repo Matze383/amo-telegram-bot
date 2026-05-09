@@ -52,12 +52,28 @@ class PluginCommandContext:
     argument: str | None
 
 
+class PluginCapabilityError(RuntimeError):
+    pass
+
+
 class PluginHostAPI:
-    def __init__(self, *, send_message: SendMessageFn, reply: ReplyFn) -> None:
+    def __init__(
+        self,
+        *,
+        send_message: SendMessageFn,
+        reply: ReplyFn,
+        required_permissions: set[str] | None = None,
+    ) -> None:
         self._send_message = send_message
         self._reply = reply
+        self._required_permissions = required_permissions
+
+    def _require_permission(self, permission: str, operation: str) -> None:
+        if self._required_permissions is not None and permission not in self._required_permissions:
+            raise PluginCapabilityError(f"operation '{operation}' requires capability '{permission}'")
 
     async def send_message(self, chat_id: int, text: str) -> object:
+        self._require_permission("send_message", "send_message")
         if not isinstance(chat_id, int):
             raise ValueError("chat_id must be int")
         text_clean = (text or "").strip()
@@ -66,6 +82,7 @@ class PluginHostAPI:
         return await self._send_message(chat_id, text_clean[:4000])
 
     async def reply(self, chat_id: int, message_id: int, text: str) -> object:
+        self._require_permission("send_message", "reply")
         if not isinstance(chat_id, int) or not isinstance(message_id, int):
             raise ValueError("chat_id and message_id must be int")
         text_clean = (text or "").strip()
@@ -86,7 +103,8 @@ class PluginCommandExecutor:
     ) -> None:
         self._loader = loader
         self._session_factory = session_factory
-        self._host_api = PluginHostAPI(send_message=send_message, reply=reply)
+        self._send_message = send_message
+        self._reply = reply
         self._timeout_seconds = timeout_seconds
 
     async def execute(self, *, actor: CommandActor, invocation: CommandInvocation) -> None:
@@ -153,8 +171,13 @@ class PluginCommandExecutor:
 
         start = time.monotonic()
         try:
+            host_api = PluginHostAPI(
+                send_message=self._send_message,
+                reply=self._reply,
+                required_permissions=set(manifest.required_permissions),
+            )
             handler = self._load_handler(manifest)
-            await asyncio.wait_for(handler(context, self._host_api), timeout=self._timeout_seconds)
+            await asyncio.wait_for(handler(context, host_api), timeout=self._timeout_seconds)
         except asyncio.TimeoutError:
             self._write_audit(
                 event_type="plugin_command_timeout",

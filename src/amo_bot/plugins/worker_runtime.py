@@ -43,7 +43,8 @@ class WorkerPluginManager:
     ) -> None:
         self._loader = loader
         self._session_factory = session_factory
-        self._host_api = PluginHostAPI(send_message=send_message, reply=reply)
+        self._send_message = send_message
+        self._reply = reply
         self._tasks: dict[str, asyncio.Task[None] | Future[None]] = {}
         self._thread_loop: asyncio.AbstractEventLoop | None = None
         self._thread: threading.Thread | None = None
@@ -133,7 +134,12 @@ class WorkerPluginManager:
             trigger_type="worker",
             started_at=started_at,
         )
-        await handler(context, self._host_api)
+        host_api = PluginHostAPI(
+            send_message=self._send_message,
+            reply=self._reply,
+            required_permissions=set(manifest.required_permissions),
+        )
+        await handler(context, host_api)
 
     def _on_worker_done(self, plugin_name: str, manifest: PluginManifest, task: asyncio.Task[None] | Future[None]) -> None:
         if task.cancelled():

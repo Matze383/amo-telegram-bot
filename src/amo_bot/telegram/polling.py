@@ -6,7 +6,7 @@ import logging
 import os
 from pathlib import Path
 from tempfile import NamedTemporaryFile
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 from amo_bot.telegram.client import TelegramApiError, TelegramClient, TelegramRateLimitError
 from amo_bot.telegram.dispatcher import Dispatcher
@@ -58,14 +58,26 @@ async def run_polling(
     limit: int,
     retry_max_seconds: int,
     dispatcher: Dispatcher | None = None,
+    scheduled_tick: Callable[[], Awaitable[None]] | None = None,
+    scheduled_tick_interval_seconds: float = 5.0,
 ) -> None:
     offset = offset_store.load() + 1
     backoff = 1
+    loop = asyncio.get_running_loop()
+    next_tick_at = loop.time()
 
     while True:
         try:
             updates = await tg.get_updates(offset=offset, timeout=timeout_seconds, limit=limit)
             backoff = 1
+
+            if scheduled_tick is not None and loop.time() >= next_tick_at:
+                try:
+                    await scheduled_tick()
+                except Exception as exc:
+                    logger.exception("scheduled tick failed: %s", exc)
+                finally:
+                    next_tick_at = loop.time() + max(0.1, scheduled_tick_interval_seconds)
 
             for update in updates:
                 update_id = int(update.get("update_id", 0))

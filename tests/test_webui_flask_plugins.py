@@ -137,6 +137,14 @@ def test_plugin_enable_disable_requires_owner_id_and_audits(tmp_path) -> None:
 
     app = create_flask_app(settings=_make_settings(db_url, str(plugins_dir), owner_id=777))
 
+    sf = create_session_factory(db_url)
+    with sf() as session:
+        from amo_bot.db.repositories import PluginRepository
+        from amo_bot.plugins.loader import PluginLoader
+
+        discovery = PluginLoader(str(plugins_dir)).discover()
+        PluginRepository(session).sync_discovered(discovery.valid)
+
     with app.test_client() as client:
         _login(client, "test-secret")
         page = client.get("/plugins")
@@ -225,6 +233,43 @@ def test_worker_buttons_call_worker_manager(tmp_path) -> None:
     assert fake.calls == [("start", "worker")]
 
 
+def test_disable_stops_running_worker_and_deactivates_plugin(tmp_path) -> None:
+    class FakeWorkerManager:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, str]] = []
+
+        def stop_sync(self, plugin_name: str) -> bool:
+            self.calls.append(("stop", plugin_name))
+            return True
+
+    db_url = f"sqlite:///{tmp_path / 'plugins8.db'}"
+    plugins_dir = tmp_path / "plugins"
+    plugin_dir = plugins_dir / "worker"
+    plugin_dir.mkdir(parents=True)
+    (plugin_dir / "plugin.json").write_text(
+        json.dumps(
+            {
+                "name": "worker",
+                "version": "1.0.0",
+                "worker": {"restart_backoff_seconds": 5},
+                "required_roles": ["admin"],
+            }
+        ),
+        encoding="utf-8",
+    )
+    fake = FakeWorkerManager()
+    app = create_flask_app(settings=_make_settings(db_url, str(plugins_dir), owner_id=777), worker_manager=fake)
+
+    with app.test_client() as client:
+        _login(client, "test-secret")
+        page = client.get("/plugins")
+        token = _extract_csrf_token(page.get_data(as_text=True))
+        response = client.post("/plugins/worker/disable", data={"csrf_token": token}, follow_redirects=False)
+
+    assert response.status_code == 302
+    assert fake.calls == [("stop", "worker")]
+
+
 def test_plugins_shows_invalid_manifest_with_reason(tmp_path) -> None:
     db_url = f"sqlite:///{tmp_path / 'plugins4.db'}"
     plugins_dir = tmp_path / "plugins"
@@ -244,3 +289,63 @@ def test_plugins_shows_invalid_manifest_with_reason(tmp_path) -> None:
     assert "broken" in html
     assert "fehlerhaft" in html
     assert "invalid manifest" in html
+
+
+def test_plugins_shows_runtime_history_fields(tmp_path) -> None:
+    from datetime import datetime, timezone
+
+    from amo_bot.db.base import create_session_factory
+    from amo_bot.db.models import Plugin
+    from amo_bot.db.repositories import PluginRepository
+    from amo_bot.plugins.manifest import PluginManifest
+
+    db_url = f"sqlite:///{tmp_path / 'plugins9.db'}"
+    plugins_dir = tmp_path / "plugins"
+    plugin_dir = plugins_dir / "sched_worker"
+    plugin_dir.mkdir(parents=True)
+    (plugin_dir / "plugin.json").write_text(
+        json.dumps(
+            {
+                "name": "sched_worker",
+                "version": "1.0.0",
+                "schedule": {"interval_seconds": 60},
+                "worker": {"restart_backoff_seconds": 30},
+                "required_roles": ["admin"],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    app = create_flask_app(settings=_make_settings(db_url, str(plugins_dir), owner_id=777))
+
+    sf = create_session_factory(db_url)
+    with sf() as session:
+        manifest = PluginManifest.model_validate_json((plugin_dir / "plugin.json").read_text(encoding="utf-8"))
+        PluginRepository(session).sync_discovered([manifest])
+        plugin = session.query(Plugin).filter(Plugin.name == "sched_worker").one()
+        plugin.last_run_at = datetime(2030, 1, 1, 9, 0, 0, tzinfo=timezone.utc).replace(tzinfo=None)
+        plugin.last_status = "error"
+        plugin.next_run_at = datetime(2030, 1, 1, 9, 5, 0, tzinfo=timezone.utc).replace(tzinfo=None)
+        plugin.worker_state = "crashed"
+        plugin.worker_restart_count = 3
+        plugin.worker_next_restart_at = datetime(2030, 1, 1, 9, 10, 0, tzinfo=timezone.utc).replace(tzinfo=None)
+        plugin.worker_last_heartbeat_at = datetime(2030, 1, 1, 8, 59, 0, tzinfo=timezone.utc).replace(tzinfo=None)
+        plugin.worker_last_error = "boom"
+        session.commit()
+
+    with app.test_client() as client:
+        _login(client, "test-secret")
+        response = client.get("/plugins")
+        html = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    assert "Laufhistorie" in html
+    assert "Worker-Status" in html
+    assert "last_run_at: 2030-01-01 09:00:00" in html
+    assert "last_status: error" in html
+    assert "next_run_at: 2030-01-01 09:05:00" in html
+    assert "state: crashed" in html
+    assert "restart_count: 3" in html
+    assert "next_restart_at: 2030-01-01 09:10:00" in html
+    assert "last_heartbeat_at: 2030-01-01 08:59:00" in html
+    assert "last_error: boom" in html

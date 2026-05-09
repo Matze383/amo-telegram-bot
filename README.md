@@ -23,7 +23,8 @@ Defensives initiales Python-Codegeruest fuer einen Telegram-Bot mit eigener Tele
 cd /path/to/local/workspace
 python3.12 -m venv venv
 source venv/bin/activate
-pip install -e .[dev]
+pip install -r requirements-dev.txt
+pip install -e .
 cp .env.example .env
 ```
 
@@ -45,11 +46,28 @@ WebUI (lokal):
 python -m amo_bot.main --webui
 ```
 
+Bot + WebUI zusammen:
+```bash
+python -m amo_bot.main --serve
+```
+
 ## Betatest
 
 Eine vollständige Betatest-Anleitung mit Checkliste und Protokoll findest du in:
 
 - **[docs/BETATEST.md](docs/BETATEST.md)** – Schritt-für-Schritt-Tests für MVP-Features
+
+Kurzablauf:
+
+```bash
+python3.12 -m venv venv
+source venv/bin/activate
+pip install -r requirements-dev.txt
+pip install -e .
+cp .env.example .env
+python -m amo_bot.main --serve
+pytest -q
+```
 
 ## Lokaler Preflight / Smoke (ohne echte Secrets)
 Vor dem ersten echten Telegram-Test:

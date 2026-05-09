@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from argparse import ArgumentParser
 
 from amo_bot.ai.ollama import OllamaClient
 from amo_bot.ai.service import AIService
@@ -10,22 +11,40 @@ from amo_bot.core.logging import setup_logging
 from amo_bot.db.base import create_session_factory
 from amo_bot.db.init_db import init_db
 from amo_bot.plugins.command_runtime import PluginCommandExecutor
+from amo_bot.db.repositories import UserRoleRepository
 from amo_bot.plugins.loader import PluginLoader
+from amo_bot.plugins.scheduled_runtime import ScheduledPluginExecutor
 from amo_bot.telegram.client import TelegramClient
 from amo_bot.telegram.commands import create_builtin_registry
 from amo_bot.telegram.chat_topic_persistence import ChatTopicPersistenceService
 from amo_bot.telegram.dispatcher import Dispatcher
 from amo_bot.telegram.polling import OffsetStore, run_polling
 from amo_bot.telegram.role_resolver import DBRoleResolver
+from amo_bot.webui.flask_app import create_flask_app
 
 
 logger = logging.getLogger(__name__)
 
 
-def run() -> None:
+def _build_parser() -> ArgumentParser:
+    parser = ArgumentParser(prog="python -m amo_bot.main")
+    parser.add_argument("--webui", action="store_true", help="Start Flask WebUI only")
+    parser.add_argument("--serve", action="store_true", help="Start WebUI and Telegram polling together")
+    return parser
+
+
+def run(argv: list[str] | None = None) -> None:
+    args = _build_parser().parse_args([] if argv is None else argv)
+
     settings = get_settings()
     setup_logging()
     init_db(settings.database_url)
+
+    session_factory = create_session_factory(settings.database_url)
+    with session_factory() as session:
+        UserRoleRepository(session).bootstrap_owner_from_settings(
+            owner_telegram_user_id=settings.webui_owner_telegram_id
+        )
 
     tg = TelegramClient(token=settings.bot_token, base_url=settings.telegram_api_base)
     logger.info(
@@ -36,7 +55,6 @@ def run() -> None:
     )
     offset_store = OffsetStore(settings.offset_state_file)
 
-    session_factory = create_session_factory(settings.database_url)
     role_resolver = DBRoleResolver(session_factory)
     ai_service = AIService(
         OllamaClient(
@@ -54,8 +72,17 @@ def run() -> None:
     async def reply_text(chat_id: int, message_id: int, text: str) -> object:
         return await tg.send_message(chat_id=chat_id, text=text, reply_to_message_id=message_id)
 
+    plugin_loader = PluginLoader(settings.amo_plugin_dir)
+
     plugin_command_executor = PluginCommandExecutor(
-        loader=PluginLoader(settings.amo_plugin_dir),
+        loader=plugin_loader,
+        session_factory=session_factory,
+        send_message=send_text,
+        reply=reply_text,
+    )
+
+    scheduled_plugin_executor = ScheduledPluginExecutor(
+        loader=plugin_loader,
         session_factory=session_factory,
         send_message=send_text,
         reply=reply_text,
@@ -70,6 +97,42 @@ def run() -> None:
         plugin_command_executor=plugin_command_executor,
     )
 
+    if args.webui:
+        app = create_flask_app(settings=settings)
+        app.run(host=settings.webui_host, port=settings.webui_port)
+        return
+
+    if args.serve:
+        app = create_flask_app(settings=settings)
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+        async def _polling_task() -> None:
+            await run_polling(
+                tg,
+                offset_store,
+                timeout_seconds=settings.poll_timeout_seconds,
+                limit=settings.poll_limit,
+                retry_max_seconds=settings.poll_retry_max_seconds,
+                dispatcher=dispatcher,
+                scheduled_tick=scheduled_plugin_executor.run_due_once,
+            )
+
+        polling = loop.create_task(_polling_task())
+
+        try:
+            app.run(host=settings.webui_host, port=settings.webui_port, use_reloader=False)
+        finally:
+            polling.cancel()
+            try:
+                loop.run_until_complete(polling)
+            except asyncio.CancelledError:
+                pass
+            finally:
+                loop.close()
+                asyncio.set_event_loop(None)
+        return
+
     asyncio.run(
         run_polling(
             tg,
@@ -78,6 +141,7 @@ def run() -> None:
             limit=settings.poll_limit,
             retry_max_seconds=settings.poll_retry_max_seconds,
             dispatcher=dispatcher,
+            scheduled_tick=scheduled_plugin_executor.run_due_once,
         )
     )
 

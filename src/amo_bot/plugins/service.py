@@ -90,6 +90,9 @@ class PluginService:
                 "worker_restart_count": db_plugins[manifest.name].worker_restart_count if manifest.name in db_plugins else 0,
                 "worker_next_restart_at": db_plugins[manifest.name].worker_next_restart_at if manifest.name in db_plugins else None,
                 "worker_last_error": db_plugins[manifest.name].worker_last_error if manifest.name in db_plugins else None,
+                "last_run_at": db_plugins[manifest.name].last_run_at if manifest.name in db_plugins else None,
+                "last_status": db_plugins[manifest.name].last_status if manifest.name in db_plugins else None,
+                "next_run_at": db_plugins[manifest.name].next_run_at if manifest.name in db_plugins else None,
             }
             for manifest in sorted(valid_by_name.values(), key=lambda item: item.name)
         ]

@@ -31,6 +31,9 @@ class PluginStatus:
     worker_restart_count: int = 0
     worker_next_restart_at: datetime | None = None
     worker_last_error: str | None = None
+    last_run_at: datetime | None = None
+    last_status: str | None = None
+    next_run_at: datetime | None = None
 
 
 class UserRoleRepository:
@@ -79,6 +82,21 @@ class UserRoleRepository:
 
         self._session.commit()
         return user
+
+    def bootstrap_owner_from_settings(self, *, owner_telegram_user_id: int | None) -> bool:
+        """Ensure configured owner exists and has owner role.
+
+        Returns True if a role/user change was applied, else False.
+        """
+        if owner_telegram_user_id is None:
+            return False
+
+        result = self.set_user_role(
+            actor_telegram_user_id=owner_telegram_user_id,
+            target_telegram_user_id=owner_telegram_user_id,
+            role=Role.OWNER,
+        )
+        return result.changed
 
     def set_user_role(
         self,
@@ -260,6 +278,9 @@ class PluginRepository:
             worker_restart_count=int(row.worker_restart_count or 0),
             worker_next_restart_at=row.worker_next_restart_at,
             worker_last_error=row.worker_last_error,
+            last_run_at=row.last_run_at,
+            last_status=row.last_status,
+            next_run_at=row.next_run_at,
         )
 
     def list_plugins(self) -> list[PluginStatus]:

@@ -44,7 +44,8 @@ class ScheduledPluginExecutor:
     ) -> None:
         self._loader = loader
         self._session_factory = session_factory
-        self._host_api = PluginHostAPI(send_message=send_message, reply=reply)
+        self._send_message = send_message
+        self._reply = reply
         self._timeout_seconds = timeout_seconds
         self._backoff_seconds = backoff_seconds
 
@@ -87,8 +88,13 @@ class ScheduledPluginExecutor:
 
         start = time.monotonic()
         try:
+            host_api = PluginHostAPI(
+                send_message=self._send_message,
+                reply=self._reply,
+                required_permissions=set(manifest.required_permissions),
+            )
             handler = self._load_handler(manifest)
-            await asyncio.wait_for(handler(context, self._host_api), timeout=self._timeout_seconds)
+            await asyncio.wait_for(handler(context, host_api), timeout=self._timeout_seconds)
         except asyncio.TimeoutError:
             self._record_result(
                 manifest.name,

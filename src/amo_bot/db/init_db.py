@@ -12,25 +12,36 @@ def init_db(database_url: str) -> None:
     Base.metadata.create_all(bind=engine)
 
     inspector = inspect(engine)
-    if "plugins" in inspector.get_table_names():
-        existing_columns = {column["name"] for column in inspector.get_columns("plugins")}
-        with engine.begin() as connection:
-            if "next_run_at" not in existing_columns:
-                connection.execute(text("ALTER TABLE plugins ADD COLUMN next_run_at DATETIME"))
-            if "last_run_at" not in existing_columns:
-                connection.execute(text("ALTER TABLE plugins ADD COLUMN last_run_at DATETIME"))
-            if "last_status" not in existing_columns:
-                connection.execute(text("ALTER TABLE plugins ADD COLUMN last_status VARCHAR(32)"))
-            if "worker_state" not in existing_columns:
-                connection.execute(text("ALTER TABLE plugins ADD COLUMN worker_state VARCHAR(32)"))
-            if "worker_last_heartbeat_at" not in existing_columns:
-                connection.execute(text("ALTER TABLE plugins ADD COLUMN worker_last_heartbeat_at DATETIME"))
-            if "worker_restart_count" not in existing_columns:
-                connection.execute(text("ALTER TABLE plugins ADD COLUMN worker_restart_count INTEGER NOT NULL DEFAULT 0"))
-            if "worker_next_restart_at" not in existing_columns:
-                connection.execute(text("ALTER TABLE plugins ADD COLUMN worker_next_restart_at DATETIME"))
-            if "worker_last_error" not in existing_columns:
-                connection.execute(text("ALTER TABLE plugins ADD COLUMN worker_last_error TEXT"))
+
+    table_column_migrations: dict[str, dict[str, str]] = {
+        "users": {
+            "first_name": "ALTER TABLE users ADD COLUMN first_name VARCHAR(255)",
+            "last_name": "ALTER TABLE users ADD COLUMN last_name VARCHAR(255)",
+            "display_name": "ALTER TABLE users ADD COLUMN display_name VARCHAR(255)",
+            "first_seen_at": "ALTER TABLE users ADD COLUMN first_seen_at DATETIME",
+            "last_seen_at": "ALTER TABLE users ADD COLUMN last_seen_at DATETIME",
+        },
+        "plugins": {
+            "next_run_at": "ALTER TABLE plugins ADD COLUMN next_run_at DATETIME",
+            "last_run_at": "ALTER TABLE plugins ADD COLUMN last_run_at DATETIME",
+            "last_status": "ALTER TABLE plugins ADD COLUMN last_status VARCHAR(32)",
+            "worker_state": "ALTER TABLE plugins ADD COLUMN worker_state VARCHAR(32)",
+            "worker_last_heartbeat_at": "ALTER TABLE plugins ADD COLUMN worker_last_heartbeat_at DATETIME",
+            "worker_restart_count": "ALTER TABLE plugins ADD COLUMN worker_restart_count INTEGER NOT NULL DEFAULT 0",
+            "worker_next_restart_at": "ALTER TABLE plugins ADD COLUMN worker_next_restart_at DATETIME",
+            "worker_last_error": "ALTER TABLE plugins ADD COLUMN worker_last_error TEXT",
+        },
+    }
+
+    with engine.begin() as connection:
+        existing_tables = set(inspector.get_table_names())
+        for table_name, migrations in table_column_migrations.items():
+            if table_name not in existing_tables:
+                continue
+            existing_columns = {column["name"] for column in inspector.get_columns(table_name)}
+            for column_name, ddl in migrations.items():
+                if column_name not in existing_columns:
+                    connection.execute(text(ddl))
 
     with session_factory() as session:
         for role, prio in DEFAULT_ROLES:

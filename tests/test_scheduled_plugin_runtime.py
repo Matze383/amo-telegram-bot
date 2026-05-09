@@ -14,7 +14,14 @@ from amo_bot.plugins.loader import PluginLoader
 from amo_bot.plugins.scheduled_runtime import ScheduledPluginExecutor
 
 
-def _write_scheduled_plugin(tmp_path, name: str, code: str, *, interval_seconds: int = 30) -> PluginLoader:
+def _write_scheduled_plugin(
+    tmp_path,
+    name: str,
+    code: str,
+    *,
+    interval_seconds: int = 30,
+    required_permissions: list[str] | None = None,
+) -> PluginLoader:
     plugins_dir = tmp_path / "plugins"
     plugin_dir = plugins_dir / name
     plugin_dir.mkdir(parents=True)
@@ -25,6 +32,7 @@ def _write_scheduled_plugin(tmp_path, name: str, code: str, *, interval_seconds:
                 "version": "1.0.0",
                 "schedule": {"interval_seconds": interval_seconds},
                 "required_roles": ["admin"],
+                "required_permissions": ["send_message"] if required_permissions is None else required_permissions,
             }
         ),
         encoding="utf-8",
@@ -126,6 +134,45 @@ async def handle_schedule(context, host_api):
     executor = ScheduledPluginExecutor(loader=loader, session_factory=sf, send_message=_send, reply=_reply)
     assert asyncio.run(executor.run_due_once(now=datetime(2030, 1, 1, tzinfo=timezone.utc))) == 0
     assert sent == []
+
+
+def test_scheduled_plugin_missing_capability_errors_and_audits(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'scheduled4.db'}"
+    init_db(db_url)
+    loader = _write_scheduled_plugin(
+        tmp_path,
+        "scheduled_no_cap",
+        """
+async def handle_schedule(context, host_api):
+    await host_api.send_message(123, "blocked")
+""",
+        required_permissions=[],
+    )
+    sf = create_session_factory(db_url)
+    with sf() as session:
+        repo = PluginRepository(session)
+        repo.sync_discovered(loader.discover().valid)
+        repo.activate("scheduled_no_cap", actor_telegram_user_id=1)
+
+    async def _send(chat_id: int, text: str):
+        return {"ok": True}
+
+    async def _reply(chat_id: int, message_id: int, text: str):
+        return {"ok": True}
+
+    executor = ScheduledPluginExecutor(loader=loader, session_factory=sf, send_message=_send, reply=_reply, backoff_seconds=10)
+
+    now = datetime(2030, 1, 1, tzinfo=timezone.utc)
+    assert asyncio.run(executor.run_due_once(now=now)) == 1
+
+    with sf() as session:
+        plugin = session.scalar(select(Plugin).where(Plugin.name == "scheduled_no_cap"))
+        assert plugin is not None
+        assert plugin.last_status == "error"
+        events = session.scalars(select(AuditEvent)).all()
+        errors = [row for row in events if row.event_type == "plugin_schedule_error"]
+    assert errors
+    assert "requires capability 'send_message'" in (errors[-1].payload_json or "")
 
 
 def test_scheduled_plugin_error_uses_backoff_and_audit(tmp_path) -> None:
