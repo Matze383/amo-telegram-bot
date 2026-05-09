@@ -62,8 +62,10 @@ class TelegramClient:
         result = await self._call("getUpdates", payload)
         return result if isinstance(result, list) else []
 
-    async def send_message(self, chat_id: int, text: str) -> dict[str, Any]:
-        payload = {"chat_id": chat_id, "text": text[:4000]}
+    async def send_message(self, chat_id: int, text: str, reply_to_message_id: int | None = None) -> dict[str, Any]:
+        payload: dict[str, Any] = {"chat_id": chat_id, "text": text[:4000]}
+        if reply_to_message_id is not None:
+            payload["reply_to_message_id"] = reply_to_message_id
         result = await self._call("sendMessage", payload)
         return result if isinstance(result, dict) else {}
 

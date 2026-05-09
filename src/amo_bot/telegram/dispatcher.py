@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Awaitable, Callable, Protocol
 
 from amo_bot.auth.permissions import can_use_bot
+from amo_bot.plugins.command_runtime import CommandActor, CommandInvocation, PluginCommandExecutor
 from amo_bot.telegram.commands import CommandContext, CommandRegistry, RoleResolver
 from amo_bot.telegram.update_parser import TelegramMessage, parse_update
 
@@ -24,6 +25,7 @@ class Dispatcher:
     send_text: SendTextFn
     bot_username: str | None = None
     message_persistence: MessagePersistence | None = None
+    plugin_command_executor: PluginCommandExecutor | None = None
 
     async def handle_raw_update(self, raw_update: object) -> None:
         update = parse_update(raw_update)
@@ -45,11 +47,21 @@ class Dispatcher:
         if not can_use_bot(role):
             return
 
-        if not self.command_registry.is_allowed(command.name, role):
-            return
-
         command_def = self.command_registry.get(command.name)
         if command_def is None:
+            if self.plugin_command_executor is not None:
+                await self.plugin_command_executor.execute(
+                    actor=CommandActor(telegram_user_id=message.from_user.id, role=role),
+                    invocation=CommandInvocation(
+                        command_name=command.name,
+                        argument=command.argument,
+                        chat_id=message.chat.id,
+                        message_id=message.message_id,
+                    ),
+                )
+            return
+
+        if not self.command_registry.is_allowed(command.name, role):
             return
 
         ctx = CommandContext(

@@ -9,6 +9,8 @@ from amo_bot.config.settings import get_settings
 from amo_bot.core.logging import setup_logging
 from amo_bot.db.base import create_session_factory
 from amo_bot.db.init_db import init_db
+from amo_bot.plugins.command_runtime import PluginCommandExecutor
+from amo_bot.plugins.loader import PluginLoader
 from amo_bot.telegram.client import TelegramClient
 from amo_bot.telegram.commands import create_builtin_registry
 from amo_bot.telegram.chat_topic_persistence import ChatTopicPersistenceService
@@ -49,12 +51,23 @@ def run() -> None:
     async def send_text(chat_id: int, text: str) -> object:
         return await tg.send_message(chat_id=chat_id, text=text)
 
+    async def reply_text(chat_id: int, message_id: int, text: str) -> object:
+        return await tg.send_message(chat_id=chat_id, text=text, reply_to_message_id=message_id)
+
+    plugin_command_executor = PluginCommandExecutor(
+        loader=PluginLoader(settings.amo_plugin_dir),
+        session_factory=session_factory,
+        send_message=send_text,
+        reply=reply_text,
+    )
+
     dispatcher = Dispatcher(
         command_registry=command_registry,
         role_resolver=role_resolver,
         send_text=send_text,
         bot_username=settings.bot_username,
         message_persistence=ChatTopicPersistenceService(session_factory),
+        plugin_command_executor=plugin_command_executor,
     )
 
     asyncio.run(

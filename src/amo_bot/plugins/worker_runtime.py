@@ -1,0 +1,225 @@
+from __future__ import annotations
+
+import asyncio
+import importlib.util
+import inspect
+import json
+import logging
+import threading
+import uuid
+from concurrent.futures import Future
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from typing import Any, Awaitable, Callable, Coroutine
+
+from sqlalchemy.orm import sessionmaker
+
+from amo_bot.db.models import AuditEvent
+from amo_bot.db.repositories import PluginRepository
+from amo_bot.plugins.command_runtime import PluginHostAPI, ReplyFn, SendMessageFn
+from amo_bot.plugins.loader import PluginLoader
+from amo_bot.plugins.manifest import PluginManifest
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass(slots=True, frozen=True)
+class WorkerPluginContext:
+    plugin_id: str
+    run_id: str
+    trigger_type: str
+    started_at: datetime
+
+
+class WorkerPluginManager:
+    def __init__(
+        self,
+        *,
+        loader: PluginLoader,
+        session_factory: sessionmaker,
+        send_message: SendMessageFn,
+        reply: ReplyFn,
+    ) -> None:
+        self._loader = loader
+        self._session_factory = session_factory
+        self._host_api = PluginHostAPI(send_message=send_message, reply=reply)
+        self._tasks: dict[str, asyncio.Task[None] | Future[None]] = {}
+        self._thread_loop: asyncio.AbstractEventLoop | None = None
+        self._thread: threading.Thread | None = None
+        self._thread_lock = threading.Lock()
+
+    async def start(self, plugin_name: str, *, now: datetime | None = None) -> bool:
+        task = self._tasks.get(plugin_name)
+        if task is not None and not task.done():
+            return False
+
+        run_at = now or datetime.now(timezone.utc)
+        manifest = self._require_worker_manifest(plugin_name)
+        if manifest.worker is None:
+            raise ValueError("plugin is not a worker")
+
+        with self._session_factory() as session:
+            repo = PluginRepository(session)
+            repo.sync_discovered([manifest])
+            status = repo.get_status(plugin_name)
+            if status is None or not status.enabled:
+                self._write_audit("plugin_worker_skipped", {"plugin_name": plugin_name, "reason": "plugin_disabled"})
+                return False
+            if status.worker_next_restart_at is not None and status.worker_next_restart_at > run_at.replace(tzinfo=None):
+                self._write_audit("plugin_worker_skipped", {"plugin_name": plugin_name, "reason": "backoff"})
+                return False
+            repo.mark_worker_state(
+                plugin_name=plugin_name,
+                state="running",
+                heartbeat_at=run_at,
+                next_restart_at=None,
+                last_error=None,
+            )
+
+        run_id = str(uuid.uuid4())
+        self._write_audit("plugin_worker_start", {"plugin_name": plugin_name, "run_id": run_id})
+        task = self._create_worker_task(self._run_worker(manifest=manifest, run_id=run_id, started_at=run_at))
+        self._tasks[plugin_name] = task
+        task.add_done_callback(lambda done, name=plugin_name, manifest=manifest: self._on_worker_done(name, manifest, done))
+        return True
+
+    async def stop(self, plugin_name: str, *, now: datetime | None = None) -> bool:
+        task = self._tasks.get(plugin_name)
+        if task is None or task.done():
+            self._mark_state(plugin_name, state="stopped", heartbeat_at=now or datetime.now(timezone.utc))
+            return False
+        task.cancel()
+        if isinstance(task, asyncio.Task):
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+        else:
+            try:
+                await asyncio.wrap_future(task)
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                if not task.cancelled():
+                    raise
+        self._mark_state(plugin_name, state="stopped", heartbeat_at=now or datetime.now(timezone.utc))
+        self._write_audit("plugin_worker_stop", {"plugin_name": plugin_name})
+        return True
+
+    async def restart(self, plugin_name: str, *, now: datetime | None = None) -> bool:
+        await self.stop(plugin_name, now=now)
+        return await self.start(plugin_name, now=now)
+
+    def start_sync(self, plugin_name: str, *, now: datetime | None = None) -> bool:
+        return self._run_on_thread_loop(self.start(plugin_name, now=now)).result()
+
+    def stop_sync(self, plugin_name: str, *, now: datetime | None = None) -> bool:
+        return self._run_on_thread_loop(self.stop(plugin_name, now=now)).result()
+
+    def restart_sync(self, plugin_name: str, *, now: datetime | None = None) -> bool:
+        return self._run_on_thread_loop(self.restart(plugin_name, now=now)).result()
+
+    def state(self, plugin_name: str) -> str | None:
+        with self._session_factory() as session:
+            status = PluginRepository(session).get_status(plugin_name)
+        return status.worker_state if status else None
+
+    async def _run_worker(self, *, manifest: PluginManifest, run_id: str, started_at: datetime) -> None:
+        handler = self._load_handler(manifest)
+        context = WorkerPluginContext(
+            plugin_id=manifest.name,
+            run_id=run_id,
+            trigger_type="worker",
+            started_at=started_at,
+        )
+        await handler(context, self._host_api)
+
+    def _on_worker_done(self, plugin_name: str, manifest: PluginManifest, task: asyncio.Task[None] | Future[None]) -> None:
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc is None:
+            self._mark_state(plugin_name, state="stopped", heartbeat_at=datetime.now(timezone.utc))
+            self._write_audit("plugin_worker_exit", {"plugin_name": plugin_name})
+            return
+
+        logger.exception("worker plugin crashed plugin=%s", plugin_name, exc_info=exc)
+        backoff = manifest.worker["restart_backoff_seconds"] if manifest.worker else 60
+        now = datetime.now(timezone.utc)
+        self._mark_state(
+            plugin_name,
+            state="crashed",
+            heartbeat_at=now,
+            next_restart_at=now + timedelta(seconds=backoff),
+            last_error=str(exc),
+            increment_restart_count=True,
+        )
+        self._write_audit("plugin_worker_crash", {"plugin_name": plugin_name, "error": str(exc), "backoff_seconds": backoff})
+
+    def _require_worker_manifest(self, plugin_name: str) -> PluginManifest:
+        discovery = self._loader.discover()
+        for manifest in discovery.valid:
+            if manifest.name == plugin_name:
+                return manifest
+        raise ValueError("plugin not found or manifest invalid")
+
+    def _load_handler(self, manifest: PluginManifest) -> Callable[[WorkerPluginContext, PluginHostAPI], Awaitable[Any]]:
+        plugin_dir = Path(self._loader.plugins_dir) / manifest.name
+        module_path = plugin_dir / "main.py"
+        if not module_path.exists():
+            raise RuntimeError("plugin entrypoint main.py not found")
+
+        module_name = f"amo_worker_plugin_{manifest.name}"
+        spec = importlib.util.spec_from_file_location(module_name, module_path)
+        if spec is None or spec.loader is None:
+            raise RuntimeError("unable to load plugin module")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        handler = getattr(module, "handle_worker", None)
+        if handler is None or not callable(handler):
+            raise RuntimeError("plugin handle_worker(context, host_api) missing")
+        if not inspect.iscoroutinefunction(handler):
+            raise RuntimeError("plugin handle_worker must be async")
+        return handler
+
+    def _create_worker_task(self, coroutine: Coroutine[Any, Any, None]) -> asyncio.Task[None] | Future[None]:
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return self._run_on_thread_loop(coroutine)
+        return loop.create_task(coroutine)
+
+    def _run_on_thread_loop(self, coroutine: Coroutine[Any, Any, None] | Coroutine[Any, Any, bool]) -> Future[Any]:
+        with self._thread_lock:
+            if self._thread_loop is None or self._thread_loop.is_closed():
+                self._thread_loop = asyncio.new_event_loop()
+                self._thread = threading.Thread(target=self._thread_loop.run_forever, name="amo-plugin-workers", daemon=True)
+                self._thread.start()
+            return asyncio.run_coroutine_threadsafe(coroutine, self._thread_loop)
+
+    def _mark_state(
+        self,
+        plugin_name: str,
+        *,
+        state: str,
+        heartbeat_at: datetime,
+        next_restart_at: datetime | None = None,
+        last_error: str | None = None,
+        increment_restart_count: bool = False,
+    ) -> None:
+        with self._session_factory() as session:
+            PluginRepository(session).mark_worker_state(
+                plugin_name=plugin_name,
+                state=state,
+                heartbeat_at=heartbeat_at,
+                next_restart_at=next_restart_at,
+                last_error=last_error,
+                increment_restart_count=increment_restart_count,
+            )
+
+    def _write_audit(self, event_type: str, payload: dict[str, Any]) -> None:
+        with self._session_factory() as session:
+            session.add(AuditEvent(actor_telegram_user_id=None, event_type=event_type, payload_json=json.dumps(payload)))
+            session.commit()

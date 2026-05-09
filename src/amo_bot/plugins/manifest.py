@@ -13,7 +13,9 @@ class PluginManifest(BaseModel):
     name: str = Field(min_length=1)
     version: str = Field(min_length=1)
     description: str = ""
-    commands: list[str] = Field(min_length=1)
+    commands: list[str] = Field(default_factory=list)
+    schedule: dict[str, int] | None = None
+    worker: dict[str, int] | None = None
     required_roles: list[str] = Field(default_factory=list)
     required_permissions: list[str] = Field(default_factory=list)
 
@@ -32,6 +34,26 @@ class PluginManifest(BaseModel):
         if len(cleaned) != len(value) or any(not item for item in cleaned):
             raise ValueError("required_permissions must contain only non-empty strings")
         return cleaned
+
+    @field_validator("schedule")
+    @classmethod
+    def validate_schedule(cls, value: dict[str, int] | None) -> dict[str, int] | None:
+        if value is None:
+            return None
+        interval = value.get("interval_seconds")
+        if not isinstance(interval, int) or interval < 1:
+            raise ValueError("schedule.interval_seconds must be a positive integer")
+        return {"interval_seconds": interval}
+
+    @field_validator("worker")
+    @classmethod
+    def validate_worker(cls, value: dict[str, int] | None) -> dict[str, int] | None:
+        if value is None:
+            return None
+        backoff = value.get("restart_backoff_seconds", 60)
+        if not isinstance(backoff, int) or backoff < 1:
+            raise ValueError("worker.restart_backoff_seconds must be a positive integer")
+        return {"restart_backoff_seconds": backoff}
 
     @field_validator("required_roles")
     @classmethod
@@ -56,3 +78,9 @@ class PluginManifest(BaseModel):
         if not has_roles and not has_permissions:
             raise ValueError("manifest must define required_roles or required_permissions")
         return data
+
+    @model_validator(mode="after")
+    def ensure_trigger_present(self) -> PluginManifest:
+        if not self.commands and self.schedule is None and self.worker is None:
+            raise ValueError("manifest must define commands, schedule, or worker")
+        return self

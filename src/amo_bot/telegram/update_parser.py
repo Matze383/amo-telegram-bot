@@ -9,7 +9,8 @@ class TelegramUser:
     id: int
     is_bot: bool
     first_name: str
-    username: str | None
+    last_name: str | None = None
+    username: str | None = None
 
 
 @dataclass(slots=True)
@@ -34,6 +35,7 @@ class TelegramMessage:
     chat: TelegramChat
     text: str
     message_thread_id: int | None = None
+    telegram_topic_name: str | None = None
 
     def parse_command(self, bot_username: str | None = None) -> CommandMatch | None:
         raw = self.text.strip()
@@ -77,6 +79,7 @@ def _parse_user(raw: Any) -> TelegramUser | None:
             id=int(raw["id"]),
             is_bot=bool(raw.get("is_bot", False)),
             first_name=str(raw.get("first_name", "")),
+            last_name=str(raw["last_name"]) if raw.get("last_name") is not None else None,
             username=str(raw["username"]) if raw.get("username") is not None else None,
         )
     except (KeyError, TypeError, ValueError):
@@ -123,12 +126,21 @@ def _parse_message(raw: Any) -> TelegramMessage | None:
         except (TypeError, ValueError):
             message_thread_id = None
 
+    telegram_topic_name_raw = raw.get("forum_topic_created")
+    telegram_topic_name: str | None = None
+    if isinstance(telegram_topic_name_raw, dict):
+        name_raw = telegram_topic_name_raw.get("name")
+        if isinstance(name_raw, str):
+            cleaned_name = name_raw.strip()
+            telegram_topic_name = cleaned_name or None
+
     return TelegramMessage(
         message_id=message_id,
         from_user=from_user,
         chat=chat,
         text=text,
         message_thread_id=message_thread_id,
+        telegram_topic_name=telegram_topic_name,
     )
 
 

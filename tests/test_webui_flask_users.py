@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 from sqlalchemy import select
 
 from amo_bot.config.settings import Settings
@@ -26,6 +28,8 @@ def _make_settings(database_url: str, password: str = "test-secret", owner_id: i
     }
     if owner_id is not None:
         payload["WEBUI_OWNER_TELEGRAM_ID"] = owner_id
+    else:
+        os.environ.pop("WEBUI_OWNER_TELEGRAM_ID", None)
     return Settings(_env_file=None, **payload)
 
 
@@ -100,6 +104,36 @@ def test_users_lists_seeded_users(tmp_path) -> None:
     assert response.status_code == 200
     assert "12345" in html
     assert "vip" in html
+
+
+def test_users_lists_auto_discovered_profile_fields(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'users_discovered.db'}"
+    init_db(db_url)
+
+    sf = create_session_factory(db_url)
+    with sf() as s:
+        from amo_bot.db.repositories import UserRoleRepository
+
+        repo = UserRoleRepository(s)
+        repo.upsert_discovered_user(
+            telegram_user_id=98765,
+            username="autouser",
+            first_name="Auto",
+            last_name="Discovered",
+        )
+
+    settings = _make_settings(db_url)
+    app = create_flask_app(settings=settings)
+
+    with app.test_client() as client:
+        _login(client, "test-secret")
+        response = client.get("/users")
+        html = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    assert "98765" in html
+    assert "autouser" in html
+    assert "Auto Discovered" in html
 
 
 def test_role_change_with_owner_id_persists(tmp_path) -> None:

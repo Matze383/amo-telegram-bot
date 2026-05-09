@@ -11,6 +11,8 @@ from amo_bot.db.base import create_session_factory
 from amo_bot.db.init_db import init_db
 from amo_bot.plugins.loader import PluginLoader
 from amo_bot.plugins.service import PluginService
+from amo_bot.plugins.worker_runtime import WorkerPluginManager
+from amo_bot.telegram.client import TelegramClient
 from amo_bot.webui.flask_blueprints import register_blueprints
 
 csrf = CSRFProtect()
@@ -26,6 +28,7 @@ def create_flask_app(
     *,
     settings: Settings | None = None,
     plugin_service: PluginService | None = None,
+    worker_manager: object | None = None,
 ) -> Flask:
     app_settings = settings or get_settings()
 
@@ -48,8 +51,25 @@ def create_flask_app(
         session_factory=session_factory,
     )
 
+    if worker_manager is None:
+        tg = TelegramClient(token=app_settings.bot_token, base_url=app_settings.telegram_api_base)
+
+        async def send_text(chat_id: int, text: str) -> object:
+            return await tg.send_message(chat_id=chat_id, text=text)
+
+        async def reply_text(chat_id: int, message_id: int, text: str) -> object:
+            return await tg.send_message(chat_id=chat_id, text=text, reply_to_message_id=message_id)
+
+        worker_manager = WorkerPluginManager(
+            loader=PluginLoader(app_settings.amo_plugin_dir),
+            session_factory=session_factory,
+            send_message=send_text,
+            reply=reply_text,
+        )
+
     app.extensions["amo.settings"] = app_settings
     app.extensions["amo.plugin_service"] = plugins
+    app.extensions["amo.worker_manager"] = worker_manager
 
     @app.before_request
     def _sliding_session_ttl() -> None:

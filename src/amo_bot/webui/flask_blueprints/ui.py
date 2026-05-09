@@ -61,7 +61,17 @@ def users_page():
     session_factory = current_app.extensions["amo.plugin_service"]._session_factory
     with session_factory() as db_session:
         rows = db_session.query(User).order_by(User.telegram_user_id.asc()).all()
-        users = [{"telegram_user_id": row.telegram_user_id, "role": row.role.name} for row in rows]
+        users = [
+            {
+                "telegram_user_id": row.telegram_user_id,
+                "role": row.role.name,
+                "username": row.username,
+                "first_name": row.first_name,
+                "last_name": row.last_name,
+                "last_seen_at": row.last_seen_at,
+            }
+            for row in rows
+        ]
 
     return render_template(
         "users.html",

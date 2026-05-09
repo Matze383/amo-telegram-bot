@@ -57,13 +57,18 @@ def test_upsert_topic_create_update_no_duplicate() -> None:
         assert topic.first_seen_at == first_seen
         assert topic.last_seen_at == first_seen
 
-        second_seen = datetime(2026, 1, 3, tzinfo=timezone.utc)
-        updated = repo.upsert_topic(chat_id=1, message_thread_id=10, telegram_topic_name="Topic B", seen_at=second_seen)
+        second_seen = datetime(2026, 1, 2, tzinfo=timezone.utc)
+        unchanged_name = repo.upsert_topic(chat_id=1, message_thread_id=10, telegram_topic_name=None, seen_at=second_seen)
+        assert unchanged_name.telegram_topic_name == "Topic A"
+        assert unchanged_name.last_seen_at == second_seen
+
+        third_seen = datetime(2026, 1, 3, tzinfo=timezone.utc)
+        updated = repo.upsert_topic(chat_id=1, message_thread_id=10, telegram_topic_name="Topic B", seen_at=third_seen)
         assert updated.chat_id == 1
         assert updated.message_thread_id == 10
         assert updated.telegram_topic_name == "Topic B"
         assert updated.first_seen_at == first_seen
-        assert updated.last_seen_at == second_seen
+        assert updated.last_seen_at == third_seen
 
         count = session.query(TelegramTopic).count()
         assert count == 1

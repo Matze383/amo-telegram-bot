@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from sqlalchemy.orm import sessionmaker
 
-from amo_bot.db.repositories import ChatTopicRepository
+from amo_bot.db.repositories import ChatTopicRepository, UserRoleRepository
 from amo_bot.telegram.update_parser import TelegramMessage
 
 
@@ -12,6 +12,14 @@ class ChatTopicPersistenceService:
 
     async def persist_message(self, message: TelegramMessage) -> None:
         with self._session_factory() as session:
+            user_repo = UserRoleRepository(session)
+            user_repo.upsert_discovered_user(
+                telegram_user_id=message.from_user.id,
+                username=message.from_user.username,
+                first_name=message.from_user.first_name or None,
+                last_name=message.from_user.last_name,
+            )
+
             repo = ChatTopicRepository(session)
             repo.upsert_chat(
                 chat_id=message.chat.id,
@@ -23,5 +31,5 @@ class ChatTopicPersistenceService:
                 repo.upsert_topic(
                     chat_id=message.chat.id,
                     message_thread_id=message.message_thread_id,
-                    telegram_topic_name=None,
+                    telegram_topic_name=message.telegram_topic_name,
                 )

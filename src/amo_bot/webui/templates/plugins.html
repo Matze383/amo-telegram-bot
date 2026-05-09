@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% block title %}Plugins{% endblock %}
+{% block content %}
+  <h1>Plugins</h1>
+  <p><a href="{{ url_for('ui.dashboard') }}">Zurück zum Dashboard</a></p>
+
+  {% if plugins %}
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Version</th>
+          <th>Typ(en)</th>
+          <th>Status (DB)</th>
+          <th>Commands</th>
+          <th>Schedule</th>
+          <th>Worker</th>
+          <th>Health</th>
+          <th>Rollen</th>
+          <th>Capabilities</th>
+          <th>Aktionen</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for plugin in plugins %}
+          <tr>
+            <td>{{ plugin.name }}</td>
+            <td>{{ plugin.version }}</td>
+            <td>command</td>
+            <td>{{ "enabled" if plugin.enabled else "disabled" }}</td>
+            <td>{{ plugin.commands | join(", ") if plugin.commands else "-" }}</td>
+            <td>{{ plugin.schedule if plugin.schedule else "-" }}</td>
+            <td>{{ plugin.worker if plugin.worker else "-" }}</td>
+            <td>
+              {{ plugin.worker_state if plugin.worker_state else "-" }}
+              {% if plugin.worker_last_error %} ({{ plugin.worker_last_error }}){% endif %}
+            </td>
+            <td>{{ plugin.required_roles | join(", ") if plugin.required_roles else "-" }}</td>
+            <td>{{ plugin.required_permissions | join(", ") if plugin.required_permissions else "-" }}</td>
+            <td>
+              {% if owner_mutation_enabled %}
+                {% if plugin.enabled %}
+                  <form method="post" action="{{ url_for('plugins.disable_plugin', plugin_name=plugin.name) }}">
+                    {{ mutation_form.hidden_tag() }}
+                    <button type="submit">Disable</button>
+                  </form>
+                {% else %}
+                  <form method="post" action="{{ url_for('plugins.enable_plugin', plugin_name=plugin.name) }}">
+                    {{ mutation_form.hidden_tag() }}
+                    <button type="submit">Enable</button>
+                  </form>
+                {% endif %}
+                {% if plugin.worker %}
+                  <form method="post" action="{{ url_for('plugins.mutate_worker', plugin_name=plugin.name, action='start') }}">
+                    {{ mutation_form.hidden_tag() }}
+                    <button type="submit">Start</button>
+                  </form>
+                  <form method="post" action="{{ url_for('plugins.mutate_worker', plugin_name=plugin.name, action='stop') }}">
+                    {{ mutation_form.hidden_tag() }}
+                    <button type="submit">Stop</button>
+                  </form>
+                  <form method="post" action="{{ url_for('plugins.mutate_worker', plugin_name=plugin.name, action='restart') }}">
+                    {{ mutation_form.hidden_tag() }}
+                    <button type="submit">Restart</button>
+                  </form>
+                {% endif %}
+              {% else %}
+                deaktiviert: WEBUI_OWNER_TELEGRAM_ID nicht gesetzt
+              {% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p>Keine Plugins gefunden.</p>
+  {% endif %}
+
+  {% if invalid_manifests %}
+    <h2>Fehlerhafte Manifeste</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Plugin-Verzeichnis</th>
+          <th>Datei</th>
+          <th>Status</th>
+          <th>Grund</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in invalid_manifests %}
+          <tr>
+            <td>{{ item.plugin_dir }}</td>
+            <td>{{ item.file_name }}</td>
+            <td>fehlerhaft</td>
+            <td>{{ item.error }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% endif %}
+{% endblock %}

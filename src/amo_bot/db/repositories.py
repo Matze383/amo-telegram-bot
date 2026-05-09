@@ -26,6 +26,11 @@ class RoleChangeResult:
 class PluginStatus:
     name: str
     enabled: bool
+    worker_state: str | None = None
+    worker_last_heartbeat_at: datetime | None = None
+    worker_restart_count: int = 0
+    worker_next_restart_at: datetime | None = None
+    worker_last_error: str | None = None
 
 
 class UserRoleRepository:
@@ -39,6 +44,41 @@ class UserRoleRepository:
         if user is None:
             return None
         return Role(user.role.name)
+
+    def upsert_discovered_user(
+        self,
+        *,
+        telegram_user_id: int,
+        username: str | None,
+        first_name: str | None,
+        last_name: str | None,
+        seen_at: datetime | None = None,
+    ) -> User:
+        seen = seen_at or datetime.now(timezone.utc)
+        user = self._session.scalar(select(User).where(User.telegram_user_id == telegram_user_id))
+
+        if user is None:
+            normal_role = self._session.scalar(select(DbRole).where(DbRole.name == Role.NORMAL.value))
+            if normal_role is None:
+                raise ValueError("role not found in db: normal")
+            user = User(
+                telegram_user_id=telegram_user_id,
+                username=username,
+                first_name=first_name,
+                last_name=last_name,
+                first_seen_at=seen,
+                last_seen_at=seen,
+                role_id=normal_role.id,
+            )
+            self._session.add(user)
+        else:
+            user.username = username
+            user.first_name = first_name
+            user.last_name = last_name
+            user.last_seen_at = seen
+
+        self._session.commit()
+        return user
 
     def set_user_role(
         self,
@@ -144,7 +184,9 @@ class ChatTopicRepository:
             )
             self._session.add(row)
         else:
-            row.telegram_topic_name = telegram_topic_name
+            cleaned_name = telegram_topic_name.strip() if isinstance(telegram_topic_name, str) else None
+            if cleaned_name:
+                row.telegram_topic_name = cleaned_name
             row.last_seen_at = seen
             row.updated_at = seen
 
@@ -208,21 +250,35 @@ class PluginRepository:
     def __init__(self, session: Session) -> None:
         self._session = session
 
+    @staticmethod
+    def _to_status(row: Plugin) -> PluginStatus:
+        return PluginStatus(
+            name=row.name,
+            enabled=bool(row.enabled),
+            worker_state=row.worker_state,
+            worker_last_heartbeat_at=row.worker_last_heartbeat_at,
+            worker_restart_count=int(row.worker_restart_count or 0),
+            worker_next_restart_at=row.worker_next_restart_at,
+            worker_last_error=row.worker_last_error,
+        )
+
     def list_plugins(self) -> list[PluginStatus]:
         rows = self._session.scalars(select(Plugin).order_by(Plugin.name.asc())).all()
-        return [PluginStatus(name=row.name, enabled=bool(row.enabled)) for row in rows]
+        return [self._to_status(row) for row in rows]
 
     def get_status(self, plugin_name: str) -> PluginStatus | None:
         row = self._session.scalar(select(Plugin).where(Plugin.name == plugin_name))
         if row is None:
             return None
-        return PluginStatus(name=row.name, enabled=bool(row.enabled))
+        return self._to_status(row)
 
     def _upsert_from_manifest(self, manifest: PluginManifest) -> Plugin:
         row = self._session.scalar(select(Plugin).where(Plugin.name == manifest.name))
         manifest_json = manifest.model_dump_json()
         if row is None:
             row = Plugin(name=manifest.name, version=manifest.version, enabled=0, manifest_json=manifest_json)
+            if manifest.schedule:
+                row.next_run_at = datetime.now(timezone.utc)
             self._session.add(row)
             self._session.flush()
             return row
@@ -237,6 +293,55 @@ class PluginRepository:
         if changed:
             self._session.flush()
         return row
+
+    def list_due_scheduled_plugins(self, *, now: datetime) -> list[Plugin]:
+        rows = self._session.scalars(
+            select(Plugin)
+            .where(Plugin.enabled == 1)
+            .where(Plugin.next_run_at.is_not(None))
+            .where(Plugin.next_run_at <= now)
+            .order_by(Plugin.name.asc())
+        ).all()
+        from amo_bot.plugins.manifest import PluginManifest
+
+        return [row for row in rows if PluginManifest.model_validate_json(row.manifest_json).schedule is not None]
+
+    def mark_scheduled_result(
+        self,
+        *,
+        plugin_name: str,
+        status: str,
+        next_run_at: datetime,
+        ran_at: datetime,
+    ) -> None:
+        row = self._session.scalar(select(Plugin).where(Plugin.name == plugin_name))
+        if row is None:
+            raise ValueError("plugin not found")
+        row.last_run_at = ran_at
+        row.last_status = status
+        row.next_run_at = next_run_at
+        self._session.commit()
+
+    def mark_worker_state(
+        self,
+        *,
+        plugin_name: str,
+        state: str,
+        heartbeat_at: datetime | None = None,
+        next_restart_at: datetime | None = None,
+        last_error: str | None = None,
+        increment_restart_count: bool = False,
+    ) -> None:
+        row = self._session.scalar(select(Plugin).where(Plugin.name == plugin_name))
+        if row is None:
+            raise ValueError("plugin not found")
+        row.worker_state = state
+        row.worker_last_heartbeat_at = heartbeat_at
+        row.worker_next_restart_at = next_restart_at
+        row.worker_last_error = last_error
+        if increment_restart_count:
+            row.worker_restart_count = int(row.worker_restart_count or 0) + 1
+        self._session.commit()
 
     def sync_discovered(self, manifests: list[PluginManifest]) -> None:
         for manifest in manifests:

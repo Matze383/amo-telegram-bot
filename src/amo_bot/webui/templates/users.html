@@ -19,6 +19,9 @@
       <thead>
         <tr>
           <th>Telegram User ID</th>
+          <th>Username</th>
+          <th>Name</th>
+          <th>Last Seen</th>
           <th>Rolle</th>
           <th>Rolle ändern</th>
         </tr>
@@ -27,6 +30,9 @@
         {% for user in users %}
           <tr>
             <td>{{ user.telegram_user_id }}</td>
+            <td>{{ user.username or '-' }}</td>
+            <td>{{ ((user.first_name or '') ~ ' ' ~ (user.last_name or '')).strip() or '-' }}</td>
+            <td>{{ user.last_seen_at or '-' }}</td>
             <td>{{ user.role }}</td>
             <td>
               <form method="post" action="{{ url_for('ui.update_user_role', telegram_user_id=user.telegram_user_id) }}">

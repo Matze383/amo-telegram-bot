@@ -23,7 +23,11 @@ class User(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     telegram_user_id: Mapped[int] = mapped_column(BigInteger, unique=True, index=True, nullable=False)
     username: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    first_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    last_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     display_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     role_id: Mapped[int] = mapped_column(ForeignKey("roles.id"), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
@@ -52,6 +56,14 @@ class Plugin(Base):
     version: Mapped[str] = mapped_column(String(64), nullable=False)
     enabled: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     manifest_json: Mapped[str] = mapped_column(Text, nullable=False)
+    next_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    worker_state: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    worker_last_heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    worker_restart_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    worker_next_restart_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    worker_last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class AuditEvent(Base):

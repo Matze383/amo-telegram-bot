@@ -72,14 +72,24 @@ class PluginService:
         with self._session_factory() as session:
             repo = PluginRepository(session)
             repo.sync_discovered(discovery.valid)
-            db_plugins = {item.name: item.enabled for item in repo.list_plugins()}
+            db_plugins = {item.name: item for item in repo.list_plugins()}
 
         plugins_payload = [
             {
                 "name": manifest.name,
                 "version": manifest.version,
-                "enabled": bool(db_plugins.get(manifest.name, False)),
+                "enabled": bool(db_plugins[manifest.name].enabled) if manifest.name in db_plugins else False,
                 "valid": True,
+                "commands": manifest.commands,
+                "required_roles": manifest.required_roles,
+                "required_permissions": manifest.required_permissions,
+                "schedule": manifest.schedule,
+                "worker": manifest.worker,
+                "worker_state": db_plugins[manifest.name].worker_state if manifest.name in db_plugins else None,
+                "worker_last_heartbeat_at": db_plugins[manifest.name].worker_last_heartbeat_at if manifest.name in db_plugins else None,
+                "worker_restart_count": db_plugins[manifest.name].worker_restart_count if manifest.name in db_plugins else 0,
+                "worker_next_restart_at": db_plugins[manifest.name].worker_next_restart_at if manifest.name in db_plugins else None,
+                "worker_last_error": db_plugins[manifest.name].worker_last_error if manifest.name in db_plugins else None,
             }
             for manifest in sorted(valid_by_name.values(), key=lambda item: item.name)
         ]

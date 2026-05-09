@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 from sqlalchemy import select
 
 from amo_bot.config.settings import Settings
@@ -26,6 +28,8 @@ def _make_settings(database_url: str, password: str = "test-secret", owner_id: i
     }
     if owner_id is not None:
         payload["WEBUI_OWNER_TELEGRAM_ID"] = owner_id
+    else:
+        os.environ.pop("WEBUI_OWNER_TELEGRAM_ID", None)
     return Settings(_env_file=None, **payload)
 
 
