@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 from argparse import ArgumentParser
 
 from amo_bot.ai.ollama import OllamaClient
@@ -66,11 +67,21 @@ def run(argv: list[str] | None = None) -> None:
     )
     command_registry = create_builtin_registry(database_url=settings.database_url, ai_service=ai_service)
 
-    async def send_text(chat_id: int, text: str) -> object:
-        return await tg.send_message(chat_id=chat_id, text=text)
+    async def send_text(chat_id: int, text: str, message_thread_id: int | None = None) -> object:
+        return await tg.send_message(chat_id=chat_id, text=text, message_thread_id=message_thread_id)
 
-    async def reply_text(chat_id: int, message_id: int, text: str) -> object:
-        return await tg.send_message(chat_id=chat_id, text=text, reply_to_message_id=message_id)
+    async def reply_text(
+        chat_id: int,
+        message_id: int,
+        text: str,
+        message_thread_id: int | None = None,
+    ) -> object:
+        return await tg.send_message(
+            chat_id=chat_id,
+            text=text,
+            reply_to_message_id=message_id,
+            message_thread_id=message_thread_id,
+        )
 
     plugin_loader = PluginLoader(settings.amo_plugin_dir)
 
@@ -104,11 +115,21 @@ def run(argv: list[str] | None = None) -> None:
 
     if args.serve:
         app = create_flask_app(settings=settings)
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
 
-        async def _polling_task() -> None:
-            await run_polling(
+        webui_thread = threading.Thread(
+            target=app.run,
+            kwargs={
+                "host": settings.webui_host,
+                "port": settings.webui_port,
+                "use_reloader": False,
+            },
+            daemon=True,
+            name="flask-webui",
+        )
+        webui_thread.start()
+
+        asyncio.run(
+            run_polling(
                 tg,
                 offset_store,
                 timeout_seconds=settings.poll_timeout_seconds,
@@ -117,20 +138,7 @@ def run(argv: list[str] | None = None) -> None:
                 dispatcher=dispatcher,
                 scheduled_tick=scheduled_plugin_executor.run_due_once,
             )
-
-        polling = loop.create_task(_polling_task())
-
-        try:
-            app.run(host=settings.webui_host, port=settings.webui_port, use_reloader=False)
-        finally:
-            polling.cancel()
-            try:
-                loop.run_until_complete(polling)
-            except asyncio.CancelledError:
-                pass
-            finally:
-                loop.close()
-                asyncio.set_event_loop(None)
+        )
         return
 
     asyncio.run(
