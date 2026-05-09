@@ -25,10 +25,10 @@ class FakeAIService:
 
 class CapturingSender:
     def __init__(self) -> None:
-        self.sent: list[tuple[int, str]] = []
+        self.sent: list[tuple[int, str, int | None]] = []
 
-    async def send_text(self, chat_id: int, text: str) -> object:
-        self.sent.append((chat_id, text))
+    async def send_text(self, chat_id: int, text: str, message_thread_id: int | None = None) -> object:
+        self.sent.append((chat_id, text, message_thread_id))
         return {"ok": True}
 
 
@@ -82,7 +82,7 @@ def test_runtime_bootstrap_without_real_telegram_or_ollama(tmp_path) -> None:
 
     asyncio.run(dispatcher.handle_raw_update(_mk_update(uid=42, chat_id=7, text="/ping")))
 
-    assert sender.sent == [(7, "pong")]
+    assert sender.sent == [(7, "pong", None)]
 
 
 def test_dispatcher_e2e_ping_role_help_setrole_and_ask_ignore_is_silent(tmp_path) -> None:
@@ -91,7 +91,7 @@ def test_dispatcher_e2e_ping_role_help_setrole_and_ask_ignore_is_silent(tmp_path
     _seed_roles(db_url)
 
     asyncio.run(dispatcher.handle_raw_update(_mk_update(uid=4000, chat_id=40, text="/ping", update_id=1)))
-    assert sender.sent[-1] == (40, "pong")
+    assert sender.sent[-1] == (40, "pong", None)
 
     asyncio.run(dispatcher.handle_raw_update(_mk_update(uid=4000, chat_id=40, text="/help", update_id=2)))
     help_normal = sender.sent[-1][1]
@@ -104,7 +104,7 @@ def test_dispatcher_e2e_ping_role_help_setrole_and_ask_ignore_is_silent(tmp_path
     assert "/setrole" in help_admin
 
     asyncio.run(dispatcher.handle_raw_update(_mk_update(uid=3000, chat_id=30, text="/role", update_id=4)))
-    assert sender.sent[-1] == (30, "your role: vip")
+    assert sender.sent[-1] == (30, "your role: vip", None)
 
     asyncio.run(
         dispatcher.handle_raw_update(_mk_update(uid=2000, chat_id=20, text="/setrole 4000 vip", update_id=5))
@@ -121,14 +121,14 @@ def test_dispatcher_e2e_ping_role_help_setrole_and_ask_ignore_is_silent(tmp_path
 
     for uid, chat_id in [(1000, 10), (2000, 20), (3000, 30)]:
         asyncio.run(dispatcher.handle_raw_update(_mk_update(uid=uid, chat_id=chat_id, text="/ask hi ai", update_id=100 + uid)))
-        assert sender.sent[-1] == (chat_id, "answer-from-fake-ai")
+        assert sender.sent[-1] == (chat_id, "answer-from-fake-ai", None)
 
     prompts = ai.prompts[:]
     assert prompts == ["hi ai", "hi ai", "hi ai"]
 
     before = len(sender.sent)
     asyncio.run(dispatcher.handle_raw_update(_mk_update(uid=4000, chat_id=40, text="/ask blocked", update_id=6)))
-    assert sender.sent[-1] == (40, "answer-from-fake-ai")
+    assert sender.sent[-1] == (40, "answer-from-fake-ai", None)
 
     ai_calls_before_ignore = len(ai.prompts)
     asyncio.run(dispatcher.handle_raw_update(_mk_update(uid=5000, chat_id=50, text="/ask blocked", update_id=7)))

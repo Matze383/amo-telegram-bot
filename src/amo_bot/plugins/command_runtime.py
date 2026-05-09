@@ -22,7 +22,7 @@ from amo_bot.plugins.manifest import PluginManifest
 logger = logging.getLogger(__name__)
 
 SendMessageFn = Callable[[int, str], Awaitable[object]]
-ReplyFn = Callable[[int, int, str], Awaitable[object]]
+ReplyFn = Callable[[int, int, str, int | None], Awaitable[object]]
 
 
 @dataclass(slots=True, frozen=True)
@@ -37,6 +37,7 @@ class CommandInvocation:
     argument: str | None
     chat_id: int
     message_id: int
+    message_thread_id: int | None = None
 
 
 @dataclass(slots=True, frozen=True)
@@ -46,6 +47,7 @@ class PluginCommandContext:
     trigger_type: str
     chat_id: int
     message_id: int
+    message_thread_id: int | None
     user_id: int
     role: Role
     command_name: str
@@ -88,7 +90,7 @@ class PluginHostAPI:
         text_clean = (text or "").strip()
         if not text_clean:
             raise ValueError("text must not be empty")
-        return await self._reply(chat_id, message_id, text_clean[:4000])
+        return await self._reply(chat_id, message_id, text_clean[:4000], None)
 
 
 class PluginCommandExecutor:
@@ -153,6 +155,7 @@ class PluginCommandExecutor:
             trigger_type="command",
             chat_id=invocation.chat_id,
             message_id=invocation.message_id,
+            message_thread_id=invocation.message_thread_id,
             user_id=actor.telegram_user_id,
             role=actor.role,
             command_name=invocation.command_name,

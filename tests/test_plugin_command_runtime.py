@@ -21,7 +21,7 @@ def _mk_executor(
     plugin_code: str,
     *,
     required_permissions: list[str] | None = None,
-) -> tuple[PluginCommandExecutor, list[tuple[int, str]], list[tuple[int, int, str]]]:
+) -> tuple[PluginCommandExecutor, list[tuple[int, str]], list[tuple[int, int, str, int | None]]]:
     plugins_dir = tmp_path / "plugins"
     pdir = plugins_dir / plugin_name
     pdir.mkdir(parents=True)
@@ -47,14 +47,14 @@ def _mk_executor(
         repo.activate(plugin_name, actor_telegram_user_id=1)
 
     sent: list[tuple[int, str]] = []
-    replied: list[tuple[int, int, str]] = []
+    replied: list[tuple[int, int, str, int | None]] = []
 
     async def _send(chat_id: int, text: str):
         sent.append((chat_id, text))
         return {"ok": True}
 
-    async def _reply(chat_id: int, message_id: int, text: str):
-        replied.append((chat_id, message_id, text))
+    async def _reply(chat_id: int, message_id: int, text: str, message_thread_id: int | None = None):
+        replied.append((chat_id, message_id, text, message_thread_id))
         return {"ok": True}
 
     executor = PluginCommandExecutor(
@@ -89,7 +89,7 @@ async def handle_command(context, host_api):
     )
 
     assert sent == [(77, "ok:plug")]
-    assert replied == [(77, 9, "ack")]
+    assert replied == [(77, 9, "ack", None)]
 
     sf = create_session_factory(db_url)
     with sf() as session:

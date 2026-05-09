@@ -22,13 +22,14 @@ def _mk_update(
     user_id: int,
     chat_id: int,
     chat_type: str,
-    text: str = "/ping",
     title: str | None = None,
     username: str | None = None,
     first_name: str = "U",
     last_name: str | None = None,
     message_thread_id: int | None = None,
     forum_topic_created_name: str | None = None,
+    forum_topic_edited_name: str | None = None,
+    text: str | None = "/ping",
 ) -> dict[str, object]:
     chat: dict[str, object] = {"id": chat_id, "type": chat_type}
     if title is not None:
@@ -40,14 +41,17 @@ def _mk_update(
         "message_id": update_id + 100,
         "from": {"id": user_id, "is_bot": False, "first_name": first_name, "username": f"u{user_id}"},
         "chat": chat,
-        "text": text,
     }
+    if text is not None:
+        message["text"] = text
     if last_name is not None:
         message["from"]["last_name"] = last_name
     if message_thread_id is not None:
         message["message_thread_id"] = message_thread_id
     if forum_topic_created_name is not None:
         message["forum_topic_created"] = {"name": forum_topic_created_name}
+    if forum_topic_edited_name is not None:
+        message["forum_topic_edited"] = {"name": forum_topic_edited_name}
 
     return {"update_id": update_id, "message": message}
 
@@ -55,7 +59,7 @@ def _mk_update(
 def _build_dispatcher(db_url: str) -> Dispatcher:
     sf = create_session_factory(db_url)
 
-    async def _fake_send(_chat_id: int, _text: str) -> object:
+    async def _fake_send(_chat_id: int, _text: str, _message_thread_id: int | None = None) -> object:
         return {"ok": True}
 
     return Dispatcher(
@@ -280,3 +284,97 @@ def test_topic_name_is_saved_and_preserved_and_updated(tmp_path) -> None:
         )
         assert topic is not None
         assert topic.telegram_topic_name == "Renamed Topic"
+
+
+def test_forum_topic_edited_name_is_persisted_without_text_message(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'persist_topic_edited_service.db'}"
+    init_db(db_url)
+    dispatcher = _build_dispatcher(db_url)
+
+    asyncio.run(
+        dispatcher.handle_raw_update(
+            _mk_update(
+                update_id=30,
+                user_id=42,
+                chat_id=-100321,
+                chat_type="supergroup",
+                title="Forum",
+                message_thread_id=872,
+                forum_topic_edited_name="Projekt: Telegram-bot",
+                text=None,
+            )
+        )
+    )
+
+    sf = create_session_factory(db_url)
+    with sf() as session:
+        topic = session.scalar(
+            select(TelegramTopic).where(
+                TelegramTopic.chat_id == -100321,
+                TelegramTopic.message_thread_id == 872,
+            )
+        )
+        assert topic is not None
+        assert topic.telegram_topic_name == "Projekt: Telegram-bot"
+
+
+def test_reply_to_forum_topic_created_name_is_persisted(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'persist_topic_reply_created.db'}"
+    init_db(db_url)
+    dispatcher = _build_dispatcher(db_url)
+
+    update = _mk_update(
+        update_id=40,
+        user_id=42,
+        chat_id=-100654,
+        chat_type="supergroup",
+        title="Forum",
+        message_thread_id=951,
+    )
+    message = update["message"]
+    assert isinstance(message, dict)
+    message["reply_to_message"] = {"forum_topic_created": {"name": "Reply Created Topic"}}
+
+    asyncio.run(dispatcher.handle_raw_update(update))
+
+    sf = create_session_factory(db_url)
+    with sf() as session:
+        topic = session.scalar(
+            select(TelegramTopic).where(
+                TelegramTopic.chat_id == -100654,
+                TelegramTopic.message_thread_id == 951,
+            )
+        )
+        assert topic is not None
+        assert topic.telegram_topic_name == "Reply Created Topic"
+
+
+def test_reply_to_forum_topic_edited_name_is_persisted(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'persist_topic_reply_edited.db'}"
+    init_db(db_url)
+    dispatcher = _build_dispatcher(db_url)
+
+    update = _mk_update(
+        update_id=41,
+        user_id=42,
+        chat_id=-100655,
+        chat_type="supergroup",
+        title="Forum",
+        message_thread_id=952,
+    )
+    message = update["message"]
+    assert isinstance(message, dict)
+    message["reply_to_message"] = {"forum_topic_edited": {"name": "Reply Edited Topic"}}
+
+    asyncio.run(dispatcher.handle_raw_update(update))
+
+    sf = create_session_factory(db_url)
+    with sf() as session:
+        topic = session.scalar(
+            select(TelegramTopic).where(
+                TelegramTopic.chat_id == -100655,
+                TelegramTopic.message_thread_id == 952,
+            )
+        )
+        assert topic is not None
+        assert topic.telegram_topic_name == "Reply Edited Topic"

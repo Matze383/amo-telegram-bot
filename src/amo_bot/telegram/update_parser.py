@@ -108,7 +108,7 @@ def _parse_message(raw: Any) -> TelegramMessage | None:
     chat = _parse_chat(raw.get("chat"))
     text = raw.get("text")
 
-    if from_user is None or chat is None or not isinstance(text, str):
+    if from_user is None or chat is None:
         return None
 
     try:
@@ -126,19 +126,29 @@ def _parse_message(raw: Any) -> TelegramMessage | None:
         except (TypeError, ValueError):
             message_thread_id = None
 
-    telegram_topic_name_raw = raw.get("forum_topic_created")
-    telegram_topic_name: str | None = None
-    if isinstance(telegram_topic_name_raw, dict):
-        name_raw = telegram_topic_name_raw.get("name")
-        if isinstance(name_raw, str):
-            cleaned_name = name_raw.strip()
-            telegram_topic_name = cleaned_name or None
+    def _extract_topic_name(event_container: Any) -> str | None:
+        if not isinstance(event_container, dict):
+            return None
+        for topic_event_key in ("forum_topic_created", "forum_topic_edited"):
+            topic_event_raw = event_container.get(topic_event_key)
+            if not isinstance(topic_event_raw, dict):
+                continue
+            name_raw = topic_event_raw.get("name")
+            if isinstance(name_raw, str):
+                cleaned_name = name_raw.strip()
+                if cleaned_name:
+                    return cleaned_name
+        return None
+
+    telegram_topic_name = _extract_topic_name(raw)
+    if telegram_topic_name is None:
+        telegram_topic_name = _extract_topic_name(raw.get("reply_to_message"))
 
     return TelegramMessage(
         message_id=message_id,
         from_user=from_user,
         chat=chat,
-        text=text,
+        text=text if isinstance(text, str) else "",
         message_thread_id=message_thread_id,
         telegram_topic_name=telegram_topic_name,
     )

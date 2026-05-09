@@ -9,7 +9,7 @@ from amo_bot.plugins.command_runtime import CommandActor, CommandInvocation, Plu
 from amo_bot.telegram.commands import CommandContext, CommandRegistry, RoleResolver
 from amo_bot.telegram.update_parser import TelegramMessage, parse_update
 
-SendTextFn = Callable[[int, str], Awaitable[object]]
+SendTextFn = Callable[[int, str, int | None], Awaitable[object]]
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +57,7 @@ class Dispatcher:
                         argument=command.argument,
                         chat_id=message.chat.id,
                         message_id=message.message_id,
+                        message_thread_id=message.message_thread_id,
                     ),
                 )
             return
@@ -73,4 +74,4 @@ class Dispatcher:
         )
         response = await command_def.handler(ctx)
         if response:
-            await self.send_text(message.chat.id, response)
+            await self.send_text(message.chat.id, response, message.message_thread_id)

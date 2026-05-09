@@ -9,8 +9,8 @@ from amo_bot.telegram.role_resolver import InMemoryRoleResolver
 def test_dispatcher_routes_command_and_calls_send() -> None:
     sent: list[tuple[int, str]] = []
 
-    async def fake_send(chat_id: int, text: str) -> object:
-        sent.append((chat_id, text))
+    async def fake_send(chat_id: int, text: str, message_thread_id: int | None = None) -> object:
+        sent.append((chat_id, text, message_thread_id))
         return {"ok": True}
 
     dispatcher = Dispatcher(
@@ -32,14 +32,14 @@ def test_dispatcher_routes_command_and_calls_send() -> None:
 
     asyncio.run(dispatcher.handle_raw_update(raw_update))
 
-    assert sent == [(99, "pong")]
+    assert sent == [(99, "pong", None)]
 
 
 def test_dispatcher_ignores_non_message_updates() -> None:
     sent: list[tuple[int, str]] = []
 
-    async def fake_send(chat_id: int, text: str) -> object:
-        sent.append((chat_id, text))
+    async def fake_send(chat_id: int, text: str, message_thread_id: int | None = None) -> object:
+        sent.append((chat_id, text, message_thread_id))
         return {"ok": True}
 
     dispatcher = Dispatcher(
@@ -56,8 +56,8 @@ def test_dispatcher_ignores_non_message_updates() -> None:
 def test_dispatcher_blocks_ignore_role() -> None:
     sent: list[tuple[int, str]] = []
 
-    async def fake_send(chat_id: int, text: str) -> object:
-        sent.append((chat_id, text))
+    async def fake_send(chat_id: int, text: str, message_thread_id: int | None = None) -> object:
+        sent.append((chat_id, text, message_thread_id))
         return {"ok": True}
 
     dispatcher = Dispatcher(
@@ -84,8 +84,8 @@ def test_dispatcher_blocks_ignore_role() -> None:
 def test_dispatcher_ignores_suffixed_command_without_configured_bot_username() -> None:
     sent: list[tuple[int, str]] = []
 
-    async def fake_send(chat_id: int, text: str) -> object:
-        sent.append((chat_id, text))
+    async def fake_send(chat_id: int, text: str, message_thread_id: int | None = None) -> object:
+        sent.append((chat_id, text, message_thread_id))
         return {"ok": True}
 
     dispatcher = Dispatcher(
@@ -112,8 +112,8 @@ def test_dispatcher_ignores_suffixed_command_without_configured_bot_username() -
 def test_dispatcher_accepts_suffixed_command_for_configured_bot_username() -> None:
     sent: list[tuple[int, str]] = []
 
-    async def fake_send(chat_id: int, text: str) -> object:
-        sent.append((chat_id, text))
+    async def fake_send(chat_id: int, text: str, message_thread_id: int | None = None) -> object:
+        sent.append((chat_id, text, message_thread_id))
         return {"ok": True}
 
     dispatcher = Dispatcher(
@@ -134,7 +134,7 @@ def test_dispatcher_accepts_suffixed_command_for_configured_bot_username() -> No
     }
 
     asyncio.run(dispatcher.handle_raw_update(raw_update))
-    assert sent == [(99, "pong")]
+    assert sent == [(99, "pong", None)]
 
 
 class _FailingPersistence(MessagePersistence):
@@ -145,8 +145,8 @@ class _FailingPersistence(MessagePersistence):
 def test_dispatcher_continues_when_message_persistence_fails() -> None:
     sent: list[tuple[int, str]] = []
 
-    async def fake_send(chat_id: int, text: str) -> object:
-        sent.append((chat_id, text))
+    async def fake_send(chat_id: int, text: str, message_thread_id: int | None = None) -> object:
+        sent.append((chat_id, text, message_thread_id))
         return {"ok": True}
 
     dispatcher = Dispatcher(
@@ -168,14 +168,14 @@ def test_dispatcher_continues_when_message_persistence_fails() -> None:
     }
 
     asyncio.run(dispatcher.handle_raw_update(raw_update))
-    assert sent == [(99, "pong")]
+    assert sent == [(99, "pong", None)]
 
 
 def test_dispatcher_ignores_suffixed_command_for_other_bot_username() -> None:
     sent: list[tuple[int, str]] = []
 
-    async def fake_send(chat_id: int, text: str) -> object:
-        sent.append((chat_id, text))
+    async def fake_send(chat_id: int, text: str, message_thread_id: int | None = None) -> object:
+        sent.append((chat_id, text, message_thread_id))
         return {"ok": True}
 
     dispatcher = Dispatcher(
@@ -197,3 +197,33 @@ def test_dispatcher_ignores_suffixed_command_for_other_bot_username() -> None:
 
     asyncio.run(dispatcher.handle_raw_update(raw_update))
     assert sent == []
+
+
+def test_dispatcher_passes_message_thread_id_to_send() -> None:
+    sent: list[tuple[int, str, int | None]] = []
+
+    async def fake_send(chat_id: int, text: str, message_thread_id: int | None = None) -> object:
+        sent.append((chat_id, text, message_thread_id))
+        return {"ok": True}
+
+    dispatcher = Dispatcher(
+        command_registry=create_builtin_registry(),
+        role_resolver=InMemoryRoleResolver({42: Role.NORMAL}),
+        send_text=fake_send,
+        bot_username="BotName",
+    )
+
+    raw_update = {
+        "update_id": 13,
+        "message": {
+            "message_id": 17,
+            "message_thread_id": 872,
+            "from": {"id": 42, "is_bot": False, "first_name": "T", "username": "tester"},
+            "chat": {"id": -1003997137641, "type": "supergroup"},
+            "text": "/ping",
+        },
+    }
+
+    asyncio.run(dispatcher.handle_raw_update(raw_update))
+
+    assert sent == [(-1003997137641, "pong", 872)]
