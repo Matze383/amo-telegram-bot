@@ -27,6 +27,8 @@ def _make_settings(
         "WEBUI_PUBLIC_MODE": False,
         "WEBUI_REQUIRE_HTTPS": False,
         "WEBUI_SESSION_COOKIE_SECURE": False,
+        "WEBUI_LOGIN_DELAY_BASE_SECONDS": 0.25,
+        "WEBUI_LOGIN_DELAY_MAX_SECONDS": 1.0,
     }
     if owner_id is not None:
         payload["WEBUI_OWNER_TELEGRAM_ID"] = owner_id

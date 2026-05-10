@@ -62,6 +62,10 @@ WEBUI_SESSION_TTL_SECONDS=3600
 # WEBUI_REQUIRE_HTTPS=false
 # WEBUI_SESSION_COOKIE_SECURE=
 
+# Security settings (Block 2 - Login Protection)
+# WEBUI_LOGIN_DELAY_BASE_SECONDS=0.25
+# WEBUI_LOGIN_DELAY_MAX_SECONDS=2.0
+
 # Polling Configuration
 POLL_TIMEOUT_SECONDS=30
 POLL_LIMIT=100
@@ -71,7 +75,7 @@ OFFSET_STATE_FILE=.state/offset.json
 
 ---
 
-### Security Features (Block 1)
+### Security Features (Block 1 + Block 2)
 
 The WebUI now includes hardened security:
 
@@ -88,9 +92,18 @@ The WebUI now includes hardened security:
 - SameSite=Lax
 - Secure flag (auto-enabled for public/HTTPS)
 
+**Login Protection (Block 2):**
+- Progressive delay after failed login attempts (exponential backoff / brute-force protection)
+- Configurable via `WEBUI_LOGIN_DELAY_BASE_SECONDS` (default: 0.25s) and `WEBUI_LOGIN_DELAY_MAX_SECONDS` (default: 2.0s)
+- Delay is capped at the maximum value
+- Successful login resets the delay counter
+- Per-IP tracking using `remote_addr` (conservative keying)
+
 **Configuration:**
 - `WEBUI_PUBLIC_MODE=false` — Local development default
 - `WEBUI_REQUIRE_HTTPS=false` — Local development default
+- `WEBUI_LOGIN_DELAY_BASE_SECONDS=0.25` — Initial delay after first failure
+- `WEBUI_LOGIN_DELAY_MAX_SECONDS=2.0` — Maximum delay cap
 
 **⚠️ Production Warning:** Flask should not be exposed directly to the internet. Use a reverse proxy with HTTPS.
 
@@ -292,12 +305,31 @@ curl http://127.0.0.1:11434/api/tags
 
 ### Future Features (Not Yet Implemented)
 
-The following features are planned for future releases:
+The following features are planned for future releases and are **not available** in the current beta:
 
-**Telegram WebUI Access Control (Block 2 - Planned)**
-- Owner can enable/disable WebUI via Telegram commands (`/webui on`, `/webui off`, `/webui status`)
-- Time-limited 1-hour access windows
-- These commands are not yet implemented and cannot be tested
+**Telegram WebUI Access Control (Block 2 - Planned / Not Implemented)**
+- Planned: Owner could enable/disable WebUI via Telegram commands (`/webui on`, `/webui off`, `/webui status`)
+- Planned: Time-limited 1-hour access windows
+- **Status: NOT IMPLEMENTED** — These commands do not exist in the current codebase
+- **Do NOT test** — This feature is not part of the MVP beta test
+
+---
+
+### Block 2 Security Testing Notes
+
+**Login behavior:**
+- Wrong credentials return a **generic error message** — no detailed information is revealed
+- Repeated failed logins are **progressively delayed** (exponential backoff, capped at max)
+- Successful login after failures works normally — the delay counter resets immediately
+
+**Audit Events (internal/optional):**
+- Login attempts generate audit events: `webui_login_failure` and `webui_login_success`
+- Events include IP address (`remote_addr`) only
+- No passwords or sensitive data is logged
+- These events are for internal logging/monitoring and do not affect user-facing behavior
+
+**Not yet implemented:**
+- Telegram `/webui on/off/status` commands for time-limited access windows
 
 ---
 

@@ -61,21 +61,27 @@ WEBUI_HOST=127.0.0.1
 WEBUI_PORT=8080
 WEBUI_SESSION_TTL_SECONDS=3600
 
-# Sicherheitseinstellungen (neu in Block 1)
+# Sicherheitseinstellungen (Block 1)
 # WEBUI_PUBLIC_MODE=false
 # WEBUI_REQUIRE_HTTPS=false
 # WEBUI_SESSION_COOKIE_SECURE=
+
+# Sicherheitseinstellungen (Block 2 – Login-Schutz)
+# WEBUI_LOGIN_DELAY_BASE_SECONDS=0.25
+# WEBUI_LOGIN_DELAY_MAX_SECONDS=2.0
 ```
 
 > **Config-Priorität:** Beim lokalen Start überschreibt `.env` Shell-Umgebungsvariablen. Setze `AMO_ENV_OVERRIDE=0`, um dies zu deaktivieren.
 
 ---
 
-## Sicherheitseinstellungen (Block 1)
+## Sicherheitseinstellungen (Block 1 + Block 2)
 
 Die WebUI enthält konfigurierbare Sicherheitsfeatures:
 
-### Umgebungsvariablen
+## Umgebungsvariablen
+
+### Block 1: Session-Sicherheit
 
 | Variable | Standard | Beschreibung |
 |----------|----------|--------------|
@@ -83,7 +89,16 @@ Die WebUI enthält konfigurierbare Sicherheitsfeatures:
 | `WEBUI_REQUIRE_HTTPS` | `false` | HTTPS erforderlich. Sollte bei öffentlichem Betrieb `true` sein. |
 | `WEBUI_SESSION_COOKIE_SECURE` | *(auto)* | Überschreibt das Secure-Flag des Cookies. Leer = auto (true bei public ODER require_https). |
 
-### Security Headers
+### Block 2: Login-Schutz
+
+| Variable | Standard | Einschränkungen | Beschreibung |
+|----------|----------|-----------------|--------------|
+| `WEBUI_LOGIN_DELAY_BASE_SECONDS` | `0,25` | nicht-negativ | Basisverzögerung nach erstem fehlgeschlagenen Login (Sekunden) |
+| `WEBUI_LOGIN_DELAY_MAX_SECONDS` | `2,0` | nicht-negativ, muss >= Basis sein | Maximale Verzögerung (Sekunden) |
+
+---
+
+## Security Headers
 
 Die WebUI setzt folgende HTTP-Security-Header:
 
@@ -94,14 +109,45 @@ Die WebUI setzt folgende HTTP-Security-Header:
 - **Permissions-Policy:** Beschränkt Browser-Features
 - **HSTS:** Nur in HTTPS/Secure-Kontexten
 
-### Session-Cookie-Sicherheit
+---
+
+## Session-Cookie-Sicherheit
 
 Session-Cookies verwenden:
 - **HttpOnly:** Verhindert JavaScript-Zugriff
 - **SameSite=Lax:** CSRF-Schutz
 - **Secure:** Automatisch bei Public-Modus oder HTTPS; Überschreibung via `WEBUI_SESSION_COOKIE_SECURE`
 
-### Lokale Entwicklungs-Defaults
+---
+
+## Login-Schutz (Block 2)
+
+Zum Schutz vor Brute-Force-Angriffen implementiert die WebUI **progressive Verzögerungen** nach fehlgeschlagenen Login-Versuchen (exponentieller Backoff).
+
+| Variable | Standard | Beschreibung |
+|----------|----------|--------------|
+| `WEBUI_LOGIN_DELAY_BASE_SECONDS` | `0,25` | Basisverzögerung nach erstem Fehlversuch (Sekunden) |
+| `WEBUI_LOGIN_DELAY_MAX_SECONDS` | `2,0` | Maximale Verzögerung (Sekunden). Muss >= Basis sein. |
+
+**Verhalten:**
+- Verzögerung erhöht sich progressiv nach jedem fehlgeschlagenen Versuch (exponentieller Backoff)
+- Verzögerung ist gecappt bei `WEBUI_LOGIN_DELAY_MAX_SECONDS`
+- Erfolgreicher Login setzt den Zähler zurück
+- Verzögerungen gelten pro IP-Adresse (`remote_addr`)
+- `LoginAttemptTracker` ist In-Memory pro Prozess mit `max_keys`-Limit und oldest eviction
+- Multi-Prozess/Shared-State bleibt ein zukünftiges Enhancement
+
+**Audit-Events:**
+- `webui_login_failure` — Protokolliert fehlgeschlagenen Login-Versuch
+- `webui_login_success` — Protokolliert erfolgreichen Login
+
+Beide Events enthalten nur `remote_addr`. Es werden keine Passwörter oder andere sensible Daten protokolliert.
+
+> **Reverse-Proxy-Hinweis:** Bei Betrieb hinter einem Reverse Proxy muss `remote_addr` korrekt und vertrauenswürdig durch die Infrastruktur gesetzt werden. Die WebUI verwendet `remote_addr` direkt ohne Auswertung von `X-Forwarded-For`. Flask niemals direkt öffentlich exponieren.
+
+---
+
+## Lokale Entwicklungs-Defaults
 
 Für lokale Tests die Standardwerte beibehalten:
 
@@ -111,7 +157,9 @@ WEBUI_REQUIRE_HTTPS=false
 # WEBUI_SESSION_COOKIE_SECURE=  # leer lassen für auto
 ```
 
-### Produktions-/Internet-Deployment
+---
+
+## Produktions-/Internet-Deployment
 
 **⚠️ Warnung:** Flask nicht direkt ins Internet stellen. Reverse Proxy (nginx, Caddy, Traefik) mit HTTPS verwenden.
 

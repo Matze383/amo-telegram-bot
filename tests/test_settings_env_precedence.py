@@ -92,6 +92,60 @@ def test_new_webui_security_env_values_are_parsed(monkeypatch, tmp_path) -> None
     assert settings.webui_session_cookie_secure is False
 
 
+def test_webui_login_delay_rejects_negative_values(monkeypatch, tmp_path) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "\n".join(
+            [
+                "BOT_TOKEN=token-from-dotenv",
+                "WEBUI_PASSWORD=pw-from-dotenv",
+                "WEBUI_LOGIN_DELAY_BASE_SECONDS=-0.1",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("DOTENV_PATH", str(env_file))
+    monkeypatch.delenv("AMO_ENV_OVERRIDE", raising=False)
+
+    with pytest.raises(ValidationError) as exc_info:
+        get_settings()
+
+    monkeypatch.delenv("WEBUI_LOGIN_DELAY_BASE_SECONDS", raising=False)
+
+    assert "WEBUI_LOGIN_DELAY_BASE_SECONDS" in str(exc_info.value)
+
+
+def test_webui_login_delay_rejects_max_below_base(monkeypatch, tmp_path) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "\n".join(
+            [
+                "BOT_TOKEN=token-from-dotenv",
+                "WEBUI_PASSWORD=pw-from-dotenv",
+                "WEBUI_LOGIN_DELAY_BASE_SECONDS=1.5",
+                "WEBUI_LOGIN_DELAY_MAX_SECONDS=1.0",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("DOTENV_PATH", str(env_file))
+    monkeypatch.delenv("AMO_ENV_OVERRIDE", raising=False)
+
+    with pytest.raises(ValidationError) as exc_info:
+        get_settings()
+
+    monkeypatch.delenv("WEBUI_LOGIN_DELAY_BASE_SECONDS", raising=False)
+    monkeypatch.delenv("WEBUI_LOGIN_DELAY_MAX_SECONDS", raising=False)
+
+    assert "WEBUI_LOGIN_DELAY_MAX_SECONDS must be >= WEBUI_LOGIN_DELAY_BASE_SECONDS" in str(exc_info.value)
+
+
 def test_no_secret_values_are_exposed_in_validation_error(monkeypatch, tmp_path) -> None:
     env_file = tmp_path / ".env"
     secret_value = "super-secret-value"

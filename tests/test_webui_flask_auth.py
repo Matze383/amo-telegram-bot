@@ -29,6 +29,8 @@ def _make_settings(
         "WEBUI_PUBLIC_MODE": webui_public_mode,
         "WEBUI_REQUIRE_HTTPS": webui_require_https,
         "WEBUI_SESSION_COOKIE_SECURE": webui_session_cookie_secure,
+        "WEBUI_LOGIN_DELAY_BASE_SECONDS": 0.25,
+        "WEBUI_LOGIN_DELAY_MAX_SECONDS": 1.0,
     }
     return Settings(_env_file=None, **payload)
 
@@ -224,3 +226,70 @@ def test_secure_mode_sets_secure_cookie_and_hsts() -> None:
 def test_public_mode_requires_https_and_secure_cookie() -> None:
     with pytest.raises(ValueError, match="WEBUI_PUBLIC_MODE=true"):
         create_flask_app(settings=_make_settings(webui_public_mode=True, webui_require_https=False))
+
+
+def test_login_bruteforce_delay_progressive_and_capped(monkeypatch) -> None:
+    app = create_flask_app(settings=_make_settings())
+    app.extensions["amo.login_attempt_tracker"] = __import__("amo_bot.webui.flask_blueprints.auth", fromlist=["LoginAttemptTracker"]).LoginAttemptTracker(base_delay_seconds=0.1, max_delay_seconds=0.25)
+
+    delays: list[float] = []
+    app.extensions["amo.login_delay_fn"] = lambda seconds: delays.append(seconds)
+
+    with app.test_client() as client:
+        for _ in range(4):
+            response = _login(client, "wrong")
+            assert response.status_code == 401
+
+    assert delays == [0.1, 0.2, 0.25, 0.25]
+
+
+def test_login_success_resets_delay_counter(monkeypatch) -> None:
+    app = create_flask_app(settings=_make_settings())
+    app.extensions["amo.login_attempt_tracker"] = __import__("amo_bot.webui.flask_blueprints.auth", fromlist=["LoginAttemptTracker"]).LoginAttemptTracker(base_delay_seconds=0.1, max_delay_seconds=1.0)
+
+    delays: list[float] = []
+    app.extensions["amo.login_delay_fn"] = lambda seconds: delays.append(seconds)
+
+    with app.test_client() as client:
+        assert _login(client, "wrong").status_code == 401
+        assert _login(client, "test-secret").status_code == 302
+        assert _login(client, "wrong").status_code == 401
+
+    assert delays == [0.1, 0.1]
+
+
+def test_login_tracker_caps_distinct_keys_to_prevent_unbounded_growth() -> None:
+    tracker_cls = __import__("amo_bot.webui.flask_blueprints.auth", fromlist=["LoginAttemptTracker"]).LoginAttemptTracker
+    tracker = tracker_cls(base_delay_seconds=0.1, max_delay_seconds=1.0, max_keys=2)
+
+    assert tracker.next_delay_seconds("ip-1") == 0.1
+    assert tracker.next_delay_seconds("ip-2") == 0.1
+    assert len(tracker._failures_by_key) == 2
+
+    # A new key above cap evicts the oldest key.
+    assert tracker.next_delay_seconds("ip-3") == 0.1
+    assert len(tracker._failures_by_key) == 2
+    assert "ip-1" not in tracker._failures_by_key
+    assert "ip-2" in tracker._failures_by_key
+    assert "ip-3" in tracker._failures_by_key
+
+
+def test_login_writes_auth_audit_events() -> None:
+    app = create_flask_app(settings=_make_settings())
+    app.extensions["amo.login_delay_fn"] = lambda _seconds: None
+
+    with app.test_client() as client:
+        assert _login(client, "wrong").status_code == 401
+        assert _login(client, "test-secret").status_code == 302
+
+    from sqlalchemy import select
+
+    session_factory = app.extensions["amo.session_factory"]
+    with session_factory() as db_session:
+        events = db_session.execute(
+            select(__import__("amo_bot.db.models", fromlist=["AuditEvent"]).AuditEvent)
+            .where(__import__("amo_bot.db.models", fromlist=["AuditEvent"]).AuditEvent.event_type.in_(["webui_login_failure", "webui_login_success"]))
+            .order_by(__import__("amo_bot.db.models", fromlist=["AuditEvent"]).AuditEvent.id.asc())
+        ).scalars().all()
+
+    assert [event.event_type for event in events[-2:]] == ["webui_login_failure", "webui_login_success"]

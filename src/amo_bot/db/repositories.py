@@ -549,3 +549,18 @@ class PluginRepository:
         )
         self._session.commit()
         return True
+
+
+class AuthAuditRepository:
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def write_login_event(self, *, event_type: str, remote_addr: str | None) -> None:
+        self._session.add(
+            AuditEvent(
+                actor_telegram_user_id=None,
+                event_type=event_type,
+                payload_json=json.dumps({"remote_addr": remote_addr or "unknown"}),
+            )
+        )
+        self._session.commit()

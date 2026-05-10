@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 
 from dotenv import load_dotenv
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -34,6 +34,14 @@ class Settings(BaseSettings):
     webui_public_mode: bool = Field(default=False, alias="WEBUI_PUBLIC_MODE")
     webui_require_https: bool = Field(default=False, alias="WEBUI_REQUIRE_HTTPS")
     webui_session_cookie_secure: bool | None = Field(default=None, alias="WEBUI_SESSION_COOKIE_SECURE")
+    webui_login_delay_base_seconds: float = Field(default=0.25, alias="WEBUI_LOGIN_DELAY_BASE_SECONDS", ge=0)
+    webui_login_delay_max_seconds: float = Field(default=2.0, alias="WEBUI_LOGIN_DELAY_MAX_SECONDS", ge=0)
+
+    @model_validator(mode="after")
+    def _validate_login_delay_bounds(self) -> Settings:
+        if self.webui_login_delay_max_seconds < self.webui_login_delay_base_seconds:
+            raise ValueError("WEBUI_LOGIN_DELAY_MAX_SECONDS must be >= WEBUI_LOGIN_DELAY_BASE_SECONDS")
+        return self
 
 
 def get_settings() -> Settings:

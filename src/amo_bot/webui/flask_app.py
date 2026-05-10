@@ -58,6 +58,7 @@ def create_flask_app(
     init_db(app_settings.database_url)
 
     session_factory = create_session_factory(app_settings.database_url)
+    app.extensions["amo.session_factory"] = session_factory
     plugins = plugin_service or PluginService(
         loader=PluginLoader(app_settings.amo_plugin_dir),
         session_factory=session_factory,
