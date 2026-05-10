@@ -144,3 +144,13 @@ Expected results:
 
 - See [BETATEST_EN.md](BETATEST_EN.md) for detailed testing instructions
 - See [RELEASE_NOTES_2026.05.09-Beta_EN.md](RELEASE_NOTES_2026.05.09-Beta_EN.md) for changelog
+
+## WebUI: Group Role Management
+
+After logging in, group roles can be managed under "Groups":
+
+- View users and their current roles
+- Set roles: `admin`, `vip`, `normal`, `ignore`
+- `owner` cannot be assigned as a group role (only via `.env`)
+- `normal` removes the group-scoped entry → fallback to `normal`
+- Roles are group-scoped, not global

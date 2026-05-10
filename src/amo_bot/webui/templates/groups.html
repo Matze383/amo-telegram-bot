@@ -26,6 +26,50 @@
           <li><strong>updated_at:</strong> {{ group.updated_at or "-" }}</li>
         </ul>
 
+        {% if group.chat_type in ["group", "supergroup"] %}
+          <h3>Gruppenrollen</h3>
+          <form method="post" action="{{ url_for('ui.update_group_role', chat_id=group.chat_id) }}" style="margin-bottom: 0.75rem;">
+            {{ group_role_form.csrf_token }}
+            <select name="telegram_user_id">
+              {% for user_role in group.group_user_roles %}
+                <option value="{{ user_role.telegram_user_id }}">{{ user_role.telegram_user_id }}{% if user_role.username %} (@{{ user_role.username }}){% endif %}</option>
+              {% endfor %}
+            </select>
+            <select name="role">
+              {% for role_name in group_roles %}
+                <option value="{{ role_name }}">{{ role_name }}</option>
+              {% endfor %}
+            </select>
+            <button type="submit" {% if not owner_mutation_enabled %}disabled{% endif %}>Rolle setzen</button>
+          </form>
+
+          {% if group.group_user_roles %}
+            <table>
+              <thead>
+                <tr>
+                  <th>Telegram User ID</th>
+                  <th>User</th>
+                  <th>Gruppenrolle</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for user_role in group.group_user_roles %}
+                  <tr>
+                    <td>{{ user_role.telegram_user_id }}</td>
+                    <td>
+                      {% set full_name = ((user_role.first_name or '') ~ ' ' ~ (user_role.last_name or '')).strip() %}
+                      {% if user_role.username %}@{{ user_role.username }}{% elif full_name %}{{ full_name }}{% else %}-{% endif %}
+                    </td>
+                    <td>{% if user_role.is_default %}normal (default){% else %}{{ user_role.role }}{% endif %}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          {% else %}
+            <p>Keine bekannten User vorhanden.</p>
+          {% endif %}
+        {% endif %}
+
         {% if group.topics %}
           <table>
             <thead>

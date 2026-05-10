@@ -242,6 +242,19 @@ curl http://127.0.0.1:11434/api/tags
 
 **Hinweis:** Plugins müssen zuerst im `AMO_PLUGIN_DIR` liegen. Das Plugin-System unterstützt Command-, Scheduled- und Worker-Runtimes (MVP).
 
+### Gruppenrollenverwaltung über WebUI
+
+1. Öffne http://127.0.0.1:8080 im Browser und melde dich an
+2. Gehe zur Seite "Groups" – zeigt alle Gruppen/Supergruppen
+3. Wähle eine Gruppe aus – Nutzer mit aktueller Rolle werden angezeigt
+4. Rolle ändern: `admin`, `vip`, `normal`, `ignore`
+
+**Wichtig:**
+- `owner` kann nicht als Gruppenrolle gesetzt werden (nur via `.env`)
+- `normal` entfernt den gruppen-spezifischen Eintrag → Fallback auf `normal`
+- Rollen sind gruppen-spezifisch, nicht global gültig
+- Mutationsschutz: Login + CSRF-Token + Owner-Gate erforderlich
+
 ---
 
 ### Was NICHT getestet wird im MVP
@@ -312,6 +325,7 @@ Nutze diese Checkliste für deinen Test:
 - [ ] WebUI Login: OK
 - [ ] WebUI Plugin-Liste: OK
 - [ ] WebUI Plugin aktivieren/deaktivieren: OK / Nicht getestet
+- [ ] WebUI Gruppenrollenverwaltung: OK / Nicht getestet
 
 **Notizen:**
 

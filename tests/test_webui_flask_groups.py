@@ -8,7 +8,7 @@ from amo_bot.config.settings import Settings
 from amo_bot.db.base import create_session_factory
 from amo_bot.db.init_db import init_db
 from amo_bot.db.models import TelegramChat, TelegramTopic
-from amo_bot.db.repositories import ChatTopicRepository
+from amo_bot.db.repositories import ChatScopedRoleRepository, ChatTopicRepository, UserRoleRepository
 from amo_bot.webui.flask_app import create_flask_app
 
 
@@ -180,6 +180,124 @@ def test_topic_metadata_update_requires_csrf(tmp_path) -> None:
         )
 
     assert response.status_code == 400
+
+
+def _seed_user(db_url: str, telegram_user_id: int, role: str = "normal") -> None:
+    sf = create_session_factory(db_url)
+    with sf() as s:
+        from amo_bot.auth.roles import Role
+
+        UserRoleRepository(s).set_user_role(
+            actor_telegram_user_id=1,
+            target_telegram_user_id=telegram_user_id,
+            role=Role(role),
+        )
+
+
+def test_group_roles_section_renders_and_shows_default(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'groups_roles1.db'}"
+    init_db(db_url)
+    _seed_chat_topic(db_url, -100210, 91)
+    _seed_user(db_url, 7001)
+
+    settings = _make_settings(db_url, owner_id=777)
+    app = create_flask_app(settings=settings)
+
+    with app.test_client() as client:
+        _login(client, "test-secret")
+        response = client.get("/groups")
+        html = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    assert "Gruppenrollen" in html
+    assert "7001" in html
+    assert "normal (default)" in html
+
+
+def test_group_role_set_persists_scoped_to_chat(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'groups_roles2.db'}"
+    init_db(db_url)
+    _seed_chat_topic(db_url, -100211, 92)
+    _seed_chat_topic(db_url, -100212, 93)
+    _seed_user(db_url, 7002)
+
+    settings = _make_settings(db_url, owner_id=777)
+    app = create_flask_app(settings=settings)
+
+    with app.test_client() as client:
+        _login(client, "test-secret")
+        page = client.get("/groups")
+        token = _extract_csrf_token(page.get_data(as_text=True))
+        response = client.post(
+            "/groups/-100211/roles",
+            data={"telegram_user_id": "7002", "role": "admin", "csrf_token": token},
+            follow_redirects=False,
+        )
+
+    assert response.status_code == 302
+
+    sf = create_session_factory(db_url)
+    with sf() as s:
+        repo = ChatScopedRoleRepository(s)
+        from amo_bot.auth.roles import Role
+
+        assert repo.get_group_role(chat_id=-100211, telegram_user_id=7002) == Role.ADMIN
+        assert repo.get_group_role(chat_id=-100212, telegram_user_id=7002) is None
+
+
+def test_group_role_owner_not_allowed(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'groups_roles3.db'}"
+    init_db(db_url)
+    _seed_chat_topic(db_url, -100213, 94)
+    _seed_user(db_url, 7003)
+
+    settings = _make_settings(db_url, owner_id=777)
+    app = create_flask_app(settings=settings)
+
+    with app.test_client() as client:
+        _login(client, "test-secret")
+        page = client.get("/groups")
+        token = _extract_csrf_token(page.get_data(as_text=True))
+        response = client.post(
+            "/groups/-100213/roles",
+            data={"telegram_user_id": "7003", "role": "owner", "csrf_token": token},
+            follow_redirects=False,
+        )
+
+    assert response.status_code == 400
+
+
+def test_group_role_normal_clears_entry(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'groups_roles4.db'}"
+    init_db(db_url)
+    _seed_chat_topic(db_url, -100214, 95)
+    _seed_user(db_url, 7004)
+
+    sf = create_session_factory(db_url)
+    with sf() as s:
+        from amo_bot.auth.roles import Role
+
+        ChatScopedRoleRepository(s).set_group_role(chat_id=-100214, telegram_user_id=7004, role=Role.VIP)
+
+    settings = _make_settings(db_url, owner_id=777)
+    app = create_flask_app(settings=settings)
+
+    with app.test_client() as client:
+        _login(client, "test-secret")
+        page = client.get("/groups")
+        token = _extract_csrf_token(page.get_data(as_text=True))
+        response = client.post(
+            "/groups/-100214/roles",
+            data={"telegram_user_id": "7004", "role": "normal", "csrf_token": token},
+            follow_redirects=False,
+        )
+
+    assert response.status_code == 302
+
+    sf = create_session_factory(db_url)
+    with sf() as s:
+        repo = ChatScopedRoleRepository(s)
+        assert repo.get_group_role(chat_id=-100214, telegram_user_id=7004) is None
 
 
 def test_topic_metadata_update_missing_topic_returns_404(tmp_path) -> None:

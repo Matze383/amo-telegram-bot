@@ -133,6 +133,21 @@ The role system has been enhanced to support group-scoped permissions:
 - **Group admins** can only set `vip`, `normal`, `ignore` within their own group (not `admin`/`owner`)
 - **Cross-group isolation**: An admin in Group A is not automatically an admin in Group B
 
+### WebUI Group Role Management
+
+**Commit:** Block 3 – WebUI Group Role Management
+
+The WebUI has been enhanced with full group role management:
+
+- **Groups page**: Shows all groups/supergroups where the bot is active
+- **User display**: Each user with current group role or `normal (default)`
+- **Change role**: `admin`, `vip`, `normal`, `ignore` can be set
+- **`owner` not assignable**: The `owner` role cannot be assigned as a group role (only via `.env`)
+- **`normal` as clear**: Setting to `normal` removes the group-scoped entry → fallback to `normal`
+- **Group-scoped**: Roles are per-group independent, not global
+- **Mutation protection**: Login required + CSRF token + Owner gate
+- **Live tested**: Works in real groups/supergroups
+
 ---
 
 ---

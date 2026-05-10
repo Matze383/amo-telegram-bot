@@ -132,3 +132,18 @@ Das Rollensystem wurde um gruppenspezifische Berechtigungen erweitert:
 - **`/setrole`** im DM setzt die globale Rolle; in Gruppen setzt die Rolle nur für genau diese Gruppe
 - **Gruppen-Admins** dürfen nur `vip`, `normal`, `ignore` in ihrer eigenen Gruppe setzen (nicht `admin`/`owner`)
 - **Gruppenübergreifende Isolation**: Ein Admin in Gruppe A ist nicht automatisch Admin in Gruppe B
+
+### WebUI Gruppenrollenverwaltung
+
+**Commit:** Block 3 – WebUI Group Role Management
+
+Die WebUI wurde um eine vollständige Gruppenrollenverwaltung erweitert:
+
+- **Groups-Seite**: Zeigt alle gruppen/supergroup, in denen der Bot aktiv ist
+- **Nutzer-Anzeige**: Jeder Nutzer mit aktueller Gruppenrolle oder `normal (default)`
+- **Rolle ändern**: `admin`, `vip`, `normal`, `ignore` können gesetzt werden
+- **`owner` nicht setzbar**: Die `owner`-Rolle kann nicht als Gruppenrolle vergeben werden (nur via `.env`)
+- **`normal` als Clear**: Setzen auf `normal` löscht den gruppen-spezifischen Eintrag → Fallback auf `normal`
+- **Gruppen-spezifisch**: Rollen sind pro Gruppe unabhängig, nicht global gültig
+- **Mutationsschutz**: Login erforderlich + CSRF-Token + Owner-Gate
+- **Live-Testet**: Funktioniert in echten Gruppen/Supergruppen

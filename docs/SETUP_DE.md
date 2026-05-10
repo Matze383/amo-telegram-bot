@@ -144,3 +144,13 @@ Erwartete Ergebnisse:
 
 - Siehe [BETATEST_DE.md](BETATEST_DE.md) für detaillierte Testanleitungen
 - Siehe [RELEASE_NOTES_2026.05.09-Beta_DE.md](RELEASE_NOTES_2026.05.09-Beta_DE.md) für das Changelog
+
+## WebUI: Gruppenrollenverwaltung
+
+Nach dem Login unter "Groups" können Gruppenrollen verwaltet werden:
+
+- Nutzer und deren aktuelle Rolle anzeigen
+- Rollen setzen: `admin`, `vip`, `normal`, `ignore`
+- `owner` kann nicht als Gruppenrolle vergeben werden (nur via `.env`)
+- `normal` löscht den gruppen-spezifischen Eintrag → Fallback auf `normal`
+- Rollen sind gruppen-spezifisch, nicht global gültig
