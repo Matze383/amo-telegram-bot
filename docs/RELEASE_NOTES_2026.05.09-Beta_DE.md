@@ -147,3 +147,19 @@ Die WebUI wurde um eine vollständige Gruppenrollenverwaltung erweitert:
 - **Gruppen-spezifisch**: Rollen sind pro Gruppe unabhängig, nicht global gültig
 - **Mutationsschutz**: Login erforderlich + CSRF-Token + Owner-Gate
 - **Live-Testet**: Funktioniert in echten Gruppen/Supergruppen
+
+### Gruppenrollen-Audit-Events
+
+**Commits:** `6b3ad79` (Audit), `b6e4ef2` (Vorherige Rolle melden)
+
+Gruppenrollen-Änderungen sind jetzt vollständig auditierbar:
+
+- **Audit-Events**: `group_role_set` und `group_role_clear` werden für alle Gruppenrollen-Änderungen geloggt
+- **Quellen erfasst**: Änderungen via `telegram_command` (Telegram) und `webui` werden unterschieden
+- **Payload enthält**:
+  - `chat_id` – Die Gruppe, in der die Änderung erfolgte
+  - `target_telegram_user_id` – Nutzer, dessen Rolle geändert wurde
+  - `previous_role` – Die Rolle vor der Änderung (jetzt korrekt bei Löschungen gemeldet)
+  - `new_role` – Die Rolle nach der Änderung
+  - `source` – Ursprung der Änderung (`telegram_command` oder `webui`)
+- **Clear/Fallback-Audit**: Das Setzen von `normal` in einer Gruppe (was die gruppenspezifische Rolle löscht) erzeugt jetzt ein `group_role_clear`-Event mit korrekt gemeldeter vorheriger Rolle in der Antwort

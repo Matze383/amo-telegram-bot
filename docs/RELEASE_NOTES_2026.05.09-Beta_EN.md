@@ -148,6 +148,22 @@ The WebUI has been enhanced with full group role management:
 - **Mutation protection**: Login required + CSRF token + Owner gate
 - **Live tested**: Works in real groups/supergroups
 
+### Group Role Audit Events
+
+**Commits:** `6b3ad79` (audit), `b6e4ef2` (report previous role)
+
+Group role changes are now fully auditable:
+
+- **Audit events**: `group_role_set` and `group_role_clear` are logged for all group role mutations
+- **Sources tracked**: Changes via `telegram_command` (Telegram) and `webui` are distinguished
+- **Payload includes**:
+  - `chat_id` – The group where the change occurred
+  - `target_telegram_user_id` – User whose role was changed
+  - `previous_role` – The role before the change (now correctly reported for clears)
+  - `new_role` – The role after the change
+  - `source` – Where the change originated (`telegram_command` or `webui`)
+- **Clear/fallback audit**: Setting `normal` in a group (which clears the group-scoped role) now generates a `group_role_clear` event with the correct previous role reported in the response
+
 ---
 
 ---

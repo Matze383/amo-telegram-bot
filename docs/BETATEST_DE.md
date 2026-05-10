@@ -211,6 +211,9 @@ Starte einen privaten Chat mit deinem Bot:
 - [ ] User mit `vip` in Gruppe A hat `normal`-Berechtigungen in Gruppe B (falls keine globale Rolle)
 - [ ] Gruppen-Admin kann nicht zu `admin`/`owner` befördern (nur `vip`/`normal`/`ignore`)
 
+**Audit-Events (optionaler Check):**
+- [ ] Gruppenrollen-Änderungen via `/setrole` sind auditierbar (Logs oder Datenbank prüfen, falls zutreffend)
+
 ---
 
 ### /ask-Test mit Ollama (optional)

@@ -211,6 +211,9 @@ Start a private chat with your bot:
 - [ ] User with `vip` in Group A has `normal` permissions in Group B (if no global role)
 - [ ] Group admin cannot promote to `admin`/`owner` (only `vip`/`normal`/`ignore`)
 
+**Audit Events (optional check):**
+- [ ] Group role changes via `/setrole` are auditable (check logs or database if applicable)
+
 ---
 
 ### /ask Test with Ollama (optional)
