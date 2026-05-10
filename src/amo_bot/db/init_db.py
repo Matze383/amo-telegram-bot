@@ -55,8 +55,13 @@ def init_db(database_url: str) -> None:
                     """
                 )
             )
-            connection.execute(text("CREATE INDEX ix_chat_user_roles_chat_id ON chat_user_roles (chat_id)"))
-            connection.execute(text("CREATE INDEX ix_chat_user_roles_user_id ON chat_user_roles (user_id)"))
+
+        if "chat_user_roles" in existing_tables:
+            existing_indexes = {index["name"] for index in inspector.get_indexes("chat_user_roles")}
+            if "ix_chat_user_roles_chat_id" not in existing_indexes:
+                connection.execute(text("CREATE INDEX ix_chat_user_roles_chat_id ON chat_user_roles (chat_id)"))
+            if "ix_chat_user_roles_user_id" not in existing_indexes:
+                connection.execute(text("CREATE INDEX ix_chat_user_roles_user_id ON chat_user_roles (user_id)"))
 
         for table_name, migrations in table_column_migrations.items():
             if table_name not in existing_tables:

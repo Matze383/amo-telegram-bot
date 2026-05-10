@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import select
 from datetime import datetime, timezone
+from collections.abc import Iterable
 from sqlalchemy.orm import Session
 
 from amo_bot.auth.roles import Role
@@ -165,6 +166,7 @@ class ChatScopedRoleRepository:
         role: Role,
         actor_telegram_user_id: int | None = None,
         source: str | None = None,
+        changed_at: datetime | None = None,
     ) -> RoleChangeResult:
         user = self._session.scalar(select(User).where(User.telegram_user_id == telegram_user_id))
         if user is None:
@@ -192,6 +194,7 @@ class ChatScopedRoleRepository:
             previous_role = Role(row.role.name)
             if row.role_id != role_row.id:
                 row.role_id = role_row.id
+                row.updated_at = changed_at or datetime.now(timezone.utc)
                 changed = True
 
         if changed:
@@ -213,6 +216,39 @@ class ChatScopedRoleRepository:
 
         self._session.commit()
         return RoleChangeResult(changed=changed, previous_role=previous_role, new_role=role)
+
+    def list_group_roles_for_users(
+        self,
+        *,
+        chat_ids: Iterable[int],
+        telegram_user_ids: Iterable[int],
+    ) -> dict[tuple[int, int], Role]:
+        chat_id_list = list(chat_ids)
+        telegram_user_id_list = list(telegram_user_ids)
+        if not chat_id_list or not telegram_user_id_list:
+            return {}
+
+        user_rows = self._session.scalars(
+            select(User).where(User.telegram_user_id.in_(telegram_user_id_list))
+        ).all()
+        if not user_rows:
+            return {}
+
+        user_id_to_telegram_user_id = {row.id: row.telegram_user_id for row in user_rows}
+        scoped_rows = self._session.scalars(
+            select(ChatUserRole).where(
+                ChatUserRole.chat_id.in_(chat_id_list),
+                ChatUserRole.user_id.in_(user_id_to_telegram_user_id.keys()),
+            )
+        ).all()
+
+        result: dict[tuple[int, int], Role] = {}
+        for row in scoped_rows:
+            telegram_user_id = user_id_to_telegram_user_id.get(row.user_id)
+            if telegram_user_id is None:
+                continue
+            result[(row.chat_id, telegram_user_id)] = Role(row.role.name)
+        return result
 
     def clear_group_role(
         self,

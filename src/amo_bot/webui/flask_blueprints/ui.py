@@ -128,13 +128,18 @@ def groups_page():
         users = db_session.query(User).order_by(User.telegram_user_id.asc()).all()
         user_choices = [(row.telegram_user_id, str(row.telegram_user_id)) for row in users]
         scoped_repo = ChatScopedRoleRepository(db_session)
+        group_chat_ids = [chat.chat_id for chat in chats if chat.chat_type in GROUP_CHAT_TYPES]
+        bulk_group_roles = scoped_repo.list_group_roles_for_users(
+            chat_ids=group_chat_ids,
+            telegram_user_ids=[row.telegram_user_id for row in users],
+        )
 
         for chat in chats:
             topics = repo.list_topics(chat.chat_id)
             group_user_roles: list[dict[str, Any]] = []
             if chat.chat_type in GROUP_CHAT_TYPES:
                 for row in users:
-                    group_role = scoped_repo.get_group_role(chat_id=chat.chat_id, telegram_user_id=row.telegram_user_id)
+                    group_role = bulk_group_roles.get((chat.chat_id, row.telegram_user_id))
                     group_user_roles.append(
                         {
                             "telegram_user_id": row.telegram_user_id,

@@ -2,17 +2,25 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from amo_bot.db.base import Base
-from amo_bot.db.models import AuditEvent, TelegramChat, TelegramTopic
-from amo_bot.db.repositories import ChatTopicRepository
+from amo_bot.db.init_db import init_db
+from amo_bot.auth.roles import Role
+from amo_bot.db.models import AuditEvent, ChatUserRole, TelegramChat, TelegramTopic
+from amo_bot.db.repositories import ChatScopedRoleRepository, ChatTopicRepository, UserRoleRepository
 
 
 def _session_factory() -> sessionmaker[Session]:
     engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
     Base.metadata.create_all(bind=engine)
+    with Session(engine) as session:
+        from amo_bot.db.models import DEFAULT_ROLES, DbRole
+
+        for role, prio in DEFAULT_ROLES:
+            session.add(DbRole(name=role.value, priority=prio))
+        session.commit()
     return sessionmaker(bind=engine, autoflush=False, expire_on_commit=False, class_=Session)
 
 
@@ -89,6 +97,35 @@ def test_list_chats_and_topics() -> None:
 
         topics = repo.list_topics(chat_id=1)
         assert [t.message_thread_id for t in topics] == [100, 200]
+
+
+def test_chat_scoped_role_update_updates_timestamp_and_bulk_lookup() -> None:
+    factory = _session_factory()
+    with factory() as session:
+        topic_repo = ChatTopicRepository(session)
+        topic_repo.upsert_chat(chat_id=1, chat_type="supergroup")
+        topic_repo.upsert_chat(chat_id=2, chat_type="supergroup")
+
+        user_repo = UserRoleRepository(session)
+        user_repo.set_user_role(actor_telegram_user_id=1, target_telegram_user_id=101, role=Role.NORMAL)
+        user_repo.set_user_role(actor_telegram_user_id=1, target_telegram_user_id=202, role=Role.NORMAL)
+
+        scoped_repo = ChatScopedRoleRepository(session)
+        scoped_repo.set_group_role(chat_id=1, telegram_user_id=101, role=Role.VIP)
+
+        changed_at = datetime(2026, 2, 1, tzinfo=timezone.utc)
+        result = scoped_repo.set_group_role(chat_id=1, telegram_user_id=101, role=Role.ADMIN, changed_at=changed_at)
+        assert result.changed is True
+
+        mapped = scoped_repo.list_group_roles_for_users(chat_ids=[1, 2], telegram_user_ids=[101, 202])
+        assert mapped[(1, 101)] == Role.ADMIN
+        assert (2, 101) not in mapped
+        assert (1, 202) not in mapped
+
+        role_row = session.scalar(select(ChatUserRole).where(ChatUserRole.chat_id == 1, ChatUserRole.user_id.is_not(None)))
+        assert role_row is not None
+        # SQLite returns TZ-naive datetimes even for timezone=True columns.
+        assert role_row.updated_at == changed_at.replace(tzinfo=None)
 
 
 def test_update_topic_metadata() -> None:
