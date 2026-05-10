@@ -175,7 +175,7 @@ def test_group_setrole_normal_in_group_writes_group_clear_audit_event(tmp_path) 
 
     _ = asyncio.run(cmd.handler(_ctx(user_id=77, role=Role.OWNER, argument="402 vip", chat_id=-100002)))
     out = asyncio.run(cmd.handler(_ctx(user_id=77, role=Role.OWNER, argument="402 normal", chat_id=-100002)))
-    assert out is not None and ("role updated" in out or "no change" in out)
+    assert out == "role updated: 402 vip -> normal"
 
     with sf() as session:
         events = session.scalars(select(AuditEvent).where(AuditEvent.event_type == "group_role_clear")).all()
@@ -187,6 +187,26 @@ def test_group_setrole_normal_in_group_writes_group_clear_audit_event(tmp_path) 
     assert payload["target_telegram_user_id"] == 402
     assert payload["new_role"] == "normal"
     assert payload["source"] == "telegram_command"
+
+
+def test_group_setrole_normal_without_existing_group_role_returns_clean_no_change(tmp_path) -> None:
+    from amo_bot.db.models import TelegramChat
+
+    db_file = tmp_path / "test_group_clear_no_existing_role.db"
+    db_url = f"sqlite:///{db_file}"
+    init_db(db_url)
+
+    sf = create_session_factory(db_url)
+    with sf() as session:
+        session.add(TelegramChat(chat_id=-100003, chat_type="supergroup", title="G3"))
+        session.commit()
+
+    reg = create_builtin_registry(database_url=db_url)
+    cmd = reg.get("setrole")
+    assert cmd is not None
+
+    out = asyncio.run(cmd.handler(_ctx(user_id=77, role=Role.OWNER, argument="403 normal", chat_id=-100003)))
+    assert out == "no change: 403 already normal"
 
 
 def test_bootstrap_owner_from_settings_empty_db_creates_owner(tmp_path) -> None:

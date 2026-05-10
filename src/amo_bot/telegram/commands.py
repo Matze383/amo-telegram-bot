@@ -137,6 +137,10 @@ def create_builtin_registry(database_url: str | None = None, ai_service: AIServi
                 chat_row = session.query(TelegramChat).filter(TelegramChat.chat_id == ctx.chat_id).one_or_none()
                 if chat_row is not None and chat_row.chat_type in GROUP_CHAT_TYPES:
                     if target_role == Role.NORMAL:
+                        previous_group_role = ChatScopedRoleRepository(session).get_group_role(
+                            chat_id=ctx.chat_id,
+                            telegram_user_id=target_user_id,
+                        )
                         changed = ChatScopedRoleRepository(session).clear_group_role(
                             chat_id=ctx.chat_id,
                             telegram_user_id=target_user_id,
@@ -145,7 +149,7 @@ def create_builtin_registry(database_url: str | None = None, ai_service: AIServi
                         )
                         result = type("GroupRoleClearResult", (), {
                             "changed": changed,
-                            "previous_role": None,
+                            "previous_role": previous_group_role,
                             "new_role": Role.NORMAL,
                         })()
                     else:
