@@ -176,11 +176,17 @@ Starte einen privaten Chat mit deinem Bot:
 
 **Voraussetzung:** Du bist Owner oder Admin
 
+**Rollen-Bereichsregeln:**
+- Im **privaten Chat (DM)**: Globale Rolle gilt überall
+- In **Gruppen**: Global `owner` oder `ignore` überschreibt alles; sonst gilt die gruppenspezifische Rolle; sonst `normal`
+- Gruppen-Admins dürfen nur `vip`, `normal`, `ignore` in ihrer eigenen Gruppe setzen, **nicht** `admin` oder `owner`
+- Ein Admin in Gruppe A ist **nicht** automatisch Admin in Gruppe B
+
 **Als Owner:**
-- `/setrole <user_id> admin` – User wird Admin
-- `/setrole <user_id> vip` – User wird VIP
-- `/setrole <user_id> normal` – User wird Normal
-- `/setrole <user_id> ignore` – User wird ignoriert
+- `/setrole <user_id> admin` – User wird Admin (global im DM, gruppenspezifisch in Gruppen)
+- `/setrole <user_id> vip` – User wird VIP (global im DM, gruppenspezifisch in Gruppen)
+- `/setrole <user_id> normal` – User wird Normal (global im DM, gruppenspezifisch in Gruppen)
+- `/setrole <user_id> ignore` – User wird ignoriert (global, überschreibt alles)
 
 **Als Admin:**
 - `/setrole <user_id> vip` – Erlaubt
@@ -192,10 +198,18 @@ Starte einen privaten Chat mit deinem Bot:
 **Test-Workflow:**
 1. Erstelle einen zweiten Telegram-Account oder frage einen Freund
 2. Ermittle die Telegram-User-ID des Test-Accounts
-3. Setze die Rolle auf `normal`
-4. Teste, ob der Account `/ask` nutzen kann (bei `normal`: nein)
-5. Setze die Rolle auf `vip`
-6. Teste erneut `/ask` (bei `vip`: ja)
+3. Im **privaten Chat**: Setze Rolle auf `normal` → `/role` zeigt "normal (global)"
+4. In **Gruppe A**: Setze Rolle auf `vip` → `/role` zeigt "vip (diese Gruppe)"
+5. In **Gruppe B**: `/role` zeigt globale Rolle (oder "normal"), außer explizit gesetzt
+6. Teste, ob der Account `/ask` nutzen kann (bei `vip`: ja, bei `normal`: nein)
+
+**Gruppenspezifische Rollen-Tests:**
+- [ ] `/role` im DM zeigt globale Rolle mit Quelle
+- [ ] `/role` in Gruppe A zeigt gruppenspezifische oder globale Rolle
+- [ ] `/setrole` im DM setzt globale Rolle
+- [ ] `/setrole` in Gruppe A setzt Rolle nur für Gruppe A
+- [ ] User mit `vip` in Gruppe A hat `normal`-Berechtigungen in Gruppe B (falls keine globale Rolle)
+- [ ] Gruppen-Admin kann nicht zu `admin`/`owner` befördern (nur `vip`/`normal`/`ignore`)
 
 ---
 

@@ -118,4 +118,21 @@ The bot will auto-bootstrap the database schema on first run.
 
 ---
 
+## Main Branch Updates (After Beta Tag)
+
+### Group-Scoped Roles
+
+**Commit:** `5bde088 feat(auth): add group-scoped roles`
+
+The role system has been enhanced to support group-scoped permissions:
+
+- **Private/DM**: Global role applies everywhere
+- **Groups**: Global `owner` and `ignore` override everything; otherwise group-specific role applies; otherwise `normal`
+- **`/role`** is now group-aware and shows the role source (global vs. this group)
+- **`/setrole`** in DM sets the global role; in groups, sets the role only for that specific group
+- **Group admins** can only set `vip`, `normal`, `ignore` within their own group (not `admin`/`owner`)
+- **Cross-group isolation**: An admin in Group A is not automatically an admin in Group B
+
+---
+
 ---

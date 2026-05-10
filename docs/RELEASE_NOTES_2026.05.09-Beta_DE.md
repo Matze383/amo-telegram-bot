@@ -115,3 +115,20 @@ python main.py
 ```
 
 Der Bot bootstrapped das Datenbank-Schema beim ersten Start automatisch.
+
+---
+
+## Main-Branch-Updates (Nach Beta-Tag)
+
+### Gruppenspezifische Rollen
+
+**Commit:** `5bde088 feat(auth): add group-scoped roles`
+
+Das Rollensystem wurde um gruppenspezifische Berechtigungen erweitert:
+
+- **Privater/DM-Chat**: Globale Rolle gilt überall
+- **Gruppen**: Global `owner` und `ignore` überschreibt alles; sonst gilt die gruppenspezifische Rolle; sonst `normal`
+- **`/role`** ist jetzt gruppenbewusst und zeigt die Rollenquelle (global vs. diese Gruppe)
+- **`/setrole`** im DM setzt die globale Rolle; in Gruppen setzt die Rolle nur für genau diese Gruppe
+- **Gruppen-Admins** dürfen nur `vip`, `normal`, `ignore` in ihrer eigenen Gruppe setzen (nicht `admin`/`owner`)
+- **Gruppenübergreifende Isolation**: Ein Admin in Gruppe A ist nicht automatisch Admin in Gruppe B

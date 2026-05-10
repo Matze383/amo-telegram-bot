@@ -20,7 +20,7 @@ Dieses Projekt befindet sich in der frühen Entwicklung. Funktionen können sich
 | Feature | EN | DE |
 |---------|-----|-----|
 | 🤖 **Telegram Bot** | Long polling, custom API integration (no external bot library) | Long Polling, eigene API-Integration (ohne externe Bot-Bibliothek) |
-| 🔐 **Role System** | Owner, Admin, VIP, Normal, Ignore — with permission-based commands | Owner, Admin, VIP, Normal, Ignore — mit berechtigungsbasierten Commands |
+| 🔐 **Role System** | Owner, Admin, VIP, Normal, Ignore — group-scoped and permission-based | Owner, Admin, VIP, Normal, Ignore — gruppenspezifisch und berechtigungsbasiert |
 | 🔌 **Plugin System** | Defensive manifest-based plugin loader | Defensiver, manifest-basierter Plugin-Loader |
 | 🌐 **WebUI** | Local Flask-based management interface | Lokale Flask-basierte Verwaltungsoberfläche |
 | 🤖 **AI Integration** | Optional Ollama `/ask` command (stateless) | Optionales Ollama `/ask` Kommando (stateless) |

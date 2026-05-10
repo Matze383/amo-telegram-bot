@@ -176,11 +176,17 @@ Start a private chat with your bot:
 
 **Prerequisite:** You are Owner or Admin
 
+**Role Scoping Rules:**
+- In **private chats (DM)**: Global role applies everywhere
+- In **groups**: Global `owner` or `ignore` overrides everything; otherwise group-specific role applies; otherwise `normal`
+- Group admins can only set `vip`, `normal`, `ignore` within their own group, **not** `admin` or `owner`
+- An admin in Group A is **not** automatically admin in Group B
+
 **As Owner:**
-- `/setrole <user_id> admin` – User becomes Admin
-- `/setrole <user_id> vip` – User becomes VIP
-- `/setrole <user_id> normal` – User becomes Normal
-- `/setrole <user_id> ignore` – User is ignored
+- `/setrole <user_id> admin` – User becomes Admin (global in DM, group-scoped in groups)
+- `/setrole <user_id> vip` – User becomes VIP (global in DM, group-scoped in groups)
+- `/setrole <user_id> normal` – User becomes Normal (global in DM, group-scoped in groups)
+- `/setrole <user_id> ignore` – User is ignored (global, overrides everything)
 
 **As Admin:**
 - `/setrole <user_id> vip` – Allowed
@@ -192,10 +198,18 @@ Start a private chat with your bot:
 **Test Workflow:**
 1. Create a second Telegram account or ask a friend
 2. Get the Telegram user ID of the test account
-3. Set role to `normal`
-4. Test if account can use `/ask` (with `normal`: no)
-5. Set role to `vip`
-6. Test `/ask` again (with `vip`: yes)
+3. In a **private chat**: Set role to `normal` → `/role` shows "normal (global)"
+4. In **Group A**: Set role to `vip` → `/role` shows "vip (this group)"
+5. In **Group B**: `/role` shows global role (or "normal") unless explicitly set
+6. Test if account can use `/ask` (with `vip`: yes, with `normal`: no)
+
+**Group-Scoped Role Tests:**
+- [ ] `/role` in DM shows global role with source
+- [ ] `/role` in Group A shows group-specific or global role
+- [ ] `/setrole` in DM sets global role
+- [ ] `/setrole` in Group A sets role only for Group A
+- [ ] User with `vip` in Group A has `normal` permissions in Group B (if no global role)
+- [ ] Group admin cannot promote to `admin`/`owner` (only `vip`/`normal`/`ignore`)
 
 ---
 
