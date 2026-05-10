@@ -17,6 +17,9 @@ def _make_settings(database_url: str) -> Settings:
         "WEBUI_PORT": 5010,
         "WEBUI_PASSWORD": "secret",
         "WEBUI_SESSION_TTL_SECONDS": 900,
+        "WEBUI_PUBLIC_MODE": False,
+        "WEBUI_REQUIRE_HTTPS": False,
+        "WEBUI_SESSION_COOKIE_SECURE": False,
     }
     return Settings(_env_file=None, **payload)
 

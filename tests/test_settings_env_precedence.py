@@ -65,6 +65,33 @@ def test_can_opt_out_from_dotenv_override_via_explicit_flag(monkeypatch, tmp_pat
     assert settings.webui_host == "127.0.0.1"
 
 
+def test_new_webui_security_env_values_are_parsed(monkeypatch, tmp_path) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "\n".join(
+            [
+                "BOT_TOKEN=token-from-dotenv",
+                "WEBUI_PASSWORD=pw-from-dotenv",
+                "WEBUI_PUBLIC_MODE=true",
+                "WEBUI_REQUIRE_HTTPS=1",
+                "WEBUI_SESSION_COOKIE_SECURE=false",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("AMO_ENV_OVERRIDE", raising=False)
+    monkeypatch.setenv("DOTENV_PATH", str(env_file))
+
+    settings = get_settings()
+
+    assert settings.webui_public_mode is True
+    assert settings.webui_require_https is True
+    assert settings.webui_session_cookie_secure is False
+
+
 def test_no_secret_values_are_exposed_in_validation_error(monkeypatch, tmp_path) -> None:
     env_file = tmp_path / ".env"
     secret_value = "super-secret-value"

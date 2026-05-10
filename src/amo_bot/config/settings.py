@@ -8,7 +8,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=None, env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(env_file=None, env_file_encoding="utf-8", extra="ignore", env_ignore_empty=True)
 
     bot_token: str = Field(alias="BOT_TOKEN")
     telegram_api_base: str = Field(default="https://api.telegram.org", alias="TELEGRAM_API_BASE")
@@ -31,6 +31,9 @@ class Settings(BaseSettings):
     webui_password: str = Field(alias="WEBUI_PASSWORD")
     webui_owner_telegram_id: int | None = Field(default=None, alias="WEBUI_OWNER_TELEGRAM_ID")
     webui_session_ttl_seconds: int = Field(default=3600, alias="WEBUI_SESSION_TTL_SECONDS")
+    webui_public_mode: bool = Field(default=False, alias="WEBUI_PUBLIC_MODE")
+    webui_require_https: bool = Field(default=False, alias="WEBUI_REQUIRE_HTTPS")
+    webui_session_cookie_secure: bool | None = Field(default=None, alias="WEBUI_SESSION_COOKIE_SECURE")
 
 
 def get_settings() -> Settings:

@@ -57,12 +57,42 @@ WEBUI_PASSWORD=your_secure_password
 WEBUI_OWNER_TELEGRAM_ID=your_telegram_user_id
 WEBUI_SESSION_TTL_SECONDS=3600
 
+# Security settings (Block 1)
+# WEBUI_PUBLIC_MODE=false
+# WEBUI_REQUIRE_HTTPS=false
+# WEBUI_SESSION_COOKIE_SECURE=
+
 # Polling Configuration
 POLL_TIMEOUT_SECONDS=30
 POLL_LIMIT=100
 POLL_RETRY_MAX_SECONDS=30
 OFFSET_STATE_FILE=.state/offset.json
 ```
+
+---
+
+### Security Features (Block 1)
+
+The WebUI now includes hardened security:
+
+**Security Headers (always active):**
+- Content-Security-Policy (CSP)
+- X-Frame-Options: DENY
+- X-Content-Type-Options: nosniff
+- Referrer-Policy
+- Permissions-Policy
+- HSTS (in HTTPS contexts)
+
+**Session Cookie Security:**
+- HttpOnly flag
+- SameSite=Lax
+- Secure flag (auto-enabled for public/HTTPS)
+
+**Configuration:**
+- `WEBUI_PUBLIC_MODE=false` — Local development default
+- `WEBUI_REQUIRE_HTTPS=false` — Local development default
+
+**⚠️ Production Warning:** Flask should not be exposed directly to the internet. Use a reverse proxy with HTTPS.
 
 ---
 
@@ -260,6 +290,17 @@ curl http://127.0.0.1:11434/api/tags
 
 ---
 
+### Future Features (Not Yet Implemented)
+
+The following features are planned for future releases:
+
+**Telegram WebUI Access Control (Block 2 - Planned)**
+- Owner can enable/disable WebUI via Telegram commands (`/webui on`, `/webui off`, `/webui status`)
+- Time-limited 1-hour access windows
+- These commands are not yet implemented and cannot be tested
+
+---
+
 ### What is NOT Tested in MVP
 
 The following features are **not** included in the MVP:
@@ -269,6 +310,7 @@ The following features are **not** included in the MVP:
 - Production-ready security hardening
 - Chat history for `/ask`
 - Multi-user WebUI (owner login only)
+- Telegram-based WebUI access control (`/webui` commands)
 
 ---
 
@@ -329,6 +371,7 @@ Use this checklist for your test:
 - [ ] WebUI plugin list: OK
 - [ ] WebUI plugin activate/deactivate: OK / Not tested
 - [ ] WebUI group role management: OK / Not tested
+- [ ] Security headers present (check browser dev tools): OK
 
 **Notes:**
 

@@ -1,10 +1,18 @@
 from __future__ import annotations
 
+import pytest
+
 from amo_bot.config.settings import Settings
 from amo_bot.webui.flask_app import create_flask_app
 
 
-def _make_settings(password: str = "test-secret", session_ttl_seconds: int = 3600) -> Settings:
+def _make_settings(
+    password: str = "test-secret",
+    session_ttl_seconds: int = 3600,
+    webui_public_mode: bool = False,
+    webui_require_https: bool = False,
+    webui_session_cookie_secure: bool | None = None,
+) -> Settings:
     payload = {
         "BOT_TOKEN": "dummy-token",
         "TELEGRAM_API_BASE": "https://api.telegram.org",
@@ -18,6 +26,9 @@ def _make_settings(password: str = "test-secret", session_ttl_seconds: int = 360
         "WEBUI_PORT": 8080,
         "WEBUI_PASSWORD": password,
         "WEBUI_SESSION_TTL_SECONDS": session_ttl_seconds,
+        "WEBUI_PUBLIC_MODE": webui_public_mode,
+        "WEBUI_REQUIRE_HTTPS": webui_require_https,
+        "WEBUI_SESSION_COOKIE_SECURE": webui_session_cookie_secure,
     }
     return Settings(_env_file=None, **payload)
 
@@ -153,3 +164,63 @@ def test_logout_requires_csrf() -> None:
         response = client.post("/logout", data={}, follow_redirects=False)
 
     assert response.status_code == 400
+
+
+def test_default_cookie_security_flags_present_without_secure() -> None:
+    app = create_flask_app(settings=_make_settings())
+
+    with app.test_client() as client:
+        response = _login(client, "test-secret")
+
+    cookie = response.headers.get("Set-Cookie", "")
+    assert "HttpOnly" in cookie
+    assert "SameSite=Lax" in cookie
+    assert "Secure" not in cookie
+
+
+def test_security_headers_present_on_normal_response() -> None:
+    app = create_flask_app(settings=_make_settings())
+
+    with app.test_client() as client:
+        response = client.get("/login")
+
+    assert response.status_code == 200
+    csp = response.headers.get("Content-Security-Policy", "")
+    assert "default-src 'self'" in csp
+    assert "frame-ancestors 'none'" in csp
+    assert "object-src 'none'" in csp
+    assert "base-uri 'self'" in csp
+    assert "form-action 'self'" in csp
+    assert response.headers.get("X-Frame-Options") == "DENY"
+    assert response.headers.get("X-Content-Type-Options") == "nosniff"
+    assert response.headers.get("Referrer-Policy") == "strict-origin-when-cross-origin"
+    assert response.headers.get("Permissions-Policy") == "geolocation=(), microphone=(), camera=()"
+
+
+def test_security_headers_present_on_error_response() -> None:
+    app = create_flask_app(settings=_make_settings())
+
+    with app.test_client() as client:
+        response = client.post("/logout", data={}, follow_redirects=False)
+
+    assert response.status_code == 400
+    assert response.headers.get("Content-Security-Policy")
+    assert response.headers.get("X-Frame-Options") == "DENY"
+
+
+def test_secure_mode_sets_secure_cookie_and_hsts() -> None:
+    app = create_flask_app(
+        settings=_make_settings(webui_public_mode=True, webui_require_https=True, webui_session_cookie_secure=True)
+    )
+
+    with app.test_client() as client:
+        response = _login(client, "test-secret")
+
+    cookie = response.headers.get("Set-Cookie", "")
+    assert "Secure" in cookie
+    assert response.headers.get("Strict-Transport-Security") == "max-age=31536000; includeSubDomains"
+
+
+def test_public_mode_requires_https_and_secure_cookie() -> None:
+    with pytest.raises(ValueError, match="WEBUI_PUBLIC_MODE=true"):
+        create_flask_app(settings=_make_settings(webui_public_mode=True, webui_require_https=False))

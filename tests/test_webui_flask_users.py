@@ -25,6 +25,9 @@ def _make_settings(database_url: str, password: str = "test-secret", owner_id: i
         "WEBUI_HOST": "127.0.0.1",
         "WEBUI_PORT": 8080,
         "WEBUI_PASSWORD": password,
+        "WEBUI_PUBLIC_MODE": False,
+        "WEBUI_REQUIRE_HTTPS": False,
+        "WEBUI_SESSION_COOKIE_SECURE": False,
     }
     if owner_id is not None:
         payload["WEBUI_OWNER_TELEGRAM_ID"] = owner_id

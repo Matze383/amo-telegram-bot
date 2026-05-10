@@ -57,12 +57,42 @@ WEBUI_PASSWORD=dein_sicheres_passwort
 WEBUI_OWNER_TELEGRAM_ID=deine_telegram_user_id
 WEBUI_SESSION_TTL_SECONDS=3600
 
+# Sicherheitseinstellungen (Block 1)
+# WEBUI_PUBLIC_MODE=false
+# WEBUI_REQUIRE_HTTPS=false
+# WEBUI_SESSION_COOKIE_SECURE=
+
 # Polling-Konfiguration
 POLL_TIMEOUT_SECONDS=30
 POLL_LIMIT=100
 POLL_RETRY_MAX_SECONDS=30
 OFFSET_STATE_FILE=.state/offset.json
 ```
+
+---
+
+### Sicherheitsfeatures (Block 1)
+
+Die WebUI enthält nun gehärtete Sicherheit:
+
+**Security Headers (immer aktiv):**
+- Content-Security-Policy (CSP)
+- X-Frame-Options: DENY
+- X-Content-Type-Options: nosniff
+- Referrer-Policy
+- Permissions-Policy
+- HSTS (in HTTPS-Kontexten)
+
+**Session-Cookie-Sicherheit:**
+- HttpOnly-Flag
+- SameSite=Lax
+- Secure-Flag (auto-aktiviert für Public/HTTPS)
+
+**Konfiguration:**
+- `WEBUI_PUBLIC_MODE=false` — Standard für lokale Entwicklung
+- `WEBUI_REQUIRE_HTTPS=false` — Standard für lokale Entwicklung
+
+**⚠️ Produktionswarnung:** Flask sollte nicht direkt ins Internet gestellt werden. Reverse Proxy mit HTTPS verwenden.
 
 ---
 
@@ -260,6 +290,17 @@ curl http://127.0.0.1:11434/api/tags
 
 ---
 
+### Zukünftige Features (Noch nicht implementiert)
+
+Folgende Features sind für zukünftige Releases geplant:
+
+**Telegram WebUI Access Control (Block 2 – Geplant)**
+- Owner kann WebUI via Telegram-Commands aktivieren/deaktivieren (`/webui on`, `/webui off`, `/webui status`)
+- Zeitlich begrenzte 1-Stunden-Zugangsfenster
+- Diese Commands sind noch nicht implementiert und können nicht getestet werden
+
+---
+
 ### Was NICHT getestet wird im MVP
 
 Folgende Features sind **nicht** im MVP enthalten:
@@ -269,6 +310,7 @@ Folgende Features sind **nicht** im MVP enthalten:
 - Produktionsreife Sicherheitshärtung
 - Chat-Verlauf für `/ask`
 - Multi-User-WebUI (nur Owner-Login)
+- Telegram-basierte WebUI-Zugangssteuerung (`/webui` Commands)
 
 ---
 
@@ -329,6 +371,7 @@ Nutze diese Checkliste für deinen Test:
 - [ ] WebUI Plugin-Liste: OK
 - [ ] WebUI Plugin aktivieren/deaktivieren: OK / Nicht getestet
 - [ ] WebUI Gruppenrollenverwaltung: OK / Nicht getestet
+- [ ] Security Headers vorhanden (Browser-Dev-Tools prüfen): OK
 
 **Notizen:**
 
@@ -339,7 +382,3 @@ Ergebnis: Bestanden / Fehlgeschlagen / Teilweise
 Auffälligkeiten: _________________________________
 _________________________________________________
 ```
-
----
-
----

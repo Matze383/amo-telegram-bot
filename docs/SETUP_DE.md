@@ -60,9 +60,70 @@ AMO_PLUGIN_DIR=./plugins
 WEBUI_HOST=127.0.0.1
 WEBUI_PORT=8080
 WEBUI_SESSION_TTL_SECONDS=3600
+
+# Sicherheitseinstellungen (neu in Block 1)
+# WEBUI_PUBLIC_MODE=false
+# WEBUI_REQUIRE_HTTPS=false
+# WEBUI_SESSION_COOKIE_SECURE=
 ```
 
 > **Config-Priorität:** Beim lokalen Start überschreibt `.env` Shell-Umgebungsvariablen. Setze `AMO_ENV_OVERRIDE=0`, um dies zu deaktivieren.
+
+---
+
+## Sicherheitseinstellungen (Block 1)
+
+Die WebUI enthält konfigurierbare Sicherheitsfeatures:
+
+### Umgebungsvariablen
+
+| Variable | Standard | Beschreibung |
+|----------|----------|--------------|
+| `WEBUI_PUBLIC_MODE` | `false` | Aktivieren für öffentliche/Internet-Deployments. Erzwingt strengere Sicherheitsprüfungen. |
+| `WEBUI_REQUIRE_HTTPS` | `false` | HTTPS erforderlich. Sollte bei öffentlichem Betrieb `true` sein. |
+| `WEBUI_SESSION_COOKIE_SECURE` | *(auto)* | Überschreibt das Secure-Flag des Cookies. Leer = auto (true bei public ODER require_https). |
+
+### Security Headers
+
+Die WebUI setzt folgende HTTP-Security-Header:
+
+- **Content-Security-Policy (CSP):** Beschränkt das Laden von Ressourcen
+- **X-Frame-Options: DENY:** Verhindert Clickjacking
+- **X-Content-Type-Options: nosniff:** Verhindert MIME-Sniffing
+- **Referrer-Policy: strict-origin-when-cross-origin:** Begrenzt Referrer-Lecks
+- **Permissions-Policy:** Beschränkt Browser-Features
+- **HSTS:** Nur in HTTPS/Secure-Kontexten
+
+### Session-Cookie-Sicherheit
+
+Session-Cookies verwenden:
+- **HttpOnly:** Verhindert JavaScript-Zugriff
+- **SameSite=Lax:** CSRF-Schutz
+- **Secure:** Automatisch bei Public-Modus oder HTTPS; Überschreibung via `WEBUI_SESSION_COOKIE_SECURE`
+
+### Lokale Entwicklungs-Defaults
+
+Für lokale Tests die Standardwerte beibehalten:
+
+```ini
+WEBUI_PUBLIC_MODE=false
+WEBUI_REQUIRE_HTTPS=false
+# WEBUI_SESSION_COOKIE_SECURE=  # leer lassen für auto
+```
+
+### Produktions-/Internet-Deployment
+
+**⚠️ Warnung:** Flask nicht direkt ins Internet stellen. Reverse Proxy (nginx, Caddy, Traefik) mit HTTPS verwenden.
+
+Empfohlene Produktionskonfiguration:
+
+```ini
+WEBUI_PUBLIC_MODE=true
+WEBUI_REQUIRE_HTTPS=true
+# WEBUI_SESSION_COOKIE_SECURE=  # auto-aktiviert
+```
+
+Die WebUI bricht bei unsicherer Konfiguration im Public-Modus sofort mit einer klaren Fehlermeldung ab.
 
 ---
 

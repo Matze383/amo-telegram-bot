@@ -60,9 +60,70 @@ AMO_PLUGIN_DIR=./plugins
 WEBUI_HOST=127.0.0.1
 WEBUI_PORT=8080
 WEBUI_SESSION_TTL_SECONDS=3600
+
+# Security settings (new in Block 1)
+# WEBUI_PUBLIC_MODE=false
+# WEBUI_REQUIRE_HTTPS=false
+# WEBUI_SESSION_COOKIE_SECURE=
 ```
 
 > **Config Priority:** When starting locally, `.env` overrides shell environment variables. Set `AMO_ENV_OVERRIDE=0` to disable this behavior.
+
+---
+
+## Security Settings (Block 1)
+
+The WebUI includes configurable security features:
+
+### Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `WEBUI_PUBLIC_MODE` | `false` | Enable for public/internet-facing deployments. Enforces stricter security checks. |
+| `WEBUI_REQUIRE_HTTPS` | `false` | Require HTTPS. Should be `true` when public. |
+| `WEBUI_SESSION_COOKIE_SECURE` | *(auto)* | Override cookie Secure flag. Empty = auto (true if public OR require_https). |
+
+### Security Headers
+
+The WebUI sets the following HTTP security headers:
+
+- **Content-Security-Policy (CSP):** Restricts resource loading
+- **X-Frame-Options: DENY:** Prevents clickjacking
+- **X-Content-Type-Options: nosniff:** Prevents MIME sniffing
+- **Referrer-Policy: strict-origin-when-cross-origin:** Limits referrer leakage
+- **Permissions-Policy:** Restricts browser features
+- **HSTS:** Only in HTTPS/secure contexts
+
+### Session Cookie Security
+
+Session cookies use:
+- **HttpOnly:** Prevents JavaScript access
+- **SameSite=Lax:** CSRF protection
+- **Secure:** Auto-enabled for public mode or HTTPS; override via `WEBUI_SESSION_COOKIE_SECURE`
+
+### Local Development Defaults
+
+For local testing, keep defaults:
+
+```ini
+WEBUI_PUBLIC_MODE=false
+WEBUI_REQUIRE_HTTPS=false
+# WEBUI_SESSION_COOKIE_SECURE=  # leave empty for auto
+```
+
+### Production/Internet Deployment
+
+**⚠️ Warning:** Do not expose Flask directly to the internet. Use a reverse proxy (nginx, Caddy, Traefik) with HTTPS.
+
+Recommended production configuration:
+
+```ini
+WEBUI_PUBLIC_MODE=true
+WEBUI_REQUIRE_HTTPS=true
+# WEBUI_SESSION_COOKIE_SECURE=  # auto-enabled
+```
+
+The WebUI will fail fast with a clear error if an unsafe configuration is detected in public mode.
 
 ---
 

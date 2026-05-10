@@ -32,12 +32,24 @@ def create_flask_app(
 ) -> Flask:
     app_settings = settings or get_settings()
 
+    effective_secure_cookie = (
+        app_settings.webui_session_cookie_secure
+        if app_settings.webui_session_cookie_secure is not None
+        else (app_settings.webui_public_mode or app_settings.webui_require_https)
+    )
+    if app_settings.webui_public_mode and not (app_settings.webui_require_https and effective_secure_cookie):
+        raise ValueError(
+            "WEBUI_PUBLIC_MODE=true requires WEBUI_REQUIRE_HTTPS=true and secure session cookies. "
+            "Set WEBUI_SESSION_COOKIE_SECURE=true (or leave unset with WEBUI_REQUIRE_HTTPS=true)."
+        )
+
     app = Flask(__name__)
     app.config.update(
         SECRET_KEY=(app_settings.webui_password or "").strip() or _derive_secret_key(app_settings.webui_password),
         PERMANENT_SESSION_LIFETIME=timedelta(seconds=max(1, app_settings.webui_session_ttl_seconds)),
         SESSION_COOKIE_HTTPONLY=True,
         SESSION_COOKIE_SAMESITE="Lax",
+        SESSION_COOKIE_SECURE=effective_secure_cookie,
     )
 
     csrf.init_app(app)
@@ -77,6 +89,25 @@ def create_flask_app(
         if session.get("authenticated") is True:
             session.permanent = True
             session.modified = True
+
+    @app.after_request
+    def _security_headers(response):  # type: ignore[no-untyped-def]
+        # style-src allows inline styles for existing server-rendered templates.
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; "
+            "object-src 'none'; "
+            "base-uri 'self'; "
+            "form-action 'self'; "
+            "frame-ancestors 'none'; "
+            "style-src 'self' 'unsafe-inline'"
+        )
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+        if app_settings.webui_require_https or effective_secure_cookie:
+            response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        return response
 
     @app.errorhandler(400)
     @app.errorhandler(401)
