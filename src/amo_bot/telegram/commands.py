@@ -9,7 +9,8 @@ from amo_bot.ai.service import AIService, OllamaError
 from amo_bot.auth.permissions import ADMIN_ASSIGNABLE_ROLES, can_assign_role, can_use_bot
 from amo_bot.auth.roles import ROLE_PRIORITY, Role
 from amo_bot.db.base import create_session_factory
-from amo_bot.db.repositories import UserRoleRepository
+from amo_bot.db.models import GROUP_CHAT_TYPES, TelegramChat
+from amo_bot.db.repositories import ChatScopedRoleRepository, UserRoleRepository
 
 
 @dataclass(slots=True)
@@ -132,12 +133,43 @@ def create_builtin_registry(database_url: str | None = None, ai_service: AIServi
             return "role management not configured"
 
         with session_factory() as session:
-            repo = UserRoleRepository(session)
-            result = repo.set_user_role(
-                actor_telegram_user_id=ctx.user_id,
-                target_telegram_user_id=target_user_id,
-                role=target_role,
-            )
+            if ctx.chat_id < 0:
+                chat_row = session.query(TelegramChat).filter(TelegramChat.chat_id == ctx.chat_id).one_or_none()
+                if chat_row is not None and chat_row.chat_type in GROUP_CHAT_TYPES:
+                    if target_role == Role.NORMAL:
+                        changed = ChatScopedRoleRepository(session).clear_group_role(
+                            chat_id=ctx.chat_id,
+                            telegram_user_id=target_user_id,
+                            actor_telegram_user_id=ctx.user_id,
+                            source="telegram_command",
+                        )
+                        result = type("GroupRoleClearResult", (), {
+                            "changed": changed,
+                            "previous_role": None,
+                            "new_role": Role.NORMAL,
+                        })()
+                    else:
+                        result = ChatScopedRoleRepository(session).set_group_role(
+                            chat_id=ctx.chat_id,
+                            telegram_user_id=target_user_id,
+                            role=target_role,
+                            actor_telegram_user_id=ctx.user_id,
+                            source="telegram_command",
+                        )
+                else:
+                    repo = UserRoleRepository(session)
+                    result = repo.set_user_role(
+                        actor_telegram_user_id=ctx.user_id,
+                        target_telegram_user_id=target_user_id,
+                        role=target_role,
+                    )
+            else:
+                repo = UserRoleRepository(session)
+                result = repo.set_user_role(
+                    actor_telegram_user_id=ctx.user_id,
+                    target_telegram_user_id=target_user_id,
+                    role=target_role,
+                )
 
         if result.changed:
             prev = result.previous_role.value if result.previous_role else "<new>"

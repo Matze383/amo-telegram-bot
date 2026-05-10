@@ -216,9 +216,20 @@ def update_group_role(chat_id: str):
         repo = ChatScopedRoleRepository(db_session)
         user_id = int(form.telegram_user_id.data)
         if role_name == Role.NORMAL.value:
-            repo.clear_group_role(chat_id=parsed_chat_id, telegram_user_id=user_id)
+            repo.clear_group_role(
+                chat_id=parsed_chat_id,
+                telegram_user_id=user_id,
+                actor_telegram_user_id=settings.webui_owner_telegram_id,
+                source="webui",
+            )
         else:
-            repo.set_group_role(chat_id=parsed_chat_id, telegram_user_id=user_id, role=Role(role_name))
+            repo.set_group_role(
+                chat_id=parsed_chat_id,
+                telegram_user_id=user_id,
+                role=Role(role_name),
+                actor_telegram_user_id=settings.webui_owner_telegram_id,
+                source="webui",
+            )
 
     return redirect(url_for("ui.groups_page"), code=302)
 

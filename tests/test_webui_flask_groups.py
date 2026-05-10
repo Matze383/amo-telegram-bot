@@ -267,6 +267,43 @@ def test_group_role_owner_not_allowed(tmp_path) -> None:
     assert response.status_code == 400
 
 
+def test_group_role_set_writes_audit_event(tmp_path) -> None:
+    import json
+
+    db_url = f"sqlite:///{tmp_path / 'groups_roles_audit_set.db'}"
+    init_db(db_url)
+    _seed_chat_topic(db_url, -100215, 96)
+    _seed_user(db_url, 7005)
+
+    settings = _make_settings(db_url, owner_id=777)
+    app = create_flask_app(settings=settings)
+
+    with app.test_client() as client:
+        _login(client, "test-secret")
+        page = client.get("/groups")
+        token = _extract_csrf_token(page.get_data(as_text=True))
+        response = client.post(
+            "/groups/-100215/roles",
+            data={"telegram_user_id": "7005", "role": "vip", "csrf_token": token},
+            follow_redirects=False,
+        )
+
+    assert response.status_code == 302
+
+    sf = create_session_factory(db_url)
+    with sf() as s:
+        from amo_bot.db.models import AuditEvent
+
+        event = s.scalar(select(AuditEvent).where(AuditEvent.event_type == "group_role_set"))
+        assert event is not None
+        payload = json.loads(event.payload_json)
+        assert event.actor_telegram_user_id == 777
+        assert payload["chat_id"] == -100215
+        assert payload["target_telegram_user_id"] == 7005
+        assert payload["new_role"] == "vip"
+        assert payload["source"] == "webui"
+
+
 def test_group_role_normal_clears_entry(tmp_path) -> None:
     db_url = f"sqlite:///{tmp_path / 'groups_roles4.db'}"
     init_db(db_url)
@@ -298,6 +335,48 @@ def test_group_role_normal_clears_entry(tmp_path) -> None:
     with sf() as s:
         repo = ChatScopedRoleRepository(s)
         assert repo.get_group_role(chat_id=-100214, telegram_user_id=7004) is None
+
+
+def test_group_role_normal_writes_clear_audit_event(tmp_path) -> None:
+    import json
+
+    db_url = f"sqlite:///{tmp_path / 'groups_roles_audit_clear.db'}"
+    init_db(db_url)
+    _seed_chat_topic(db_url, -100216, 97)
+    _seed_user(db_url, 7006)
+
+    sf = create_session_factory(db_url)
+    with sf() as s:
+        from amo_bot.auth.roles import Role
+
+        ChatScopedRoleRepository(s).set_group_role(chat_id=-100216, telegram_user_id=7006, role=Role.VIP)
+
+    settings = _make_settings(db_url, owner_id=777)
+    app = create_flask_app(settings=settings)
+
+    with app.test_client() as client:
+        _login(client, "test-secret")
+        page = client.get("/groups")
+        token = _extract_csrf_token(page.get_data(as_text=True))
+        response = client.post(
+            "/groups/-100216/roles",
+            data={"telegram_user_id": "7006", "role": "normal", "csrf_token": token},
+            follow_redirects=False,
+        )
+
+    assert response.status_code == 302
+
+    with sf() as s:
+        from amo_bot.db.models import AuditEvent
+
+        event = s.scalar(select(AuditEvent).where(AuditEvent.event_type == "group_role_clear"))
+        assert event is not None
+        payload = json.loads(event.payload_json)
+        assert event.actor_telegram_user_id == 777
+        assert payload["chat_id"] == -100216
+        assert payload["target_telegram_user_id"] == 7006
+        assert payload["new_role"] == "normal"
+        assert payload["source"] == "webui"
 
 
 def test_topic_metadata_update_missing_topic_returns_404(tmp_path) -> None:

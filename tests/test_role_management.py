@@ -7,9 +7,9 @@ from amo_bot.telegram.commands import CommandContext, create_builtin_registry
 from amo_bot.telegram.role_resolver import DBRoleResolver
 
 
-def _ctx(*, user_id: int, role: Role, argument: str | None) -> CommandContext:
+def _ctx(*, user_id: int, role: Role, argument: str | None, chat_id: int = 1) -> CommandContext:
     return CommandContext(
-        chat_id=1,
+        chat_id=chat_id,
         user_id=user_id,
         role=role,
         command_name="setrole",
@@ -116,6 +116,77 @@ def test_audit_event_written_on_role_change(tmp_path) -> None:
     assert events[0].actor_telegram_user_id == 77
     assert '"target_telegram_user_id": 400' in events[0].payload_json
     assert '"new_role": "vip"' in events[0].payload_json
+
+
+def test_group_setrole_in_group_writes_group_audit_event(tmp_path) -> None:
+    import json
+
+    from sqlalchemy import select
+
+    from amo_bot.db.models import AuditEvent, TelegramChat
+
+    db_file = tmp_path / "test_group_audit_set.db"
+    db_url = f"sqlite:///{db_file}"
+    init_db(db_url)
+
+    sf = create_session_factory(db_url)
+    with sf() as session:
+        session.add(TelegramChat(chat_id=-100001, chat_type="supergroup", title="G"))
+        session.commit()
+
+    reg = create_builtin_registry(database_url=db_url)
+    cmd = reg.get("setrole")
+    assert cmd is not None
+
+    out = asyncio.run(cmd.handler(_ctx(user_id=77, role=Role.OWNER, argument="401 vip", chat_id=-100001)))
+    assert out is not None and "role updated" in out
+
+    with sf() as session:
+        events = session.scalars(select(AuditEvent).where(AuditEvent.event_type == "group_role_set")).all()
+
+    assert len(events) == 1
+    payload = json.loads(events[0].payload_json)
+    assert events[0].actor_telegram_user_id == 77
+    assert payload["chat_id"] == -100001
+    assert payload["target_telegram_user_id"] == 401
+    assert payload["new_role"] == "vip"
+    assert payload["source"] == "telegram_command"
+
+
+def test_group_setrole_normal_in_group_writes_group_clear_audit_event(tmp_path) -> None:
+    import json
+
+    from sqlalchemy import select
+
+    from amo_bot.db.models import AuditEvent, TelegramChat
+
+    db_file = tmp_path / "test_group_audit_clear.db"
+    db_url = f"sqlite:///{db_file}"
+    init_db(db_url)
+
+    sf = create_session_factory(db_url)
+    with sf() as session:
+        session.add(TelegramChat(chat_id=-100002, chat_type="group", title="G2"))
+        session.commit()
+
+    reg = create_builtin_registry(database_url=db_url)
+    cmd = reg.get("setrole")
+    assert cmd is not None
+
+    _ = asyncio.run(cmd.handler(_ctx(user_id=77, role=Role.OWNER, argument="402 vip", chat_id=-100002)))
+    out = asyncio.run(cmd.handler(_ctx(user_id=77, role=Role.OWNER, argument="402 normal", chat_id=-100002)))
+    assert out is not None and ("role updated" in out or "no change" in out)
+
+    with sf() as session:
+        events = session.scalars(select(AuditEvent).where(AuditEvent.event_type == "group_role_clear")).all()
+
+    assert len(events) == 1
+    payload = json.loads(events[0].payload_json)
+    assert events[0].actor_telegram_user_id == 77
+    assert payload["chat_id"] == -100002
+    assert payload["target_telegram_user_id"] == 402
+    assert payload["new_role"] == "normal"
+    assert payload["source"] == "telegram_command"
 
 
 def test_bootstrap_owner_from_settings_empty_db_creates_owner(tmp_path) -> None:

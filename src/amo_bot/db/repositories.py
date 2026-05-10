@@ -163,6 +163,8 @@ class ChatScopedRoleRepository:
         chat_id: int,
         telegram_user_id: int,
         role: Role,
+        actor_telegram_user_id: int | None = None,
+        source: str | None = None,
     ) -> RoleChangeResult:
         user = self._session.scalar(select(User).where(User.telegram_user_id == telegram_user_id))
         if user is None:
@@ -192,10 +194,34 @@ class ChatScopedRoleRepository:
                 row.role_id = role_row.id
                 changed = True
 
+        if changed:
+            self._session.add(
+                AuditEvent(
+                    actor_telegram_user_id=actor_telegram_user_id,
+                    event_type="group_role_set",
+                    payload_json=json.dumps(
+                        {
+                            "chat_id": chat_id,
+                            "target_telegram_user_id": telegram_user_id,
+                            "previous_role": previous_role.value if previous_role else None,
+                            "new_role": role.value,
+                            "source": source,
+                        }
+                    ),
+                )
+            )
+
         self._session.commit()
         return RoleChangeResult(changed=changed, previous_role=previous_role, new_role=role)
 
-    def clear_group_role(self, *, chat_id: int, telegram_user_id: int) -> bool:
+    def clear_group_role(
+        self,
+        *,
+        chat_id: int,
+        telegram_user_id: int,
+        actor_telegram_user_id: int | None = None,
+        source: str | None = None,
+    ) -> bool:
         user = self._session.scalar(select(User).where(User.telegram_user_id == telegram_user_id))
         if user is None:
             return False
@@ -204,7 +230,23 @@ class ChatScopedRoleRepository:
         )
         if row is None:
             return False
+        previous_role = Role(row.role.name)
         self._session.delete(row)
+        self._session.add(
+            AuditEvent(
+                actor_telegram_user_id=actor_telegram_user_id,
+                event_type="group_role_clear",
+                payload_json=json.dumps(
+                    {
+                        "chat_id": chat_id,
+                        "target_telegram_user_id": telegram_user_id,
+                        "previous_role": previous_role.value,
+                        "new_role": Role.NORMAL.value,
+                        "source": source,
+                    }
+                ),
+            )
+        )
         self._session.commit()
         return True
 
