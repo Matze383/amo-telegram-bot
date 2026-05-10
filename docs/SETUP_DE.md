@@ -254,6 +254,49 @@ Erwartete Ergebnisse:
 - Siehe [BETATEST_DE.md](BETATEST_DE.md) für detaillierte Testanleitungen
 - Siehe [RELEASE_NOTES_2026.05.09-Beta_DE.md](RELEASE_NOTES_2026.05.09-Beta_DE.md) für das Changelog
 
+## WebUI Security — Access Window (Block 3)
+
+Der WebUI-Zugang kann über Telegram-Commands gesteuert werden. Das ermöglicht dem Owner, den Zugang zur WebUI von überall aus zu öffnen oder zu schließen.
+
+### Telegram-Commands
+
+| Command | Beschreibung | Anforderungen |
+|---------|--------------|---------------|
+| `/webui status` | Zeigt, ob das WebUI-Zugangsfenster OPEN oder CLOSED ist, und die verbleibende Zeit bei offenem Fenster | Privater Chat, nur Owner |
+| `/webui on` | Öffnet das WebUI-Zugangsfenster für 60 Minuten (verlängert bei bereits offenem Fenster) | Privater Chat, nur Owner |
+| `/webui off` | Schließt das WebUI-Zugangsfenster sofort | Privater Chat, nur Owner |
+
+**Wichtig:** Diese Commands funktionieren nur im **privaten Chat** (nicht in Gruppen) und nur für den **Owner**.
+
+### Zugriffsverweigerungs-Gründe
+
+Bei abgelehntem Zugriff wird ein Audit-Event mit einem dieser Gründe protokolliert:
+- `not_private` — Command wurde in einer Gruppe oder einem Channel verwendet
+- `not_owner` — Nutzer ist nicht der konfigurierte Owner
+
+### Audit-Events
+
+Folgende Audit-Events werden generiert:
+
+| Event | Beschreibung |
+|-------|--------------|
+| `webui_access_enabled` | WebUI-Zugangsfenster geöffnet via `/webui on` |
+| `webui_access_disabled` | WebUI-Zugangsfenster geschlossen via `/webui off` |
+| `webui_access_status` | Status abgefragt via `/webui status` |
+| `webui_access_denied` | Zugriff verweigert (falscher Chat-Typ oder nicht autorisierter Nutzer) |
+
+### Status-Informationen
+
+Bei `/webui status` erhältst du:
+- **OPEN** mit verbleibenden Minuten, wenn das Zugangsfenster aktiv ist
+- **CLOSED**, wenn kein Zugangsfenster geöffnet ist
+
+Das Zugangsfenster wird persistent in der Datenbank gespeichert und übersteht Bot-Neustarts.
+
+> **Hinweis:** Das HTTP-Request-Gate (tatsächliche Blockierung der Login-Seite) ist **noch nicht implementiert**. Die Access-Window-Commands sind voll funktionsfähig und persistieren ihren Zustand, aber die WebUI-Login-Seite wird durch diesen Mechanismus noch nicht blockiert. Dies folgt in einem späteren Block.
+
+---
+
 ## WebUI: Gruppenrollenverwaltung
 
 Nach dem Login unter "Groups" können Gruppenrollen verwaltet werden:

@@ -303,15 +303,59 @@ curl http://127.0.0.1:11434/api/tags
 
 ---
 
+### WebUI-Zugangskontrolle via Telegram (Block 3)
+
+Die `/webui`-Commands ermöglichen dem Owner, den WebUI-Zugang über Telegram zu steuern.
+
+**Test-Schritte:**
+
+1. **`/webui status` testen (geschlossener Zustand):**
+   - Sende: `/webui status`
+   - Erwartet: "CLOSED" oder ähnliche Nachricht, die anzeigt, dass das Zugangsfenster nicht geöffnet ist
+
+2. **`/webui on` testen:**
+   - Sende: `/webui on`
+   - Erwartet: Bestätigung, dass das WebUI-Zugangsfenster nun für 60 Minuten OPEN ist
+
+3. **`/webui status` testen (geöffneter Zustand):**
+   - Sende: `/webui status`
+   - Erwartet: "OPEN" mit Anzeige der verbleibenden Minuten
+
+4. **`/webui off` testen:**
+   - Sende: `/webui off`
+   - Erwartet: Bestätigung, dass das WebUI-Zugangsfenster nun CLOSED ist
+
+**Negative Tests:**
+
+5. **Test in einer Gruppe (sollte verweigert werden):**
+   - Füge den Bot zu einer Testgruppe hinzu
+   - Sende: `/webui status` in der Gruppe
+   - Erwartet: Zugriff verweigert, möglicherweise mit einer Nachricht, dass dies nur im privaten Chat funktioniert
+
+6. **Test als Nicht-Owner (sollte verweigert werden):**
+   - Lass einen Nicht-Owner `/webui status` senden
+   - Erwartet: Zugriff verweigert, möglicherweise mit einem Autorisierungsfehler
+
+**Wichtige Hinweise:**
+- Diese Commands funktionieren nur im **privaten Chat** mit dem Owner
+- Der Zustand des Zugangsfensters wird in der Datenbank persistiert (übersteht Bot-Neustarts)
+- **Das HTTP-Request-Gate ist NOCH NICHT implementiert** — die WebUI-Login-Seite wird durch diesen Mechanismus noch nicht blockiert
+
+**Checkliste:**
+- [ ] `/webui status` zeigt initial CLOSED
+- [ ] `/webui on` öffnet das Zugangsfenster
+- [ ] `/webui status` zeigt OPEN mit verbleibender Zeit
+- [ ] `/webui off` schließt das Zugangsfenster
+- [ ] `/webui`-Commands in Gruppen werden verweigert
+- [ ] `/webui`-Commands für Nicht-Owner werden verweigert
+
+---
+
 ### Zukünftige Features (Noch nicht implementiert)
 
 Folgende Features sind für zukünftige Releases geplant und im aktuellen Beta **nicht verfügbar**:
 
-**Telegram WebUI Access Control (Block 2 – Geplant / Nicht implementiert)**
-- Geplant: Owner könnte WebUI via Telegram-Commands aktivieren/deaktivieren (`/webui on`, `/webui off`, `/webui status`)
-- Geplant: Zeitlich begrenzte 1-Stunden-Zugangsfenster
-- **Status: NICHT IMPLEMENTIERT** — Diese Commands existieren nicht im aktuellen Code
-- **Nicht testen** — Dieses Feature ist nicht Teil des MVP-Betatests
+- HTTP-Request-Gate für WebUI-Zugangsfenster (tatsächliche Blockierung der Login-Seite) — Block 3 Fortsetzung
 
 ---
 
@@ -329,7 +373,7 @@ Folgende Features sind für zukünftige Releases geplant und im aktuellen Beta *
 - Diese Events dienen der internen Protokollierung/Überwachung und beeinflussen nicht das Nutzerverhalten
 
 **Noch nicht implementiert:**
-- Telegram-Commands `/webui on/off/status` für zeitlich begrenzte Zugangsfenster
+- HTTP-Request-Gate (tatsächliche Blockierung der WebUI-Login-Seite basierend auf dem Zugangsfenster-Zustand)
 
 ---
 
@@ -342,7 +386,7 @@ Folgende Features sind **nicht** im MVP enthalten:
 - Produktionsreife Sicherheitshärtung
 - Chat-Verlauf für `/ask`
 - Multi-User-WebUI (nur Owner-Login)
-- Telegram-basierte WebUI-Zugangssteuerung (`/webui` Commands)
+- Telegram-basierte WebUI-Zugangssteuerung (`/webui`-Commands) — Command-Pfad implementiert; HTTP-Gate ausstehend
 
 ---
 

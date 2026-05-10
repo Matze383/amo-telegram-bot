@@ -303,15 +303,59 @@ curl http://127.0.0.1:11434/api/tags
 
 ---
 
+### WebUI Access Control via Telegram (Block 3)
+
+The `/webui` commands allow the owner to control WebUI access via Telegram.
+
+**Test Steps:**
+
+1. **Test `/webui status` (closed state):**
+   - Send: `/webui status`
+   - Expected: "CLOSED" or similar message indicating the access window is not open
+
+2. **Test `/webui on`:**
+   - Send: `/webui on`
+   - Expected: Confirmation that the WebUI access window is now OPEN for 60 minutes
+
+3. **Test `/webui status` (open state):**
+   - Send: `/webui status`
+   - Expected: "OPEN" with remaining minutes displayed
+
+4. **Test `/webui off`:**
+   - Send: `/webui off`
+   - Expected: Confirmation that the WebUI access window is now CLOSED
+
+**Negative Tests:**
+
+5. **Test in a group (should be denied):**
+   - Add the bot to a test group
+   - Send: `/webui status` in the group
+   - Expected: Access denied, possibly with a message that this only works in private chats
+
+6. **Test as non-owner (should be denied):**
+   - Have a non-owner user send `/webui status`
+   - Expected: Access denied, possibly with an authorization error
+
+**Important Notes:**
+- These commands only work in **private chats** with the owner
+- The access window state is persisted in the database (survives bot restarts)
+- **The HTTP request gate is NOT YET implemented** — the WebUI login page is not blocked by this mechanism yet
+
+**Checklist:**
+- [ ] `/webui status` shows CLOSED initially
+- [ ] `/webui on` opens the access window
+- [ ] `/webui status` shows OPEN with remaining time
+- [ ] `/webui off` closes the access window
+- [ ] `/webui` commands in groups are denied
+- [ ] `/webui` commands for non-owners are denied
+
+---
+
 ### Future Features (Not Yet Implemented)
 
 The following features are planned for future releases and are **not available** in the current beta:
 
-**Telegram WebUI Access Control (Block 2 - Planned / Not Implemented)**
-- Planned: Owner could enable/disable WebUI via Telegram commands (`/webui on`, `/webui off`, `/webui status`)
-- Planned: Time-limited 1-hour access windows
-- **Status: NOT IMPLEMENTED** — These commands do not exist in the current codebase
-- **Do NOT test** — This feature is not part of the MVP beta test
+- HTTP request gate for WebUI access window (actual blocking of login page) — Block 3 continuation
 
 ---
 
@@ -329,7 +373,7 @@ The following features are planned for future releases and are **not available**
 - These events are for internal logging/monitoring and do not affect user-facing behavior
 
 **Not yet implemented:**
-- Telegram `/webui on/off/status` commands for time-limited access windows
+- HTTP request gate (actual blocking of WebUI login page based on access window state)
 
 ---
 
@@ -342,7 +386,7 @@ The following features are **not** included in the MVP:
 - Production-ready security hardening
 - Chat history for `/ask`
 - Multi-user WebUI (owner login only)
-- Telegram-based WebUI access control (`/webui` commands)
+- Telegram-based WebUI access control (`/webui` commands) — Command path implemented; HTTP gate pending
 
 ---
 

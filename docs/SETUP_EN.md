@@ -254,6 +254,49 @@ Expected results:
 - See [BETATEST_EN.md](BETATEST_EN.md) for detailed testing instructions
 - See [RELEASE_NOTES_2026.05.09-Beta_EN.md](RELEASE_NOTES_2026.05.09-Beta_EN.md) for changelog
 
+## WebUI Security — Access Window (Block 3)
+
+The WebUI access can be controlled via Telegram commands. This allows the owner to open or close access to the WebUI from anywhere.
+
+### Telegram Commands
+
+| Command | Description | Requirements |
+|---------|-------------|--------------|
+| `/webui status` | Shows whether the WebUI access window is OPEN or CLOSED, and the remaining time if open | Private chat, Owner only |
+| `/webui on` | Opens the WebUI access window for 60 minutes (extends if already open) | Private chat, Owner only |
+| `/webui off` | Closes the WebUI access window immediately | Private chat, Owner only |
+
+**Important:** These commands only work in **private chats** (not in groups) and only for the **owner**.
+
+### Access Denied Reasons
+
+If access is denied, an audit event is logged with one of these reasons:
+- `not_private` — Command was used in a group or channel
+- `not_owner` — User is not the configured owner
+
+### Audit Events
+
+The following audit events are generated:
+
+| Event | Description |
+|-------|-------------|
+| `webui_access_enabled` | WebUI access window opened via `/webui on` |
+| `webui_access_disabled` | WebUI access window closed via `/webui off` |
+| `webui_access_status` | Status checked via `/webui status` |
+| `webui_access_denied` | Access denied (wrong chat type or unauthorized user) |
+
+### Status Information
+
+When running `/webui status`, you receive:
+- **OPEN** with remaining minutes if the access window is active
+- **CLOSED** if no access window is currently open
+
+The access window is stored persistently in the database, so it survives bot restarts.
+
+> **Note:** The HTTP request gate (actual blocking of the login page) is **not yet implemented**. The access window commands are fully functional and persist their state, but the WebUI login page is not yet blocked by this mechanism. This will be implemented in a subsequent block.
+
+---
+
 ## WebUI: Group Role Management
 
 After logging in, group roles can be managed under "Groups":

@@ -63,6 +63,20 @@ def init_db(database_url: str) -> None:
             if "ix_chat_user_roles_user_id" not in existing_indexes:
                 connection.execute(text("CREATE INDEX ix_chat_user_roles_user_id ON chat_user_roles (user_id)"))
 
+        if "webui_access_window" not in existing_tables:
+            connection.execute(
+                text(
+                    """
+                    CREATE TABLE webui_access_window (
+                        id INTEGER NOT NULL PRIMARY KEY,
+                        enabled_until DATETIME NULL,
+                        updated_by_telegram_id BIGINT NULL,
+                        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL
+                    )
+                    """
+                )
+            )
+
         for table_name, migrations in table_column_migrations.items():
             if table_name not in existing_tables:
                 continue

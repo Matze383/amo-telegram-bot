@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import UTC, datetime
+import json
 import logging
 from typing import Awaitable, Callable
 
@@ -10,7 +12,9 @@ from amo_bot.auth.permissions import ADMIN_ASSIGNABLE_ROLES, can_assign_role, ca
 from amo_bot.auth.roles import ROLE_PRIORITY, Role
 from amo_bot.db.base import create_session_factory
 from amo_bot.db.models import GROUP_CHAT_TYPES, TelegramChat
+from amo_bot.db.models import AuditEvent
 from amo_bot.db.repositories import ChatScopedRoleRepository, UserRoleRepository
+from amo_bot.webui.access_window import WebuiAccessWindowService
 
 
 @dataclass(slots=True)
@@ -20,6 +24,10 @@ class CommandContext:
     role: Role
     command_name: str
     argument: str | None
+
+    @property
+    def chat_type(self) -> str:
+        return "private" if self.chat_id > 0 else "group"
 
 
 CommandHandler = Callable[[CommandContext], Awaitable[str | None]]
@@ -195,6 +203,116 @@ def create_builtin_registry(database_url: str | None = None, ai_service: AIServi
             logger.exception("/ask failed: invalid prompt user_id=%s chat_id=%s", ctx.user_id, ctx.chat_id)
             return "Sorry, I cannot answer right now. Please try again later."
 
+    async def webui_handler(ctx: CommandContext) -> str:
+        if session_factory is None:
+            return "webui access control not configured"
+
+        subcommand = (ctx.argument or "status").strip().casefold()
+        if subcommand not in {"on", "off", "status"}:
+            return "usage: /webui <on|off|status>"
+
+        if ctx.chat_type != "private":
+            with session_factory() as session:
+                session.add(
+                    AuditEvent(
+                        actor_telegram_user_id=ctx.user_id,
+                        event_type="webui_access_denied",
+                        payload_json=json.dumps(
+                            {
+                                "reason": "not_private",
+                                "chat_id": ctx.chat_id,
+                                "chat_type": ctx.chat_type,
+                                "command": subcommand,
+                            }
+                        ),
+                    )
+                )
+                session.commit()
+            return "permission denied"
+
+        if ctx.role != Role.OWNER:
+            with session_factory() as session:
+                session.add(
+                    AuditEvent(
+                        actor_telegram_user_id=ctx.user_id,
+                        event_type="webui_access_denied",
+                        payload_json=json.dumps(
+                            {
+                                "reason": "not_owner",
+                                "chat_id": ctx.chat_id,
+                                "chat_type": ctx.chat_type,
+                                "command": subcommand,
+                            }
+                        ),
+                    )
+                )
+                session.commit()
+            return "permission denied"
+
+        service = WebuiAccessWindowService(session_factory)
+        now = datetime.now(UTC)
+
+        if subcommand == "on":
+            enabled_until = service.enable_for_one_hour(actor_id=ctx.user_id, now_utc=now)
+            with session_factory() as session:
+                session.add(
+                    AuditEvent(
+                        actor_telegram_user_id=ctx.user_id,
+                        event_type="webui_access_enabled",
+                        payload_json=json.dumps(
+                            {
+                                "chat_id": ctx.chat_id,
+                                "chat_type": ctx.chat_type,
+                                "enabled_until": enabled_until.isoformat(),
+                            }
+                        ),
+                    )
+                )
+                session.commit()
+            return f"webui access: OPEN (~60m, until {enabled_until.strftime('%H:%M UTC')})"
+
+        if subcommand == "off":
+            service.disable(actor_id=ctx.user_id, now_utc=now)
+            with session_factory() as session:
+                session.add(
+                    AuditEvent(
+                        actor_telegram_user_id=ctx.user_id,
+                        event_type="webui_access_disabled",
+                        payload_json=json.dumps(
+                            {
+                                "chat_id": ctx.chat_id,
+                                "chat_type": ctx.chat_type,
+                            }
+                        ),
+                    )
+                )
+                session.commit()
+            return "webui access: CLOSED"
+
+        status = service.get_status(now_utc=now)
+        remaining_minutes = max(0, status.remaining_seconds // 60)
+        with session_factory() as session:
+            session.add(
+                AuditEvent(
+                    actor_telegram_user_id=ctx.user_id,
+                    event_type="webui_access_status",
+                    payload_json=json.dumps(
+                        {
+                            "chat_id": ctx.chat_id,
+                            "chat_type": ctx.chat_type,
+                            "open": status.open,
+                            "remaining_minutes": remaining_minutes,
+                            "enabled_until": status.enabled_until.isoformat() if status.enabled_until is not None else None,
+                        }
+                    ),
+                )
+            )
+            session.commit()
+
+        if status.open:
+            return f"webui access: OPEN (remaining: {remaining_minutes}m)"
+        return "webui access: CLOSED"
+
     async def help_handler(ctx: CommandContext) -> str:
         allowed = registry.list_allowed(ctx.role)
         if not allowed:
@@ -218,6 +336,14 @@ def create_builtin_registry(database_url: str | None = None, ai_service: AIServi
             description="Set role: /setrole <telegram_user_id> <role>",
             allowed_roles=admin_plus,
             handler=setrole_handler,
+        )
+    )
+    registry.register(
+        Command(
+            name="webui",
+            description="WebUI access window: /webui <on|off|status>",
+            allowed_roles={Role.OWNER, Role.ADMIN, Role.VIP, Role.NORMAL},
+            handler=webui_handler,
         )
     )
 

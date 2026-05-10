@@ -109,6 +109,15 @@ class ChatUserRole(Base):
     role: Mapped[DbRole] = relationship()
 
 
+class WebuiAccessWindow(Base):
+    __tablename__ = "webui_access_window"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
+    enabled_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    updated_by_telegram_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
 class TelegramTopic(Base):
     __tablename__ = "telegram_topics"
     __table_args__ = (UniqueConstraint("chat_id", "message_thread_id", name="uq_topic_chat_thread"),)
