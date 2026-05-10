@@ -293,7 +293,54 @@ Bei `/webui status` erhältst du:
 
 Das Zugangsfenster wird persistent in der Datenbank gespeichert und übersteht Bot-Neustarts.
 
-> **Hinweis:** Das HTTP-Request-Gate (tatsächliche Blockierung der Login-Seite) ist **noch nicht implementiert**. Die Access-Window-Commands sind voll funktionsfähig und persistieren ihren Zustand, aber die WebUI-Login-Seite wird durch diesen Mechanismus noch nicht blockiert. Dies folgt in einem späteren Block.
+---
+
+## WebUI Security — HTTP Request Gate (Block 3C)
+
+Wenn `WEBUI_PUBLIC_MODE=true`, verwendet die WebUI ein **HTTP-Request-Gate**, das den Zugriff auf geschützte Seiten blockiert, wenn das Zugangsfenster geschlossen ist.
+
+### Funktionsweise
+
+| Szenario | Verhalten |
+|----------|-----------|
+| `WEBUI_PUBLIC_MODE=false` | Gate ist inaktiv; lokale/LAN-Nutzung unverändert |
+| `WEBUI_PUBLIC_MODE=true` + Zugangsfenster **geschlossen** | `/login` und geschützte Seiten geben **403 Forbidden** |
+| `WEBUI_PUBLIC_MODE=true` + Zugangsfenster **offen** | Normaler Passwort-Login funktioniert; Zugriff erlaubt |
+
+### Whitelist-Pfade
+
+Folgende Pfade sind immer erreichbar (Gate blockiert nicht):
+- `/health` — Health-Check-Endpunkt
+- `/static/*` — Statische Assets (CSS, JS, Bilder)
+- `/logout` — Logout-Endpunkt
+
+### 403-Antworten
+
+Bei blockiertem Zugriff gibt das Gate zurück:
+
+**HTML/Plain-Text-Anfragen:**
+```
+403 Forbidden
+```
+
+**JSON/API-Anfragen:**
+```json
+{"error":"forbidden","status":403}
+```
+
+### Konfiguration
+
+```ini
+# Public-Modus aktivieren, um das Gate zu schalten
+WEBUI_PUBLIC_MODE=true
+
+# Zugangsfenster wird via Telegram-Commands gesteuert:
+# /webui on  - öffnet das Fenster für 60 Minuten
+# /webui off - schließt das Fenster sofort
+# /webui status - zeigt aktuellen Zustand
+```
+
+> **Hinweis:** Wenn das Zugangsfenster offen ist, ist weiterhin die normale Passwort-Authentifizierung erforderlich. Das Gate steuert nur, *ob* die Login-Seite erreichbar ist, nicht den Login selbst.
 
 ---
 

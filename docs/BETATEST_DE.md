@@ -339,7 +339,6 @@ Die `/webui`-Commands ermöglichen dem Owner, den WebUI-Zugang über Telegram zu
 **Wichtige Hinweise:**
 - Diese Commands funktionieren nur im **privaten Chat** mit dem Owner
 - Der Zustand des Zugangsfensters wird in der Datenbank persistiert (übersteht Bot-Neustarts)
-- **Das HTTP-Request-Gate ist NOCH NICHT implementiert** — die WebUI-Login-Seite wird durch diesen Mechanismus noch nicht blockiert
 
 **Checkliste:**
 - [ ] `/webui status` zeigt initial CLOSED
@@ -351,11 +350,79 @@ Die `/webui`-Commands ermöglichen dem Owner, den WebUI-Zugang über Telegram zu
 
 ---
 
+### WebUI HTTP Request Gate (Block 3C)
+
+Wenn `WEBUI_PUBLIC_MODE=true`, blockiert das HTTP-Request-Gate den Zugriff auf geschützte WebUI-Seiten, wenn das Zugangsfenster geschlossen ist.
+
+**Voraussetzungen:**
+- Setze `WEBUI_PUBLIC_MODE=true` in `.env`
+- Starte Bot/WebUI neu
+
+**Test-Schritte:**
+
+1. **Mit geschlossenem Zugangsfenster:**
+   - Stelle sicher, dass das Fenster geschlossen ist: `/webui off` im Owner-DM
+   - Versuche Zugriff auf: `http://127.0.0.1:8080/login`
+   - Erwartet: **403 Forbidden**-Seite
+
+2. **Geschützte Routen ebenfalls blockiert:**
+   - Versuche Zugriff auf: `http://127.0.0.1:8080/groups`
+   - Erwartet: **403 Forbidden**
+
+3. **Zugangsfenster öffnen:**
+   - Sende: `/webui on` im Owner-DM
+   - Versuche Zugriff auf: `http://127.0.0.1:8080/login`
+   - Erwartet: Login-Seite lädt normal
+   - Einloggen mit Passwort: Sollte wie gewohnt funktionieren
+
+4. **Zugangsfenster läuft ab oder wird geschlossen:**
+   - Warte auf Ablauf (oder sende `/webui off`)
+   - Versuche erneut Zugriff auf geschützte Seiten
+   - Erwartet: **403 Forbidden** wird zurückgegeben
+
+5. **Whitelist-Pfade bleiben erreichbar:**
+   - Bei geschlossenem Fenster teste:
+     - `http://127.0.0.1:8080/health` — Erwartet: Health-Check-Antwort (nicht 403)
+     - `http://127.0.0.1:8080/static/css/style.css` — Erwartet: Statische Datei wird ausgeliefert
+     - `/logout` — Erwartet: Logout funktioniert (falls vor Fensterschluss eingeloggt)
+
+6. **JSON/API-Antworten:**
+   - Sende Anfrage mit `Accept: application/json`-Header an blockierten Pfad
+   - Erwartet: `{"error":"forbidden","status":403}`
+
+**Public Mode Off (Standard):**
+
+7. **Mit `WEBUI_PUBLIC_MODE=false`:**
+   - Schließe Zugangsfenster: `/webui off`
+   - Greife auf `http://127.0.0.1:8080/login` zu
+   - Erwartet: Login-Seite lädt normal (Gate ist im Nicht-Public-Modus inaktiv)
+
+**Checkliste:**
+- [ ] Public mode + geschlossenes Fenster → `/login` gibt 403 zurück
+- [ ] Public mode + geschlossenes Fenster → `/groups` gibt 403 zurück
+- [ ] `/webui on` im Owner-DM → `/login` wird erreichbar
+- [ ] Normaler Passwort-Login funktioniert, wenn Fenster offen
+- [ ] `/webui off` oder Ablauf → 403 wird wieder zurückgegeben
+- [ ] `/health` bleibt erreichbar, wenn Fenster geschlossen
+- [ ] Statische Assets bleiben erreichbar, wenn Fenster geschlossen
+- [ ] JSON-Anfragen erhalten `{"error":"forbidden","status":403}`
+- [ ] Nicht-Public-Modus (`WEBUI_PUBLIC_MODE=false`) → Gate inaktiv, lokale Nutzung unverändert
+
+**Wichtige Hinweise:**
+- Das Gate ist **nur aktiv, wenn `WEBUI_PUBLIC_MODE=true`**
+- Wenn das Fenster offen ist, ist weiterhin die normale Passwort-Authentifizierung erforderlich
+- Das Gate steuert, ob die Login-Seite *erreichbar* ist, nicht den Login selbst
+- Für Produktions-/Internet-Deployment ist weiterhin ein Reverse Proxy (nginx, Caddy, Traefik) mit HTTPS erforderlich — Flask sollte nicht direkt ins Internet freigegeben werden
+
+**⚠️ Deployment-Hinweis:** Dieses Feature ermöglicht Zugangskontrolle für Public-Deployments, ersetzt aber nicht das korrekte Reverse-Proxy- und HTTPS-Setup. Nginx/Internet-Deployment-Konfiguration ist außerhalb des Scope dieses Betas.
+
+---
+
 ### Zukünftige Features (Noch nicht implementiert)
 
 Folgende Features sind für zukünftige Releases geplant und im aktuellen Beta **nicht verfügbar**:
 
-- HTTP-Request-Gate für WebUI-Zugangsfenster (tatsächliche Blockierung der Login-Seite) — Block 3 Fortsetzung
+- Zusätzliche Sicherheitsverbesserungen — zukünftige Blöcke
 
 ---
 
@@ -372,9 +439,6 @@ Folgende Features sind für zukünftige Releases geplant und im aktuellen Beta *
 - Es werden keine Passwörter oder sensible Daten protokolliert
 - Diese Events dienen der internen Protokollierung/Überwachung und beeinflussen nicht das Nutzerverhalten
 
-**Noch nicht implementiert:**
-- HTTP-Request-Gate (tatsächliche Blockierung der WebUI-Login-Seite basierend auf dem Zugangsfenster-Zustand)
-
 ---
 
 ### Was NICHT getestet wird im MVP
@@ -386,7 +450,6 @@ Folgende Features sind **nicht** im MVP enthalten:
 - Produktionsreife Sicherheitshärtung
 - Chat-Verlauf für `/ask`
 - Multi-User-WebUI (nur Owner-Login)
-- Telegram-basierte WebUI-Zugangssteuerung (`/webui`-Commands) — Command-Pfad implementiert; HTTP-Gate ausstehend
 
 ---
 

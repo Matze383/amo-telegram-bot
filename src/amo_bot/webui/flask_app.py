@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 from datetime import timedelta
 
-from flask import Flask, jsonify, session
+from flask import Flask, abort, jsonify, request, session
 from flask_wtf import CSRFProtect
 
 from amo_bot.config.settings import Settings, get_settings
@@ -13,6 +13,7 @@ from amo_bot.plugins.loader import PluginLoader
 from amo_bot.plugins.service import PluginService
 from amo_bot.plugins.worker_runtime import WorkerPluginManager
 from amo_bot.telegram.client import TelegramClient
+from amo_bot.webui.access_window import WebuiAccessWindowService
 from amo_bot.webui.flask_blueprints import register_blueprints
 
 csrf = CSRFProtect()
@@ -59,6 +60,7 @@ def create_flask_app(
 
     session_factory = create_session_factory(app_settings.database_url)
     app.extensions["amo.session_factory"] = session_factory
+    app.extensions["amo.webui_access_window_service"] = WebuiAccessWindowService(session_factory)
     plugins = plugin_service or PluginService(
         loader=PluginLoader(app_settings.amo_plugin_dir),
         session_factory=session_factory,
@@ -83,6 +85,31 @@ def create_flask_app(
     app.extensions["amo.settings"] = app_settings
     app.extensions["amo.plugin_service"] = plugins
     app.extensions["amo.worker_manager"] = worker_manager
+
+    @app.before_request
+    def _webui_access_window_gate() -> None:
+        # Access window gate is only active in hardened public mode to avoid
+        # changing local/LAN default behavior.
+        if not app_settings.webui_public_mode:
+            return
+
+        # Keep health and static reachable for operational checks and assets.
+        endpoint = request.endpoint or ""
+        if endpoint in {"health.health", "static"}:
+            return
+
+        # Logout remains allowed so stale sessions can always be cleared.
+        if endpoint in {"auth.logout_get", "auth.logout_submit"}:
+            return
+
+        access_service = app.extensions["amo.webui_access_window_service"]
+        if access_service.is_open():
+            return
+
+        abort_message = "forbidden"
+        if request.accept_mimetypes.best == "application/json":
+            return jsonify({"error": abort_message, "status": 403}), 403
+        return abort_message, 403
 
     @app.before_request
     def _sliding_session_ttl() -> None:

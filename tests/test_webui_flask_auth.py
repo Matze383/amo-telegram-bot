@@ -7,6 +7,7 @@ from amo_bot.webui.flask_app import create_flask_app
 
 
 def _make_settings(
+    tmp_path,
     password: str = "test-secret",
     session_ttl_seconds: int = 3600,
     webui_public_mode: bool = False,
@@ -20,7 +21,7 @@ def _make_settings(
         "POLL_LIMIT": 100,
         "POLL_RETRY_MAX_SECONDS": 30,
         "OFFSET_STATE_FILE": ".state/offset.json",
-        "DATABASE_URL": "sqlite:///./data/test_flask_auth.db",
+        "DATABASE_URL": f"sqlite:///{tmp_path / 'test.sqlite3'}",
         "AMO_PLUGIN_DIR": "./plugins",
         "WEBUI_HOST": "127.0.0.1",
         "WEBUI_PORT": 8080,
@@ -57,8 +58,8 @@ def _logout(client):
     return client.post("/logout", data={"csrf_token": token}, follow_redirects=False)
 
 
-def test_get_login_page_ok() -> None:
-    app = create_flask_app(settings=_make_settings())
+def test_get_login_page_ok(tmp_path) -> None:
+    app = create_flask_app(settings=_make_settings(tmp_path))
 
     with app.test_client() as client:
         response = client.get("/login")
@@ -67,8 +68,8 @@ def test_get_login_page_ok() -> None:
     assert "<h1>Login</h1>" in response.get_data(as_text=True)
 
 
-def test_login_wrong_password_rejected() -> None:
-    app = create_flask_app(settings=_make_settings())
+def test_login_wrong_password_rejected(tmp_path) -> None:
+    app = create_flask_app(settings=_make_settings(tmp_path))
 
     with app.test_client() as client:
         response = _login(client, "wrong")
@@ -77,8 +78,8 @@ def test_login_wrong_password_rejected() -> None:
     assert "Ungültiges Passwort" in response.get_data(as_text=True)
 
 
-def test_login_success_sets_session_authenticated() -> None:
-    app = create_flask_app(settings=_make_settings())
+def test_login_success_sets_session_authenticated(tmp_path) -> None:
+    app = create_flask_app(settings=_make_settings(tmp_path))
 
     with app.test_client() as client:
         response = _login(client, "test-secret")
@@ -90,8 +91,8 @@ def test_login_success_sets_session_authenticated() -> None:
             assert session.permanent is True
 
 
-def test_logout_clears_session() -> None:
-    app = create_flask_app(settings=_make_settings())
+def test_logout_clears_session(tmp_path) -> None:
+    app = create_flask_app(settings=_make_settings(tmp_path))
 
     with app.test_client() as client:
         login = _login(client, "test-secret")
@@ -104,8 +105,8 @@ def test_logout_clears_session() -> None:
             assert session.get("authenticated") is None
 
 
-def test_login_blocked_with_unsafe_password_change_me() -> None:
-    app = create_flask_app(settings=_make_settings(password="change_me"))
+def test_login_blocked_with_unsafe_password_change_me(tmp_path) -> None:
+    app = create_flask_app(settings=_make_settings(tmp_path, password="change_me"))
 
     with app.test_client() as client:
         response = _login(client, "change_me")
@@ -114,8 +115,8 @@ def test_login_blocked_with_unsafe_password_change_me() -> None:
     assert "Login deaktiviert" in response.get_data(as_text=True)
 
 
-def test_dashboard_requires_login_redirects_to_login() -> None:
-    app = create_flask_app(settings=_make_settings())
+def test_dashboard_requires_login_redirects_to_login(tmp_path) -> None:
+    app = create_flask_app(settings=_make_settings(tmp_path))
 
     with app.test_client() as client:
         response = client.get("/dashboard", follow_redirects=False)
@@ -124,8 +125,8 @@ def test_dashboard_requires_login_redirects_to_login() -> None:
     assert response.headers["Location"].endswith("/login")
 
 
-def test_dashboard_contains_expected_text_after_login() -> None:
-    app = create_flask_app(settings=_make_settings())
+def test_dashboard_contains_expected_text_after_login(tmp_path) -> None:
+    app = create_flask_app(settings=_make_settings(tmp_path))
 
     with app.test_client() as client:
         login = _login(client, "test-secret")
@@ -140,8 +141,8 @@ def test_dashboard_contains_expected_text_after_login() -> None:
     assert '<a href="/users">Users</a>' in html
 
 
-def test_logout_blocks_dashboard_again() -> None:
-    app = create_flask_app(settings=_make_settings())
+def test_logout_blocks_dashboard_again(tmp_path) -> None:
+    app = create_flask_app(settings=_make_settings(tmp_path))
 
     with app.test_client() as client:
         login = _login(client, "test-secret")
@@ -156,8 +157,8 @@ def test_logout_blocks_dashboard_again() -> None:
     assert dashboard.headers["Location"].endswith("/login")
 
 
-def test_logout_requires_csrf() -> None:
-    app = create_flask_app(settings=_make_settings())
+def test_logout_requires_csrf(tmp_path) -> None:
+    app = create_flask_app(settings=_make_settings(tmp_path))
 
     with app.test_client() as client:
         login = _login(client, "test-secret")
@@ -168,8 +169,8 @@ def test_logout_requires_csrf() -> None:
     assert response.status_code == 400
 
 
-def test_default_cookie_security_flags_present_without_secure() -> None:
-    app = create_flask_app(settings=_make_settings())
+def test_default_cookie_security_flags_present_without_secure(tmp_path) -> None:
+    app = create_flask_app(settings=_make_settings(tmp_path))
 
     with app.test_client() as client:
         response = _login(client, "test-secret")
@@ -180,8 +181,8 @@ def test_default_cookie_security_flags_present_without_secure() -> None:
     assert "Secure" not in cookie
 
 
-def test_security_headers_present_on_normal_response() -> None:
-    app = create_flask_app(settings=_make_settings())
+def test_security_headers_present_on_normal_response(tmp_path) -> None:
+    app = create_flask_app(settings=_make_settings(tmp_path))
 
     with app.test_client() as client:
         response = client.get("/login")
@@ -199,8 +200,8 @@ def test_security_headers_present_on_normal_response() -> None:
     assert response.headers.get("Permissions-Policy") == "geolocation=(), microphone=(), camera=()"
 
 
-def test_security_headers_present_on_error_response() -> None:
-    app = create_flask_app(settings=_make_settings())
+def test_security_headers_present_on_error_response(tmp_path) -> None:
+    app = create_flask_app(settings=_make_settings(tmp_path))
 
     with app.test_client() as client:
         response = client.post("/logout", data={}, follow_redirects=False)
@@ -210,10 +211,11 @@ def test_security_headers_present_on_error_response() -> None:
     assert response.headers.get("X-Frame-Options") == "DENY"
 
 
-def test_secure_mode_sets_secure_cookie_and_hsts() -> None:
+def test_secure_mode_sets_secure_cookie_and_hsts(tmp_path) -> None:
     app = create_flask_app(
-        settings=_make_settings(webui_public_mode=True, webui_require_https=True, webui_session_cookie_secure=True)
+        settings=_make_settings(tmp_path, webui_public_mode=True, webui_require_https=True, webui_session_cookie_secure=True)
     )
+    app.extensions["amo.webui_access_window_service"].enable_for_one_hour(actor_id=123)
 
     with app.test_client() as client:
         response = _login(client, "test-secret")
@@ -223,13 +225,13 @@ def test_secure_mode_sets_secure_cookie_and_hsts() -> None:
     assert response.headers.get("Strict-Transport-Security") == "max-age=31536000; includeSubDomains"
 
 
-def test_public_mode_requires_https_and_secure_cookie() -> None:
+def test_public_mode_requires_https_and_secure_cookie(tmp_path) -> None:
     with pytest.raises(ValueError, match="WEBUI_PUBLIC_MODE=true"):
-        create_flask_app(settings=_make_settings(webui_public_mode=True, webui_require_https=False))
+        create_flask_app(settings=_make_settings(tmp_path, webui_public_mode=True, webui_require_https=False))
 
 
-def test_login_bruteforce_delay_progressive_and_capped(monkeypatch) -> None:
-    app = create_flask_app(settings=_make_settings())
+def test_login_bruteforce_delay_progressive_and_capped(monkeypatch, tmp_path) -> None:
+    app = create_flask_app(settings=_make_settings(tmp_path))
     app.extensions["amo.login_attempt_tracker"] = __import__("amo_bot.webui.flask_blueprints.auth", fromlist=["LoginAttemptTracker"]).LoginAttemptTracker(base_delay_seconds=0.1, max_delay_seconds=0.25)
 
     delays: list[float] = []
@@ -243,8 +245,8 @@ def test_login_bruteforce_delay_progressive_and_capped(monkeypatch) -> None:
     assert delays == [0.1, 0.2, 0.25, 0.25]
 
 
-def test_login_success_resets_delay_counter(monkeypatch) -> None:
-    app = create_flask_app(settings=_make_settings())
+def test_login_success_resets_delay_counter(monkeypatch, tmp_path) -> None:
+    app = create_flask_app(settings=_make_settings(tmp_path))
     app.extensions["amo.login_attempt_tracker"] = __import__("amo_bot.webui.flask_blueprints.auth", fromlist=["LoginAttemptTracker"]).LoginAttemptTracker(base_delay_seconds=0.1, max_delay_seconds=1.0)
 
     delays: list[float] = []
@@ -258,7 +260,7 @@ def test_login_success_resets_delay_counter(monkeypatch) -> None:
     assert delays == [0.1, 0.1]
 
 
-def test_login_tracker_caps_distinct_keys_to_prevent_unbounded_growth() -> None:
+def test_login_tracker_caps_distinct_keys_to_prevent_unbounded_growth(tmp_path) -> None:
     tracker_cls = __import__("amo_bot.webui.flask_blueprints.auth", fromlist=["LoginAttemptTracker"]).LoginAttemptTracker
     tracker = tracker_cls(base_delay_seconds=0.1, max_delay_seconds=1.0, max_keys=2)
 
@@ -274,8 +276,8 @@ def test_login_tracker_caps_distinct_keys_to_prevent_unbounded_growth() -> None:
     assert "ip-3" in tracker._failures_by_key
 
 
-def test_login_writes_auth_audit_events() -> None:
-    app = create_flask_app(settings=_make_settings())
+def test_login_writes_auth_audit_events(tmp_path) -> None:
+    app = create_flask_app(settings=_make_settings(tmp_path))
     app.extensions["amo.login_delay_fn"] = lambda _seconds: None
 
     with app.test_client() as client:
@@ -293,3 +295,82 @@ def test_login_writes_auth_audit_events() -> None:
         ).scalars().all()
 
     assert [event.event_type for event in events[-2:]] == ["webui_login_failure", "webui_login_success"]
+
+
+def test_public_mode_closed_blocks_login_with_403(tmp_path) -> None:
+    app = create_flask_app(
+        settings=_make_settings(tmp_path, webui_public_mode=True, webui_require_https=True, webui_session_cookie_secure=True)
+    )
+
+    with app.test_client() as client:
+        response = client.get("/login")
+
+    assert response.status_code == 403
+    assert response.get_data(as_text=True).strip() == "forbidden"
+
+
+def test_public_mode_closed_blocks_protected_pages_with_403(tmp_path) -> None:
+    app = create_flask_app(
+        settings=_make_settings(tmp_path, webui_public_mode=True, webui_require_https=True, webui_session_cookie_secure=True)
+    )
+
+    with app.test_client() as client:
+        response = client.get("/dashboard", follow_redirects=False)
+
+    assert response.status_code == 403
+    assert response.get_data(as_text=True).strip() == "forbidden"
+
+
+def test_public_mode_closed_keeps_health_reachable(tmp_path) -> None:
+    app = create_flask_app(
+        settings=_make_settings(tmp_path, webui_public_mode=True, webui_require_https=True, webui_session_cookie_secure=True)
+    )
+
+    with app.test_client() as client:
+        response = client.get("/health")
+
+    assert response.status_code == 200
+    assert response.get_json() == {"status": "ok"}
+
+
+def test_public_mode_open_allows_login_and_password_flow(tmp_path) -> None:
+    app = create_flask_app(
+        settings=_make_settings(tmp_path, webui_public_mode=True, webui_require_https=True, webui_session_cookie_secure=True)
+    )
+    app.extensions["amo.webui_access_window_service"].enable_for_one_hour(actor_id=123)
+
+    with app.test_client() as client:
+        login_page = client.get("/login")
+        assert login_page.status_code == 200
+
+        login = _login(client, "test-secret")
+
+    assert login.status_code == 302
+    assert login.headers["Location"].endswith("/dashboard")
+
+
+def test_public_mode_expired_window_blocks_login_again(tmp_path) -> None:
+    from datetime import UTC, datetime, timedelta
+
+    app = create_flask_app(
+        settings=_make_settings(tmp_path, webui_public_mode=True, webui_require_https=True, webui_session_cookie_secure=True)
+    )
+    now = datetime.now(UTC)
+    app.extensions["amo.webui_access_window_service"].enable_for_one_hour(actor_id=123, now_utc=now - timedelta(hours=2))
+
+    with app.test_client() as client:
+        response = client.get("/login")
+
+    assert response.status_code == 403
+
+
+def test_public_mode_closed_logout_remains_allowed(tmp_path) -> None:
+    app = create_flask_app(
+        settings=_make_settings(tmp_path, webui_public_mode=True, webui_require_https=True, webui_session_cookie_secure=True)
+    )
+
+    with app.test_client() as client:
+        response = client.get("/logout", follow_redirects=False)
+
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith("/login")

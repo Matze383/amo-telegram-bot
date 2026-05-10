@@ -293,7 +293,54 @@ When running `/webui status`, you receive:
 
 The access window is stored persistently in the database, so it survives bot restarts.
 
-> **Note:** The HTTP request gate (actual blocking of the login page) is **not yet implemented**. The access window commands are fully functional and persist their state, but the WebUI login page is not yet blocked by this mechanism. This will be implemented in a subsequent block.
+---
+
+## WebUI Security — HTTP Request Gate (Block 3C)
+
+When `WEBUI_PUBLIC_MODE=true`, the WebUI uses an **HTTP Request Gate** that blocks access to protected pages when the access window is closed.
+
+### How It Works
+
+| Scenario | Behavior |
+|----------|----------|
+| `WEBUI_PUBLIC_MODE=false` | Gate is inactive; local/LAN usage unchanged |
+| `WEBUI_PUBLIC_MODE=true` + Access Window **closed** | `/login` and protected pages return **403 Forbidden** |
+| `WEBUI_PUBLIC_MODE=true` + Access Window **open** | Normal password login works; access granted |
+
+### Whitelisted Paths
+
+The following paths are always accessible (gate does not block):
+- `/health` — Health check endpoint
+- `/static/*` — Static assets (CSS, JS, images)
+- `/logout` — Logout endpoint
+
+### 403 Responses
+
+When access is blocked, the gate returns:
+
+**HTML/Plain text requests:**
+```
+403 Forbidden
+```
+
+**JSON/API requests:**
+```json
+{"error":"forbidden","status":403}
+```
+
+### Configuration
+
+```ini
+# Enable public mode to activate the gate
+WEBUI_PUBLIC_MODE=true
+
+# Access window controlled via Telegram commands:
+# /webui on  - opens the window for 60 minutes
+# /webui off - closes the window immediately
+# /webui status - shows current state
+```
+
+> **Note:** When the access window is open, normal password authentication is still required. The gate only controls *whether* the login page is reachable, not the login itself.
 
 ---
 

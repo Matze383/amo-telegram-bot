@@ -339,7 +339,6 @@ The `/webui` commands allow the owner to control WebUI access via Telegram.
 **Important Notes:**
 - These commands only work in **private chats** with the owner
 - The access window state is persisted in the database (survives bot restarts)
-- **The HTTP request gate is NOT YET implemented** — the WebUI login page is not blocked by this mechanism yet
 
 **Checklist:**
 - [ ] `/webui status` shows CLOSED initially
@@ -351,11 +350,79 @@ The `/webui` commands allow the owner to control WebUI access via Telegram.
 
 ---
 
+### WebUI HTTP Request Gate (Block 3C)
+
+When `WEBUI_PUBLIC_MODE=true`, the HTTP Request Gate blocks access to protected WebUI pages when the access window is closed.
+
+**Prerequisites:**
+- Set `WEBUI_PUBLIC_MODE=true` in `.env`
+- Restart the bot/WebUI
+
+**Test Steps:**
+
+1. **With access window CLOSED:**
+   - Ensure window is closed: `/webui off` in Owner DM
+   - Try to access: `http://127.0.0.1:8080/login`
+   - Expected: **403 Forbidden** page
+
+2. **Protected routes also blocked:**
+   - Try to access: `http://127.0.0.1:8080/groups`
+   - Expected: **403 Forbidden**
+
+3. **Open access window:**
+   - Send: `/webui on` in Owner DM
+   - Try to access: `http://127.0.0.1:8080/login`
+   - Expected: Login page loads normally
+   - Log in with password: Should work as usual
+
+4. **Access window expires or closed:**
+   - Wait for expiration (or send `/webui off`)
+   - Try to access protected pages again
+   - Expected: **403 Forbidden** returned
+
+5. **Whitelisted paths remain accessible:**
+   - With window CLOSED, test:
+     - `http://127.0.0.1:8080/health` — Expected: Health check response (not 403)
+     - `http://127.0.0.1:8080/static/css/style.css` — Expected: Static file served
+     - `/logout` — Expected: Logout works (if logged in before window closed)
+
+6. **JSON/API responses:**
+   - Send request with `Accept: application/json` header to blocked path
+   - Expected: `{"error":"forbidden","status":403}`
+
+**Public Mode Off (default):**
+
+7. **With `WEBUI_PUBLIC_MODE=false`:**
+   - Close access window: `/webui off`
+   - Access `http://127.0.0.1:8080/login`
+   - Expected: Login page loads normally (gate is inactive in non-public mode)
+
+**Checklist:**
+- [ ] Public mode + closed window → `/login` returns 403
+- [ ] Public mode + closed window → `/groups` returns 403
+- [ ] `/webui on` in Owner DM → `/login` becomes reachable
+- [ ] Normal password login works when window is open
+- [ ] `/webui off` or expiration → 403 returned again
+- [ ] `/health` remains reachable when window is closed
+- [ ] Static assets remain reachable when window is closed
+- [ ] JSON requests receive `{"error":"forbidden","status":403}`
+- [ ] Non-public mode (`WEBUI_PUBLIC_MODE=false`) → gate inactive, local usage unchanged
+
+**Important Notes:**
+- The gate is **only active when `WEBUI_PUBLIC_MODE=true`**
+- When the window is open, normal password authentication is still required
+- The gate controls whether the login page is *reachable*, not the login itself
+- For production/internet deployment, a reverse proxy (nginx, Caddy, Traefik) with HTTPS is still required — Flask should not be exposed directly to the internet
+
+**⚠️ Deployment Note:** This feature enables access control for public deployments, but does not replace proper reverse proxy and HTTPS setup. Nginx/internet deployment configuration is outside the scope of this beta.
+
+---
+
 ### Future Features (Not Yet Implemented)
 
 The following features are planned for future releases and are **not available** in the current beta:
 
-- HTTP request gate for WebUI access window (actual blocking of login page) — Block 3 continuation
+- Additional security enhancements — future blocks
 
 ---
 
@@ -372,9 +439,6 @@ The following features are planned for future releases and are **not available**
 - No passwords or sensitive data is logged
 - These events are for internal logging/monitoring and do not affect user-facing behavior
 
-**Not yet implemented:**
-- HTTP request gate (actual blocking of WebUI login page based on access window state)
-
 ---
 
 ### What is NOT Tested in MVP
@@ -386,7 +450,6 @@ The following features are **not** included in the MVP:
 - Production-ready security hardening
 - Chat history for `/ask`
 - Multi-user WebUI (owner login only)
-- Telegram-based WebUI access control (`/webui` commands) — Command path implemented; HTTP gate pending
 
 ---
 
