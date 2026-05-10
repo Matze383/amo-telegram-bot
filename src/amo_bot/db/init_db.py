@@ -77,6 +77,32 @@ def init_db(database_url: str) -> None:
                 )
             )
 
+        if "chat_seen_users" not in existing_tables:
+            connection.execute(
+                text(
+                    """
+                    CREATE TABLE chat_seen_users (
+                        id INTEGER NOT NULL PRIMARY KEY,
+                        chat_id BIGINT NOT NULL,
+                        telegram_user_id BIGINT NOT NULL,
+                        first_seen_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                        last_seen_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                        CONSTRAINT uq_chat_seen_user UNIQUE (chat_id, telegram_user_id),
+                        FOREIGN KEY(chat_id) REFERENCES telegram_chats (chat_id)
+                    )
+                    """
+                )
+            )
+
+        if "chat_seen_users" in existing_tables:
+            existing_indexes = {index["name"] for index in inspector.get_indexes("chat_seen_users")}
+            if "ix_chat_seen_users_chat_id" not in existing_indexes:
+                connection.execute(text("CREATE INDEX ix_chat_seen_users_chat_id ON chat_seen_users (chat_id)"))
+            if "ix_chat_seen_users_telegram_user_id" not in existing_indexes:
+                connection.execute(
+                    text("CREATE INDEX ix_chat_seen_users_telegram_user_id ON chat_seen_users (telegram_user_id)")
+                )
+
         for table_name, migrations in table_column_migrations.items():
             if table_name not in existing_tables:
                 continue

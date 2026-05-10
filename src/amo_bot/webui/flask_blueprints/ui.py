@@ -11,7 +11,12 @@ from wtforms.validators import DataRequired
 from amo_bot.auth.roles import Role
 from amo_bot.config.settings import Settings
 from amo_bot.db.models import GROUP_CHAT_TYPES, User
-from amo_bot.db.repositories import ChatScopedRoleRepository, ChatTopicRepository, UserRoleRepository
+from amo_bot.db.repositories import (
+    ChatScopedRoleRepository,
+    ChatSeenUserRepository,
+    ChatTopicRepository,
+    UserRoleRepository,
+)
 
 F = TypeVar("F", bound=Callable[..., Any])
 
@@ -126,28 +131,44 @@ def groups_page():
         repo = ChatTopicRepository(db_session)
         chats = repo.list_chats()
         users = db_session.query(User).order_by(User.telegram_user_id.asc()).all()
-        user_choices = [(row.telegram_user_id, str(row.telegram_user_id)) for row in users]
+        users_by_id = {row.telegram_user_id: row for row in users}
         scoped_repo = ChatScopedRoleRepository(db_session)
+        seen_repo = ChatSeenUserRepository(db_session)
         group_chat_ids = [chat.chat_id for chat in chats if chat.chat_type in GROUP_CHAT_TYPES]
+
+        seen_user_ids_by_chat: dict[int, set[int]] = {}
+        known_user_ids: set[int] = set()
+        for group_chat_id in group_chat_ids:
+            seen_user_ids = set(seen_repo.list_seen_users_for_chat(chat_id=group_chat_id))
+            seen_user_ids_by_chat[group_chat_id] = seen_user_ids
+            known_user_ids.update(seen_user_ids)
+
         bulk_group_roles = scoped_repo.list_group_roles_for_users(
             chat_ids=group_chat_ids,
-            telegram_user_ids=[row.telegram_user_id for row in users],
+            telegram_user_ids=list(known_user_ids),
         )
 
         for chat in chats:
             topics = repo.list_topics(chat.chat_id)
             group_user_roles: list[dict[str, Any]] = []
             if chat.chat_type in GROUP_CHAT_TYPES:
-                for row in users:
-                    group_role = bulk_group_roles.get((chat.chat_id, row.telegram_user_id))
+                seen_user_ids = seen_user_ids_by_chat.get(chat.chat_id, set())
+                chat_role_rows = scoped_repo.list_group_role_users(chat.chat_id)
+                assigned_user_ids = {row.telegram_user_id for row in chat_role_rows}
+                display_user_ids = sorted(seen_user_ids | assigned_user_ids)
+
+                for user_id in display_user_ids:
+                    row = users_by_id.get(user_id)
+                    group_role = bulk_group_roles.get((chat.chat_id, user_id))
                     group_user_roles.append(
                         {
-                            "telegram_user_id": row.telegram_user_id,
-                            "username": row.username,
-                            "first_name": row.first_name,
-                            "last_name": row.last_name,
+                            "telegram_user_id": user_id,
+                            "username": row.username if row is not None else None,
+                            "first_name": row.first_name if row is not None else None,
+                            "last_name": row.last_name if row is not None else None,
                             "role": group_role.value if group_role is not None else "normal",
                             "is_default": group_role is None,
+                            "seen_in_chat": user_id in seen_user_ids,
                         }
                     )
 
@@ -174,7 +195,7 @@ def groups_page():
             )
 
     group_role_form = GroupRoleForm()
-    group_role_form.telegram_user_id.choices = user_choices
+    group_role_form.telegram_user_id.choices = []
 
     return render_template(
         "groups.html",
@@ -198,8 +219,10 @@ def update_group_role(chat_id: str):
     form = GroupRoleForm()
     session_factory = current_app.extensions["amo.plugin_service"]._session_factory
     with session_factory() as db_session:
-        users = db_session.query(User).order_by(User.telegram_user_id.asc()).all()
-        form.telegram_user_id.choices = [(row.telegram_user_id, str(row.telegram_user_id)) for row in users]
+        seen_user_ids = set(ChatSeenUserRepository(db_session).list_seen_users_for_chat(chat_id=parsed_chat_id))
+        assigned_user_ids = {row.telegram_user_id for row in ChatScopedRoleRepository(db_session).list_group_role_users(parsed_chat_id)}
+        allowed_user_ids = sorted(seen_user_ids | assigned_user_ids)
+        form.telegram_user_id.choices = [(user_id, str(user_id)) for user_id in allowed_user_ids]
 
     if not form.validate_on_submit():
         abort(400, description="invalid group role payload")

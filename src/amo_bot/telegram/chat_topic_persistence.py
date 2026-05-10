@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from sqlalchemy.orm import sessionmaker
 
-from amo_bot.db.repositories import ChatTopicRepository, UserRoleRepository
+from amo_bot.db.models import GROUP_CHAT_TYPES
+from amo_bot.db.repositories import ChatSeenUserRepository, ChatTopicRepository, UserRoleRepository
 from amo_bot.telegram.update_parser import TelegramMessage
 
 
@@ -27,6 +28,11 @@ class ChatTopicPersistenceService:
                 title=message.chat.title,
                 username=message.chat.username,
             )
+            if message.chat.type in GROUP_CHAT_TYPES:
+                ChatSeenUserRepository(session).mark_seen(
+                    chat_id=message.chat.id,
+                    telegram_user_id=message.from_user.id,
+                )
             if message.message_thread_id is not None:
                 repo.upsert_topic(
                     chat_id=message.chat.id,

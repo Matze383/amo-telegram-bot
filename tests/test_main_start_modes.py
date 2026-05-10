@@ -30,6 +30,7 @@ def _set_env(monkeypatch, tmp_path, webui_host: str = "127.0.0.1") -> None:
     monkeypatch.setenv("AMO_PLUGIN_DIR", str(tmp_path / "plugins"))
     monkeypatch.setenv("WEBUI_OWNER_TELEGRAM_ID", "")
     monkeypatch.setenv("WEBUI_HOST", webui_host)
+    monkeypatch.setenv("AMO_ENV_OVERRIDE", "0")
 
 
 def test_run_webui_mode_starts_flask_only(monkeypatch, tmp_path) -> None:

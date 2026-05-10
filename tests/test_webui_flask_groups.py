@@ -8,7 +8,7 @@ from amo_bot.config.settings import Settings
 from amo_bot.db.base import create_session_factory
 from amo_bot.db.init_db import init_db
 from amo_bot.db.models import TelegramChat, TelegramTopic
-from amo_bot.db.repositories import ChatScopedRoleRepository, ChatTopicRepository, UserRoleRepository
+from amo_bot.db.repositories import ChatScopedRoleRepository, ChatSeenUserRepository, ChatTopicRepository, UserRoleRepository
 from amo_bot.webui.flask_app import create_flask_app
 
 
@@ -205,6 +205,10 @@ def test_group_roles_section_renders_and_shows_default(tmp_path) -> None:
     _seed_chat_topic(db_url, -100210, 91)
     _seed_user(db_url, 7001)
 
+    sf = create_session_factory(db_url)
+    with sf() as s:
+        ChatSeenUserRepository(s).mark_seen(chat_id=-100210, telegram_user_id=7001)
+
     settings = _make_settings(db_url, owner_id=777)
     app = create_flask_app(settings=settings)
 
@@ -226,6 +230,10 @@ def test_group_role_set_persists_scoped_to_chat(tmp_path) -> None:
     _seed_chat_topic(db_url, -100212, 93)
     _seed_user(db_url, 7002)
 
+    sf = create_session_factory(db_url)
+    with sf() as s:
+        ChatSeenUserRepository(s).mark_seen(chat_id=-100211, telegram_user_id=7002)
+
     settings = _make_settings(db_url, owner_id=777)
     app = create_flask_app(settings=settings)
 
@@ -241,7 +249,6 @@ def test_group_role_set_persists_scoped_to_chat(tmp_path) -> None:
 
     assert response.status_code == 302
 
-    sf = create_session_factory(db_url)
     with sf() as s:
         repo = ChatScopedRoleRepository(s)
         from amo_bot.auth.roles import Role
@@ -255,6 +262,10 @@ def test_group_role_owner_not_allowed(tmp_path) -> None:
     init_db(db_url)
     _seed_chat_topic(db_url, -100213, 94)
     _seed_user(db_url, 7003)
+
+    sf = create_session_factory(db_url)
+    with sf() as s:
+        ChatSeenUserRepository(s).mark_seen(chat_id=-100213, telegram_user_id=7003)
 
     settings = _make_settings(db_url, owner_id=777)
     app = create_flask_app(settings=settings)
@@ -279,6 +290,10 @@ def test_group_role_set_writes_audit_event(tmp_path) -> None:
     init_db(db_url)
     _seed_chat_topic(db_url, -100215, 96)
     _seed_user(db_url, 7005)
+
+    sf = create_session_factory(db_url)
+    with sf() as s:
+        ChatSeenUserRepository(s).mark_seen(chat_id=-100215, telegram_user_id=7005)
 
     settings = _make_settings(db_url, owner_id=777)
     app = create_flask_app(settings=settings)
@@ -336,7 +351,6 @@ def test_group_role_normal_clears_entry(tmp_path) -> None:
 
     assert response.status_code == 302
 
-    sf = create_session_factory(db_url)
     with sf() as s:
         repo = ChatScopedRoleRepository(s)
         assert repo.get_group_role(chat_id=-100214, telegram_user_id=7004) is None
@@ -382,6 +396,65 @@ def test_group_role_normal_writes_clear_audit_event(tmp_path) -> None:
         assert payload["target_telegram_user_id"] == 7006
         assert payload["new_role"] == "normal"
         assert payload["source"] == "webui"
+
+
+def test_group_roles_only_show_seen_users_per_chat_and_keep_assigned_not_seen(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'groups_roles_seen_filter.db'}"
+    init_db(db_url)
+
+    _seed_chat_topic(db_url, -100301, 101)
+    _seed_chat_topic(db_url, -100302, 102)
+
+    _seed_user(db_url, 7101)
+    _seed_user(db_url, 7102)
+    _seed_user(db_url, 7103)
+    _seed_user(db_url, 7104)
+
+    sf = create_session_factory(db_url)
+    with sf() as s:
+        seen_repo = ChatSeenUserRepository(s)
+        seen_repo.mark_seen(chat_id=-100301, telegram_user_id=7101)
+        seen_repo.mark_seen(chat_id=-100302, telegram_user_id=7102)
+
+        from amo_bot.auth.roles import Role
+
+        ChatScopedRoleRepository(s).set_group_role(chat_id=-100301, telegram_user_id=7104, role=Role.VIP)
+
+    settings = _make_settings(db_url, owner_id=777)
+    app = create_flask_app(settings=settings)
+
+    with app.test_client() as client:
+        _login(client, "test-secret")
+        response = client.get("/groups")
+        html = response.get_data(as_text=True)
+
+        assert response.status_code == 200
+
+        assert "<li><strong>chat_id:</strong> -100301</li>" in html
+        assert "<li><strong>chat_id:</strong> -100302</li>" in html
+
+        sections = html.split('<section style="margin-bottom: 2rem;">')
+        group1_html = next((section for section in sections if "<strong>chat_id:</strong> -100301" in section), "")
+        assert group1_html
+
+        assert "7101" in group1_html
+        assert "7102" not in group1_html
+        assert "7103" not in group1_html
+        assert "7104" in group1_html
+        assert "assigned/not seen" in group1_html
+
+        page = client.get("/groups")
+        token = _extract_csrf_token(page.get_data(as_text=True))
+        clear_response = client.post(
+            "/groups/-100301/roles",
+            data={"telegram_user_id": "7104", "role": "normal", "csrf_token": token},
+            follow_redirects=False,
+        )
+        assert clear_response.status_code == 302
+
+    with sf() as s:
+        repo = ChatScopedRoleRepository(s)
+        assert repo.get_group_role(chat_id=-100301, telegram_user_id=7104) is None
 
 
 def test_topic_metadata_update_missing_topic_returns_404(tmp_path) -> None:

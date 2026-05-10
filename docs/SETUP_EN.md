@@ -353,3 +353,5 @@ After logging in, group roles can be managed under "Groups":
 - `owner` cannot be assigned as a group role (only via `.env`)
 - `normal` removes the group-scoped entry → fallback to `normal`
 - Roles are group-scoped, not global
+
+**Note on user list:** The WebUI only shows users the bot has seen in that group. Existing role assignments remain visible and are marked `[assigned/not seen]` if the user has not yet been active in the group.

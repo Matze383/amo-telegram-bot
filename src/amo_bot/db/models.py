@@ -109,6 +109,17 @@ class ChatUserRole(Base):
     role: Mapped[DbRole] = relationship()
 
 
+class ChatSeenUser(Base):
+    __tablename__ = "chat_seen_users"
+    __table_args__ = (UniqueConstraint("chat_id", "telegram_user_id", name="uq_chat_seen_user"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    chat_id: Mapped[int] = mapped_column(ForeignKey("telegram_chats.chat_id"), index=True, nullable=False)
+    telegram_user_id: Mapped[int] = mapped_column(BigInteger, index=True, nullable=False)
+    first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
 class WebuiAccessWindow(Base):
     __tablename__ = "webui_access_window"
 

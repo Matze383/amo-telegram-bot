@@ -32,7 +32,7 @@
             {{ group_role_form.csrf_token }}
             <select name="telegram_user_id">
               {% for user_role in group.group_user_roles %}
-                <option value="{{ user_role.telegram_user_id }}">{{ user_role.telegram_user_id }}{% if user_role.username %} (@{{ user_role.username }}){% endif %}</option>
+                <option value="{{ user_role.telegram_user_id }}">{{ user_role.telegram_user_id }}{% if user_role.username %} (@{{ user_role.username }}){% endif %}{% if not user_role.seen_in_chat %} [assigned/not seen]{% endif %}</option>
               {% endfor %}
             </select>
             <select name="role">
@@ -60,7 +60,7 @@
                       {% set full_name = ((user_role.first_name or '') ~ ' ' ~ (user_role.last_name or '')).strip() %}
                       {% if user_role.username %}@{{ user_role.username }}{% elif full_name %}{{ full_name }}{% else %}-{% endif %}
                     </td>
-                    <td>{% if user_role.is_default %}normal (default){% else %}{{ user_role.role }}{% endif %}</td>
+                    <td>{% if user_role.is_default %}normal (default){% else %}{{ user_role.role }}{% endif %}{% if not user_role.seen_in_chat %} [assigned/not seen]{% endif %}</td>
                   </tr>
                 {% endfor %}
               </tbody>

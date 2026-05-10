@@ -353,3 +353,5 @@ Nach dem Login unter "Groups" können Gruppenrollen verwaltet werden:
 - `owner` kann nicht als Gruppenrolle vergeben werden (nur via `.env`)
 - `normal` löscht den gruppen-spezifischen Eintrag → Fallback auf `normal`
 - Rollen sind gruppen-spezifisch, nicht global gültig
+
+**Hinweis zur Nutzerliste:** Die WebUI zeigt pro Gruppe nur Nutzer an, die der Bot in dieser Gruppe gesehen hat. Bereits zugewiesene Rollen bleiben sichtbar und werden mit `[zugewiesen/nicht gesehen]` markiert, falls der Nutzer noch nicht in der Gruppe aktiv war.

@@ -10,7 +10,7 @@ from collections.abc import Iterable
 from sqlalchemy.orm import Session
 
 from amo_bot.auth.roles import Role
-from amo_bot.db.models import AuditEvent, ChatUserRole, DbRole, Plugin, TelegramChat, TelegramTopic, User
+from amo_bot.db.models import AuditEvent, ChatSeenUser, ChatUserRole, DbRole, Plugin, TelegramChat, TelegramTopic, User
 
 if TYPE_CHECKING:
     from amo_bot.plugins.manifest import PluginManifest
@@ -217,6 +217,14 @@ class ChatScopedRoleRepository:
         self._session.commit()
         return RoleChangeResult(changed=changed, previous_role=previous_role, new_role=role)
 
+    def list_group_role_users(self, chat_id: int) -> list[User]:
+        return self._session.scalars(
+            select(User)
+            .join(ChatUserRole, ChatUserRole.user_id == User.id)
+            .where(ChatUserRole.chat_id == chat_id)
+            .order_by(User.telegram_user_id.asc())
+        ).all()
+
     def list_group_roles_for_users(
         self,
         *,
@@ -285,6 +293,54 @@ class ChatScopedRoleRepository:
         )
         self._session.commit()
         return True
+
+
+class ChatSeenUserRepository:
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    @staticmethod
+    def _ensure_utc(dt: datetime) -> datetime:
+        if dt.tzinfo is None:
+            return dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+
+    @classmethod
+    def _normalize_row_timestamps(cls, row: ChatSeenUser) -> ChatSeenUser:
+        row.first_seen_at = cls._ensure_utc(row.first_seen_at)
+        row.last_seen_at = cls._ensure_utc(row.last_seen_at)
+        return row
+
+    def mark_seen(self, *, chat_id: int, telegram_user_id: int, seen_at: datetime | None = None) -> ChatSeenUser:
+        seen = self._ensure_utc(seen_at or datetime.now(timezone.utc))
+        row = self._session.scalar(
+            select(ChatSeenUser).where(
+                ChatSeenUser.chat_id == chat_id,
+                ChatSeenUser.telegram_user_id == telegram_user_id,
+            )
+        )
+        if row is None:
+            row = ChatSeenUser(
+                chat_id=chat_id,
+                telegram_user_id=telegram_user_id,
+                first_seen_at=seen,
+                last_seen_at=seen,
+            )
+            self._session.add(row)
+        else:
+            row.last_seen_at = seen
+
+        self._session.commit()
+        self._session.refresh(row)
+        return self._normalize_row_timestamps(row)
+
+    def list_seen_users_for_chat(self, *, chat_id: int) -> list[int]:
+        rows = self._session.scalars(
+            select(ChatSeenUser.telegram_user_id)
+            .where(ChatSeenUser.chat_id == chat_id)
+            .order_by(ChatSeenUser.telegram_user_id.asc())
+        ).all()
+        return list(rows)
 
 
 class ChatTopicRepository:
