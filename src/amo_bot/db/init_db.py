@@ -35,6 +35,29 @@ def init_db(database_url: str) -> None:
 
     with engine.begin() as connection:
         existing_tables = set(inspector.get_table_names())
+
+        if "chat_user_roles" not in existing_tables:
+            connection.execute(
+                text(
+                    """
+                    CREATE TABLE chat_user_roles (
+                        id INTEGER NOT NULL PRIMARY KEY,
+                        chat_id BIGINT NOT NULL,
+                        user_id INTEGER NOT NULL,
+                        role_id INTEGER NOT NULL,
+                        created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                        CONSTRAINT uq_chat_user_role UNIQUE (chat_id, user_id),
+                        FOREIGN KEY(chat_id) REFERENCES telegram_chats (chat_id),
+                        FOREIGN KEY(user_id) REFERENCES users (id),
+                        FOREIGN KEY(role_id) REFERENCES roles (id)
+                    )
+                    """
+                )
+            )
+            connection.execute(text("CREATE INDEX ix_chat_user_roles_chat_id ON chat_user_roles (chat_id)"))
+            connection.execute(text("CREATE INDEX ix_chat_user_roles_user_id ON chat_user_roles (user_id)"))
+
         for table_name, migrations in table_column_migrations.items():
             if table_name not in existing_tables:
                 continue

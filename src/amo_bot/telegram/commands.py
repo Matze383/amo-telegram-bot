@@ -71,7 +71,7 @@ class CommandRegistry:
 
 
 class RoleResolver:
-    async def resolve(self, user_id: int) -> Role:
+    async def resolve(self, user_id: int, *, chat_id: int | None = None, chat_type: str | None = None) -> Role:
         raise NotImplementedError
 
 
@@ -80,7 +80,7 @@ class StaticRoleResolver(RoleResolver):
         self._mapping = mapping or {}
         self._default_role = default_role
 
-    async def resolve(self, user_id: int) -> Role:
+    async def resolve(self, user_id: int, *, chat_id: int | None = None, chat_type: str | None = None) -> Role:
         return self._mapping.get(user_id, self._default_role)
 
 

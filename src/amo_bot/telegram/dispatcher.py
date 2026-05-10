@@ -43,7 +43,11 @@ class Dispatcher:
         if command is None:
             return
 
-        role = await self.role_resolver.resolve(message.from_user.id)
+        role = await self.role_resolver.resolve(
+            message.from_user.id,
+            chat_id=message.chat.id,
+            chat_type=message.chat.type,
+        )
         if not can_use_bot(role):
             return
 

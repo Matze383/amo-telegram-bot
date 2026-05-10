@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 
 from amo_bot.auth.roles import Role
-from amo_bot.db.models import AuditEvent, DbRole, Plugin, TelegramChat, TelegramTopic, User
+from amo_bot.db.models import AuditEvent, ChatUserRole, DbRole, Plugin, TelegramChat, TelegramTopic, User
 
 if TYPE_CHECKING:
     from amo_bot.plugins.manifest import PluginManifest
@@ -140,6 +140,73 @@ class UserRoleRepository:
         self._session.commit()
 
         return RoleChangeResult(changed=changed, previous_role=previous_role, new_role=role)
+
+
+class ChatScopedRoleRepository:
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def get_group_role(self, *, chat_id: int, telegram_user_id: int) -> Role | None:
+        user = self._session.scalar(select(User).where(User.telegram_user_id == telegram_user_id))
+        if user is None:
+            return None
+        row = self._session.scalar(
+            select(ChatUserRole).where(ChatUserRole.chat_id == chat_id, ChatUserRole.user_id == user.id)
+        )
+        if row is None:
+            return None
+        return Role(row.role.name)
+
+    def set_group_role(
+        self,
+        *,
+        chat_id: int,
+        telegram_user_id: int,
+        role: Role,
+    ) -> RoleChangeResult:
+        user = self._session.scalar(select(User).where(User.telegram_user_id == telegram_user_id))
+        if user is None:
+            normal_role = self._session.scalar(select(DbRole).where(DbRole.name == Role.NORMAL.value))
+            if normal_role is None:
+                raise ValueError("role not found in db: normal")
+            user = User(telegram_user_id=telegram_user_id, role_id=normal_role.id)
+            self._session.add(user)
+            self._session.flush()
+
+        role_row = self._session.scalar(select(DbRole).where(DbRole.name == role.value))
+        if role_row is None:
+            raise ValueError(f"role not found in db: {role.value}")
+
+        row = self._session.scalar(
+            select(ChatUserRole).where(ChatUserRole.chat_id == chat_id, ChatUserRole.user_id == user.id)
+        )
+        previous_role: Role | None = None
+        changed = False
+        if row is None:
+            row = ChatUserRole(chat_id=chat_id, user_id=user.id, role_id=role_row.id)
+            self._session.add(row)
+            changed = True
+        else:
+            previous_role = Role(row.role.name)
+            if row.role_id != role_row.id:
+                row.role_id = role_row.id
+                changed = True
+
+        self._session.commit()
+        return RoleChangeResult(changed=changed, previous_role=previous_role, new_role=role)
+
+    def clear_group_role(self, *, chat_id: int, telegram_user_id: int) -> bool:
+        user = self._session.scalar(select(User).where(User.telegram_user_id == telegram_user_id))
+        if user is None:
+            return False
+        row = self._session.scalar(
+            select(ChatUserRole).where(ChatUserRole.chat_id == chat_id, ChatUserRole.user_id == user.id)
+        )
+        if row is None:
+            return False
+        self._session.delete(row)
+        self._session.commit()
+        return True
 
 
 class ChatTopicRepository:

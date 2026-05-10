@@ -9,6 +9,9 @@ from amo_bot.auth.roles import Role
 from amo_bot.db.base import Base
 
 
+GROUP_CHAT_TYPES: tuple[str, ...] = ("group", "supergroup")
+
+
 class DbRole(Base):
     __tablename__ = "roles"
 
@@ -88,6 +91,22 @@ class TelegramChat(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
     )
+
+
+class ChatUserRole(Base):
+    __tablename__ = "chat_user_roles"
+    __table_args__ = (UniqueConstraint("chat_id", "user_id", name="uq_chat_user_role"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    chat_id: Mapped[int] = mapped_column(ForeignKey("telegram_chats.chat_id"), index=True, nullable=False)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True, nullable=False)
+    role_id: Mapped[int] = mapped_column(ForeignKey("roles.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+    role: Mapped[DbRole] = relationship()
 
 
 class TelegramTopic(Base):
