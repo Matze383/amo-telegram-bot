@@ -11,8 +11,8 @@ from amo_bot.ai.service import AIService, OllamaError
 from amo_bot.auth.permissions import ADMIN_ASSIGNABLE_ROLES, can_assign_role, can_use_bot
 from amo_bot.auth.roles import ROLE_PRIORITY, Role
 from amo_bot.db.base import create_session_factory
-from amo_bot.db.models import GROUP_CHAT_TYPES, TelegramChat
-from amo_bot.db.models import AuditEvent
+from amo_bot.db.models import GROUP_CHAT_TYPES, AuditEvent, TelegramChat, User
+from amo_bot.consent import CONSENT_ACCEPTED, CONSENT_DECLINED, CONSENT_PENDING, CONSENT_UNREACHABLE, ConsentService
 from amo_bot.db.repositories import ChatScopedRoleRepository, UserRoleRepository
 from amo_bot.webui.access_window import WebuiAccessWindowService
 
@@ -188,6 +188,51 @@ def create_builtin_registry(database_url: str | None = None, ai_service: AIServi
             return f"role updated: {target_user_id} {prev} -> {result.new_role.value}"
         return f"no change: {target_user_id} already {result.new_role.value}"
 
+    async def accept_handler(ctx: CommandContext) -> str:
+        if session_factory is None:
+            return "consent management not configured"
+        with session_factory() as session:
+            user = session.query(User).filter(User.telegram_user_id == ctx.user_id).one_or_none()
+            if user is None:
+                return "user profile not found yet. send /ping and try again."
+            ConsentService().accept(user)
+            session.commit()
+        return "consent accepted. thanks — you can use /decline anytime to change this."
+
+    async def decline_handler(ctx: CommandContext) -> str:
+        if session_factory is None:
+            return "consent management not configured"
+        with session_factory() as session:
+            user = session.query(User).filter(User.telegram_user_id == ctx.user_id).one_or_none()
+            if user is None:
+                return "user profile not found yet. send /ping and try again."
+            ConsentService().decline(user)
+            session.commit()
+        return "consent declined. you can re-enable later with /accept."
+
+    async def consent_handler(ctx: CommandContext) -> str:
+        if ctx.chat_type != "private":
+            return "for privacy, please use /consent in a private chat with me."
+        if session_factory is None:
+            return "consent management not configured"
+        with session_factory() as session:
+            user = session.query(User).filter(User.telegram_user_id == ctx.user_id).one_or_none()
+            if user is None:
+                return "consent status: unknown\nSend any command in private first, then retry /consent."
+            status = ConsentService().get_status(user)
+
+        explanations = {
+            CONSENT_ACCEPTED: "You agreed to consent.",
+            CONSENT_DECLINED: "You declined consent.",
+            CONSENT_PENDING: "Consent is still pending.",
+            CONSENT_UNREACHABLE: "Consent marked as unreachable.",
+        }
+        return (
+            f"consent status: {status}\n"
+            f"{explanations.get(status, 'Consent status recorded.')}\n"
+            "Use /accept or /decline to change your choice."
+        )
+
     async def ask_handler(ctx: CommandContext) -> str:
         if not ctx.argument or not ctx.argument.strip():
             return "usage: /ask <question>"
@@ -329,6 +374,9 @@ def create_builtin_registry(database_url: str | None = None, ai_service: AIServi
     registry.register(Command(name="ping", description="Health check", allowed_roles=normal_plus, handler=ping_handler))
     registry.register(Command(name="help", description="List available commands", allowed_roles=normal_plus, handler=help_handler))
     registry.register(Command(name="role", description="Show your current role", allowed_roles=normal_plus, handler=role_handler))
+    registry.register(Command(name="accept", description="Accept consent", allowed_roles=normal_plus, handler=accept_handler))
+    registry.register(Command(name="decline", description="Decline consent", allowed_roles=normal_plus, handler=decline_handler))
+    registry.register(Command(name="consent", description="Show consent status", allowed_roles=normal_plus, handler=consent_handler))
     registry.register(Command(name="ask", description="Ask Ollama: /ask <question>", allowed_roles=ask_roles, handler=ask_handler))
     registry.register(
         Command(

@@ -196,7 +196,23 @@ Start a private chat with your bot:
 - Send: `/help`
 - Expected: List of available commands (depends on your role)
 
-**Test 3: /role**
+**Test 3: /consent**
+- Send: `/consent`
+- Expected: Shows your current consent status and available commands
+  - **Private chat**: Full status and details shown
+  - **Groups**: Privacy notice only (no status details shown in groups for data protection)
+
+**Test 4: /accept**
+- Send: `/accept`
+- Expected: Consent accepted confirmation
+- Note: If you previously declined, you can use `/accept` again to re-consent
+
+**Test 5: /decline**
+- Send: `/decline`
+- Expected: Consent declined confirmation
+- Note: You can use `/accept` later if you change your mind
+
+**Test 6: /role**
 - Send: `/role`
 - Expected: Your current role (e.g., "owner")
 
@@ -418,6 +434,46 @@ When `WEBUI_PUBLIC_MODE=true`, the HTTP Request Gate blocks access to protected 
 
 ---
 
+### Consent Commands (Block 1)
+
+The bot now includes user consent management via Telegram commands.
+
+**Test Steps:**
+
+1. **Test `/consent` in private chat:**
+   - Send: `/consent`
+   - Expected: Shows current consent status, details, and available commands
+
+2. **Test `/accept`:**
+   - Send: `/accept`
+   - Expected: Confirmation that consent has been accepted
+
+3. **Test `/decline`:**
+   - Send: `/decline`
+   - Expected: Confirmation that consent has been declined
+
+4. **Test `/consent` after declining:**
+   - Send: `/consent`
+   - Expected: Shows declined status and reminds that you can `/accept` again
+
+5. **Test re-accepting:**
+   - Send: `/accept` (after previously declining)
+   - Expected: Consent accepted again successfully
+
+6. **Test `/consent` in groups:**
+   - Send: `/consent` in a group where the bot is present
+   - Expected: Privacy notice only — no consent status details shown in groups for data protection reasons
+
+**Checklist:**
+- [ ] `/consent` in private chat shows full status
+- [ ] `/accept` confirms consent accepted
+- [ ] `/decline` confirms consent declined
+- [ ] `/consent` shows declined status correctly
+- [ ] `/accept` works after previous decline
+- [ ] `/consent` in groups shows only privacy hint (no details)
+
+---
+
 ### Future Features (Not Yet Implemented)
 
 The following features are planned for future releases and are **not available** in the current beta:
@@ -499,6 +555,9 @@ Use this checklist for your test:
 - [ ] WebUI starts without errors
 - [ ] Private chat /ping: OK
 - [ ] Private chat /help: OK
+- [ ] Private chat /consent: OK
+- [ ] Private chat /accept: OK
+- [ ] Private chat /decline: OK
 - [ ] Private chat /role: OK
 - [ ] Group test /ping: OK
 - [ ] Group test /help: OK

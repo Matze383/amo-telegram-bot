@@ -196,7 +196,23 @@ Starte einen privaten Chat mit deinem Bot:
 - Sende: `/help`
 - Erwartet: Liste der verfügbaren Commands (abhängig von deiner Rolle)
 
-**Test 3: /role**
+**Test 3: /consent**
+- Sende: `/consent`
+- Erwartet: Zeigt deinen aktuellen Consent-Status und verfügbare Commands
+  - **Privater Chat**: Vollständiger Status und Details werden angezeigt
+  - **Gruppen**: Nur Datenschutzhinweis (keine Statusdetails in Gruppen aus Datenschutzgründen)
+
+**Test 4: /accept**
+- Sende: `/accept`
+- Erwartet: Bestätigung, dass Consent akzeptiert wurde
+- Hinweis: Falls du zuvor abgelehnt hast, kannst du später mit `/accept` erneut zustimmen
+
+**Test 5: /decline**
+- Sende: `/decline`
+- Erwartet: Bestätigung, dass Consent abgelehnt wurde
+- Hinweis: Du kannst später mit `/accept` erneut zustimmen, falls du deine Meinung änderst
+
+**Test 6: /role**
 - Sende: `/role`
 - Erwartet: Deine aktuelle Rolle (z.B. "owner")
 
@@ -418,6 +434,46 @@ Wenn `WEBUI_PUBLIC_MODE=true`, blockiert das HTTP-Request-Gate den Zugriff auf g
 
 ---
 
+### Consent Commands (Block 1)
+
+Der Bot enthält nun ein Consent-Management über Telegram-Commands.
+
+**Test-Schritte:**
+
+1. **`/consent` im privaten Chat testen:**
+   - Sende: `/consent`
+   - Erwartet: Zeigt aktuellen Consent-Status, Details und verfügbare Commands
+
+2. **`/accept` testen:**
+   - Sende: `/accept`
+   - Erwartet: Bestätigung, dass Consent akzeptiert wurde
+
+3. **`/decline` testen:**
+   - Sende: `/decline`
+   - Erwartet: Bestätigung, dass Consent abgelehnt wurde
+
+4. **`/consent` nach Ablehnung testen:**
+   - Sende: `/consent`
+   - Erwartet: Zeigt abgelehnten Status und erinnert daran, dass du jederzeit mit `/accept` erneut zustimmen kannst
+
+5. **Erneutes Annehmen testen:**
+   - Sende: `/accept` (nach vorheriger Ablehnung)
+   - Erwartet: Consent erneut erfolgreich akzeptiert
+
+6. **`/consent` in Gruppen testen:**
+   - Sende: `/consent` in einer Gruppe, in der der Bot vorhanden ist
+   - Erwartet: Nur Datenschutzhinweis — keine Consent-Statusdetails in Gruppen aus Datenschutzgründen
+
+**Checkliste:**
+- [ ] `/consent` im privaten Chat zeigt vollständigen Status
+- [ ] `/accept` bestätigt Consent akzeptiert
+- [ ] `/decline` bestätigt Consent abgelehnt
+- [ ] `/consent` zeigt abgelehnten Status korrekt
+- [ ] `/accept` funktioniert nach vorheriger Ablehnung
+- [ ] `/consent` in Gruppen zeigt nur Datenschutzhinweis (keine Details)
+
+---
+
 ### Zukünftige Features (Noch nicht implementiert)
 
 Folgende Features sind für zukünftige Releases geplant und im aktuellen Beta **nicht verfügbar**:
@@ -499,6 +555,9 @@ Nutze diese Checkliste für deinen Test:
 - [ ] WebUI startet ohne Fehler
 - [ ] Privater Chat /ping: OK
 - [ ] Privater Chat /help: OK
+- [ ] Privater Chat /consent: OK
+- [ ] Privater Chat /accept: OK
+- [ ] Privater Chat /decline: OK
 - [ ] Privater Chat /role: OK
 - [ ] Gruppen-Test /ping: OK
 - [ ] Gruppen-Test /help: OK

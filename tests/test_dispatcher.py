@@ -227,3 +227,31 @@ def test_dispatcher_passes_message_thread_id_to_send() -> None:
     asyncio.run(dispatcher.handle_raw_update(raw_update))
 
     assert sent == [(-1003997137641, "pong", 872)]
+
+def test_dispatcher_ignores_messages_from_bot_users() -> None:
+    sent: list[tuple[int, str]] = []
+
+    async def fake_send(chat_id: int, text: str, message_thread_id: int | None = None) -> object:
+        sent.append((chat_id, text, message_thread_id))
+        return {"ok": True}
+
+    dispatcher = Dispatcher(
+        command_registry=create_builtin_registry(),
+        role_resolver=InMemoryRoleResolver({42: Role.NORMAL}),
+        send_text=fake_send,
+        bot_username="BotName",
+    )
+
+    raw_update = {
+        "update_id": 14,
+        "message": {
+            "message_id": 18,
+            "from": {"id": 42, "is_bot": True, "first_name": "T", "username": "tester"},
+            "chat": {"id": 99, "type": "private"},
+            "text": "/ping",
+        },
+    }
+
+    asyncio.run(dispatcher.handle_raw_update(raw_update))
+
+    assert sent == []

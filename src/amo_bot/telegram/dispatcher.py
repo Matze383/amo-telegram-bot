@@ -33,6 +33,9 @@ class Dispatcher:
             return
 
         message = update.message
+        if message.from_user.is_bot:
+            return
+
         if self.message_persistence is not None:
             try:
                 await self.message_persistence.persist_message(message)
