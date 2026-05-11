@@ -509,3 +509,79 @@ def test_dispatcher_ignores_messages_from_bot_users() -> None:
     asyncio.run(dispatcher.handle_raw_update(raw_update))
 
     assert sent == []
+
+
+def test_consent_buttons_notify_owner(tmp_path) -> None:
+    from amo_bot.db.init_db import init_db
+    from amo_bot.db.base import create_session_factory
+    from amo_bot.db.repositories import UserRoleRepository
+    from amo_bot.telegram.owner_notify import OwnerNotifier
+
+    db_url = f"sqlite:///{tmp_path / 'dispatcher_owner_notify_buttons.db'}"
+    init_db(db_url)
+    sf = create_session_factory(db_url)
+    with sf() as session:
+        UserRoleRepository(session).upsert_discovered_user(
+            telegram_user_id=4201,
+            username="u4201",
+            first_name="U",
+            last_name=None,
+        )
+
+    sent_owner: list[str] = []
+
+    async def fake_send(chat_id: int, text: str, message_thread_id: int | None = None) -> object:
+        return {"ok": True}
+
+    async def fake_owner_send(_chat_id: int, text: str) -> object:
+        sent_owner.append(text)
+        return {"ok": True}
+
+    async def fake_answer_callback(callback_query_id: str, text: str | None = None) -> object:
+        return True
+
+    dispatcher = Dispatcher(
+        command_registry=create_builtin_registry(database_url=db_url),
+        role_resolver=InMemoryRoleResolver({4201: Role.NORMAL}),
+        send_text=fake_send,
+        answer_callback=fake_answer_callback,
+        bot_username="BotName",
+        database_url=db_url,
+        owner_notifier=OwnerNotifier(owner_telegram_user_id=9999, send_private_text=fake_owner_send),
+    )
+
+    raw_accept = {
+        "update_id": 901,
+        "callback_query": {
+            "id": "cb-accept",
+            "from": {"id": 4201, "is_bot": False, "first_name": "T", "username": "tester"},
+            "message": {
+                "message_id": 20,
+                "chat": {"id": 4201, "type": "private"},
+                "from": {"id": 99, "is_bot": True, "first_name": "Bot"},
+                "text": "consent",
+            },
+            "data": "consent:accept",
+        },
+    }
+    raw_decline = {
+        "update_id": 902,
+        "callback_query": {
+            "id": "cb-decline",
+            "from": {"id": 4201, "is_bot": False, "first_name": "T", "username": "tester"},
+            "message": {
+                "message_id": 21,
+                "chat": {"id": 4201, "type": "private"},
+                "from": {"id": 99, "is_bot": True, "first_name": "Bot"},
+                "text": "consent",
+            },
+            "data": "consent:decline",
+        },
+    }
+
+    asyncio.run(dispatcher.handle_raw_update(raw_accept))
+    asyncio.run(dispatcher.handle_raw_update(raw_decline))
+
+    assert len(sent_owner) == 2
+    assert "Consent akzeptiert" in sent_owner[0]
+    assert "Consent abgelehnt" in sent_owner[1]

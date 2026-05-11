@@ -117,3 +117,44 @@ def test_consent_shows_status_private_and_privacy_in_group(tmp_path) -> None:
         assert group_out == "for privacy, please use /consent in a private chat with me."
     finally:
         engine.dispose()
+
+
+def test_accept_and_decline_notify_owner(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'consent_owner_notify_cmd.db'}"
+    init_db(db_url)
+    engine = create_engine(db_url)
+    session_factory = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+    owner_messages: list[str] = []
+
+    async def _owner_send(_chat_id: int, text: str) -> object:
+        owner_messages.append(text)
+        return {"ok": True}
+
+    from amo_bot.telegram.owner_notify import OwnerNotifier
+
+    try:
+        with session_factory() as session:
+            UserRoleRepository(session).upsert_discovered_user(
+                telegram_user_id=1004,
+                username="u1004",
+                first_name="U",
+                last_name=None,
+            )
+
+        reg = create_builtin_registry(
+            database_url=db_url,
+            owner_notifier=OwnerNotifier(owner_telegram_user_id=9999, send_private_text=_owner_send),
+        )
+        accept_cmd = reg.get("accept")
+        decline_cmd = reg.get("decline")
+        assert accept_cmd is not None
+        assert decline_cmd is not None
+
+        asyncio.run(accept_cmd.handler(_ctx(command_name="accept", user_id=1004, chat_id=1004)))
+        asyncio.run(decline_cmd.handler(_ctx(command_name="decline", user_id=1004, chat_id=1004)))
+
+        assert len(owner_messages) == 2
+        assert "Consent akzeptiert" in owner_messages[0]
+        assert "Consent abgelehnt" in owner_messages[1]
+    finally:
+        engine.dispose()

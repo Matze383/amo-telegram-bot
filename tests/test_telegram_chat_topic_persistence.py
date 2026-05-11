@@ -550,3 +550,60 @@ def test_reply_to_forum_topic_edited_name_is_persisted(tmp_path) -> None:
         )
         assert topic is not None
         assert topic.telegram_topic_name == "Reply Edited Topic"
+
+def test_new_user_discovery_notifies_owner_once(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'persist_owner_notify_once.db'}"
+    init_db(db_url)
+    sent_owner: list[tuple[int, str]] = []
+
+    async def _owner_send(chat_id: int, text: str) -> object:
+        sent_owner.append((chat_id, text))
+        return {"ok": True}
+
+    from amo_bot.telegram.owner_notify import OwnerNotifier
+    from amo_bot.telegram.update_parser import parse_update
+
+    sf = create_session_factory(db_url)
+    service = ChatTopicPersistenceService(
+        sf,
+        send_private_message=None,
+        owner_notifier=OwnerNotifier(owner_telegram_user_id=9999, send_private_text=_owner_send),
+    )
+
+    msg1 = parse_update(_mk_update(update_id=901, user_id=6001, chat_id=-1005, chat_type="group", title="G"))
+    msg2 = parse_update(_mk_update(update_id=902, user_id=6001, chat_id=-1005, chat_type="group", title="G"))
+    assert msg1 is not None and msg1.message is not None
+    assert msg2 is not None and msg2.message is not None
+
+    asyncio.run(service.persist_message(msg1.message))
+    asyncio.run(service.persist_message(msg2.message))
+
+    assert len(sent_owner) == 1
+    assert sent_owner[0][0] == 9999
+    assert "Neuer User erfasst" in sent_owner[0][1]
+
+
+def test_owner_notify_failure_does_not_break_persistence(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'persist_owner_notify_fail.db'}"
+    init_db(db_url)
+
+    async def _owner_send(_chat_id: int, _text: str) -> object:
+        raise RuntimeError("boom")
+
+    from amo_bot.telegram.owner_notify import OwnerNotifier
+    from amo_bot.telegram.update_parser import parse_update
+
+    sf = create_session_factory(db_url)
+    service = ChatTopicPersistenceService(
+        sf,
+        send_private_message=None,
+        owner_notifier=OwnerNotifier(owner_telegram_user_id=9999, send_private_text=_owner_send),
+    )
+
+    msg = parse_update(_mk_update(update_id=903, user_id=6002, chat_id=6002, chat_type="private"))
+    assert msg is not None and msg.message is not None
+    asyncio.run(service.persist_message(msg.message))
+
+    with sf() as session:
+        user = session.scalar(select(User).where(User.telegram_user_id == 6002))
+        assert user is not None

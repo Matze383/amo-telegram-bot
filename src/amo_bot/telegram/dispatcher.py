@@ -11,6 +11,7 @@ from amo_bot.db.base import create_session_factory
 from amo_bot.db.models import User
 from amo_bot.plugins.command_runtime import CommandActor, CommandInvocation, PluginCommandExecutor
 from amo_bot.telegram.commands import CommandContext, CommandRegistry, RoleResolver
+from amo_bot.telegram.owner_notify import OwnerNotifier
 from amo_bot.telegram.update_parser import TelegramMessage, parse_update
 
 SendTextFn = Callable[[int, str, int | None], Awaitable[object]]
@@ -37,6 +38,7 @@ class Dispatcher:
     message_persistence: MessagePersistence | None = None
     plugin_command_executor: PluginCommandExecutor | None = None
     database_url: str | None = None
+    owner_notifier: OwnerNotifier | None = None
 
     async def handle_raw_update(self, raw_update: object) -> None:
         update = parse_update(raw_update)
@@ -232,6 +234,8 @@ class Dispatcher:
             if data == "consent:accept":
                 consent_service.accept(user)
                 session.commit()
+                if self.owner_notifier is not None:
+                    await self.owner_notifier.notify_consent_decision(user=user, accepted=True, source="button:consent:accept")
                 if self.answer_callback is not None:
                     await self.answer_callback(callback_query.id, "Consent akzeptiert")
                 return
@@ -239,6 +243,8 @@ class Dispatcher:
             if data == "consent:decline":
                 consent_service.decline(user)
                 session.commit()
+                if self.owner_notifier is not None:
+                    await self.owner_notifier.notify_consent_decision(user=user, accepted=False, source="button:consent:decline")
                 if self.answer_callback is not None:
                     await self.answer_callback(callback_query.id, "Consent abgelehnt")
                 return

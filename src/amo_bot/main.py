@@ -19,6 +19,7 @@ from amo_bot.telegram.client import TelegramClient
 from amo_bot.telegram.commands import create_builtin_registry
 from amo_bot.telegram.chat_topic_persistence import ChatTopicPersistenceService
 from amo_bot.telegram.dispatcher import Dispatcher
+from amo_bot.telegram.owner_notify import OwnerNotifier
 from amo_bot.telegram.polling import OffsetStore, run_polling
 from amo_bot.telegram.role_resolver import DBRoleResolver
 from amo_bot.webui.flask_app import create_flask_app
@@ -65,7 +66,19 @@ def run(argv: list[str] | None = None) -> None:
             max_response_chars=settings.ollama_max_response_chars,
         )
     )
-    command_registry = create_builtin_registry(database_url=settings.database_url, ai_service=ai_service)
+    async def send_owner_private_text(chat_id: int, text: str) -> object:
+        return await tg.send_message(chat_id=chat_id, text=text)
+
+    owner_notifier = OwnerNotifier(
+        owner_telegram_user_id=settings.webui_owner_telegram_id,
+        send_private_text=send_owner_private_text,
+    )
+
+    command_registry = create_builtin_registry(
+        database_url=settings.database_url,
+        ai_service=ai_service,
+        owner_notifier=owner_notifier,
+    )
 
     async def send_text(chat_id: int, text: str, message_thread_id: int | None = None) -> object:
         return await tg.send_message(chat_id=chat_id, text=text, message_thread_id=message_thread_id)
@@ -133,9 +146,11 @@ def run(argv: list[str] | None = None) -> None:
         message_persistence=ChatTopicPersistenceService(
             session_factory,
             send_private_message=send_private_text_with_markup,
+            owner_notifier=owner_notifier,
         ),
         plugin_command_executor=plugin_command_executor,
         database_url=settings.database_url,
+        owner_notifier=owner_notifier,
     )
 
     if args.webui:

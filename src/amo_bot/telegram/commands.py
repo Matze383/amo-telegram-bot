@@ -14,6 +14,7 @@ from amo_bot.db.base import create_session_factory
 from amo_bot.db.models import GROUP_CHAT_TYPES, AuditEvent, TelegramChat, User
 from amo_bot.consent import CONSENT_ACCEPTED, CONSENT_DECLINED, CONSENT_PENDING, CONSENT_UNREACHABLE, ConsentService
 from amo_bot.db.repositories import ChatScopedRoleRepository, UserRoleRepository
+from amo_bot.telegram.owner_notify import OwnerNotifier
 from amo_bot.webui.access_window import WebuiAccessWindowService
 
 
@@ -93,7 +94,11 @@ class StaticRoleResolver(RoleResolver):
         return self._mapping.get(user_id, self._default_role)
 
 
-def create_builtin_registry(database_url: str | None = None, ai_service: AIService | None = None) -> CommandRegistry:
+def create_builtin_registry(
+    database_url: str | None = None,
+    ai_service: AIService | None = None,
+    owner_notifier: OwnerNotifier | None = None,
+) -> CommandRegistry:
     registry = CommandRegistry()
     session_factory = create_session_factory(database_url) if database_url else None
 
@@ -197,6 +202,8 @@ def create_builtin_registry(database_url: str | None = None, ai_service: AIServi
                 return "user profile not found yet. send /ping and try again."
             ConsentService().accept(user)
             session.commit()
+            if owner_notifier is not None:
+                await owner_notifier.notify_consent_decision(user=user, accepted=True, source="command:/accept")
         return "consent accepted. thanks — you can use /decline anytime to change this."
 
     async def decline_handler(ctx: CommandContext) -> str:
@@ -208,6 +215,8 @@ def create_builtin_registry(database_url: str | None = None, ai_service: AIServi
                 return "user profile not found yet. send /ping and try again."
             ConsentService().decline(user)
             session.commit()
+            if owner_notifier is not None:
+                await owner_notifier.notify_consent_decision(user=user, accepted=False, source="command:/decline")
         return "consent declined. you can re-enable later with /accept."
 
     async def consent_handler(ctx: CommandContext) -> str:
