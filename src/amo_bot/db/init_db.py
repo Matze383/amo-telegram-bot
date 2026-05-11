@@ -20,6 +20,10 @@ def init_db(database_url: str) -> None:
             "display_name": "ALTER TABLE users ADD COLUMN display_name VARCHAR(255)",
             "first_seen_at": "ALTER TABLE users ADD COLUMN first_seen_at DATETIME",
             "last_seen_at": "ALTER TABLE users ADD COLUMN last_seen_at DATETIME",
+            "consent_status": "ALTER TABLE users ADD COLUMN consent_status VARCHAR(32) NOT NULL DEFAULT 'accepted'",
+            "consent_updated_at": "ALTER TABLE users ADD COLUMN consent_updated_at DATETIME",
+            "consent_prompted_at": "ALTER TABLE users ADD COLUMN consent_prompted_at DATETIME",
+            "consent_prompt_count": "ALTER TABLE users ADD COLUMN consent_prompt_count INTEGER NOT NULL DEFAULT 0",
         },
         "plugins": {
             "next_run_at": "ALTER TABLE plugins ADD COLUMN next_run_at DATETIME",
@@ -110,6 +114,26 @@ def init_db(database_url: str) -> None:
             for column_name, ddl in migrations.items():
                 if column_name not in existing_columns:
                     connection.execute(text(ddl))
+
+        if "users" in existing_tables:
+            connection.execute(
+                text(
+                    """
+                    UPDATE users
+                    SET consent_status = 'accepted'
+                    WHERE consent_status IS NULL OR TRIM(consent_status) = ''
+                    """
+                )
+            )
+            connection.execute(
+                text(
+                    """
+                    UPDATE users
+                    SET consent_prompt_count = 0
+                    WHERE consent_prompt_count IS NULL
+                    """
+                )
+            )
 
     with session_factory() as session:
         for role, prio in DEFAULT_ROLES:

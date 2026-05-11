@@ -36,6 +36,10 @@ class User(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+    consent_status: Mapped[str] = mapped_column(String(32), nullable=False, default="accepted", server_default="accepted")
+    consent_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    consent_prompted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    consent_prompt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
 
     role: Mapped[DbRole] = relationship()
 
