@@ -791,7 +791,12 @@ def test_forbidden_dm_group_fallback_contains_button_url_and_preserves_thread(tm
     chat_id, text, markup, thread_id = sent_group_markup[0]
     assert chat_id == -108101
     assert thread_id == 872
-    assert text == "@u8101 bitte bestätige die Policy kurz privat."
+    assert text == (
+        "Willkommen @u8101 in G. "
+        "Ich bin der KI-Bot der Gruppe. "
+        "Damit du mich nutzen kannst und ich mit dir interagieren kann, "
+        "musst du den Nutzungsbedingungen zustimmen."
+    )
     button = markup["inline_keyboard"][0][0]
     assert button["text"] == "Policy privat öffnen"
     assert button["url"] == "https://t.me/AmoBot?start=consent"
@@ -821,7 +826,17 @@ def test_forbidden_dm_without_bot_username_uses_text_only_fallback(tmp_path) -> 
     )
 
     assert sent_group_markup == []
-    fallback_msgs = [m for m in sent_group_text if m[1] == "@u8102 bitte bestätige die Policy kurz privat."]
+    fallback_msgs = [
+        m
+        for m in sent_group_text
+        if m[1]
+        == (
+            "Willkommen @u8102 in G. "
+            "Ich bin der KI-Bot der Gruppe. "
+            "Damit du mich nutzen kannst und ich mit dir interagieren kann, "
+            "musst du den Nutzungsbedingungen zustimmen."
+        )
+    ]
     assert len(fallback_msgs) == 1
     block_msgs = [m for m in sent_group_text if m[1] == "Bitte kläre Consent privat mit dem Bot."]
     assert len(block_msgs) == 1

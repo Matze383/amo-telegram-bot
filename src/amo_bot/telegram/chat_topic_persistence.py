@@ -98,14 +98,30 @@ class ChatTopicPersistenceService:
 
     def _build_group_unreachable_text(self, *, message: TelegramMessage) -> str:
         mention = self._render_user_mention(message=message)
+        group_label = self._render_group_label(message=message)
         if mention:
-            return f"{mention} bitte bestätige die Policy kurz privat."
-        return "Bitte bestätige die Policy kurz privat."
+            return (
+                f"Willkommen {mention} in {group_label}. "
+                "Ich bin der KI-Bot der Gruppe. "
+                "Damit du mich nutzen kannst und ich mit dir interagieren kann, "
+                "musst du den Nutzungsbedingungen zustimmen."
+            )
+        return (
+            f"Willkommen in {group_label}. "
+            "Ich bin der KI-Bot der Gruppe. "
+            "Damit du mich nutzen kannst und ich mit dir interagieren kann, "
+            "musst du den Nutzungsbedingungen zustimmen."
+        )
 
     def _render_user_mention(self, *, message: TelegramMessage) -> str:
         if message.from_user.username:
             return f"@{message.from_user.username}"
         return ""
+
+    def _render_group_label(self, *, message: TelegramMessage) -> str:
+        if message.chat.title:
+            return message.chat.title
+        return "der Gruppe"
 
     def _build_group_unreachable_markup(self) -> dict[str, object] | None:
         bot_username = (self._bot_username or "").strip().lstrip("@")
