@@ -48,9 +48,15 @@ class ConsentPromptService:
     @staticmethod
     def _build_prompt_text() -> str:
         return (
-            "Hi! Before I can assist you, please confirm consent.\n\n"
-            "Use:\n"
-            "/accept — agree\n"
-            "/decline — decline\n"
-            "/consent — show current status"
+            "Hallo! Bevor ich dir antworten oder deine Nachrichten verarbeiten darf, "
+            "brauche ich kurz dein Einverständnis.\n\n"
+            "Wenn du zustimmst, kann der Bot deine Telegram-Nutzerinformationen "
+            "speichern und verwenden, um Rollen, Gruppenfunktionen und Bot-Antworten "
+            "bereitzustellen.\n\n"
+            "Du kannst zustimmen mit:\n"
+            "/accept\n\n"
+            "Du kannst ablehnen mit:\n"
+            "/decline\n\n"
+            "Deinen aktuellen Status siehst du mit:\n"
+            "/consent"
         )
