@@ -56,10 +56,17 @@ def _mk_update(
     return {"update_id": update_id, "message": message}
 
 
-def _build_dispatcher(db_url: str) -> Dispatcher:
+def _build_dispatcher(db_url: str, sent_private: list[tuple[int, str]] | None = None, private_send_error: Exception | None = None) -> Dispatcher:
     sf = create_session_factory(db_url)
 
     async def _fake_send(_chat_id: int, _text: str, _message_thread_id: int | None = None) -> object:
+        return {"ok": True}
+
+    async def _fake_send_private(chat_id: int, text: str) -> object:
+        if private_send_error is not None:
+            raise private_send_error
+        if sent_private is not None:
+            sent_private.append((chat_id, text))
         return {"ok": True}
 
     return Dispatcher(
@@ -67,7 +74,7 @@ def _build_dispatcher(db_url: str) -> Dispatcher:
         role_resolver=InMemoryRoleResolver({42: Role.NORMAL}),
         send_text=_fake_send,
         bot_username="AmoBot",
-        message_persistence=ChatTopicPersistenceService(sf),
+        message_persistence=ChatTopicPersistenceService(sf, send_private_message=_fake_send_private),
     )
 
 
@@ -292,6 +299,106 @@ def test_followup_message_keeps_declined_and_unreachable_consent_status(tmp_path
         assert unreachable_after is not None
         assert unreachable_after.consent_status == "unreachable"
 
+
+
+
+def test_discovery_pending_user_triggers_private_consent_prompt(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'persist_user_prompt.db'}"
+    init_db(db_url)
+    sent_private: list[tuple[int, str]] = []
+    dispatcher = _build_dispatcher(db_url, sent_private=sent_private)
+
+    asyncio.run(
+        dispatcher.handle_raw_update(
+            _mk_update(update_id=30, user_id=6001, chat_id=-10001, chat_type="supergroup", title="G")
+        )
+    )
+
+    assert len(sent_private) == 1
+    assert sent_private[0][0] == 6001
+    assert "/accept" in sent_private[0][1]
+
+    sf = create_session_factory(db_url)
+    with sf() as session:
+        user = session.scalar(select(User).where(User.telegram_user_id == 6001))
+        assert user is not None
+        assert user.consent_status == "pending"
+        assert user.consent_prompt_count == 1
+        assert user.consent_prompted_at is not None
+
+
+def test_discovery_forbidden_private_dm_marks_unreachable(tmp_path) -> None:
+    from amo_bot.telegram.client import TelegramApiError
+
+    db_url = f"sqlite:///{tmp_path / 'persist_user_unreachable.db'}"
+    init_db(db_url)
+    dispatcher = _build_dispatcher(
+        db_url,
+        private_send_error=TelegramApiError("Forbidden: bot can't initiate conversation with a user"),
+    )
+
+    asyncio.run(
+        dispatcher.handle_raw_update(
+            _mk_update(update_id=31, user_id=6002, chat_id=-10002, chat_type="supergroup", title="G")
+        )
+    )
+
+    sf = create_session_factory(db_url)
+    with sf() as session:
+        user = session.scalar(select(User).where(User.telegram_user_id == 6002))
+        assert user is not None
+        assert user.consent_status == "unreachable"
+
+
+def test_discovery_prompts_only_once_for_pending_user(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'persist_user_prompt_rate_limited.db'}"
+    init_db(db_url)
+    sent_private: list[tuple[int, str]] = []
+    dispatcher = _build_dispatcher(db_url, sent_private=sent_private)
+
+    asyncio.run(
+        dispatcher.handle_raw_update(
+            _mk_update(update_id=32, user_id=6003, chat_id=-10003, chat_type="supergroup", title="G")
+        )
+    )
+    asyncio.run(
+        dispatcher.handle_raw_update(
+            _mk_update(update_id=33, user_id=6003, chat_id=-10003, chat_type="supergroup", title="G")
+        )
+    )
+
+    assert len(sent_private) == 1
+
+
+def test_discovery_prompt_skips_user_with_existing_prompt_count(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'persist_user_prompt_max_count.db'}"
+    init_db(db_url)
+    sent_private: list[tuple[int, str]] = []
+    dispatcher = _build_dispatcher(db_url, sent_private=sent_private)
+
+    sf = create_session_factory(db_url)
+    with sf() as session:
+        from datetime import datetime, timezone
+
+        from amo_bot.db.repositories import UserRoleRepository
+
+        user = UserRoleRepository(session).upsert_discovered_user(
+            telegram_user_id=6004,
+            username="u6004",
+            first_name="U",
+            last_name=None,
+        )
+        user.consent_prompt_count = 1
+        user.consent_prompted_at = datetime.now(timezone.utc)
+        session.commit()
+
+    asyncio.run(
+        dispatcher.handle_raw_update(
+            _mk_update(update_id=34, user_id=6004, chat_id=-10004, chat_type="supergroup", title="G")
+        )
+    )
+
+    assert sent_private == []
 
 def test_topic_name_is_saved_and_preserved_and_updated(tmp_path) -> None:
     db_url = f"sqlite:///{tmp_path / 'persist_topic_name_lifecycle.db'}"

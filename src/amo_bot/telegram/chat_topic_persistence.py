@@ -2,19 +2,22 @@ from __future__ import annotations
 
 from sqlalchemy.orm import sessionmaker
 
+from amo_bot.consent.prompt_service import ConsentPromptService
 from amo_bot.db.models import GROUP_CHAT_TYPES
 from amo_bot.db.repositories import ChatSeenUserRepository, ChatTopicRepository, UserRoleRepository
 from amo_bot.telegram.update_parser import TelegramMessage
 
 
 class ChatTopicPersistenceService:
-    def __init__(self, session_factory: sessionmaker) -> None:
+    def __init__(self, session_factory: sessionmaker, send_private_message=None) -> None:
         self._session_factory = session_factory
+        self._send_private_message = send_private_message
+        self._consent_prompt_service = ConsentPromptService()
 
     async def persist_message(self, message: TelegramMessage) -> None:
         with self._session_factory() as session:
             user_repo = UserRoleRepository(session)
-            user_repo.upsert_discovered_user(
+            user = user_repo.upsert_discovered_user(
                 telegram_user_id=message.from_user.id,
                 username=message.from_user.username,
                 first_name=message.from_user.first_name or None,
@@ -39,3 +42,11 @@ class ChatTopicPersistenceService:
                     message_thread_id=message.message_thread_id,
                     telegram_topic_name=message.telegram_topic_name,
                 )
+
+            if self._send_private_message is not None:
+                await self._consent_prompt_service.maybe_prompt_user(
+                    user=user,
+                    send_private_message=self._send_private_message,
+                )
+
+            session.commit()

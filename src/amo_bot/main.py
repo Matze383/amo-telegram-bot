@@ -104,7 +104,7 @@ def run(argv: list[str] | None = None) -> None:
         role_resolver=role_resolver,
         send_text=send_text,
         bot_username=settings.bot_username,
-        message_persistence=ChatTopicPersistenceService(session_factory),
+        message_persistence=ChatTopicPersistenceService(session_factory, send_private_message=send_text),
         plugin_command_executor=plugin_command_executor,
     )
 

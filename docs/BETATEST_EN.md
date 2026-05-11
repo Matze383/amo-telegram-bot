@@ -474,6 +474,42 @@ The bot now includes user consent management via Telegram commands.
 
 ---
 
+### Automatic Private Consent DM Prompt (Block 2)
+
+The bot automatically sends a private consent prompt to users who are in "pending" status (not yet accepted or declined).
+
+**How it works:**
+- When a pending user is seen in a group, the bot automatically sends them a private DM with a consent notice
+- The DM includes instructions and commands: `/accept`, `/decline`, `/consent`
+- **One-shot policy:** Exactly 1 automatic DM per user — only sent if `consent_prompt_count == 0`. After successful delivery, `prompt_count` is set to 1 and no further automatic DMs are sent.
+- **Unreachable users:** If the bot cannot initiate a private conversation (user hasn't started the bot), the user is marked as `unreachable` and won't receive prompts. The user must start the bot privately and use `/accept` to consent.
+
+**Test Steps:**
+
+1. **Test automatic prompt:**
+   - Have a new user join a group where the bot is present
+   - User should receive exactly one private DM from the bot with the consent notice
+
+2. **Test one-shot policy:**
+   - After receiving the first (and only) automatic prompt, the user will not receive any further automatic DMs
+   - The `consent_prompt_count` is set to 1 after successful delivery
+
+3. **Test unreachable handling:**
+   - If the user hasn't started a private chat with the bot, the DM cannot be delivered
+   - User is marked as `unreachable` in the system
+   - To become reachable and consent, the user must start the bot privately first and use `/accept`
+
+**Checklist:**
+- [ ] Pending users receive exactly one automatic DM prompt when first seen in groups
+- [ ] DM contains `/accept`, `/decline`, `/consent` commands
+- [ ] One-shot policy enforced: only 1 automatic prompt per user (when `consent_prompt_count == 0`)
+- [ ] No automatic retries after successful delivery or failure
+- [ ] Unreachable users are marked appropriately and must start the bot privately to consent
+
+**Note:** Runtime consent gating (blocking access until consent is given) is NOT yet active in this beta.
+
+---
+
 ### Future Features (Not Yet Implemented)
 
 The following features are planned for future releases and are **not available** in the current beta:

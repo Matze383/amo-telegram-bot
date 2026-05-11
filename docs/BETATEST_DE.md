@@ -474,6 +474,42 @@ Der Bot enthält nun ein Consent-Management über Telegram-Commands.
 
 ---
 
+### Automatischer privater Consent-DM-Prompt (Block 2)
+
+Der Bot sendet automatisch einen privaten Consent-Hinweis an Nutzer mit dem Status "pending" (noch nicht akzeptiert oder abgelehnt).
+
+**Funktionsweise:**
+- Wenn ein pending User in einer Gruppe gesehen wird, sendet der Bot automatisch eine private DM mit Consent-Hinweis
+- Die DM enthält Anweisungen und Commands: `/accept`, `/decline`, `/consent`
+- **One-Shot-Policy:** Genau 1 automatische DM pro User — wird nur gesendet wenn `consent_prompt_count == 0`. Nach erfolgreicher Zustellung wird `prompt_count` auf 1 gesetzt, keine weiteren automatischen DMs.
+- **Unerreichbare User:** Wenn der Bot kein privates Gespräch starten kann (User hat den Bot nicht gestartet), wird der User als `unreachable` markiert und erhält keine Prompts. Der User muss den Bot privat starten und `/accept` nutzen, um zu consenten.
+
+**Test-Schritte:**
+
+1. **Automatischen Prompt testen:**
+   - Einen neuen User zu einer Gruppe hinzufügen, in der der Bot ist
+   - User sollte genau eine private DM vom Bot mit dem Consent-Hinweis erhalten
+
+2. **One-Shot-Policy testen:**
+   - Nach Erhalt des ersten (und einzigen) automatischen Prompts erhält der User keine weiteren automatischen DMs
+   - Der `consent_prompt_count` wird nach erfolgreicher Zustellung auf 1 gesetzt
+
+3. **Unerreichbar-Handling testen:**
+   - Wenn der User noch keinen privaten Chat mit dem Bot gestartet hat, kann die DM nicht zugestellt werden
+   - User wird im System als `unreachable` markiert
+   - Um erreichbar zu werden und zu consenten, muss der User den Bot zuerst privat starten und `/accept` nutzen
+
+**Checkliste:**
+- [ ] Pending-User erhalten genau einen automatischen DM-Prompt beim ersten Erscheinen in Gruppen
+- [ ] DM enthält `/accept`, `/decline`, `/consent` Commands
+- [ ] One-Shot-Policy eingehalten: nur 1 automatischer Prompt pro User (bei `consent_prompt_count == 0`)
+- [ ] Keine automatischen Retries nach erfolgreicher Zustellung oder Fehler
+- [ ] Unerreichbare User werden entsprechend markiert und müssen den Bot privat starten, um zu consenten
+
+**Hinweis:** Ein Runtime-Consent-Gate (Zugriffsbeschränkung bis zur Zustimmung) ist in diesem Beta noch NICHT aktiv.
+
+---
+
 ### Zukünftige Features (Noch nicht implementiert)
 
 Folgende Features sind für zukünftige Releases geplant und im aktuellen Beta **nicht verfügbar**:
