@@ -123,7 +123,7 @@ class Dispatcher:
                 if (
                     isinstance(target_user_id, int)
                     and target_user_id > 0
-                    and message.chat.type in {"group", "supergroup"}
+                    and message.chat.id < 0
                     and isinstance(reply_markup, dict)
                     and self.send_private_markup is not None
                 ):

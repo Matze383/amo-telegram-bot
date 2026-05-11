@@ -144,6 +144,50 @@ def test_dispatcher_handles_test_command_in_group_by_sending_private_markup() ->
     assert sent_text == [(-1001, "Ich habe dir den Button-Test privat geschickt.", None)]
 
 
+def test_dispatcher_handles_test_command_in_forum_supergroup_by_sending_private_markup() -> None:
+    sent_text: list[tuple[int, str, int | None]] = []
+    sent_private_markup: list[tuple[int, str, dict[str, object]]] = []
+
+    async def fake_send(chat_id: int, text: str, message_thread_id: int | None = None) -> object:
+        sent_text.append((chat_id, text, message_thread_id))
+        return {"ok": True}
+
+    async def fake_send_private_markup(chat_id: int, text: str, reply_markup: dict[str, object]) -> object:
+        sent_private_markup.append((chat_id, text, reply_markup))
+        return {"ok": True}
+
+    dispatcher = Dispatcher(
+        command_registry=create_builtin_registry(),
+        role_resolver=InMemoryRoleResolver({900000001: Role.ADMIN}),
+        send_text=fake_send,
+        send_markup=None,
+        send_private_markup=fake_send_private_markup,
+        bot_username="BotName",
+    )
+
+    raw_update = {
+        "update_id": 8011,
+        "message": {
+            "message_id": 12,
+            "message_thread_id": 872,
+            "from": {"id": 900000001, "is_bot": False, "first_name": "Matze", "username": "tester"},
+            "chat": {"id": -1003997137641, "type": "supergroup"},
+            "text": "/test",
+        },
+    }
+
+    asyncio.run(dispatcher.handle_raw_update(raw_update))
+
+    assert sent_private_markup == [
+        (
+            900000001,
+            "Inline-Button-Test: Bitte klicken.",
+            {"inline_keyboard": [[{"text": "✅ Test Button", "callback_data": "test:ok"}]]},
+        )
+    ]
+    assert sent_text == [(-1003997137641, "Ich habe dir den Button-Test privat geschickt.", 872)]
+
+
 def test_dispatcher_handles_test_command_in_group_when_private_dm_fails() -> None:
     sent_text: list[tuple[int, str, int | None]] = []
 
