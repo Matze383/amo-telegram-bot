@@ -68,14 +68,29 @@ class TelegramClient:
         text: str,
         reply_to_message_id: int | None = None,
         message_thread_id: int | None = None,
+        reply_markup: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {"chat_id": chat_id, "text": text[:4000]}
         if reply_to_message_id is not None:
             payload["reply_to_message_id"] = reply_to_message_id
         if message_thread_id is not None:
             payload["message_thread_id"] = message_thread_id
+        if reply_markup is not None:
+            payload["reply_markup"] = reply_markup
         result = await self._call("sendMessage", payload)
         return result if isinstance(result, dict) else {}
+
+    async def answer_callback_query(
+        self,
+        callback_query_id: str,
+        text: str | None = None,
+        show_alert: bool = False,
+    ) -> bool:
+        payload: dict[str, Any] = {"callback_query_id": callback_query_id, "show_alert": show_alert}
+        if text is not None:
+            payload["text"] = text[:200]
+        result = await self._call("answerCallbackQuery", payload)
+        return bool(result)
 
     async def get_me(self) -> dict[str, Any]:
         result = await self._call("getMe", {})

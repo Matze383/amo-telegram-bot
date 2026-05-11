@@ -66,9 +66,18 @@ class TelegramMessage:
 
 
 @dataclass(slots=True)
+class TelegramCallbackQuery:
+    id: str
+    from_user: TelegramUser
+    message: TelegramMessage | None
+    data: str | None
+
+
+@dataclass(slots=True)
 class TelegramUpdate:
     update_id: int
     message: TelegramMessage | None
+    callback_query: TelegramCallbackQuery | None
 
 
 def _parse_user(raw: Any) -> TelegramUser | None:
@@ -154,6 +163,29 @@ def _parse_message(raw: Any) -> TelegramMessage | None:
     )
 
 
+def _parse_callback_query(raw: Any) -> TelegramCallbackQuery | None:
+    if not isinstance(raw, dict):
+        return None
+
+    callback_id_raw = raw.get("id")
+    if not isinstance(callback_id_raw, str) or not callback_id_raw:
+        return None
+
+    from_user = _parse_user(raw.get("from"))
+    if from_user is None:
+        return None
+
+    message = _parse_message(raw.get("message"))
+    data_raw = raw.get("data")
+    data = data_raw if isinstance(data_raw, str) else None
+    return TelegramCallbackQuery(
+        id=callback_id_raw,
+        from_user=from_user,
+        message=message,
+        data=data,
+    )
+
+
 def parse_update(raw: Any) -> TelegramUpdate | None:
     if not isinstance(raw, dict):
         return None
@@ -166,4 +198,5 @@ def parse_update(raw: Any) -> TelegramUpdate | None:
     return TelegramUpdate(
         update_id=update_id,
         message=_parse_message(raw.get("message")),
+        callback_query=_parse_callback_query(raw.get("callback_query")),
     )

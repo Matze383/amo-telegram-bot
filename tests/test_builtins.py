@@ -51,3 +51,21 @@ def test_help_admin_contains_setrole() -> None:
     )
     assert out_admin is not None
     assert "/setrole" in out_admin
+    assert "/test" in out_admin
+
+
+def test_test_command_returns_inline_button_markup() -> None:
+    reg = create_builtin_registry()
+    test_cmd = reg.get("test")
+    assert test_cmd is not None
+
+    out = asyncio.run(
+        test_cmd.handler(
+            CommandContext(chat_id=1, user_id=1, role=Role.ADMIN, command_name="test", argument=None)
+        )
+    )
+    assert isinstance(out, dict)
+    assert out.get("text") == "Inline-Button-Test: Bitte klicken."
+    assert out.get("reply_markup") == {
+        "inline_keyboard": [[{"text": "✅ Test Button", "callback_data": "test:ok"}]]
+    }

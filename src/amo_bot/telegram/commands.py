@@ -30,7 +30,7 @@ class CommandContext:
         return "private" if self.chat_id > 0 else "group"
 
 
-CommandHandler = Callable[[CommandContext], Awaitable[str | None]]
+CommandHandler = Callable[[CommandContext], Awaitable[str | dict[str, object] | None]]
 
 
 @dataclass(slots=True)
@@ -358,6 +358,21 @@ def create_builtin_registry(database_url: str | None = None, ai_service: AIServi
             return f"webui access: OPEN (remaining: {remaining_minutes}m)"
         return "webui access: CLOSED"
 
+    async def test_handler(ctx: CommandContext) -> dict[str, object]:
+        return {
+            "text": "Inline-Button-Test: Bitte klicken.",
+            "reply_markup": {
+                "inline_keyboard": [
+                    [
+                        {
+                            "text": "✅ Test Button",
+                            "callback_data": "test:ok",
+                        }
+                    ]
+                ]
+            },
+        }
+
     async def help_handler(ctx: CommandContext) -> str:
         allowed = registry.list_allowed(ctx.role)
         if not allowed:
@@ -384,6 +399,14 @@ def create_builtin_registry(database_url: str | None = None, ai_service: AIServi
             description="Set role: /setrole <telegram_user_id> <role>",
             allowed_roles=admin_plus,
             handler=setrole_handler,
+        )
+    )
+    registry.register(
+        Command(
+            name="test",
+            description="Send inline-button smoke test",
+            allowed_roles=admin_plus,
+            handler=test_handler,
         )
     )
     registry.register(

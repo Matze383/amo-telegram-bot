@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Awaitable, Callable, Protocol
+from typing import Any, Awaitable, Callable, Protocol
 
 from amo_bot.auth.permissions import can_use_bot
 from amo_bot.auth.roles import Role
@@ -14,6 +14,8 @@ from amo_bot.telegram.commands import CommandContext, CommandRegistry, RoleResol
 from amo_bot.telegram.update_parser import TelegramMessage, parse_update
 
 SendTextFn = Callable[[int, str, int | None], Awaitable[object]]
+SendMarkupFn = Callable[[int, str, dict[str, Any], int | None], Awaitable[object]]
+AnswerCallbackFn = Callable[[str, str | None], Awaitable[object]]
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +29,8 @@ class Dispatcher:
     command_registry: CommandRegistry
     role_resolver: RoleResolver
     send_text: SendTextFn
+    send_markup: SendMarkupFn | None = None
+    answer_callback: AnswerCallbackFn | None = None
     bot_username: str | None = None
     message_persistence: MessagePersistence | None = None
     plugin_command_executor: PluginCommandExecutor | None = None
@@ -34,7 +38,15 @@ class Dispatcher:
 
     async def handle_raw_update(self, raw_update: object) -> None:
         update = parse_update(raw_update)
-        if update is None or update.message is None:
+        if update is None:
+            return
+
+        callback_query = update.callback_query
+        if callback_query is not None:
+            await self._handle_callback_query(callback_query)
+            return
+
+        if update.message is None:
             return
 
         message = update.message
@@ -98,8 +110,44 @@ class Dispatcher:
             argument=command.argument,
         )
         response = await command_def.handler(ctx)
+        if isinstance(response, dict):
+            text = response.get("text")
+            reply_markup = response.get("reply_markup")
+            if isinstance(text, str) and text:
+                if isinstance(reply_markup, dict) and self.send_markup is not None:
+                    await self.send_markup(message.chat.id, text, reply_markup, message.message_thread_id)
+                else:
+                    await self.send_text(message.chat.id, text, message.message_thread_id)
+            return
         if response:
             await self.send_text(message.chat.id, response, message.message_thread_id)
+
+    async def _handle_callback_query(self, callback_query: Any) -> None:
+        if callback_query.from_user.is_bot:
+            return
+
+        role = await self.role_resolver.resolve(
+            callback_query.from_user.id,
+            chat_id=callback_query.message.chat.id if callback_query.message is not None else None,
+            chat_type=callback_query.message.chat.type if callback_query.message is not None else None,
+        )
+        if not can_use_bot(role):
+            return
+
+        data = callback_query.data or ""
+        if data != "test:ok":
+            return
+
+        if self.answer_callback is not None:
+            await self.answer_callback(callback_query.id, "Button test ok")
+            return
+
+        if callback_query.message is not None:
+            await self.send_text(
+                callback_query.message.chat.id,
+                "Button test ok",
+                callback_query.message.message_thread_id,
+            )
 
     @staticmethod
     def _is_consent_command(command_name: str) -> bool:

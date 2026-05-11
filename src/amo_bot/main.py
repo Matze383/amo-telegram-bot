@@ -70,6 +70,22 @@ def run(argv: list[str] | None = None) -> None:
     async def send_text(chat_id: int, text: str, message_thread_id: int | None = None) -> object:
         return await tg.send_message(chat_id=chat_id, text=text, message_thread_id=message_thread_id)
 
+    async def send_markup(
+        chat_id: int,
+        text: str,
+        reply_markup: dict[str, object],
+        message_thread_id: int | None = None,
+    ) -> object:
+        return await tg.send_message(
+            chat_id=chat_id,
+            text=text,
+            message_thread_id=message_thread_id,
+            reply_markup=reply_markup,
+        )
+
+    async def answer_callback(callback_query_id: str, text: str | None = None) -> object:
+        return await tg.answer_callback_query(callback_query_id=callback_query_id, text=text)
+
     async def reply_text(
         chat_id: int,
         message_id: int,
@@ -103,6 +119,8 @@ def run(argv: list[str] | None = None) -> None:
         command_registry=command_registry,
         role_resolver=role_resolver,
         send_text=send_text,
+        send_markup=send_markup,
+        answer_callback=answer_callback,
         bot_username=settings.bot_username,
         message_persistence=ChatTopicPersistenceService(session_factory, send_private_message=send_text),
         plugin_command_executor=plugin_command_executor,
