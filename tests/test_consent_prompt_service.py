@@ -59,6 +59,24 @@ def test_pending_user_gets_prompt_with_markup_when_callable_supports_it() -> Non
     }
 
 
+def test_three_arg_callable_with_message_thread_id_is_treated_as_no_markup_support() -> None:
+    svc = ConsentPromptService()
+    user = _user(status="pending")
+    sent: list[tuple[int, str, int | None]] = []
+
+    async def _send(chat_id: int, text: str, message_thread_id: int | None = None) -> None:
+        sent.append((chat_id, text, message_thread_id))
+
+    import asyncio
+    changed = asyncio.run(svc.maybe_prompt_user(user=user, send_private_message=_send))
+
+    assert changed is True
+    assert len(sent) == 1
+    assert sent[0][0] == 123
+    assert "/accept" in sent[0][1]
+    assert sent[0][2] is None
+
+
 def test_non_pending_status_does_not_send(status: str = "accepted") -> None:
     svc = ConsentPromptService()
 

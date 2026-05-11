@@ -85,12 +85,19 @@ class ConsentPromptService:
         if has_varargs:
             return True
 
-        positional_params = [
-            param
-            for param in sig.parameters.values()
-            if param.kind in (param.POSITIONAL_ONLY, param.POSITIONAL_OR_KEYWORD)
-        ]
-        return len(positional_params) >= 3
+        has_varkw = any(param.kind == param.VAR_KEYWORD for param in sig.parameters.values())
+        if has_varkw:
+            return True
+
+        reply_markup_param = sig.parameters.get("reply_markup")
+        if reply_markup_param is None:
+            return False
+
+        return reply_markup_param.kind in (
+            reply_markup_param.POSITIONAL_ONLY,
+            reply_markup_param.POSITIONAL_OR_KEYWORD,
+            reply_markup_param.KEYWORD_ONLY,
+        )
 
     @staticmethod
     def _is_unreachable_error(exc: TelegramApiError) -> bool:

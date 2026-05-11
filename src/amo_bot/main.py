@@ -83,6 +83,13 @@ def run(argv: list[str] | None = None) -> None:
             reply_markup=reply_markup,
         )
 
+    async def send_private_text_with_markup(
+        chat_id: int,
+        text: str,
+        reply_markup: dict[str, object],
+    ) -> object:
+        return await tg.send_message(chat_id=chat_id, text=text, reply_markup=reply_markup)
+
     async def answer_callback(callback_query_id: str, text: str | None = None) -> object:
         return await tg.answer_callback_query(callback_query_id=callback_query_id, text=text)
 
@@ -123,7 +130,10 @@ def run(argv: list[str] | None = None) -> None:
         send_private_markup=send_markup,
         answer_callback=answer_callback,
         bot_username=settings.bot_username,
-        message_persistence=ChatTopicPersistenceService(session_factory, send_private_message=send_text),
+        message_persistence=ChatTopicPersistenceService(
+            session_factory,
+            send_private_message=send_private_text_with_markup,
+        ),
         plugin_command_executor=plugin_command_executor,
         database_url=settings.database_url,
     )
