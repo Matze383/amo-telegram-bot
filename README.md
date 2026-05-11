@@ -21,7 +21,7 @@ Dieses Projekt befindet sich in der frühen Entwicklung. Funktionen können sich
 |---------|-----|-----|
 | 🤖 **Telegram Bot** | Long polling, custom API integration (no external bot library) | Long Polling, eigene API-Integration (ohne externe Bot-Bibliothek) |
 | 🔐 **Role System** | Owner, Admin, VIP, Normal, Ignore — group-scoped and permission-based | Owner, Admin, VIP, Normal, Ignore — gruppenspezifisch und berechtigungsbasiert |
-| ✅ **Consent Management** | `/accept`, `/decline`, `/consent` commands for user consent; automatic one-shot DM prompt for pending users | `/accept`, `/decline`, `/consent` Commands für Nutzer-Consent; automatischer One-Shot-DM-Prompt für Pending-User |
+| ✅ **Consent Management** | `/accept`, `/decline`, `/consent` commands for user consent; automatic one-shot DM prompt for pending users; runtime gate blocks normal usage until consent is accepted (allowed: `/accept`, `/decline`, `/consent`, `/start`) | `/accept`, `/decline`, `/consent` Commands für Nutzer-Consent; automatischer One-Shot-DM-Prompt für Pending-User; Runtime-Gate blockiert normale Nutzung bis Consent akzeptiert ist (erlaubt: `/accept`, `/decline`, `/consent`, `/start`) |
 | 🔌 **Plugin System** | Defensive manifest-based plugin loader | Defensiver, manifest-basierter Plugin-Loader |
 | 🌐 **WebUI** | Local Flask-based management interface | Lokale Flask-basierte Verwaltungsoberfläche |
 | 🤖 **AI Integration** | Optional Ollama `/ask` command (stateless) | Optionales Ollama `/ask` Kommando (stateless) |

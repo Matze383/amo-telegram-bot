@@ -505,8 +505,19 @@ The bot automatically sends a private consent prompt to users who are in "pendin
 - [ ] One-shot policy enforced: only 1 automatic prompt per user (when `consent_prompt_count == 0`)
 - [ ] No automatic retries after successful delivery or failure
 - [ ] Unreachable users are marked appropriately and must start the bot privately to consent
+- [ ] Runtime gate blocks normal usage for `pending`/`declined`/`unreachable` users
+- [ ] Allowed commands work despite gate: `/accept`, `/decline`, `/consent`, `/start`
+- [ ] `accepted` users can use all commands normally
+- [ ] Owner bypass works for consent (owner can always use the bot)
+- [ ] Global `ignore` role remains blocking regardless of consent
 
-**Note:** Runtime consent gating (blocking access until consent is given) is NOT yet active in this beta.
+**Runtime Consent Gate:** The runtime gate is **now active**. Users with status `pending`, `declined`, or `unreachable` cannot use normal bot functions until they `/accept`.
+
+**Allowed commands despite gate:** `/accept`, `/decline`, `/consent`, `/start` — these always work.
+
+**Group behavior:** In groups, only a privacy-preserving notice is shown. No status details are revealed.
+
+**Private block message:** Blocked users in private chats are told to use `/accept` or `/consent`. For `unreachable` users: Start the bot privately first, then `/accept`.
 
 ---
 

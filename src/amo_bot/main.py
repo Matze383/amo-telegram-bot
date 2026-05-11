@@ -106,6 +106,7 @@ def run(argv: list[str] | None = None) -> None:
         bot_username=settings.bot_username,
         message_persistence=ChatTopicPersistenceService(session_factory, send_private_message=send_text),
         plugin_command_executor=plugin_command_executor,
+        database_url=settings.database_url,
     )
 
     if args.webui:

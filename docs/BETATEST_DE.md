@@ -505,8 +505,19 @@ Der Bot sendet automatisch einen privaten Consent-Hinweis an Nutzer mit dem Stat
 - [ ] One-Shot-Policy eingehalten: nur 1 automatischer Prompt pro User (bei `consent_prompt_count == 0`)
 - [ ] Keine automatischen Retries nach erfolgreicher Zustellung oder Fehler
 - [ ] Unerreichbare User werden entsprechend markiert und müssen den Bot privat starten, um zu consenten
+- [ ] Runtime-Gate blockiert normale Nutzung für `pending`/`declined`/`unreachable` User
+- [ ] Erlaubte Commands funktionieren trotz Gate: `/accept`, `/decline`, `/consent`, `/start`
+- [ ] `accepted` User können alle Commands normal nutzen
+- [ ] Owner-Bypass funktioniert für Consent (Owner kann den Bot immer nutzen)
+- [ ] Globale `ignore`-Rolle bleibt blockierend unabhängig vom Consent
 
-**Hinweis:** Ein Runtime-Consent-Gate (Zugriffsbeschränkung bis zur Zustimmung) ist in diesem Beta noch NICHT aktiv.
+**Runtime Consent Gate:** Das Runtime-Gate ist **jetzt aktiv**. Nutzer mit Status `pending`, `declined` oder `unreachable` können normale Bot-Funktionen nicht nutzen, bis sie `/accept` senden.
+
+**Erlaubte Commands trotz Gate:** `/accept`, `/decline`, `/consent`, `/start` — diese funktionieren immer.
+
+**Verhalten in Gruppen:** In Gruppen wird nur ein datenschonender Hinweis gezeigt. Keine Statusdetails werden preisgegeben.
+
+**Private Block-Nachricht:** Blockierte User im privaten Chat werden aufgefordert, `/accept` oder `/consent` zu nutzen. Für `unreachable` User: Bot zuerst privat starten, dann `/accept`.
 
 ---
 
