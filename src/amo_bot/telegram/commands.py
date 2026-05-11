@@ -105,6 +105,50 @@ def create_builtin_registry(
     async def ping_handler(ctx: CommandContext) -> str:
         return "pong"
 
+    async def start_handler(ctx: CommandContext) -> dict[str, object] | str:
+        if session_factory is None:
+            return "consent management not configured"
+        if ctx.chat_type != "private":
+            return "Bitte öffne die Policy privat über den Button."
+
+        with session_factory() as session:
+            user = session.query(User).filter(User.telegram_user_id == ctx.user_id).one_or_none()
+            if user is None:
+                user = UserRoleRepository(session).upsert_discovered_user(
+                    telegram_user_id=ctx.user_id,
+                    username=None,
+                    first_name=None,
+                    last_name=None,
+                )
+                session.commit()
+
+            status = ConsentService().get_status(user)
+            if status == CONSENT_UNREACHABLE:
+                user.consent_status = CONSENT_PENDING
+                session.commit()
+                status = CONSENT_PENDING
+
+        if status == CONSENT_PENDING:
+            return {
+                "text": "Bitte bestätige kurz die Policy, dann geht's weiter.",
+                "reply_markup": {
+                    "inline_keyboard": [
+                        [
+                            {"text": "✅ Akzeptieren", "callback_data": "consent:accept"},
+                            {"text": "❌ Ablehnen", "callback_data": "consent:decline"},
+                        ]
+                    ]
+                },
+            }
+
+        if status == CONSENT_ACCEPTED:
+            return "Consent ist bereits akzeptiert. ✅"
+
+        if status == CONSENT_DECLINED:
+            return "Consent ist aktuell abgelehnt. Du kannst mit /accept wieder zustimmen."
+
+        return "Bitte bestätige zuerst mit /accept oder prüfe /consent."
+
     async def role_handler(ctx: CommandContext) -> str:
         return f"your role: {ctx.role.value}"
 
@@ -403,6 +447,7 @@ def create_builtin_registry(
     registry.register(Command(name="ping", description="Health check", allowed_roles=normal_plus, handler=ping_handler))
     registry.register(Command(name="help", description="List available commands", allowed_roles=normal_plus, handler=help_handler))
     registry.register(Command(name="role", description="Show your current role", allowed_roles=normal_plus, handler=role_handler))
+    registry.register(Command(name="start", description="Start consent flow in private chat", allowed_roles=normal_plus, handler=start_handler))
     registry.register(Command(name="accept", description="Accept consent", allowed_roles=normal_plus, handler=accept_handler))
     registry.register(Command(name="decline", description="Decline consent", allowed_roles=normal_plus, handler=decline_handler))
     registry.register(Command(name="consent", description="Show consent status", allowed_roles=normal_plus, handler=consent_handler))

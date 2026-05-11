@@ -56,10 +56,24 @@ def _mk_update(
     return {"update_id": update_id, "message": message}
 
 
-def _build_dispatcher(db_url: str, sent_private: list[tuple[int, str]] | None = None, private_send_error: Exception | None = None) -> Dispatcher:
+def _build_dispatcher(
+    db_url: str,
+    sent_private: list[tuple[int, str]] | None = None,
+    private_send_error: Exception | None = None,
+    sent_group_markup: list[tuple[int, str, dict[str, object], int | None]] | None = None,
+    sent_group_text: list[tuple[int, str, int | None]] | None = None,
+    bot_username: str | None = "AmoBot",
+) -> Dispatcher:
     sf = create_session_factory(db_url)
 
     async def _fake_send(_chat_id: int, _text: str, _message_thread_id: int | None = None) -> object:
+        if sent_group_text is not None:
+            sent_group_text.append((_chat_id, _text, _message_thread_id))
+        return {"ok": True}
+
+    async def _fake_send_markup(_chat_id: int, _text: str, _reply_markup: dict[str, object], _message_thread_id: int | None = None) -> object:
+        if sent_group_markup is not None:
+            sent_group_markup.append((_chat_id, _text, _reply_markup, _message_thread_id))
         return {"ok": True}
 
     async def _fake_send_private(chat_id: int, text: str) -> object:
@@ -70,11 +84,19 @@ def _build_dispatcher(db_url: str, sent_private: list[tuple[int, str]] | None = 
         return {"ok": True}
 
     return Dispatcher(
-        command_registry=create_builtin_registry(),
+        command_registry=create_builtin_registry(database_url=db_url),
         role_resolver=InMemoryRoleResolver({42: Role.NORMAL}),
         send_text=_fake_send,
-        bot_username="AmoBot",
-        message_persistence=ChatTopicPersistenceService(sf, send_private_message=_fake_send_private),
+        send_markup=_fake_send_markup,
+        bot_username=bot_username,
+        database_url=db_url,
+        message_persistence=ChatTopicPersistenceService(
+            sf,
+            send_private_message=_fake_send_private,
+            send_group_markup=_fake_send_markup,
+            send_group_text=_fake_send,
+            bot_username=bot_username,
+        ),
     )
 
 
@@ -729,3 +751,104 @@ def test_owner_notify_failure_does_not_break_persistence(tmp_path) -> None:
     with sf() as session:
         user = session.scalar(select(User).where(User.telegram_user_id == 6002))
         assert user is not None
+
+
+def test_forbidden_dm_group_fallback_contains_button_url_and_preserves_thread(tmp_path) -> None:
+    from amo_bot.telegram.client import TelegramApiError
+
+    db_url = f"sqlite:///{tmp_path / 'persist_fallback_button_thread.db'}"
+    init_db(db_url)
+    sent_group_markup: list[tuple[int, str, dict[str, object], int | None]] = []
+    sent_group_text: list[tuple[int, str, int | None]] = []
+
+    dispatcher = _build_dispatcher(
+        db_url,
+        sent_group_markup=sent_group_markup,
+        sent_group_text=sent_group_text,
+        private_send_error=TelegramApiError("Forbidden: bot can't initiate conversation with a user"),
+        bot_username="AmoBot",
+    )
+
+    asyncio.run(
+        dispatcher.handle_raw_update(
+            _mk_update(
+                update_id=100,
+                user_id=8101,
+                chat_id=-108101,
+                chat_type="supergroup",
+                title="G",
+                username="grp",
+                message_thread_id=872,
+            )
+        )
+    )
+
+    consent_block_msgs = [m for m in sent_group_text if m[1] == "Bitte kläre Consent privat mit dem Bot."]
+    assert len(consent_block_msgs) == 1
+    assert consent_block_msgs[0][2] == 872
+
+    assert len(sent_group_markup) == 1
+    chat_id, text, markup, thread_id = sent_group_markup[0]
+    assert chat_id == -108101
+    assert thread_id == 872
+    assert text == "@u8101 bitte bestätige die Policy kurz privat."
+    button = markup["inline_keyboard"][0][0]
+    assert button["text"] == "Policy privat öffnen"
+    assert button["url"] == "https://t.me/AmoBot?start=consent"
+    assert "/start" not in text
+
+
+def test_forbidden_dm_without_bot_username_uses_text_only_fallback(tmp_path) -> None:
+    from amo_bot.telegram.client import TelegramApiError
+
+    db_url = f"sqlite:///{tmp_path / 'persist_fallback_text_only.db'}"
+    init_db(db_url)
+    sent_group_markup: list[tuple[int, str, dict[str, object], int | None]] = []
+    sent_group_text: list[tuple[int, str, int | None]] = []
+
+    dispatcher = _build_dispatcher(
+        db_url,
+        sent_group_markup=sent_group_markup,
+        sent_group_text=sent_group_text,
+        private_send_error=TelegramApiError("Forbidden: bot can't initiate conversation with a user"),
+        bot_username=None,
+    )
+
+    asyncio.run(
+        dispatcher.handle_raw_update(
+            _mk_update(update_id=101, user_id=8102, chat_id=-108102, chat_type="supergroup", title="G")
+        )
+    )
+
+    assert sent_group_markup == []
+    fallback_msgs = [m for m in sent_group_text if m[1] == "@u8102 bitte bestätige die Policy kurz privat."]
+    assert len(fallback_msgs) == 1
+    block_msgs = [m for m in sent_group_text if m[1] == "Bitte kläre Consent privat mit dem Bot."]
+    assert len(block_msgs) == 1
+
+
+def test_dm_success_sends_no_group_fallback(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'persist_no_group_fallback_on_dm_success.db'}"
+    init_db(db_url)
+    sent_group_markup: list[tuple[int, str, dict[str, object], int | None]] = []
+    sent_group_text: list[tuple[int, str, int | None]] = []
+    sent_private: list[tuple[int, str]] = []
+
+    dispatcher = _build_dispatcher(
+        db_url,
+        sent_group_markup=sent_group_markup,
+        sent_group_text=sent_group_text,
+        sent_private=sent_private,
+        bot_username="AmoBot",
+    )
+
+    asyncio.run(
+        dispatcher.handle_raw_update(
+            _mk_update(update_id=102, user_id=8103, chat_id=-108103, chat_type="supergroup", title="G")
+        )
+    )
+
+    assert len(sent_private) == 1
+    assert sent_group_markup == []
+    block_msgs = [m for m in sent_group_text if m[1] == "Bitte kläre Consent privat mit dem Bot."]
+    assert len(block_msgs) == 1
