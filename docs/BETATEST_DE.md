@@ -480,9 +480,9 @@ Der Bot sendet automatisch einen privaten Consent-Hinweis an Nutzer mit dem Stat
 
 **Funktionsweise:**
 - Wenn ein pending User in einer Gruppe gesehen wird, sendet der Bot automatisch eine private DM mit Consent-Hinweis
-- Die DM enthält Anweisungen und Commands: `/accept`, `/decline`, `/consent`
+- Die DM enthält **Inline-Buttons** (✅ Akzeptieren / ❌ Ablehnen) für schnelle Zustimmung, plus Fallback-Commands: `/accept`, `/decline`, `/consent`
 - **One-Shot-Policy:** Genau 1 automatische DM pro User — wird nur gesendet wenn `consent_prompt_count == 0`. Nach erfolgreicher Zustellung wird `prompt_count` auf 1 gesetzt, keine weiteren automatischen DMs.
-- **Unerreichbare User:** Wenn der Bot kein privates Gespräch starten kann (User hat den Bot nicht gestartet), wird der User als `unreachable` markiert und erhält keine Prompts. Der User muss den Bot privat starten und `/accept` nutzen, um zu consenten.
+- **Unerreichbare User:** Wenn der Bot kein privates Gespräch starten kann (User hat den Bot nicht gestartet), wird der User als `unreachable` markiert und erhält keine Prompts. Der User muss den Bot privat starten und `/accept` (oder den Akzeptieren-Button) nutzen, um zu consenten.
 
 **Test-Schritte:**
 
@@ -501,7 +501,9 @@ Der Bot sendet automatisch einen privaten Consent-Hinweis an Nutzer mit dem Stat
 
 **Checkliste:**
 - [ ] Pending-User erhalten genau einen automatischen DM-Prompt beim ersten Erscheinen in Gruppen
-- [ ] DM enthält `/accept`, `/decline`, `/consent` Commands
+- [ ] DM enthält **Inline-Buttons** (Akzeptieren/Ablehnen) und `/accept`, `/decline`, `/consent` Fallback-Commands
+- [ ] Inline-Buttons funktionieren: Akzeptieren-Button setzt Consent auf akzeptiert, Ablehnen-Button setzt Consent auf abgelehnt
+- [ ] Fallback-Commands bleiben nutzbar neben Buttons
 - [ ] One-Shot-Policy eingehalten: nur 1 automatischer Prompt pro User (bei `consent_prompt_count == 0`)
 - [ ] Keine automatischen Retries nach erfolgreicher Zustellung oder Fehler
 - [ ] Unerreichbare User werden entsprechend markiert und müssen den Bot privat starten, um zu consenten

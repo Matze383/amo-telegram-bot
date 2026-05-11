@@ -135,6 +135,11 @@ class Dispatcher:
             return
 
         data = callback_query.data or ""
+
+        if data in {"consent:accept", "consent:decline"}:
+            await self._handle_consent_callback(callback_query=callback_query, role=role, data=data)
+            return
+
         if data != "test:ok":
             return
 
@@ -148,6 +153,35 @@ class Dispatcher:
                 "Button test ok",
                 callback_query.message.message_thread_id,
             )
+
+    async def _handle_consent_callback(self, *, callback_query: Any, role: Role, data: str) -> None:
+        if self.database_url is None:
+            if self.answer_callback is not None:
+                await self.answer_callback(callback_query.id, "Consent nicht verfügbar")
+            return
+
+        session_factory = create_session_factory(self.database_url)
+        with session_factory() as session:
+            user = session.query(User).filter(User.telegram_user_id == callback_query.from_user.id).one_or_none()
+            if user is None:
+                if self.answer_callback is not None:
+                    await self.answer_callback(callback_query.id, "Profil nicht gefunden")
+                return
+
+            consent_service = ConsentService()
+            if data == "consent:accept":
+                consent_service.accept(user)
+                session.commit()
+                if self.answer_callback is not None:
+                    await self.answer_callback(callback_query.id, "Consent akzeptiert")
+                return
+
+            if data == "consent:decline":
+                consent_service.decline(user)
+                session.commit()
+                if self.answer_callback is not None:
+                    await self.answer_callback(callback_query.id, "Consent abgelehnt")
+                return
 
     @staticmethod
     def _is_consent_command(command_name: str) -> bool:

@@ -480,9 +480,9 @@ The bot automatically sends a private consent prompt to users who are in "pendin
 
 **How it works:**
 - When a pending user is seen in a group, the bot automatically sends them a private DM with a consent notice
-- The DM includes instructions and commands: `/accept`, `/decline`, `/consent`
+- The DM includes **inline buttons** (✅ Accept / ❌ Decline) for quick consent, plus fallback commands: `/accept`, `/decline`, `/consent`
 - **One-shot policy:** Exactly 1 automatic DM per user — only sent if `consent_prompt_count == 0`. After successful delivery, `prompt_count` is set to 1 and no further automatic DMs are sent.
-- **Unreachable users:** If the bot cannot initiate a private conversation (user hasn't started the bot), the user is marked as `unreachable` and won't receive prompts. The user must start the bot privately and use `/accept` to consent.
+- **Unreachable users:** If the bot cannot initiate a private conversation (user hasn't started the bot), the user is marked as `unreachable` and won't receive prompts. The user must start the bot privately and use `/accept` (or the Accept button) to consent.
 
 **Test Steps:**
 
@@ -501,7 +501,9 @@ The bot automatically sends a private consent prompt to users who are in "pendin
 
 **Checklist:**
 - [ ] Pending users receive exactly one automatic DM prompt when first seen in groups
-- [ ] DM contains `/accept`, `/decline`, `/consent` commands
+- [ ] DM contains **inline buttons** (Accept/Decline) and `/accept`, `/decline`, `/consent` fallback commands
+- [ ] Inline buttons work: Accept button sets consent to accepted, Decline button sets consent to declined
+- [ ] Fallback commands remain usable alongside buttons
 - [ ] One-shot policy enforced: only 1 automatic prompt per user (when `consent_prompt_count == 0`)
 - [ ] No automatic retries after successful delivery or failure
 - [ ] Unreachable users are marked appropriately and must start the bot privately to consent
