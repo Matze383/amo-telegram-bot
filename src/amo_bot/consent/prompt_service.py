@@ -37,8 +37,8 @@ class ConsentPromptService:
             await self._send_prompt_message(
                 send_private_message=send_private_message,
                 chat_id=user.telegram_user_id,
-                text=self._build_prompt_text(),
-                reply_markup=self._build_prompt_markup(),
+                text=self.build_prompt_text(),
+                reply_markup=self.build_prompt_markup(),
             )
         except TelegramApiError as exc:
             if self._is_unreachable_error(exc):
@@ -105,7 +105,7 @@ class ConsentPromptService:
         return "forbidden" in msg and ("can't initiate conversation" in msg or "cannot initiate conversation" in msg)
 
     @staticmethod
-    def _build_prompt_markup() -> dict[str, object]:
+    def build_prompt_markup() -> dict[str, object]:
         return {
             "inline_keyboard": [
                 [
@@ -116,7 +116,7 @@ class ConsentPromptService:
         }
 
     @staticmethod
-    def _build_prompt_text() -> str:
+    def build_prompt_text() -> str:
         return (
             "Hallo! Bevor ich dir antworten oder deine Nachrichten verarbeiten darf, "
             "brauche ich kurz dein Einverständnis.\n\n"

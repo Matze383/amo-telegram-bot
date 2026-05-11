@@ -13,6 +13,7 @@ from amo_bot.auth.roles import ROLE_PRIORITY, Role
 from amo_bot.db.base import create_session_factory
 from amo_bot.db.models import GROUP_CHAT_TYPES, AuditEvent, TelegramChat, User
 from amo_bot.consent import CONSENT_ACCEPTED, CONSENT_DECLINED, CONSENT_PENDING, CONSENT_UNREACHABLE, ConsentService
+from amo_bot.consent.prompt_service import ConsentPromptService
 from amo_bot.db.repositories import ChatScopedRoleRepository, UserRoleRepository
 from amo_bot.telegram.owner_notify import OwnerNotifier
 from amo_bot.webui.access_window import WebuiAccessWindowService
@@ -130,15 +131,8 @@ def create_builtin_registry(
 
         if status == CONSENT_PENDING:
             return {
-                "text": "Bitte bestätige kurz die Policy, dann geht's weiter.",
-                "reply_markup": {
-                    "inline_keyboard": [
-                        [
-                            {"text": "✅ Akzeptieren", "callback_data": "consent:accept"},
-                            {"text": "❌ Ablehnen", "callback_data": "consent:decline"},
-                        ]
-                    ]
-                },
+                "text": ConsentPromptService.build_prompt_text(),
+                "reply_markup": ConsentPromptService.build_prompt_markup(),
             }
 
         if status == CONSENT_ACCEPTED:
@@ -147,7 +141,10 @@ def create_builtin_registry(
         if status == CONSENT_DECLINED:
             return "Consent ist aktuell abgelehnt. Du kannst mit /accept wieder zustimmen."
 
-        return "Bitte bestätige zuerst mit /accept oder prüfe /consent."
+        return {
+            "text": ConsentPromptService.build_prompt_text(),
+            "reply_markup": ConsentPromptService.build_prompt_markup(),
+        }
 
     async def role_handler(ctx: CommandContext) -> str:
         return f"your role: {ctx.role.value}"

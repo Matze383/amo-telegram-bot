@@ -4,6 +4,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from amo_bot.auth.roles import Role
+from amo_bot.consent.prompt_service import ConsentPromptService
 from amo_bot.db.init_db import init_db
 from amo_bot.db.models import User
 from amo_bot.db.repositories import UserRoleRepository
@@ -182,7 +183,7 @@ def test_start_private_pending_returns_policy_buttons(tmp_path) -> None:
 
         out = asyncio.run(cmd.handler(_ctx(command_name="start", user_id=1101, chat_id=1101)))
         assert isinstance(out, dict)
-        assert out["text"] == "Bitte bestätige kurz die Policy, dann geht's weiter."
+        assert out["text"] == ConsentPromptService.build_prompt_text()
         markup = out.get("reply_markup")
         assert isinstance(markup, dict)
         assert markup["inline_keyboard"][0][0]["callback_data"] == "consent:accept"
@@ -213,7 +214,11 @@ def test_start_private_unreachable_resets_to_pending_and_returns_buttons(tmp_pat
 
         out = asyncio.run(cmd.handler(_ctx(command_name="start", user_id=1102, chat_id=1102)))
         assert isinstance(out, dict)
-        assert out["text"] == "Bitte bestätige kurz die Policy, dann geht's weiter."
+        assert out["text"] == ConsentPromptService.build_prompt_text()
+        markup = out.get("reply_markup")
+        assert isinstance(markup, dict)
+        assert markup["inline_keyboard"][0][0]["callback_data"] == "consent:accept"
+        assert markup["inline_keyboard"][0][1]["callback_data"] == "consent:decline"
 
         with session_factory() as session:
             user = session.query(User).filter_by(telegram_user_id=1102).one()
@@ -234,7 +239,11 @@ def test_start_private_unknown_user_creates_profile_and_returns_buttons(tmp_path
 
         out = asyncio.run(cmd.handler(_ctx(command_name="start", user_id=1103, chat_id=1103)))
         assert isinstance(out, dict)
-        assert out["text"] == "Bitte bestätige kurz die Policy, dann geht's weiter."
+        assert out["text"] == ConsentPromptService.build_prompt_text()
+        markup = out.get("reply_markup")
+        assert isinstance(markup, dict)
+        assert markup["inline_keyboard"][0][0]["callback_data"] == "consent:accept"
+        assert markup["inline_keyboard"][0][1]["callback_data"] == "consent:decline"
 
         with session_factory() as session:
             user = session.query(User).filter_by(telegram_user_id=1103).one_or_none()
