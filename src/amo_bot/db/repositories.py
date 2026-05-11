@@ -10,6 +10,7 @@ from collections.abc import Iterable
 from sqlalchemy.orm import Session
 
 from amo_bot.auth.roles import Role
+from amo_bot.consent import ConsentService
 from amo_bot.db.models import AuditEvent, ChatSeenUser, ChatUserRole, DbRole, Plugin, TelegramChat, TelegramTopic, User
 
 if TYPE_CHECKING:
@@ -60,6 +61,7 @@ class UserRoleRepository:
     ) -> User:
         seen = seen_at or datetime.now(timezone.utc)
         user = self._session.scalar(select(User).where(User.telegram_user_id == telegram_user_id))
+        is_new_user = user is None
 
         if user is None:
             normal_role = self._session.scalar(select(DbRole).where(DbRole.name == Role.NORMAL.value))
@@ -80,6 +82,9 @@ class UserRoleRepository:
             user.first_name = first_name
             user.last_name = last_name
             user.last_seen_at = seen
+
+        if is_new_user:
+            ConsentService().ensure_pending_for_new_user(user, now=seen)
 
         self._session.commit()
         return user

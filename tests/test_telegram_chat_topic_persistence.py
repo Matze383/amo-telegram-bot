@@ -186,6 +186,7 @@ def test_new_message_auto_discovers_user_with_default_normal_role(tmp_path) -> N
         assert user.last_name == "A"
         assert user.first_seen_at is not None
         assert user.last_seen_at is not None
+        assert user.consent_status == "pending"
 
 
 def test_followup_message_updates_profile_and_last_seen_without_overwriting_role(tmp_path) -> None:
@@ -226,6 +227,70 @@ def test_followup_message_updates_profile_and_last_seen_without_overwriting_role
         assert after.last_seen_at is not None
         assert before_seen is not None
         assert after.last_seen_at >= before_seen
+        assert after.consent_status == "pending"
+
+
+def test_followup_message_keeps_declined_and_unreachable_consent_status(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'persist_user_discovery_consent_preserve.db'}"
+    init_db(db_url)
+    dispatcher = _build_dispatcher(db_url)
+
+    sf = create_session_factory(db_url)
+    with sf() as session:
+        from amo_bot.db.repositories import UserRoleRepository
+
+        repo = UserRoleRepository(session)
+        repo.upsert_discovered_user(
+            telegram_user_id=4545,
+            username="u4545",
+            first_name="Declined",
+            last_name="User",
+        )
+
+    with sf() as session:
+        declined = session.scalar(select(User).where(User.telegram_user_id == 4545))
+        assert declined is not None
+        declined.consent_status = "declined"
+        session.commit()
+
+    asyncio.run(
+        dispatcher.handle_raw_update(
+            _mk_update(update_id=23, user_id=4545, chat_id=502, chat_type="private", first_name="Declined", last_name="Again")
+        )
+    )
+
+    with sf() as session:
+        declined_after = session.scalar(select(User).where(User.telegram_user_id == 4545))
+        assert declined_after is not None
+        assert declined_after.consent_status == "declined"
+
+    with sf() as session:
+        from amo_bot.db.repositories import UserRoleRepository
+
+        repo = UserRoleRepository(session)
+        repo.upsert_discovered_user(
+            telegram_user_id=4646,
+            username="u4646",
+            first_name="Unreachable",
+            last_name="User",
+        )
+
+    with sf() as session:
+        unreachable = session.scalar(select(User).where(User.telegram_user_id == 4646))
+        assert unreachable is not None
+        unreachable.consent_status = "unreachable"
+        session.commit()
+
+    asyncio.run(
+        dispatcher.handle_raw_update(
+            _mk_update(update_id=24, user_id=4646, chat_id=503, chat_type="private", first_name="Unreachable", last_name="Again")
+        )
+    )
+
+    with sf() as session:
+        unreachable_after = session.scalar(select(User).where(User.telegram_user_id == 4646))
+        assert unreachable_after is not None
+        assert unreachable_after.consent_status == "unreachable"
 
 
 def test_topic_name_is_saved_and_preserved_and_updated(tmp_path) -> None:
