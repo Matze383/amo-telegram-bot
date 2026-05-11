@@ -6,8 +6,12 @@ venv/
 .pytest_cache/
 .mypy_cache/
 .env
+.env.backup-*
 .state/
 data/
+logs/
+tmp/
+docs/Docs_Check_Report.md
 *.db
 *.sqlite
 *.sqlite3
