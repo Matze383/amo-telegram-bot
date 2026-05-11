@@ -61,11 +61,12 @@ class OwnerNotifier:
         username = f"@{user.username}" if user.username else "-"
         full_name = f"{(user.first_name or '-')} {(user.last_name or '-')}".strip()
         text = (
-            "⚠️ Consent DM nicht zustellbar\n"
+            "⚠️ Policy-DM nicht zustellbar\n"
             f"id: {user.telegram_user_id}\n"
             f"username: {username}\n"
             f"name: {full_name}\n"
-            f"status: {user.consent_status or 'unknown'}"
+            f"status: {user.consent_status or 'unknown'}\n"
+            "aktion: User muss den Bot privat mit /start öffnen"
         )
         if reason:
             text += f"\nreason: {reason}"

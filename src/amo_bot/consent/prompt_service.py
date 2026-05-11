@@ -30,9 +30,9 @@ class ConsentPromptService:
         *,
         user: User,
         send_private_message: SendPrivateMessageFn | SendPrivateMessageWithMarkupFn,
-    ) -> bool:
+    ) -> str:
         if not self._is_eligible(user):
-            return False
+            return "skipped"
         try:
             await self._send_prompt_message(
                 send_private_message=send_private_message,
@@ -43,11 +43,11 @@ class ConsentPromptService:
         except TelegramApiError as exc:
             if self._is_unreachable_error(exc):
                 self._consent_service.mark_unreachable(user)
-                return False
+                return "unreachable"
             raise
 
         self._consent_service.record_prompt(user)
-        return True
+        return "prompted"
 
     def _is_eligible(self, user: User) -> bool:
         status = self._consent_service.get_status(user)

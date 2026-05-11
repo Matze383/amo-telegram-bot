@@ -329,12 +329,34 @@ def test_discovery_pending_user_triggers_private_consent_prompt(tmp_path) -> Non
 
 def test_discovery_forbidden_private_dm_marks_unreachable(tmp_path) -> None:
     from amo_bot.telegram.client import TelegramApiError
+    from amo_bot.telegram.owner_notify import OwnerNotifier
 
     db_url = f"sqlite:///{tmp_path / 'persist_user_unreachable.db'}"
     init_db(db_url)
-    dispatcher = _build_dispatcher(
-        db_url,
-        private_send_error=TelegramApiError("Forbidden: bot can't initiate conversation with a user"),
+    sent_owner: list[tuple[int, str]] = []
+
+    async def _owner_send(chat_id: int, text: str) -> object:
+        sent_owner.append((chat_id, text))
+        return {"ok": True}
+
+    sf = create_session_factory(db_url)
+
+    async def _fake_send(_chat_id: int, _text: str, _message_thread_id: int | None = None) -> object:
+        return {"ok": True}
+
+    async def _fake_send_private(_chat_id: int, _text: str) -> object:
+        raise TelegramApiError("Forbidden: bot can't initiate conversation with a user")
+
+    dispatcher = Dispatcher(
+        command_registry=create_builtin_registry(),
+        role_resolver=InMemoryRoleResolver({42: Role.NORMAL}),
+        send_text=_fake_send,
+        bot_username="AmoBot",
+        message_persistence=ChatTopicPersistenceService(
+            sf,
+            send_private_message=_fake_send_private,
+            owner_notifier=OwnerNotifier(owner_telegram_user_id=9999, send_private_text=_owner_send),
+        ),
     )
 
     asyncio.run(
@@ -348,6 +370,15 @@ def test_discovery_forbidden_private_dm_marks_unreachable(tmp_path) -> None:
         user = session.scalar(select(User).where(User.telegram_user_id == 6002))
         assert user is not None
         assert user.consent_status == "unreachable"
+        assert user.consent_prompt_count == 0
+        assert user.consent_prompted_at is None
+
+    assert len(sent_owner) == 2
+    assert sent_owner[0][0] == 9999
+    assert "Neuer User erfasst" in sent_owner[0][1]
+    assert sent_owner[1][0] == 9999
+    assert "Policy-DM nicht zustellbar" in sent_owner[1][1]
+    assert "/start" in sent_owner[1][1]
 
 
 def test_discovery_prompts_only_once_for_pending_user(tmp_path) -> None:
@@ -581,6 +612,97 @@ def test_new_user_discovery_notifies_owner_once(tmp_path) -> None:
     assert len(sent_owner) == 1
     assert sent_owner[0][0] == 9999
     assert "Neuer User erfasst" in sent_owner[0][1]
+
+
+def test_repeated_message_from_unreachable_user_does_not_notify_owner_again(tmp_path) -> None:
+    from amo_bot.telegram.client import TelegramApiError
+    from amo_bot.telegram.owner_notify import OwnerNotifier
+
+    db_url = f"sqlite:///{tmp_path / 'persist_owner_notify_unreachable_once.db'}"
+    init_db(db_url)
+    sent_owner: list[tuple[int, str]] = []
+
+    async def _owner_send(chat_id: int, text: str) -> object:
+        sent_owner.append((chat_id, text))
+        return {"ok": True}
+
+    sf = create_session_factory(db_url)
+
+    async def _fake_send(_chat_id: int, _text: str, _message_thread_id: int | None = None) -> object:
+        return {"ok": True}
+
+    async def _fake_send_private(_chat_id: int, _text: str) -> object:
+        raise TelegramApiError("Forbidden: bot can't initiate conversation with a user")
+
+    dispatcher = Dispatcher(
+        command_registry=create_builtin_registry(),
+        role_resolver=InMemoryRoleResolver({42: Role.NORMAL}),
+        send_text=_fake_send,
+        bot_username="AmoBot",
+        message_persistence=ChatTopicPersistenceService(
+            sf,
+            send_private_message=_fake_send_private,
+            owner_notifier=OwnerNotifier(owner_telegram_user_id=9999, send_private_text=_owner_send),
+        ),
+    )
+
+    asyncio.run(
+        dispatcher.handle_raw_update(
+            _mk_update(update_id=904, user_id=7001, chat_id=-1006, chat_type="supergroup", title="G")
+        )
+    )
+    asyncio.run(
+        dispatcher.handle_raw_update(
+            _mk_update(update_id=905, user_id=7001, chat_id=-1006, chat_type="supergroup", title="G")
+        )
+    )
+
+    unreachable_notifies = [text for _, text in sent_owner if "Policy-DM nicht zustellbar" in text]
+    assert len(unreachable_notifies) == 1
+
+
+def test_owner_unreachable_notify_failure_does_not_break_persistence(tmp_path) -> None:
+    from amo_bot.telegram.client import TelegramApiError
+    from amo_bot.telegram.owner_notify import OwnerNotifier
+
+    db_url = f"sqlite:///{tmp_path / 'persist_owner_unreachable_notify_fail.db'}"
+    init_db(db_url)
+
+    async def _owner_send(_chat_id: int, text: str) -> object:
+        if "Policy-DM nicht zustellbar" in text:
+            raise RuntimeError("boom")
+        return {"ok": True}
+
+    sf = create_session_factory(db_url)
+
+    async def _fake_send(_chat_id: int, _text: str, _message_thread_id: int | None = None) -> object:
+        return {"ok": True}
+
+    async def _fake_send_private(_chat_id: int, _text: str) -> object:
+        raise TelegramApiError("Forbidden: bot can't initiate conversation with a user")
+
+    dispatcher = Dispatcher(
+        command_registry=create_builtin_registry(),
+        role_resolver=InMemoryRoleResolver({42: Role.NORMAL}),
+        send_text=_fake_send,
+        bot_username="AmoBot",
+        message_persistence=ChatTopicPersistenceService(
+            sf,
+            send_private_message=_fake_send_private,
+            owner_notifier=OwnerNotifier(owner_telegram_user_id=9999, send_private_text=_owner_send),
+        ),
+    )
+
+    asyncio.run(
+        dispatcher.handle_raw_update(
+            _mk_update(update_id=906, user_id=7002, chat_id=-1007, chat_type="supergroup", title="G")
+        )
+    )
+
+    with sf() as session:
+        user = session.scalar(select(User).where(User.telegram_user_id == 7002))
+        assert user is not None
+        assert user.consent_status == "unreachable"
 
 
 def test_owner_notify_failure_does_not_break_persistence(tmp_path) -> None:

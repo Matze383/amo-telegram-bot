@@ -26,7 +26,7 @@ def test_pending_user_gets_prompt_and_recorded_with_legacy_two_arg_callable() ->
     import asyncio
     changed = asyncio.run(svc.maybe_prompt_user(user=user, send_private_message=_send))
 
-    assert changed is True
+    assert changed == "prompted"
     assert len(sent) == 1
     assert sent[0][0] == 123
     assert "/accept" in sent[0][1]
@@ -45,7 +45,7 @@ def test_pending_user_gets_prompt_with_markup_when_callable_supports_it() -> Non
     import asyncio
     changed = asyncio.run(svc.maybe_prompt_user(user=user, send_private_message=_send))
 
-    assert changed is True
+    assert changed == "prompted"
     assert len(sent) == 1
     assert sent[0][0] == 123
     assert "/accept" in sent[0][1]
@@ -70,7 +70,7 @@ def test_three_arg_callable_with_message_thread_id_is_treated_as_no_markup_suppo
     import asyncio
     changed = asyncio.run(svc.maybe_prompt_user(user=user, send_private_message=_send))
 
-    assert changed is True
+    assert changed == "prompted"
     assert len(sent) == 1
     assert sent[0][0] == 123
     assert "/accept" in sent[0][1]
@@ -90,7 +90,7 @@ def test_non_pending_status_does_not_send(status: str = "accepted") -> None:
 
         import asyncio
         sent = asyncio.run(svc.maybe_prompt_user(user=user, send_private_message=_send))
-        assert sent is False
+        assert sent == "skipped"
         assert calls == 0
 
 
@@ -103,7 +103,7 @@ def test_pending_user_with_existing_prompt_count_is_not_prompted() -> None:
 
     import asyncio
     sent = asyncio.run(svc.maybe_prompt_user(user=user, send_private_message=_send))
-    assert sent is False
+    assert sent == "skipped"
 
 
 def test_pending_user_with_prompt_timestamp_is_not_prompted_again() -> None:
@@ -115,7 +115,7 @@ def test_pending_user_with_prompt_timestamp_is_not_prompted_again() -> None:
 
     import asyncio
     sent = asyncio.run(svc.maybe_prompt_user(user=user, send_private_message=_send))
-    assert sent is False
+    assert sent == "skipped"
 
 
 def test_forbidden_dm_marks_unreachable() -> None:
@@ -128,7 +128,7 @@ def test_forbidden_dm_marks_unreachable() -> None:
     import asyncio
     sent = asyncio.run(svc.maybe_prompt_user(user=user, send_private_message=_send))
 
-    assert sent is False
+    assert sent == "unreachable"
     assert user.consent_status == "unreachable"
 
 
