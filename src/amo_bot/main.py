@@ -120,6 +120,7 @@ def run(argv: list[str] | None = None) -> None:
         role_resolver=role_resolver,
         send_text=send_text,
         send_markup=send_markup,
+        send_private_markup=send_markup,
         answer_callback=answer_callback,
         bot_username=settings.bot_username,
         message_persistence=ChatTopicPersistenceService(session_factory, send_private_message=send_text),

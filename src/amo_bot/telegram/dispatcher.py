@@ -120,17 +120,35 @@ class Dispatcher:
             group_success_text = response.get("group_success_text")
 
             if isinstance(text, str) and text:
+                is_group_like = (
+                    message.chat.id < 0
+                    or message.chat.type != "private"
+                    or message.message_thread_id is not None
+                )
+
                 if (
                     isinstance(target_user_id, int)
                     and target_user_id > 0
-                    and message.chat.id < 0
+                    and is_group_like
                     and isinstance(reply_markup, dict)
                     and self.send_private_markup is not None
                 ):
                     try:
+                        logger.info(
+                            "/test private route: chat_id=%s user_id=%s is_group_like=%s dm_success=false",
+                            message.chat.id,
+                            target_user_id,
+                            is_group_like,
+                        )
                         await self.send_private_markup(target_user_id, text, reply_markup)
                     except Exception as exc:
                         msg = str(exc).casefold()
+                        logger.info(
+                            "/test private route: chat_id=%s user_id=%s is_group_like=%s dm_success=false",
+                            message.chat.id,
+                            target_user_id,
+                            is_group_like,
+                        )
                         blocked = any(
                             marker in msg
                             for marker in (
@@ -146,6 +164,12 @@ class Dispatcher:
                         else:
                             raise
                     else:
+                        logger.info(
+                            "/test private route: chat_id=%s user_id=%s is_group_like=%s dm_success=true",
+                            message.chat.id,
+                            target_user_id,
+                            is_group_like,
+                        )
                         if isinstance(group_success_text, str) and group_success_text:
                             await self.send_text(message.chat.id, group_success_text, message.message_thread_id)
                     return
