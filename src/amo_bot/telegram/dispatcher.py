@@ -15,6 +15,7 @@ from amo_bot.telegram.update_parser import TelegramMessage, parse_update
 
 SendTextFn = Callable[[int, str, int | None], Awaitable[object]]
 SendMarkupFn = Callable[[int, str, dict[str, Any], int | None], Awaitable[object]]
+SendPrivateMarkupFn = Callable[[int, str, dict[str, Any]], Awaitable[object]]
 AnswerCallbackFn = Callable[[str, str | None], Awaitable[object]]
 
 logger = logging.getLogger(__name__)
@@ -30,6 +31,7 @@ class Dispatcher:
     role_resolver: RoleResolver
     send_text: SendTextFn
     send_markup: SendMarkupFn | None = None
+    send_private_markup: SendPrivateMarkupFn | None = None
     answer_callback: AnswerCallbackFn | None = None
     bot_username: str | None = None
     message_persistence: MessagePersistence | None = None
@@ -113,7 +115,41 @@ class Dispatcher:
         if isinstance(response, dict):
             text = response.get("text")
             reply_markup = response.get("reply_markup")
+            target_user_id = response.get("target_user_id")
+            group_fallback_text = response.get("group_fallback_text")
+            group_success_text = response.get("group_success_text")
+
             if isinstance(text, str) and text:
+                if (
+                    isinstance(target_user_id, int)
+                    and target_user_id > 0
+                    and message.chat.type in {"group", "supergroup"}
+                    and isinstance(reply_markup, dict)
+                    and self.send_private_markup is not None
+                ):
+                    try:
+                        await self.send_private_markup(target_user_id, text, reply_markup)
+                    except Exception as exc:
+                        msg = str(exc).casefold()
+                        blocked = any(
+                            marker in msg
+                            for marker in (
+                                "forbidden",
+                                "bot was blocked",
+                                "chat not found",
+                                "cannot initiate conversation",
+                                "can't initiate conversation",
+                            )
+                        )
+                        if blocked and isinstance(group_fallback_text, str) and group_fallback_text:
+                            await self.send_text(message.chat.id, group_fallback_text, message.message_thread_id)
+                        else:
+                            raise
+                    else:
+                        if isinstance(group_success_text, str) and group_success_text:
+                            await self.send_text(message.chat.id, group_success_text, message.message_thread_id)
+                    return
+
                 if isinstance(reply_markup, dict) and self.send_markup is not None:
                     await self.send_markup(message.chat.id, text, reply_markup, message.message_thread_id)
                 else:

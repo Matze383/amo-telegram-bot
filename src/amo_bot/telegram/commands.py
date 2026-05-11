@@ -359,7 +359,7 @@ def create_builtin_registry(database_url: str | None = None, ai_service: AIServi
         return "webui access: CLOSED"
 
     async def test_handler(ctx: CommandContext) -> dict[str, object]:
-        return {
+        payload: dict[str, object] = {
             "text": "Inline-Button-Test: Bitte klicken.",
             "reply_markup": {
                 "inline_keyboard": [
@@ -372,6 +372,11 @@ def create_builtin_registry(database_url: str | None = None, ai_service: AIServi
                 ]
             },
         }
+        if ctx.chat_type != "private":
+            payload["target_user_id"] = ctx.user_id
+            payload["group_success_text"] = "Ich habe dir den Button-Test privat geschickt."
+            payload["group_fallback_text"] = "Ich kann dir aktuell keine private Nachricht senden. Bitte starte den Bot zuerst privat mit /start."
+        return payload
 
     async def help_handler(ctx: CommandContext) -> str:
         allowed = registry.list_allowed(ctx.role)

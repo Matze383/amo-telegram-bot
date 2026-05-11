@@ -101,6 +101,89 @@ def test_dispatcher_handles_test_command_with_markup_sender() -> None:
     ]
 
 
+def test_dispatcher_handles_test_command_in_group_by_sending_private_markup() -> None:
+    sent_text: list[tuple[int, str, int | None]] = []
+    sent_private_markup: list[tuple[int, str, dict[str, object]]] = []
+
+    async def fake_send(chat_id: int, text: str, message_thread_id: int | None = None) -> object:
+        sent_text.append((chat_id, text, message_thread_id))
+        return {"ok": True}
+
+    async def fake_send_private_markup(chat_id: int, text: str, reply_markup: dict[str, object]) -> object:
+        sent_private_markup.append((chat_id, text, reply_markup))
+        return {"ok": True}
+
+    dispatcher = Dispatcher(
+        command_registry=create_builtin_registry(),
+        role_resolver=InMemoryRoleResolver({42: Role.ADMIN}),
+        send_text=fake_send,
+        send_markup=None,
+        send_private_markup=fake_send_private_markup,
+        bot_username="BotName",
+    )
+
+    raw_update = {
+        "update_id": 801,
+        "message": {
+            "message_id": 12,
+            "from": {"id": 42, "is_bot": False, "first_name": "T", "username": "tester"},
+            "chat": {"id": -1001, "type": "group"},
+            "text": "/test",
+        },
+    }
+
+    asyncio.run(dispatcher.handle_raw_update(raw_update))
+
+    assert sent_private_markup == [
+        (
+            42,
+            "Inline-Button-Test: Bitte klicken.",
+            {"inline_keyboard": [[{"text": "✅ Test Button", "callback_data": "test:ok"}]]},
+        )
+    ]
+    assert sent_text == [(-1001, "Ich habe dir den Button-Test privat geschickt.", None)]
+
+
+def test_dispatcher_handles_test_command_in_group_when_private_dm_fails() -> None:
+    sent_text: list[tuple[int, str, int | None]] = []
+
+    async def fake_send(chat_id: int, text: str, message_thread_id: int | None = None) -> object:
+        sent_text.append((chat_id, text, message_thread_id))
+        return {"ok": True}
+
+    async def fake_send_private_markup(chat_id: int, text: str, reply_markup: dict[str, object]) -> object:
+        raise RuntimeError("Forbidden: bot was blocked by the user")
+
+    dispatcher = Dispatcher(
+        command_registry=create_builtin_registry(),
+        role_resolver=InMemoryRoleResolver({42: Role.ADMIN}),
+        send_text=fake_send,
+        send_markup=None,
+        send_private_markup=fake_send_private_markup,
+        bot_username="BotName",
+    )
+
+    raw_update = {
+        "update_id": 802,
+        "message": {
+            "message_id": 12,
+            "from": {"id": 42, "is_bot": False, "first_name": "T", "username": "tester"},
+            "chat": {"id": -1001, "type": "supergroup"},
+            "text": "/test",
+        },
+    }
+
+    asyncio.run(dispatcher.handle_raw_update(raw_update))
+
+    assert sent_text == [
+        (
+            -1001,
+            "Ich kann dir aktuell keine private Nachricht senden. Bitte starte den Bot zuerst privat mit /start.",
+            None,
+        )
+    ]
+
+
 def test_dispatcher_handles_test_callback_with_answer_callback() -> None:
     callback_answers: list[tuple[str, str | None]] = []
 
