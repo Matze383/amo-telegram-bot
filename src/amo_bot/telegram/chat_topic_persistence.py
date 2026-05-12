@@ -70,6 +70,8 @@ class ChatTopicPersistenceService:
                     user=user,
                     send_private_message=self._send_private_message,
                 )
+                if prompt_result == "prompted" and existing_user is None and self._owner_notifier is not None:
+                    await self._owner_notifier.notify_consent_prompt_sent(user=user, message=message)
                 if prompt_result == "unreachable":
                     if self._owner_notifier is not None:
                         await self._owner_notifier.notify_consent_unreachable(user=user, reason="private_dm_unreachable")
@@ -90,6 +92,8 @@ class ChatTopicPersistenceService:
                                     text,
                                     message.message_thread_id,
                                 )
+                            if self._owner_notifier is not None:
+                                await self._owner_notifier.notify_consent_group_fallback_sent(user=user, message=message)
                         except Exception:
                             # Fallback message send failure must not break persistence/consent state updates.
                             logger.exception("group consent fallback send failed: chat_id=%s user_id=%s", message.chat.id, message.from_user.id)

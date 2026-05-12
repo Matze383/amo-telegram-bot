@@ -55,6 +55,29 @@ class OwnerNotifier:
         )
         await self._safe_send(text)
 
+    async def notify_consent_prompt_sent(self, *, user: User, message: TelegramMessage) -> None:
+        if not self._is_enabled() or user.telegram_user_id <= 0:
+            return
+
+        chat = message.chat
+        topic_suffix = ""
+        if message.message_thread_id is not None:
+            topic_suffix = f" | topic_id={message.message_thread_id}"
+            if message.telegram_topic_name:
+                topic_suffix += f" topic={message.telegram_topic_name}"
+
+        username = f"@{user.username}" if user.username else "-"
+        full_name = f"{(user.first_name or '-')} {(user.last_name or '-')}".strip()
+        text = (
+            "📨 Policy-DM erfolgreich gesendet\n"
+            f"id: {user.telegram_user_id}\n"
+            f"username: {username}\n"
+            f"name: {full_name}\n"
+            f"status: {user.consent_status or 'unknown'}\n"
+            f"kontext: chat_type={chat.type} chat_title={(chat.title or '-')}{topic_suffix}"
+        )
+        await self._safe_send(text)
+
     async def notify_consent_unreachable(self, *, user: User, reason: str | None = None) -> None:
         if not self._is_enabled() or user.telegram_user_id <= 0:
             return
@@ -70,6 +93,29 @@ class OwnerNotifier:
         )
         if reason:
             text += f"\nreason: {reason}"
+        await self._safe_send(text)
+
+    async def notify_consent_group_fallback_sent(self, *, user: User, message: TelegramMessage) -> None:
+        if not self._is_enabled() or user.telegram_user_id <= 0:
+            return
+
+        chat = message.chat
+        topic_suffix = ""
+        if message.message_thread_id is not None:
+            topic_suffix = f" | topic_id={message.message_thread_id}"
+            if message.telegram_topic_name:
+                topic_suffix += f" topic={message.telegram_topic_name}"
+
+        username = f"@{user.username}" if user.username else "-"
+        full_name = f"{(user.first_name or '-')} {(user.last_name or '-')}".strip()
+        text = (
+            "📣 Gruppenfallback für Consent gesendet\n"
+            f"id: {user.telegram_user_id}\n"
+            f"username: {username}\n"
+            f"name: {full_name}\n"
+            f"status: {user.consent_status or 'unknown'}\n"
+            f"kontext: chat_type={chat.type} chat_title={(chat.title or '-')} chat_id={chat.id}{topic_suffix}"
+        )
         await self._safe_send(text)
 
     def _is_enabled(self) -> bool:

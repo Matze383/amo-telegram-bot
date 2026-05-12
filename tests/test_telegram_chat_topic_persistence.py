@@ -680,7 +680,11 @@ def test_repeated_message_from_unreachable_user_does_not_notify_owner_again(tmp_
     )
 
     unreachable_notifies = [text for _, text in sent_owner if "Policy-DM nicht zustellbar" in text]
+    fallback_notifies = [text for _, text in sent_owner if "Gruppenfallback für Consent gesendet" in text]
+    prompted_notifies = [text for _, text in sent_owner if "Policy-DM erfolgreich gesendet" in text]
     assert len(unreachable_notifies) == 1
+    assert len(fallback_notifies) == 0
+    assert len(prompted_notifies) == 0
 
 
 def test_owner_unreachable_notify_failure_does_not_break_persistence(tmp_path) -> None:
@@ -867,3 +871,90 @@ def test_dm_success_sends_no_group_fallback(tmp_path) -> None:
     assert sent_group_markup == []
     block_msgs = [m for m in sent_group_text if m[1] == "Bitte kläre Consent privat mit dem Bot."]
     assert len(block_msgs) == 1
+
+
+def test_new_user_dm_success_notifies_owner_about_prompt_delivery(tmp_path) -> None:
+    from amo_bot.telegram.owner_notify import OwnerNotifier
+
+    db_url = f"sqlite:///{tmp_path / 'persist_owner_notify_prompt_sent.db'}"
+    init_db(db_url)
+    sent_owner: list[tuple[int, str]] = []
+
+    async def _owner_send(chat_id: int, text: str) -> object:
+        sent_owner.append((chat_id, text))
+        return {"ok": True}
+
+    sf = create_session_factory(db_url)
+
+    async def _fake_send(_chat_id: int, _text: str, _message_thread_id: int | None = None) -> object:
+        return {"ok": True}
+
+    async def _fake_send_private(_chat_id: int, _text: str) -> object:
+        return {"ok": True}
+
+    dispatcher = Dispatcher(
+        command_registry=create_builtin_registry(),
+        role_resolver=InMemoryRoleResolver({42: Role.NORMAL}),
+        send_text=_fake_send,
+        bot_username="AmoBot",
+        message_persistence=ChatTopicPersistenceService(
+            sf,
+            send_private_message=_fake_send_private,
+            owner_notifier=OwnerNotifier(owner_telegram_user_id=9999, send_private_text=_owner_send),
+        ),
+    )
+
+    asyncio.run(
+        dispatcher.handle_raw_update(
+            _mk_update(update_id=103, user_id=8104, chat_id=-108104, chat_type="supergroup", title="G")
+        )
+    )
+
+    prompt_notifies = [text for _, text in sent_owner if "Policy-DM erfolgreich gesendet" in text]
+    assert len(prompt_notifies) == 1
+
+
+def test_unreachable_dm_group_fallback_notifies_owner_when_fallback_sent(tmp_path) -> None:
+    from amo_bot.telegram.client import TelegramApiError
+    from amo_bot.telegram.owner_notify import OwnerNotifier
+
+    db_url = f"sqlite:///{tmp_path / 'persist_owner_notify_fallback_sent.db'}"
+    init_db(db_url)
+    sent_owner: list[tuple[int, str]] = []
+
+    async def _owner_send(chat_id: int, text: str) -> object:
+        sent_owner.append((chat_id, text))
+        return {"ok": True}
+
+    sf = create_session_factory(db_url)
+
+    async def _fake_send(_chat_id: int, _text: str, _message_thread_id: int | None = None) -> object:
+        return {"ok": True}
+
+    async def _fake_send_private(_chat_id: int, _text: str) -> object:
+        raise TelegramApiError("Forbidden: bot can't initiate conversation with a user")
+
+    dispatcher = Dispatcher(
+        command_registry=create_builtin_registry(),
+        role_resolver=InMemoryRoleResolver({42: Role.NORMAL}),
+        send_text=_fake_send,
+        bot_username="AmoBot",
+        message_persistence=ChatTopicPersistenceService(
+            sf,
+            send_private_message=_fake_send_private,
+            owner_notifier=OwnerNotifier(owner_telegram_user_id=9999, send_private_text=_owner_send),
+            send_group_text=_fake_send,
+            bot_username="AmoBot",
+        ),
+    )
+
+    asyncio.run(
+        dispatcher.handle_raw_update(
+            _mk_update(update_id=104, user_id=8105, chat_id=-108105, chat_type="supergroup", title="G")
+        )
+    )
+
+    unreachable_notifies = [text for _, text in sent_owner if "Policy-DM nicht zustellbar" in text]
+    fallback_notifies = [text for _, text in sent_owner if "Gruppenfallback für Consent gesendet" in text]
+    assert len(unreachable_notifies) == 1
+    assert len(fallback_notifies) == 1
