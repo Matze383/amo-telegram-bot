@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
 from sqlalchemy import select
-from datetime import datetime, timezone
-from collections.abc import Iterable
 from sqlalchemy.orm import Session
 
 from amo_bot.auth.roles import Role
@@ -23,6 +23,10 @@ from amo_bot.db.models import (
     PluginPolicyOverride,
     TelegramChat,
     TelegramTopic,
+    TopicAgentConfig,
+    TopicAiSession,
+    TopicDailyMemory,
+    TopicLongMemory,
     User,
 )
 
@@ -613,25 +617,420 @@ class ChatTopicRepository:
 
 class PluginRepository:
     ACTIVATION_REQUEST_STATUSES = {"pending", "approved", "rejected", "blocked"}
+    LEGACY_ACTIVATION_PENDING = "activation_pending"
 
     def __init__(self, session: Session) -> None:
         self._session = session
 
-    @staticmethod
-    def _to_status(row: Plugin) -> PluginStatus:
+    def upsert_from_manifest(self, manifest: PluginManifest) -> None:
+        row = self._session.scalar(select(Plugin).where(Plugin.name == manifest.name))
+        now = datetime.now(timezone.utc)
+        if row is None:
+            row = Plugin(
+                name=manifest.name,
+                version=manifest.version,
+                enabled=0,
+                activation_status=self.LEGACY_ACTIVATION_PENDING,
+                manifest_json=manifest.model_dump_json(),
+            )
+            self._session.add(row)
+            self._session.commit()
+            return
+
+        row.version = manifest.version
+        row.manifest_json = manifest.model_dump_json()
+        if not row.activation_status:
+            row.activation_status = self.LEGACY_ACTIVATION_PENDING
+        self._session.commit()
+
+    def sync_discovered(self, manifests: Iterable[PluginManifest]) -> None:
+        for manifest in manifests:
+            row = self._session.scalar(select(Plugin).where(Plugin.name == manifest.name))
+            if row is None:
+                self._session.add(
+                    Plugin(
+                        name=manifest.name,
+                        version=manifest.version,
+                        enabled=0,
+                        activation_status=self.LEGACY_ACTIVATION_PENDING,
+                        manifest_json=manifest.model_dump_json(),
+                    )
+                )
+                continue
+
+            row.version = manifest.version
+            row.manifest_json = manifest.model_dump_json()
+            if not row.activation_status:
+                row.activation_status = self.LEGACY_ACTIVATION_PENDING
+
+        self._session.commit()
+
+    def activate(self, plugin_name: str, *, actor_telegram_user_id: int | None = None) -> bool:
+        row = self._session.scalar(select(Plugin).where(Plugin.name == plugin_name))
+        if row is None:
+            raise ValueError("plugin not found")
+
+        changed = bool(not row.enabled or row.activation_status != "active")
+        row.enabled = 1
+        row.activation_status = "active"
+
+        if changed:
+            self._session.add(
+                AuditEvent(
+                    actor_telegram_user_id=actor_telegram_user_id,
+                    event_type="plugin_activate",
+                    payload_json=json.dumps({"plugin_name": plugin_name}),
+                )
+            )
+
+        self._session.commit()
+        return changed
+
+    def deactivate(self, plugin_name: str, *, actor_telegram_user_id: int | None = None) -> bool:
+        row = self._session.scalar(select(Plugin).where(Plugin.name == plugin_name))
+        if row is None:
+            raise ValueError("plugin not found")
+
+        changed = bool(row.enabled)
+        row.enabled = 0
+        row.activation_status = self.LEGACY_ACTIVATION_PENDING
+
+        if changed:
+            self._session.add(
+                AuditEvent(
+                    actor_telegram_user_id=actor_telegram_user_id,
+                    event_type="plugin_deactivate",
+                    payload_json=json.dumps({"plugin_name": plugin_name}),
+                )
+            )
+
+        self._session.commit()
+        return changed
+
+    def set_worker_state(
+        self,
+        *,
+        plugin_name: str,
+        state: str,
+        heartbeat_at: datetime,
+        restart_count: int,
+        next_restart_at: datetime | None,
+        last_error: str | None,
+    ) -> None:
+        row = self._session.scalar(select(Plugin).where(Plugin.name == plugin_name))
+        if row is None:
+            return
+        row.worker_state = state
+        row.worker_last_heartbeat_at = heartbeat_at
+        row.worker_restart_count = restart_count
+        row.worker_next_restart_at = next_restart_at
+        row.worker_last_error = last_error
+        row.updated_at = datetime.now(timezone.utc)
+        self._session.commit()
+
+    def set_run_state(
+        self,
+        *,
+        plugin_name: str,
+        last_run_at: datetime | None,
+        last_status: str | None,
+        next_run_at: datetime | None,
+    ) -> None:
+        row = self._session.scalar(select(Plugin).where(Plugin.name == plugin_name))
+        if row is None:
+            return
+        row.last_run_at = last_run_at
+        row.last_status = last_status
+        row.next_run_at = next_run_at
+        row.updated_at = datetime.now(timezone.utc)
+        self._session.commit()
+
+    def mark_scheduled_result(
+        self,
+        *,
+        plugin_name: str,
+        ran_at: datetime,
+        status: str,
+        next_run_at: datetime | None,
+        actor_telegram_user_id: int | None = None,
+        error: str | None = None,
+    ) -> None:
+        row = self._session.scalar(select(Plugin).where(Plugin.name == plugin_name))
+        if row is None:
+            return
+
+        ran_at_naive = ran_at.replace(tzinfo=None) if ran_at.tzinfo is not None else ran_at
+        next_run_naive = next_run_at.replace(tzinfo=None) if next_run_at is not None and next_run_at.tzinfo is not None else next_run_at
+
+        row.last_run_at = ran_at_naive
+        row.last_status = status
+        row.next_run_at = next_run_naive
+        row.updated_at = datetime.now(timezone.utc)
+
+        payload: dict[str, object] = {
+            "plugin_name": plugin_name,
+            "status": status,
+            "run_at": ran_at_naive.isoformat(),
+            "next_run_at": next_run_naive.isoformat() if next_run_naive is not None else None,
+        }
+        if error is not None:
+            payload["error"] = error
+
+        self._session.add(
+            AuditEvent(
+                actor_telegram_user_id=actor_telegram_user_id,
+                event_type="plugin_schedule_run",
+                payload_json=json.dumps(payload),
+            )
+        )
+        self._session.commit()
+
+    def mark_worker_state(
+        self,
+        *,
+        plugin_name: str,
+        state: str,
+        heartbeat_at: datetime,
+        next_restart_at: datetime | None,
+        last_error: str | None,
+        increment_restart_count: bool = False,
+    ) -> None:
+        row = self._session.scalar(select(Plugin).where(Plugin.name == plugin_name))
+        if row is None:
+            return
+        restart_count = row.worker_restart_count + 1 if increment_restart_count else row.worker_restart_count
+        self.set_worker_state(
+            plugin_name=plugin_name,
+            state=state,
+            heartbeat_at=heartbeat_at,
+            restart_count=restart_count,
+            next_restart_at=next_restart_at,
+            last_error=last_error,
+        )
+
+    def get_status(self, plugin_name: str) -> PluginStatus | None:
+        row = self._session.scalar(select(Plugin).where(Plugin.name == plugin_name))
+        if row is None:
+            return None
         return PluginStatus(
             name=row.name,
-            enabled=bool(row.enabled),
-            activation_status=(row.activation_status or "activation_pending"),
+            enabled=row.enabled,
+            activation_status=self._resolve_activation_status(row.name),
             worker_state=row.worker_state,
             worker_last_heartbeat_at=row.worker_last_heartbeat_at,
-            worker_restart_count=int(row.worker_restart_count or 0),
+            worker_restart_count=row.worker_restart_count,
             worker_next_restart_at=row.worker_next_restart_at,
             worker_last_error=row.worker_last_error,
             last_run_at=row.last_run_at,
             last_status=row.last_status,
             next_run_at=row.next_run_at,
         )
+
+    def list_due_scheduled_plugins(self, *, now: datetime) -> list[Plugin]:
+        now_naive = now.replace(tzinfo=None) if now.tzinfo is not None else now
+        rows = self._session.scalars(select(Plugin).order_by(Plugin.name.asc())).all()
+        due: list[Plugin] = []
+        for row in rows:
+            if not row.enabled:
+                continue
+            if row.next_run_at is not None and row.next_run_at > now_naive:
+                continue
+            due.append(row)
+        return due
+
+    def list_plugins(self) -> list[Plugin]:
+        return self._session.scalars(select(Plugin).order_by(Plugin.name.asc())).all()
+
+    def list_statuses(self) -> list[PluginStatus]:
+        rows = self._session.scalars(select(Plugin).order_by(Plugin.name.asc())).all()
+        statuses: list[PluginStatus] = []
+        for row in rows:
+            activation_status = self._resolve_activation_status(row.name)
+            statuses.append(
+                PluginStatus(
+                    name=row.name,
+                    enabled=row.enabled,
+                    activation_status=activation_status,
+                    worker_state=row.worker_state,
+                    worker_last_heartbeat_at=row.worker_last_heartbeat_at,
+                    worker_restart_count=row.worker_restart_count,
+                    worker_next_restart_at=row.worker_next_restart_at,
+                    worker_last_error=row.worker_last_error,
+                    last_run_at=row.last_run_at,
+                    last_status=row.last_status,
+                    next_run_at=row.next_run_at,
+                )
+            )
+        return statuses
+
+    def _resolve_activation_status(self, plugin_name: str) -> str:
+        latest_request = self._session.scalar(
+            select(PluginActivationRequest)
+            .where(PluginActivationRequest.plugin_name == plugin_name)
+            .order_by(PluginActivationRequest.requested_at.desc(), PluginActivationRequest.id.desc())
+        )
+        if latest_request is None:
+            return "activation_pending"
+        if latest_request.status == "pending":
+            return "activation_pending"
+        if latest_request.status == "approved":
+            return "approved"
+        if latest_request.status == "rejected":
+            return "rejected"
+        if latest_request.status == "blocked":
+            return "blocked"
+        return "activation_pending"
+
+    def create_activation_request(
+        self,
+        plugin_name: str,
+        *,
+        actor_telegram_user_id: int | None,
+        reason: str | None = None,
+    ) -> PluginActivationRequestStatus:
+        if actor_telegram_user_id is None:
+            raise ValueError("actor required")
+        return self.request_activation(
+            plugin_name=plugin_name,
+            requested_by_telegram_user_id=actor_telegram_user_id,
+            reason=reason,
+        )
+
+    def request_activation(
+        self,
+        *,
+        plugin_name: str,
+        requested_by_telegram_user_id: int,
+        reason: str | None,
+    ) -> PluginActivationRequestStatus:
+        plugin = self._session.scalar(select(Plugin).where(Plugin.name == plugin_name))
+        if plugin is None:
+            raise ValueError("plugin not found")
+
+        existing_pending = self._session.scalar(
+            select(PluginActivationRequest)
+            .where(
+                PluginActivationRequest.plugin_name == plugin_name,
+                PluginActivationRequest.status == "pending",
+            )
+            .order_by(PluginActivationRequest.requested_at.desc(), PluginActivationRequest.id.desc())
+        )
+        if existing_pending is not None:
+            return self._to_activation_request_status(existing_pending)
+
+        request = PluginActivationRequest(
+            plugin_name=plugin_name,
+            status="pending",
+            requested_by_telegram_user_id=requested_by_telegram_user_id,
+            reason=reason,
+        )
+        self._session.add(request)
+        self._session.commit()
+        self._session.refresh(request)
+        return self._to_activation_request_status(request)
+
+    def get_activation_request(self, request_id: int) -> PluginActivationRequestStatus | None:
+        request = self._session.scalar(select(PluginActivationRequest).where(PluginActivationRequest.id == request_id))
+        if request is None:
+            return None
+        return self._to_activation_request_status(request)
+
+    def resolve_activation_request(
+        self,
+        request_id: int,
+        *,
+        status: str,
+        actor_telegram_user_id: int | None,
+    ) -> bool:
+        if actor_telegram_user_id is None:
+            raise ValueError("actor required")
+        resolved = self._resolve_activation_request_status(
+            request_id=request_id,
+            decision=status,
+            resolved_by_telegram_user_id=actor_telegram_user_id,
+            reason=None,
+        )
+        if resolved.plugin_name:
+            plugin = self._session.scalar(select(Plugin).where(Plugin.name == resolved.plugin_name))
+            if plugin is None:
+                raise ValueError("plugin not found")
+            event_type: str | None = None
+            if resolved.status == "approved":
+                plugin.enabled = 1
+                plugin.activation_status = "active"
+                event_type = "plugin_activation_request_approved"
+                self._session.add(
+                    AuditEvent(
+                        actor_telegram_user_id=actor_telegram_user_id,
+                        event_type="plugin_activate",
+                        payload_json=json.dumps({"plugin_name": resolved.plugin_name}),
+                    )
+                )
+            elif resolved.status in {"rejected", "blocked"}:
+                plugin.enabled = 0
+                plugin.activation_status = self.LEGACY_ACTIVATION_PENDING
+                event_type = f"plugin_activation_request_{resolved.status}"
+            if event_type is not None:
+                self._session.add(
+                    AuditEvent(
+                        actor_telegram_user_id=actor_telegram_user_id,
+                        event_type=event_type,
+                        payload_json=json.dumps({"plugin_name": resolved.plugin_name, "request_id": request_id}),
+                    )
+                )
+        self._session.commit()
+        return True
+
+    def _resolve_activation_request_status(
+        self,
+        *,
+        request_id: int,
+        decision: str,
+        resolved_by_telegram_user_id: int,
+        reason: str | None,
+    ) -> PluginActivationRequestStatus:
+        normalized_decision = decision.strip().lower()
+        if normalized_decision not in {"approved", "rejected", "blocked"}:
+            raise ValueError("invalid decision")
+
+        request = self._session.scalar(select(PluginActivationRequest).where(PluginActivationRequest.id == request_id))
+        if request is None:
+            raise ValueError("request not found")
+
+        request.status = normalized_decision
+        request.resolved_by_telegram_user_id = resolved_by_telegram_user_id
+        request.resolved_at = datetime.now(timezone.utc)
+        if reason is not None:
+            request.reason = reason
+
+        self._session.commit()
+        self._session.refresh(request)
+        return self._to_activation_request_status(request)
+
+    def list_activation_requests(
+        self,
+        *,
+        plugin_name: str | None = None,
+        status: str | None = None,
+        limit: int = 20,
+    ) -> list[PluginActivationRequestStatus]:
+        normalized_status = None
+        if status is not None:
+            normalized_status = status.strip().lower()
+            if normalized_status not in self.ACTIVATION_REQUEST_STATUSES:
+                raise ValueError("invalid status")
+
+        query = select(PluginActivationRequest)
+        if plugin_name is not None:
+            query = query.where(PluginActivationRequest.plugin_name == plugin_name)
+        if normalized_status is not None:
+            query = query.where(PluginActivationRequest.status == normalized_status)
+
+        safe_limit = max(1, min(limit, 100))
+        rows = self._session.scalars(
+            query.order_by(PluginActivationRequest.requested_at.desc(), PluginActivationRequest.id.desc()).limit(safe_limit)
+        ).all()
+        return [self._to_activation_request_status(row) for row in rows]
 
     @staticmethod
     def _to_activation_request_status(row: PluginActivationRequest) -> PluginActivationRequestStatus:
@@ -646,223 +1045,388 @@ class PluginRepository:
             resolved_at=row.resolved_at,
         )
 
-    def list_plugins(self) -> list[PluginStatus]:
-        rows = self._session.scalars(select(Plugin).order_by(Plugin.name.asc())).all()
-        return [self._to_status(row) for row in rows]
-
-    def get_status(self, plugin_name: str) -> PluginStatus | None:
-        row = self._session.scalar(select(Plugin).where(Plugin.name == plugin_name))
-        if row is None:
-            return None
-        return self._to_status(row)
-
-    def create_activation_request(
-        self,
-        plugin_name: str,
-        *,
-        actor_telegram_user_id: int | None,
-        reason: str | None = None,
-    ) -> PluginActivationRequestStatus:
-        plugin = self._session.scalar(select(Plugin).where(Plugin.name == plugin_name))
-        if plugin is None:
-            raise ValueError("plugin not found")
-
-        if bool(plugin.enabled) or plugin.activation_status == "active":
-            raise ValueError("plugin already active")
-
-        request = PluginActivationRequest(
-            plugin_name=plugin_name,
-            status="pending",
-            requested_by_telegram_user_id=actor_telegram_user_id,
-            reason=reason,
-        )
-        self._session.add(request)
-        self._session.add(
-            AuditEvent(
-                actor_telegram_user_id=actor_telegram_user_id,
-                event_type="plugin_activation_request_created",
-                payload_json=json.dumps({"plugin_name": plugin_name, "status": "pending"}),
-            )
-        )
-        self._session.commit()
-        return self._to_activation_request_status(request)
-
-    def get_activation_request(self, request_id: int) -> PluginActivationRequestStatus | None:
-        row = self._session.get(PluginActivationRequest, request_id)
-        if row is None:
-            return None
-        return self._to_activation_request_status(row)
-
-    def resolve_activation_request(
-        self,
-        request_id: int,
-        *,
-        status: str,
-        actor_telegram_user_id: int | None,
-    ) -> bool:
-        if status not in {"approved", "rejected", "blocked"}:
-            raise ValueError("invalid activation request status")
-
-        request = self._session.get(PluginActivationRequest, request_id)
-        if request is None:
-            raise ValueError("activation request not found")
-        if request.status != "pending":
-            return False
-
-        plugin = self._session.scalar(select(Plugin).where(Plugin.name == request.plugin_name))
-        if plugin is None:
-            raise ValueError("plugin not found")
-
-        request.status = status
-        request.resolved_by_telegram_user_id = actor_telegram_user_id
-        request.resolved_at = datetime.now(timezone.utc)
-        self._session.add(
-            AuditEvent(
-                actor_telegram_user_id=actor_telegram_user_id,
-                event_type=f"plugin_activation_request_{status}",
-                payload_json=json.dumps(
-                    {"plugin_name": request.plugin_name, "activation_request_id": request.id, "status": status}
-                ),
-            )
-        )
-
-        if status == "approved":
-            # Approval is the explicit hand-off into the existing activation path.
-            return self.activate(request.plugin_name, actor_telegram_user_id=actor_telegram_user_id)
-
-        if not bool(plugin.enabled):
-            plugin.activation_status = "activation_pending"
-        self._session.commit()
-        return True
-
-    def _upsert_from_manifest(self, manifest: PluginManifest) -> Plugin:
-        row = self._session.scalar(select(Plugin).where(Plugin.name == manifest.name))
-        manifest_json = manifest.model_dump_json()
-        if row is None:
-            row = Plugin(name=manifest.name, version=manifest.version, enabled=0, manifest_json=manifest_json)
-            if manifest.schedule:
-                row.next_run_at = datetime.now(timezone.utc)
-            self._session.add(row)
-            self._session.flush()
-            return row
-
-        changed = False
-        if row.version != manifest.version:
-            row.version = manifest.version
-            changed = True
-        if not (row.activation_status or "").strip():
-            row.activation_status = "activation_pending"
-            changed = True
-        if row.manifest_json != manifest_json:
-            row.manifest_json = manifest_json
-            changed = True
-        if changed:
-            self._session.flush()
-        return row
-
-    def list_due_scheduled_plugins(self, *, now: datetime) -> list[Plugin]:
-        rows = self._session.scalars(
-            select(Plugin)
-            .where(Plugin.enabled == 1)
-            .where(Plugin.next_run_at.is_not(None))
-            .where(Plugin.next_run_at <= now)
-            .order_by(Plugin.name.asc())
-        ).all()
-        from amo_bot.plugins.manifest import PluginManifest
-
-        return [row for row in rows if PluginManifest.model_validate_json(row.manifest_json).schedule is not None]
-
-    def mark_scheduled_result(
-        self,
-        *,
-        plugin_name: str,
-        status: str,
-        next_run_at: datetime,
-        ran_at: datetime,
-    ) -> None:
-        row = self._session.scalar(select(Plugin).where(Plugin.name == plugin_name))
-        if row is None:
-            raise ValueError("plugin not found")
-        row.last_run_at = ran_at
-        row.last_status = status
-        row.next_run_at = next_run_at
-        self._session.commit()
-
-    def mark_worker_state(
-        self,
-        *,
-        plugin_name: str,
-        state: str,
-        heartbeat_at: datetime | None = None,
-        next_restart_at: datetime | None = None,
-        last_error: str | None = None,
-        increment_restart_count: bool = False,
-    ) -> None:
-        row = self._session.scalar(select(Plugin).where(Plugin.name == plugin_name))
-        if row is None:
-            raise ValueError("plugin not found")
-        row.worker_state = state
-        row.worker_last_heartbeat_at = heartbeat_at
-        row.worker_next_restart_at = next_restart_at
-        row.worker_last_error = last_error
-        if increment_restart_count:
-            row.worker_restart_count = int(row.worker_restart_count or 0) + 1
-        self._session.commit()
-
-    def sync_discovered(self, manifests: list[PluginManifest]) -> None:
-        for manifest in manifests:
-            self._upsert_from_manifest(manifest)
-        self._session.commit()
-
-    def activate(self, plugin_name: str, *, actor_telegram_user_id: int | None) -> bool:
-        row = self._session.scalar(select(Plugin).where(Plugin.name == plugin_name))
-        if row is None:
-            raise ValueError("plugin not found")
-        if bool(row.enabled):
-            return False
-
-        row.enabled = 1
-        row.activation_status = "active"
-        self._session.add(
-            AuditEvent(
-                actor_telegram_user_id=actor_telegram_user_id,
-                event_type="plugin_activate",
-                payload_json=json.dumps({"plugin_name": plugin_name}),
-            )
-        )
-        self._session.commit()
-        return True
-
-    def deactivate(self, plugin_name: str, *, actor_telegram_user_id: int | None) -> bool:
-        row = self._session.scalar(select(Plugin).where(Plugin.name == plugin_name))
-        if row is None:
-            raise ValueError("plugin not found")
-        if not bool(row.enabled):
-            return False
-
-        row.enabled = 0
-        row.activation_status = "activation_pending"
-        self._session.add(
-            AuditEvent(
-                actor_telegram_user_id=actor_telegram_user_id,
-                event_type="plugin_deactivate",
-                payload_json=json.dumps({"plugin_name": plugin_name}),
-            )
-        )
-        self._session.commit()
-        return True
-
 
 class AuthAuditRepository:
     def __init__(self, session: Session) -> None:
         self._session = session
 
     def write_login_event(self, *, event_type: str, remote_addr: str | None) -> None:
+        self.log(
+            actor_telegram_user_id=None,
+            event_type=event_type,
+            payload={"remote_addr": remote_addr},
+        )
+
+    def log(
+        self,
+        *,
+        actor_telegram_user_id: int | None,
+        event_type: str,
+        payload: dict[str, object],
+    ) -> None:
         self._session.add(
             AuditEvent(
-                actor_telegram_user_id=None,
+                actor_telegram_user_id=actor_telegram_user_id,
                 event_type=event_type,
-                payload_json=json.dumps({"remote_addr": remote_addr or "unknown"}),
+                payload_json=json.dumps(payload),
             )
         )
         self._session.commit()
+
+
+@dataclass(slots=True)
+class TopicAgentConfigRecord:
+    scope_type: str
+    chat_id: int | None
+    topic_id: int | None
+    user_id: int | None
+    ai_enabled: bool
+    response_mode: str
+    memory_retention_days: int
+    tools_enabled: bool
+    topic_soul_text: str | None
+    topic_soul_owner_only_edit: bool
+
+
+@dataclass(slots=True)
+class TopicDailyMemoryRecord:
+    scope_type: str
+    chat_id: int | None
+    topic_id: int | None
+    user_id: int | None
+    memory_date: str
+    summary_text: str
+    tokens_estimate: int
+
+
+@dataclass(slots=True)
+class TopicLongMemoryRecord:
+    id: int
+    scope_type: str
+    chat_id: int | None
+    topic_id: int | None
+    user_id: int | None
+    fact_text: str
+    is_active: bool
+    source_daily_memory_id: int | None
+
+
+@dataclass(slots=True)
+class TopicAiSessionRecord:
+    scope_type: str
+    chat_id: int | None
+    topic_id: int | None
+    user_id: int | None
+    session_payload: dict[str, object]
+
+
+class TopicAgentMemoryRepository:
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def upsert_config(
+        self,
+        *,
+        scope_type: str,
+        chat_id: int | None = None,
+        topic_id: int | None = None,
+        user_id: int | None = None,
+        ai_enabled: bool = False,
+        response_mode: str = "command",
+        memory_retention_days: int = 30,
+        tools_enabled: bool = False,
+        topic_soul_text: str | None = None,
+        topic_soul_owner_only_edit: bool = True,
+    ) -> TopicAgentConfigRecord:
+        row = self._session.scalar(
+            select(TopicAgentConfig).where(
+                TopicAgentConfig.scope_type == scope_type,
+                TopicAgentConfig.chat_id == chat_id,
+                TopicAgentConfig.topic_id == topic_id,
+                TopicAgentConfig.user_id == user_id,
+            )
+        )
+        if row is None:
+            row = TopicAgentConfig(
+                scope_type=scope_type,
+                chat_id=chat_id,
+                topic_id=topic_id,
+                user_id=user_id,
+            )
+            self._session.add(row)
+
+        row.ai_enabled = ai_enabled
+        row.response_mode = response_mode
+        row.memory_retention_days = memory_retention_days
+        row.tools_enabled = tools_enabled
+        row.topic_soul_text = topic_soul_text
+        row.topic_soul_owner_only_edit = topic_soul_owner_only_edit
+        self._session.commit()
+        self._session.refresh(row)
+        return self._to_config_record(row)
+
+    def get_config(
+        self,
+        *,
+        scope_type: str,
+        chat_id: int | None = None,
+        topic_id: int | None = None,
+        user_id: int | None = None,
+    ) -> TopicAgentConfigRecord | None:
+        row = self._session.scalar(
+            select(TopicAgentConfig).where(
+                TopicAgentConfig.scope_type == scope_type,
+                TopicAgentConfig.chat_id == chat_id,
+                TopicAgentConfig.topic_id == topic_id,
+                TopicAgentConfig.user_id == user_id,
+            )
+        )
+        if row is None:
+            return None
+        return self._to_config_record(row)
+
+    def upsert_daily_memory(
+        self,
+        *,
+        scope_type: str,
+        memory_date: str,
+        summary_text: str,
+        tokens_estimate: int,
+        chat_id: int | None = None,
+        topic_id: int | None = None,
+        user_id: int | None = None,
+    ) -> TopicDailyMemoryRecord:
+        row = self._session.scalar(
+            select(TopicDailyMemory).where(
+                TopicDailyMemory.scope_type == scope_type,
+                TopicDailyMemory.chat_id == chat_id,
+                TopicDailyMemory.topic_id == topic_id,
+                TopicDailyMemory.user_id == user_id,
+                TopicDailyMemory.memory_date == memory_date,
+            )
+        )
+        if row is None:
+            row = TopicDailyMemory(
+                scope_type=scope_type,
+                chat_id=chat_id,
+                topic_id=topic_id,
+                user_id=user_id,
+                memory_date=memory_date,
+            )
+            self._session.add(row)
+
+        row.summary_text = summary_text
+        row.tokens_estimate = tokens_estimate
+        self._session.commit()
+        self._session.refresh(row)
+        return self._to_daily_record(row)
+
+    def get_daily_memory(
+        self,
+        *,
+        scope_type: str,
+        memory_date: str,
+        chat_id: int | None = None,
+        topic_id: int | None = None,
+        user_id: int | None = None,
+    ) -> TopicDailyMemoryRecord | None:
+        row = self._session.scalar(
+            select(TopicDailyMemory).where(
+                TopicDailyMemory.scope_type == scope_type,
+                TopicDailyMemory.chat_id == chat_id,
+                TopicDailyMemory.topic_id == topic_id,
+                TopicDailyMemory.user_id == user_id,
+                TopicDailyMemory.memory_date == memory_date,
+            )
+        )
+        if row is None:
+            return None
+        return self._to_daily_record(row)
+
+    def list_daily_memories(
+        self,
+        *,
+        scope_type: str,
+        chat_id: int | None = None,
+        topic_id: int | None = None,
+        user_id: int | None = None,
+        limit: int = 30,
+    ) -> list[TopicDailyMemoryRecord]:
+        safe_limit = max(1, min(limit, 365))
+        rows = self._session.scalars(
+            select(TopicDailyMemory)
+            .where(
+                TopicDailyMemory.scope_type == scope_type,
+                TopicDailyMemory.chat_id == chat_id,
+                TopicDailyMemory.topic_id == topic_id,
+                TopicDailyMemory.user_id == user_id,
+            )
+            .order_by(TopicDailyMemory.memory_date.desc())
+            .limit(safe_limit)
+        ).all()
+        return [self._to_daily_record(row) for row in rows]
+
+    def create_long_memory(
+        self,
+        *,
+        scope_type: str,
+        fact_text: str,
+        chat_id: int | None = None,
+        topic_id: int | None = None,
+        user_id: int | None = None,
+        source_daily_memory_id: int | None = None,
+    ) -> TopicLongMemoryRecord:
+        row = TopicLongMemory(
+            scope_type=scope_type,
+            chat_id=chat_id,
+            topic_id=topic_id,
+            user_id=user_id,
+            fact_text=fact_text,
+            is_active=True,
+            source_daily_memory_id=source_daily_memory_id,
+        )
+        self._session.add(row)
+        self._session.commit()
+        self._session.refresh(row)
+        return self._to_long_record(row)
+
+    def list_long_memories(
+        self,
+        *,
+        scope_type: str,
+        chat_id: int | None = None,
+        topic_id: int | None = None,
+        user_id: int | None = None,
+        active_only: bool = True,
+        limit: int = 100,
+    ) -> list[TopicLongMemoryRecord]:
+        safe_limit = max(1, min(limit, 1000))
+        query = select(TopicLongMemory).where(
+            TopicLongMemory.scope_type == scope_type,
+            TopicLongMemory.chat_id == chat_id,
+            TopicLongMemory.topic_id == topic_id,
+            TopicLongMemory.user_id == user_id,
+        )
+        if active_only:
+            query = query.where(TopicLongMemory.is_active.is_(True))
+        rows = self._session.scalars(query.order_by(TopicLongMemory.id.desc()).limit(safe_limit)).all()
+        return [self._to_long_record(row) for row in rows]
+
+    def deactivate_long_memory(self, *, memory_id: int) -> bool:
+        row = self._session.scalar(select(TopicLongMemory).where(TopicLongMemory.id == memory_id))
+        if row is None:
+            return False
+        if row.is_active:
+            row.is_active = False
+            self._session.commit()
+        return True
+
+    def upsert_ai_session(
+        self,
+        *,
+        scope_type: str,
+        session_payload: dict[str, object],
+        chat_id: int | None = None,
+        topic_id: int | None = None,
+        user_id: int | None = None,
+        last_message_at: datetime | None = None,
+    ) -> TopicAiSessionRecord:
+        row = self._session.scalar(
+            select(TopicAiSession).where(
+                TopicAiSession.scope_type == scope_type,
+                TopicAiSession.chat_id == chat_id,
+                TopicAiSession.topic_id == topic_id,
+                TopicAiSession.user_id == user_id,
+            )
+        )
+        if row is None:
+            row = TopicAiSession(
+                scope_type=scope_type,
+                chat_id=chat_id,
+                topic_id=topic_id,
+                user_id=user_id,
+            )
+            self._session.add(row)
+
+        row.session_payload_json = json.dumps(session_payload)
+        row.last_message_at = last_message_at
+        self._session.commit()
+        self._session.refresh(row)
+        return self._to_session_record(row)
+
+    def get_ai_session(
+        self,
+        *,
+        scope_type: str,
+        chat_id: int | None = None,
+        topic_id: int | None = None,
+        user_id: int | None = None,
+    ) -> TopicAiSessionRecord | None:
+        row = self._session.scalar(
+            select(TopicAiSession).where(
+                TopicAiSession.scope_type == scope_type,
+                TopicAiSession.chat_id == chat_id,
+                TopicAiSession.topic_id == topic_id,
+                TopicAiSession.user_id == user_id,
+            )
+        )
+        if row is None:
+            return None
+        return self._to_session_record(row)
+
+    @staticmethod
+    def _to_config_record(row: TopicAgentConfig) -> TopicAgentConfigRecord:
+        return TopicAgentConfigRecord(
+            scope_type=row.scope_type,
+            chat_id=row.chat_id,
+            topic_id=row.topic_id,
+            user_id=row.user_id,
+            ai_enabled=row.ai_enabled,
+            response_mode=row.response_mode,
+            memory_retention_days=row.memory_retention_days,
+            tools_enabled=row.tools_enabled,
+            topic_soul_text=row.topic_soul_text,
+            topic_soul_owner_only_edit=row.topic_soul_owner_only_edit,
+        )
+
+    @staticmethod
+    def _to_daily_record(row: TopicDailyMemory) -> TopicDailyMemoryRecord:
+        return TopicDailyMemoryRecord(
+            scope_type=row.scope_type,
+            chat_id=row.chat_id,
+            topic_id=row.topic_id,
+            user_id=row.user_id,
+            memory_date=row.memory_date,
+            summary_text=row.summary_text,
+            tokens_estimate=row.tokens_estimate,
+        )
+
+    @staticmethod
+    def _to_long_record(row: TopicLongMemory) -> TopicLongMemoryRecord:
+        return TopicLongMemoryRecord(
+            id=row.id,
+            scope_type=row.scope_type,
+            chat_id=row.chat_id,
+            topic_id=row.topic_id,
+            user_id=row.user_id,
+            fact_text=row.fact_text,
+            is_active=row.is_active,
+            source_daily_memory_id=row.source_daily_memory_id,
+        )
+
+    @staticmethod
+    def _to_session_record(row: TopicAiSession) -> TopicAiSessionRecord:
+        payload: dict[str, object]
+        try:
+            raw = json.loads(row.session_payload_json or "{}")
+            payload = raw if isinstance(raw, dict) else {}
+        except json.JSONDecodeError:
+            payload = {}
+
+        return TopicAiSessionRecord(
+            scope_type=row.scope_type,
+            chat_id=row.chat_id,
+            topic_id=row.topic_id,
+            user_id=row.user_id,
+            session_payload=payload,
+        )

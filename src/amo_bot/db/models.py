@@ -208,3 +208,77 @@ DEFAULT_ROLES: list[tuple[Role, int]] = [
     (Role.NORMAL, 30),
     (Role.IGNORE, 100),
 ]
+
+
+class TopicAgentConfig(Base):
+    __tablename__ = "topic_agent_configs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    scope_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    chat_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    topic_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    user_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    ai_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="0")
+    response_mode: Mapped[str] = mapped_column(String(32), nullable=False, default="command", server_default="command")
+    memory_retention_days: Mapped[int] = mapped_column(Integer, nullable=False, default=30, server_default="30")
+    tools_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="0")
+    topic_soul_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    topic_soul_owner_only_edit: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="1")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("scope_type", "chat_id", "topic_id", "user_id", name="uq_topic_agent_configs_scope"),
+    )
+
+
+class TopicDailyMemory(Base):
+    __tablename__ = "topic_daily_memories"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    scope_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    chat_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    topic_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    user_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    memory_date: Mapped[str] = mapped_column(String(10), nullable=False)
+    summary_text: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
+    tokens_estimate: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("scope_type", "chat_id", "topic_id", "user_id", "memory_date", name="uq_topic_daily_memories_scope_day"),
+    )
+
+
+class TopicLongMemory(Base):
+    __tablename__ = "topic_long_memories"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    scope_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    chat_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    topic_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    user_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    fact_text: Mapped[str] = mapped_column(Text, nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="1")
+    source_daily_memory_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+
+class TopicAiSession(Base):
+    __tablename__ = "topic_ai_sessions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    scope_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    chat_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    topic_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    user_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    session_payload_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}", server_default="{}")
+    last_message_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("scope_type", "chat_id", "topic_id", "user_id", name="uq_topic_ai_sessions_scope"),
+    )

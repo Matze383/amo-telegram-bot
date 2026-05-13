@@ -13,6 +13,71 @@ def init_db(database_url: str) -> None:
 
     inspector = inspect(engine)
 
+
+    table_creation_migrations: dict[str, str] = {
+        "topic_agent_configs": """
+            CREATE TABLE topic_agent_configs (
+                id INTEGER NOT NULL PRIMARY KEY,
+                scope_type VARCHAR(32) NOT NULL,
+                chat_id BIGINT,
+                topic_id BIGINT,
+                user_id BIGINT,
+                ai_enabled BOOLEAN NOT NULL DEFAULT 0,
+                response_mode VARCHAR(32) NOT NULL DEFAULT 'command',
+                memory_retention_days INTEGER NOT NULL DEFAULT 30,
+                tools_enabled BOOLEAN NOT NULL DEFAULT 0,
+                topic_soul_text TEXT,
+                topic_soul_owner_only_edit BOOLEAN NOT NULL DEFAULT 1,
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                CONSTRAINT uq_topic_agent_configs_scope UNIQUE (scope_type, chat_id, topic_id, user_id)
+            )
+        """,
+        "topic_daily_memories": """
+            CREATE TABLE topic_daily_memories (
+                id INTEGER NOT NULL PRIMARY KEY,
+                scope_type VARCHAR(32) NOT NULL,
+                chat_id BIGINT,
+                topic_id BIGINT,
+                user_id BIGINT,
+                memory_date VARCHAR(10) NOT NULL,
+                summary_text TEXT NOT NULL DEFAULT '',
+                tokens_estimate INTEGER NOT NULL DEFAULT 0,
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                CONSTRAINT uq_topic_daily_memories_scope_day UNIQUE (scope_type, chat_id, topic_id, user_id, memory_date)
+            )
+        """,
+        "topic_long_memories": """
+            CREATE TABLE topic_long_memories (
+                id INTEGER NOT NULL PRIMARY KEY,
+                scope_type VARCHAR(32) NOT NULL,
+                chat_id BIGINT,
+                topic_id BIGINT,
+                user_id BIGINT,
+                fact_text TEXT NOT NULL,
+                is_active BOOLEAN NOT NULL DEFAULT 1,
+                source_daily_memory_id INTEGER,
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+        """,
+        "topic_ai_sessions": """
+            CREATE TABLE topic_ai_sessions (
+                id INTEGER NOT NULL PRIMARY KEY,
+                scope_type VARCHAR(32) NOT NULL,
+                chat_id BIGINT,
+                topic_id BIGINT,
+                user_id BIGINT,
+                session_payload_json TEXT NOT NULL DEFAULT '{}',
+                last_message_at DATETIME,
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                CONSTRAINT uq_topic_ai_sessions_scope UNIQUE (scope_type, chat_id, topic_id, user_id)
+            )
+        """,
+    }
+
     table_column_migrations: dict[str, dict[str, str]] = {
         "users": {
             "first_name": "ALTER TABLE users ADD COLUMN first_name VARCHAR(255)",
@@ -40,6 +105,10 @@ def init_db(database_url: str) -> None:
 
     with engine.begin() as connection:
         existing_tables = set(inspector.get_table_names())
+
+        for table_name, create_sql in table_creation_migrations.items():
+            if table_name not in existing_tables:
+                connection.execute(text(create_sql))
 
         if "chat_user_roles" not in existing_tables:
             connection.execute(
