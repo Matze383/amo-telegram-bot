@@ -18,6 +18,9 @@ from amo_bot.db.models import (
     DbRole,
     Plugin,
     PluginActivationRequest,
+    PluginPolicyAllowedGroup,
+    PluginPolicyAllowedTopic,
+    PluginPolicyOverride,
     TelegramChat,
     TelegramTopic,
     User,
@@ -59,6 +62,65 @@ class PluginActivationRequestStatus:
     reason: str | None = None
     requested_at: datetime | None = None
     resolved_at: datetime | None = None
+
+
+@dataclass(slots=True)
+class PluginPolicyOverrideSnapshot:
+    plugin_name: str
+    roles_mode: str
+    required_roles: list[Role]
+    private_mode: str
+    groups_mode: str
+    topics_mode: str
+    allowed_group_ids: list[int]
+    allowed_topics: list[tuple[int, int]]
+
+
+class PluginPolicyOverrideRepository:
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def get_snapshot(self, *, plugin_name: str) -> PluginPolicyOverrideSnapshot | None:
+        row = self._session.scalar(select(PluginPolicyOverride).where(PluginPolicyOverride.plugin_name == plugin_name))
+        if row is None:
+            return None
+
+        required_roles: list[Role] = []
+        if row.required_roles_json:
+            try:
+                raw_roles = json.loads(row.required_roles_json)
+            except json.JSONDecodeError:
+                raw_roles = []
+            if isinstance(raw_roles, list):
+                for item in raw_roles:
+                    if not isinstance(item, str):
+                        continue
+                    try:
+                        required_roles.append(Role(item))
+                    except ValueError:
+                        continue
+
+        allowed_group_ids = self._session.scalars(
+            select(PluginPolicyAllowedGroup.chat_id)
+            .where(PluginPolicyAllowedGroup.override_id == row.id)
+            .order_by(PluginPolicyAllowedGroup.chat_id.asc())
+        ).all()
+        allowed_topics = self._session.execute(
+            select(PluginPolicyAllowedTopic.chat_id, PluginPolicyAllowedTopic.message_thread_id)
+            .where(PluginPolicyAllowedTopic.override_id == row.id)
+            .order_by(PluginPolicyAllowedTopic.chat_id.asc(), PluginPolicyAllowedTopic.message_thread_id.asc())
+        ).all()
+
+        return PluginPolicyOverrideSnapshot(
+            plugin_name=row.plugin_name,
+            roles_mode=row.roles_mode,
+            required_roles=required_roles,
+            private_mode=row.private_mode,
+            groups_mode=row.groups_mode,
+            topics_mode=row.topics_mode,
+            allowed_group_ids=list(allowed_group_ids),
+            allowed_topics=[(int(chat_id), int(message_thread_id)) for chat_id, message_thread_id in allowed_topics],
+        )
 
 
 class UserRoleRepository:

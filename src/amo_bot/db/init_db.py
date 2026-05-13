@@ -134,6 +134,81 @@ def init_db(database_url: str) -> None:
                     text("CREATE INDEX ix_chat_seen_users_telegram_user_id ON chat_seen_users (telegram_user_id)")
                 )
 
+
+
+        if "plugin_policy_overrides" not in existing_tables:
+            connection.execute(
+                text(
+                    """
+                    CREATE TABLE plugin_policy_overrides (
+                        id INTEGER NOT NULL PRIMARY KEY,
+                        plugin_name VARCHAR(128) NOT NULL,
+                        roles_mode VARCHAR(16) NOT NULL DEFAULT 'inherit',
+                        required_roles_json TEXT NULL,
+                        private_mode VARCHAR(16) NOT NULL DEFAULT 'inherit',
+                        groups_mode VARCHAR(16) NOT NULL DEFAULT 'inherit',
+                        topics_mode VARCHAR(16) NOT NULL DEFAULT 'inherit',
+                        created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                        CONSTRAINT uq_plugin_policy_override_plugin UNIQUE (plugin_name)
+                    )
+                    """
+                )
+            )
+            existing_tables.add("plugin_policy_overrides")
+
+        if "plugin_policy_overrides" in existing_tables:
+            existing_indexes = {index["name"] for index in inspector.get_indexes("plugin_policy_overrides")}
+            if "ix_plugin_policy_overrides_plugin_name" not in existing_indexes:
+                connection.execute(text("CREATE INDEX ix_plugin_policy_overrides_plugin_name ON plugin_policy_overrides (plugin_name)"))
+
+        if "plugin_policy_allowed_groups" not in existing_tables:
+            connection.execute(
+                text(
+                    """
+                    CREATE TABLE plugin_policy_allowed_groups (
+                        id INTEGER NOT NULL PRIMARY KEY,
+                        override_id INTEGER NOT NULL,
+                        chat_id BIGINT NOT NULL,
+                        CONSTRAINT uq_plugin_policy_allowed_group UNIQUE (override_id, chat_id),
+                        FOREIGN KEY(override_id) REFERENCES plugin_policy_overrides (id) ON DELETE CASCADE
+                    )
+                    """
+                )
+            )
+            existing_tables.add("plugin_policy_allowed_groups")
+
+        if "plugin_policy_allowed_groups" in existing_tables:
+            existing_indexes = {index["name"] for index in inspector.get_indexes("plugin_policy_allowed_groups")}
+            if "ix_plugin_policy_allowed_groups_override_id" not in existing_indexes:
+                connection.execute(text("CREATE INDEX ix_plugin_policy_allowed_groups_override_id ON plugin_policy_allowed_groups (override_id)"))
+            if "ix_plugin_policy_allowed_groups_chat_id" not in existing_indexes:
+                connection.execute(text("CREATE INDEX ix_plugin_policy_allowed_groups_chat_id ON plugin_policy_allowed_groups (chat_id)"))
+
+        if "plugin_policy_allowed_topics" not in existing_tables:
+            connection.execute(
+                text(
+                    """
+                    CREATE TABLE plugin_policy_allowed_topics (
+                        id INTEGER NOT NULL PRIMARY KEY,
+                        override_id INTEGER NOT NULL,
+                        chat_id BIGINT NOT NULL,
+                        message_thread_id INTEGER NOT NULL,
+                        CONSTRAINT uq_plugin_policy_allowed_topic UNIQUE (override_id, chat_id, message_thread_id),
+                        FOREIGN KEY(override_id) REFERENCES plugin_policy_overrides (id) ON DELETE CASCADE
+                    )
+                    """
+                )
+            )
+            existing_tables.add("plugin_policy_allowed_topics")
+
+        if "plugin_policy_allowed_topics" in existing_tables:
+            existing_indexes = {index["name"] for index in inspector.get_indexes("plugin_policy_allowed_topics")}
+            if "ix_plugin_policy_allowed_topics_override_id" not in existing_indexes:
+                connection.execute(text("CREATE INDEX ix_plugin_policy_allowed_topics_override_id ON plugin_policy_allowed_topics (override_id)"))
+            if "ix_plugin_policy_allowed_topics_chat_id" not in existing_indexes:
+                connection.execute(text("CREATE INDEX ix_plugin_policy_allowed_topics_chat_id ON plugin_policy_allowed_topics (chat_id)"))
+
         for table_name, migrations in table_column_migrations.items():
             if table_name not in existing_tables:
                 continue

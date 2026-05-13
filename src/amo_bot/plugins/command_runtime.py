@@ -15,10 +15,10 @@ from sqlalchemy.orm import sessionmaker
 
 from amo_bot.auth.roles import Role
 from amo_bot.db.models import AuditEvent
-from amo_bot.db.repositories import PluginRepository
+from amo_bot.db.repositories import PluginPolicyOverrideRepository, PluginRepository
 from amo_bot.plugins.loader import PluginLoader
 from amo_bot.plugins.manifest import PluginManifest
-from amo_bot.plugins.service import PluginPolicy
+from amo_bot.plugins.policy_overrides import evaluate_effective_policy, resolve_effective_policy
 
 logger = logging.getLogger(__name__)
 
@@ -116,19 +116,6 @@ class PluginCommandExecutor:
             return
 
         run_id = str(uuid.uuid4())
-        if not self._is_role_allowed(manifest, actor.role):
-            self._write_audit(
-                event_type="plugin_command_denied",
-                actor_telegram_user_id=actor.telegram_user_id,
-                payload={
-                    "plugin_name": manifest.name,
-                    "command": invocation.command_name,
-                    "reason": "role_denied",
-                    "run_id": run_id,
-                },
-            )
-            return
-
         try:
             with self._session_factory() as session:
                 repo = PluginRepository(session)
@@ -145,6 +132,33 @@ class PluginCommandExecutor:
                     "plugin_name": manifest.name,
                     "command": invocation.command_name,
                     "reason": "plugin_disabled",
+                    "run_id": run_id,
+                },
+            )
+            return
+
+        try:
+            with self._session_factory() as session:
+                override = PluginPolicyOverrideRepository(session).get_snapshot(plugin_name=manifest.name)
+        except Exception:
+            logger.exception("plugin policy override lookup failed plugin=%s", manifest.name)
+            return
+
+        effective_policy = resolve_effective_policy(manifest=manifest, override=override)
+        policy_eval = evaluate_effective_policy(
+            actor_role=actor.role,
+            effective_policy=effective_policy,
+            chat_id=invocation.chat_id,
+            message_thread_id=invocation.message_thread_id,
+        )
+        if not policy_eval.allowed:
+            self._write_audit(
+                event_type="plugin_command_denied",
+                actor_telegram_user_id=actor.telegram_user_id,
+                payload={
+                    "plugin_name": manifest.name,
+                    "command": invocation.command_name,
+                    "reason": policy_eval.deny_reason,
                     "run_id": run_id,
                 },
             )
@@ -234,10 +248,6 @@ class PluginCommandExecutor:
             if command and command in commands:
                 return manifest
         return None
-
-    @staticmethod
-    def _is_role_allowed(manifest: PluginManifest, role: Role) -> bool:
-        return PluginPolicy.is_role_allowed(actor_role=role, plugin_required_roles=manifest.required_roles)
 
     def _load_handler(self, manifest: PluginManifest) -> Callable[[PluginCommandContext, PluginHostAPI], Awaitable[Any]]:
         plugin_dir = Path(self._loader.plugins_dir) / manifest.name

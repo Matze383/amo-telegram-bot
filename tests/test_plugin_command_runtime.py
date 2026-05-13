@@ -8,7 +8,7 @@ from sqlalchemy import select
 from amo_bot.auth.roles import Role
 from amo_bot.db.base import create_session_factory
 from amo_bot.db.init_db import init_db
-from amo_bot.db.models import AuditEvent
+from amo_bot.db.models import AuditEvent, PluginPolicyAllowedGroup, PluginPolicyAllowedTopic, PluginPolicyOverride
 from amo_bot.db.repositories import PluginRepository
 from amo_bot.plugins.command_runtime import CommandActor, CommandInvocation, PluginCommandExecutor
 from amo_bot.plugins.loader import PluginLoader
@@ -319,3 +319,243 @@ async def handle_command(context, host_api):
         events = [row.event_type for row in session.scalars(select(AuditEvent)).all()]
     assert "plugin_command_timeout" in events
     assert "plugin_command_error" in events
+
+
+def test_plugin_command_roles_override_replaces_manifest_roles(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'plugin_runtime_roles_override.db'}"
+    init_db(db_url)
+    executor, sent, _ = _mk_executor(
+        tmp_path,
+        db_url,
+        "roles_override_demo",
+        """
+async def handle_command(context, host_api):
+    await host_api.send_message(context.chat_id, "ok")
+""",
+    )
+
+    sf = create_session_factory(db_url)
+    with sf() as session:
+        session.add(
+            PluginPolicyOverride(
+                plugin_name="roles_override_demo",
+                roles_mode="override",
+                required_roles_json='["normal"]',
+            )
+        )
+        session.commit()
+
+    asyncio.run(
+        executor.execute(
+            actor=CommandActor(telegram_user_id=100, role=Role.NORMAL),
+            invocation=CommandInvocation(command_name="plug", argument=None, chat_id=77, message_id=9),
+        )
+    )
+
+    assert sent == [(77, "ok")]
+
+
+def test_plugin_command_private_deny_blocks_private_and_inherit_keeps_legacy(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'plugin_runtime_private_scope.db'}"
+    init_db(db_url)
+    executor, sent, _ = _mk_executor(
+        tmp_path,
+        db_url,
+        "private_scope_demo",
+        """
+async def handle_command(context, host_api):
+    await host_api.send_message(context.chat_id, "ok")
+""",
+    )
+
+    sf = create_session_factory(db_url)
+    with sf() as session:
+        session.add(
+            PluginPolicyOverride(
+                plugin_name="private_scope_demo",
+                private_mode="deny",
+            )
+        )
+        session.commit()
+
+    asyncio.run(
+        executor.execute(
+            actor=CommandActor(telegram_user_id=100, role=Role.ADMIN),
+            invocation=CommandInvocation(command_name="plug", argument=None, chat_id=100, message_id=9),
+        )
+    )
+    assert sent == []
+
+    with sf() as session:
+        row = session.scalar(select(PluginPolicyOverride).where(PluginPolicyOverride.plugin_name == "private_scope_demo"))
+        assert row is not None
+        row.private_mode = "inherit"
+        session.commit()
+
+    asyncio.run(
+        executor.execute(
+            actor=CommandActor(telegram_user_id=100, role=Role.ADMIN),
+            invocation=CommandInvocation(command_name="plug", argument=None, chat_id=100, message_id=10),
+        )
+    )
+    assert sent == [(100, "ok")]
+
+
+def test_plugin_command_group_allow_mode_empty_denies_all_then_allows_specific_group(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'plugin_runtime_group_scope.db'}"
+    init_db(db_url)
+    executor, sent, _ = _mk_executor(
+        tmp_path,
+        db_url,
+        "group_scope_demo",
+        """
+async def handle_command(context, host_api):
+    await host_api.send_message(context.chat_id, "ok")
+""",
+    )
+
+    sf = create_session_factory(db_url)
+    with sf() as session:
+        override = PluginPolicyOverride(
+            plugin_name="group_scope_demo",
+            groups_mode="allow",
+        )
+        session.add(override)
+        session.commit()
+        override_id = override.id
+
+    asyncio.run(
+        executor.execute(
+            actor=CommandActor(telegram_user_id=100, role=Role.ADMIN),
+            invocation=CommandInvocation(command_name="plug", argument=None, chat_id=-111, message_id=9),
+        )
+    )
+    assert sent == []
+
+    with sf() as session:
+        session.add(PluginPolicyAllowedGroup(override_id=override_id, chat_id=-111))
+        session.commit()
+
+    asyncio.run(
+        executor.execute(
+            actor=CommandActor(telegram_user_id=100, role=Role.ADMIN),
+            invocation=CommandInvocation(command_name="plug", argument=None, chat_id=-111, message_id=10),
+        )
+    )
+    assert sent == [(-111, "ok")]
+
+
+def test_plugin_command_group_deny_mode_blocks_group_chat(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'plugin_runtime_group_deny_scope.db'}"
+    init_db(db_url)
+    executor, sent, _ = _mk_executor(
+        tmp_path,
+        db_url,
+        "group_deny_scope_demo",
+        """
+async def handle_command(context, host_api):
+    await host_api.send_message(context.chat_id, "ok")
+""",
+    )
+
+    sf = create_session_factory(db_url)
+    with sf() as session:
+        session.add(
+            PluginPolicyOverride(
+                plugin_name="group_deny_scope_demo",
+                groups_mode="deny",
+            )
+        )
+        session.commit()
+
+    asyncio.run(
+        executor.execute(
+            actor=CommandActor(telegram_user_id=100, role=Role.ADMIN),
+            invocation=CommandInvocation(command_name="plug", argument=None, chat_id=-333, message_id=9),
+        )
+    )
+    assert sent == []
+
+
+def test_plugin_command_topic_deny_mode_blocks_topic_messages_only(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'plugin_runtime_topic_deny_scope.db'}"
+    init_db(db_url)
+    executor, sent, _ = _mk_executor(
+        tmp_path,
+        db_url,
+        "topic_deny_scope_demo",
+        """
+async def handle_command(context, host_api):
+    await host_api.send_message(context.chat_id, "ok")
+""",
+    )
+
+    sf = create_session_factory(db_url)
+    with sf() as session:
+        session.add(
+            PluginPolicyOverride(
+                plugin_name="topic_deny_scope_demo",
+                topics_mode="deny",
+            )
+        )
+        session.commit()
+
+    asyncio.run(
+        executor.execute(
+            actor=CommandActor(telegram_user_id=100, role=Role.ADMIN),
+            invocation=CommandInvocation(command_name="plug", argument=None, chat_id=-444, message_id=9, message_thread_id=1),
+        )
+    )
+
+    asyncio.run(
+        executor.execute(
+            actor=CommandActor(telegram_user_id=100, role=Role.ADMIN),
+            invocation=CommandInvocation(command_name="plug", argument=None, chat_id=-444, message_id=10, message_thread_id=None),
+        )
+    )
+
+    assert sent == [(-444, "ok")]
+
+
+def test_plugin_command_topic_allow_mode_empty_denies_all_then_allows_specific_topic(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'plugin_runtime_topic_scope.db'}"
+    init_db(db_url)
+    executor, sent, _ = _mk_executor(
+        tmp_path,
+        db_url,
+        "topic_scope_demo",
+        """
+async def handle_command(context, host_api):
+    await host_api.send_message(context.chat_id, "ok")
+""",
+    )
+
+    sf = create_session_factory(db_url)
+    with sf() as session:
+        override = PluginPolicyOverride(
+            plugin_name="topic_scope_demo",
+            topics_mode="allow",
+        )
+        session.add(override)
+        session.commit()
+        override_id = override.id
+
+    asyncio.run(
+        executor.execute(
+            actor=CommandActor(telegram_user_id=100, role=Role.ADMIN),
+            invocation=CommandInvocation(command_name="plug", argument=None, chat_id=-222, message_id=9, message_thread_id=1),
+        )
+    )
+    assert sent == []
+
+    with sf() as session:
+        session.add(PluginPolicyAllowedTopic(override_id=override_id, chat_id=-222, message_thread_id=1))
+        session.commit()
+
+    asyncio.run(
+        executor.execute(
+            actor=CommandActor(telegram_user_id=100, role=Role.ADMIN),
+            invocation=CommandInvocation(command_name="plug", argument=None, chat_id=-222, message_id=10, message_thread_id=1),
+        )
+    )
+    assert sent == [(-222, "ok")]

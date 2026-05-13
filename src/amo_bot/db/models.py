@@ -165,6 +165,42 @@ class TelegramTopic(Base):
     )
 
 
+class PluginPolicyOverride(Base):
+    __tablename__ = "plugin_policy_overrides"
+    __table_args__ = (UniqueConstraint("plugin_name", name="uq_plugin_policy_override_plugin"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    plugin_name: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    roles_mode: Mapped[str] = mapped_column(String(16), nullable=False, default="inherit", server_default="inherit")
+    required_roles_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    private_mode: Mapped[str] = mapped_column(String(16), nullable=False, default="inherit", server_default="inherit")
+    groups_mode: Mapped[str] = mapped_column(String(16), nullable=False, default="inherit", server_default="inherit")
+    topics_mode: Mapped[str] = mapped_column(String(16), nullable=False, default="inherit", server_default="inherit")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class PluginPolicyAllowedGroup(Base):
+    __tablename__ = "plugin_policy_allowed_groups"
+    __table_args__ = (UniqueConstraint("override_id", "chat_id", name="uq_plugin_policy_allowed_group"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    override_id: Mapped[int] = mapped_column(ForeignKey("plugin_policy_overrides.id", ondelete="CASCADE"), nullable=False, index=True)
+    chat_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+
+
+class PluginPolicyAllowedTopic(Base):
+    __tablename__ = "plugin_policy_allowed_topics"
+    __table_args__ = (UniqueConstraint("override_id", "chat_id", "message_thread_id", name="uq_plugin_policy_allowed_topic"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    override_id: Mapped[int] = mapped_column(ForeignKey("plugin_policy_overrides.id", ondelete="CASCADE"), nullable=False, index=True)
+    chat_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    message_thread_id: Mapped[int] = mapped_column(Integer, nullable=False)
+
+
 DEFAULT_ROLES: list[tuple[Role, int]] = [
     (Role.OWNER, 0),
     (Role.ADMIN, 10),
