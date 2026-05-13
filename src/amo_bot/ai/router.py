@@ -11,6 +11,7 @@ class AIRouterReasonCode(StrEnum):
 
     DEFAULT_NOOP = "default_noop"
     SCOPE_ENABLED = "scope_enabled"
+    MENTION_IN_ACTIVE_SCOPE = "mention_in_active_scope"
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,8 +37,9 @@ class AIRouter:
         topic_id: int | None = None,
         user_id: int | None = None,
         chat_type: str | None = None,
+        bot_username: str | None = None,
     ) -> AIRouterDecision:
-        _ = (prompt, chat_type)
+        _ = chat_type
 
         repo = self._topic_agent_memory_repository
         if repo is None:
@@ -55,6 +57,13 @@ class AIRouter:
         )
         if config is None or not config.ai_enabled:
             return AIRouterDecision()
+
+        if self._has_bot_mention(prompt=prompt, bot_username=bot_username):
+            return AIRouterDecision(
+                passthrough=True,
+                eligible=True,
+                reason_code=AIRouterReasonCode.MENTION_IN_ACTIVE_SCOPE,
+            )
 
         return AIRouterDecision(passthrough=True, eligible=True, reason_code=AIRouterReasonCode.SCOPE_ENABLED)
 
@@ -75,6 +84,25 @@ class AIRouter:
             return {"scope_type": "private_user", "chat_id": None, "topic_id": None, "user_id": private_user_id}
 
         return None
+
+    @staticmethod
+    def _has_bot_mention(*, prompt: str, bot_username: str | None) -> bool:
+        if bot_username is None:
+            return False
+
+        normalized = bot_username.strip().lstrip("@").lower()
+        if not normalized:
+            return False
+
+        prompt_lower = prompt.lower()
+        mention = f"@{normalized}"
+        idx = prompt_lower.find(mention)
+        while idx != -1:
+            next_index = idx + len(mention)
+            if next_index >= len(prompt_lower) or not (prompt_lower[next_index].isalnum() or prompt_lower[next_index] == "_"):
+                return True
+            idx = prompt_lower.find(mention, idx + 1)
+        return False
 
 
 __all__ = ["AIRouter", "AIRouterDecision", "AIRouterReasonCode"]
