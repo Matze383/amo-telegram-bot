@@ -131,6 +131,7 @@ class PluginPolicyOverrideRepository:
         private_mode: str,
         groups_mode: str,
         topics_mode: str,
+        allowed_group_ids: list[int] | None = None,
     ) -> None:
         row = self._session.scalar(select(PluginPolicyOverride).where(PluginPolicyOverride.plugin_name == plugin_name))
         required_roles_json = json.dumps([role.value for role in required_roles])
@@ -145,12 +146,19 @@ class PluginPolicyOverrideRepository:
                 topics_mode=topics_mode,
             )
             self._session.add(row)
+            self._session.flush()
         else:
             row.roles_mode = roles_mode
             row.required_roles_json = required_roles_json
             row.private_mode = private_mode
             row.groups_mode = groups_mode
             row.topics_mode = topics_mode
+
+        if allowed_group_ids is not None:
+            self._session.query(PluginPolicyAllowedGroup).filter(PluginPolicyAllowedGroup.override_id == row.id).delete()
+            deduped_group_ids = sorted(set(allowed_group_ids))
+            for chat_id in deduped_group_ids:
+                self._session.add(PluginPolicyAllowedGroup(override_id=row.id, chat_id=chat_id))
 
         self._session.commit()
 

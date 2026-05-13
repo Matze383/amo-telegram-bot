@@ -78,7 +78,7 @@
             </td>
             <td>
               {% if owner_mutation_enabled %}
-                {% set override = policy_overrides.get(plugin.name, {'roles_mode': 'inherit', 'required_roles': [], 'private_mode': 'inherit', 'groups_mode': 'inherit'}) %}
+                {% set override = policy_overrides.get(plugin.name, {'roles_mode': 'inherit', 'required_roles': [], 'private_mode': 'inherit', 'groups_mode': 'inherit', 'allowed_group_ids': []}) %}
                 <form method="post" action="{{ url_for('plugins.save_plugin_policy', plugin_name=plugin.name) }}">
                   {{ mutation_form.hidden_tag() }}
                   <fieldset>
@@ -107,6 +107,18 @@
                         <option value="deny" {% if override.groups_mode == 'deny' %}selected{% endif %}>deny</option>
                       </select>
                     </label><br>
+                    <label>Allowed groups</label><br>
+                    {% if known_groups %}
+                      {% for group in known_groups %}
+                        <label>
+                          <input type="checkbox" name="allowed_group_ids" value="{{ group.chat_id }}" {% if group.chat_id in override.allowed_group_ids %}checked{% endif %}>
+                          {{ group.title if group.title else '(ohne Titel)' }} ({{ group.chat_id }})
+                        </label><br>
+                      {% endfor %}
+                    {% else %}
+                      <em>Keine bekannten Gruppen vorhanden.</em><br>
+                    {% endif %}
+                    <small>groups_mode=allow + keine Gruppe ausgewählt =&gt; deny all.</small><br>
                     <small>Topic mode bleibt in Block 2 bewusst auf inherit.</small><br>
                     <button type="submit">Policy speichern</button>
                   </fieldset>

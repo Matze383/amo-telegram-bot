@@ -562,3 +562,55 @@ def test_activate_blocks_when_required_settings_missing(tmp_path) -> None:
         assert "api_key" in str(exc)
     else:
         raise AssertionError("activation must be blocked when required plugin settings are missing")
+
+
+def test_plugin_policy_override_repository_upsert_allowed_group_ids_dedup_replace_and_clear(tmp_path) -> None:
+    from amo_bot.auth.roles import Role
+    from amo_bot.db.base import create_session_factory
+    from amo_bot.db.repositories import PluginPolicyOverrideRepository
+    from amo_bot.db.init_db import init_db
+
+    db_url = f"sqlite:///{tmp_path / 'plugins_allowed_groups.db'}"
+    init_db(db_url)
+    sf = create_session_factory(db_url)
+
+    with sf() as session:
+        repo = PluginPolicyOverrideRepository(session)
+        repo.upsert_override(
+            plugin_name="scope",
+            roles_mode="inherit",
+            required_roles=[],
+            private_mode="inherit",
+            groups_mode="allow",
+            topics_mode="inherit",
+            allowed_group_ids=[-2002, -1001, -2002],
+        )
+        snap1 = repo.get_snapshot(plugin_name="scope")
+        assert snap1 is not None
+        assert snap1.allowed_group_ids == [-2002, -1001]
+
+        repo.upsert_override(
+            plugin_name="scope",
+            roles_mode="override",
+            required_roles=[Role.ADMIN],
+            private_mode="deny",
+            groups_mode="allow",
+            topics_mode="inherit",
+            allowed_group_ids=[-3003],
+        )
+        snap2 = repo.get_snapshot(plugin_name="scope")
+        assert snap2 is not None
+        assert snap2.allowed_group_ids == [-3003]
+
+        repo.upsert_override(
+            plugin_name="scope",
+            roles_mode="override",
+            required_roles=[Role.ADMIN],
+            private_mode="deny",
+            groups_mode="allow",
+            topics_mode="inherit",
+            allowed_group_ids=[],
+        )
+        snap3 = repo.get_snapshot(plugin_name="scope")
+        assert snap3 is not None
+        assert snap3.allowed_group_ids == []

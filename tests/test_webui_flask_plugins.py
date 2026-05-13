@@ -375,6 +375,8 @@ def test_plugins_shows_runtime_history_fields(tmp_path) -> None:
 
 
 def test_plugins_policy_section_shows_defaults(tmp_path) -> None:
+    from amo_bot.db.base import create_session_factory
+    from amo_bot.db.repositories import ChatTopicRepository
     db_url = f"sqlite:///{tmp_path / 'plugins10.db'}"
     plugins_dir = tmp_path / "plugins"
     plugin_dir = plugins_dir / "scope"
@@ -385,6 +387,12 @@ def test_plugins_policy_section_shows_defaults(tmp_path) -> None:
     )
 
     app = create_flask_app(settings=_make_settings(db_url, str(plugins_dir), owner_id=777))
+
+    sf = create_session_factory(db_url)
+    with sf() as session:
+        chat_repo = ChatTopicRepository(session)
+        chat_repo.upsert_chat(chat_id=-1001, chat_type="group", title="Team Alpha", username=None)
+        chat_repo.upsert_chat(chat_id=-2002, chat_type="supergroup", title="Team Beta", username=None)
 
     with app.test_client() as client:
         _login(client, "test-secret")
@@ -403,7 +411,7 @@ def test_plugins_policy_section_shows_defaults(tmp_path) -> None:
 
 def test_plugin_policy_post_saves_roles_override(tmp_path) -> None:
     from amo_bot.db.base import create_session_factory
-    from amo_bot.db.repositories import PluginPolicyOverrideRepository
+    from amo_bot.db.repositories import ChatTopicRepository, PluginPolicyOverrideRepository
 
     db_url = f"sqlite:///{tmp_path / 'plugins11.db'}"
     plugins_dir = tmp_path / "plugins"
@@ -415,6 +423,12 @@ def test_plugin_policy_post_saves_roles_override(tmp_path) -> None:
     )
 
     app = create_flask_app(settings=_make_settings(db_url, str(plugins_dir), owner_id=777))
+
+    sf = create_session_factory(db_url)
+    with sf() as session:
+        chat_repo = ChatTopicRepository(session)
+        chat_repo.upsert_chat(chat_id=-1001, chat_type="group", title="Team Alpha", username=None)
+        chat_repo.upsert_chat(chat_id=-2002, chat_type="supergroup", title="Team Beta", username=None)
 
     with app.test_client() as client:
         _login(client, "test-secret")
@@ -444,6 +458,8 @@ def test_plugin_policy_post_saves_roles_override(tmp_path) -> None:
 
 
 def test_plugin_policy_get_renders_saved_override(tmp_path) -> None:
+    from amo_bot.db.base import create_session_factory
+    from amo_bot.db.repositories import ChatTopicRepository
     db_url = f"sqlite:///{tmp_path / 'plugins12.db'}"
     plugins_dir = tmp_path / "plugins"
     plugin_dir = plugins_dir / "scope"
@@ -454,6 +470,12 @@ def test_plugin_policy_get_renders_saved_override(tmp_path) -> None:
     )
 
     app = create_flask_app(settings=_make_settings(db_url, str(plugins_dir), owner_id=777))
+
+    sf = create_session_factory(db_url)
+    with sf() as session:
+        chat_repo = ChatTopicRepository(session)
+        chat_repo.upsert_chat(chat_id=-1001, chat_type="group", title="Team Alpha", username=None)
+        chat_repo.upsert_chat(chat_id=-2002, chat_type="supergroup", title="Team Beta", username=None)
 
     with app.test_client() as client:
         _login(client, "test-secret")
@@ -467,6 +489,7 @@ def test_plugin_policy_get_renders_saved_override(tmp_path) -> None:
                 "required_roles": ["admin", "vip"],
                 "private_mode": "deny",
                 "groups_mode": "allow",
+                "allowed_group_ids": ["-2002", "-1001", "-2002"],
             },
             follow_redirects=False,
         )
@@ -481,9 +504,13 @@ def test_plugin_policy_get_renders_saved_override(tmp_path) -> None:
     assert 'name="required_roles" value="vip" checked' in html
     assert '<option value="deny" selected>deny</option>' in html
     assert '<option value="allow" selected>allow</option>' in html
+    assert 'value="-1001" checked' in html
+    assert 'value="-2002" checked' in html
 
 
 def test_plugin_policy_post_rejects_invalid_modes_and_roles(tmp_path) -> None:
+    from amo_bot.db.base import create_session_factory
+    from amo_bot.db.repositories import ChatTopicRepository
     db_url = f"sqlite:///{tmp_path / 'plugins13.db'}"
     plugins_dir = tmp_path / "plugins"
     plugin_dir = plugins_dir / "scope"
@@ -494,6 +521,10 @@ def test_plugin_policy_post_rejects_invalid_modes_and_roles(tmp_path) -> None:
     )
 
     app = create_flask_app(settings=_make_settings(db_url, str(plugins_dir), owner_id=777))
+
+    sf = create_session_factory(db_url)
+    with sf() as session:
+        ChatTopicRepository(session).upsert_chat(chat_id=-1001, chat_type="group", title="Known Group", username=None)
 
     with app.test_client() as client:
         _login(client, "test-secret")
@@ -551,7 +582,61 @@ def test_plugin_policy_post_rejects_invalid_modes_and_roles(tmp_path) -> None:
             follow_redirects=False,
         )
 
+        page5 = client.get("/plugins")
+        token5 = _extract_csrf_token(page5.get_data(as_text=True))
+        resp_invalid_group_id = client.post(
+            "/plugins/scope/policy",
+            data={
+                "csrf_token": token5,
+                "roles_mode": "inherit",
+                "private_mode": "inherit",
+                "groups_mode": "allow",
+                "allowed_group_ids": ["not-an-int"],
+            },
+            follow_redirects=False,
+        )
+
+        page6 = client.get("/plugins")
+        token6 = _extract_csrf_token(page6.get_data(as_text=True))
+        resp_unknown_group_id = client.post(
+            "/plugins/scope/policy",
+            data={
+                "csrf_token": token6,
+                "roles_mode": "inherit",
+                "private_mode": "inherit",
+                "groups_mode": "allow",
+                "allowed_group_ids": ["-9999"],
+            },
+            follow_redirects=False,
+        )
+
+        page7 = client.get("/plugins")
+        token7 = _extract_csrf_token(page7.get_data(as_text=True))
+        resp_allow_without_groups = client.post(
+            "/plugins/scope/policy",
+            data={
+                "csrf_token": token7,
+                "roles_mode": "inherit",
+                "private_mode": "inherit",
+                "groups_mode": "allow",
+            },
+            follow_redirects=False,
+        )
+
     assert resp_invalid_roles_mode.status_code == 400
     assert resp_invalid_private_mode.status_code == 400
     assert resp_invalid_groups_mode.status_code == 400
     assert resp_invalid_role.status_code == 400
+    assert resp_invalid_group_id.status_code == 400
+    assert resp_unknown_group_id.status_code == 400
+    assert resp_allow_without_groups.status_code == 302
+
+    sf2 = create_session_factory(db_url)
+    with sf2() as session:
+        from amo_bot.db.repositories import PluginPolicyOverrideRepository
+
+        policy = PluginPolicyOverrideRepository(session).get_snapshot(plugin_name="scope")
+
+    assert policy is not None
+    assert policy.groups_mode == "allow"
+    assert policy.allowed_group_ids == []
