@@ -1,0 +1,38 @@
+# Plugin Manifest - Command Plugin with Secret
+# See docs/PLUGIN_CONTRACT.md for manifest specification
+
+id: example.command.with_secret
+name: Command Plugin with Secret
+version: "1.0.0"
+description: Example plugin demonstrating secret configuration usage
+entrypoint: main.py
+min_bot_version: "1.0.0"
+triggers:
+  - user-triggered
+
+author: AMO Team
+
+settings_schema:
+  api_key:
+    type: secret
+    required: true
+    description: API key for weather service (encrypted storage)
+  default_city:
+    type: text
+    required: false
+    default: "Berlin"
+    description: Default city for weather queries
+  units:
+    type: select
+    required: true
+    default: "metric"
+    options:
+      - metric
+      - imperial
+      - kelvin
+    description: Temperature display format
+  cache_enabled:
+    type: bool
+    required: false
+    default: true
+    description: Cache weather data for 10 minutes

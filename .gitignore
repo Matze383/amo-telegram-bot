@@ -12,6 +12,10 @@ data/
 logs/
 tmp/
 docs/Docs_Check_Report.md
+# Internal workflow/planning files for local agent coordination
+TODO.md
+docs/**/TODO.md
+*.todo.md
 *.log
 *.db
 *.db-journal

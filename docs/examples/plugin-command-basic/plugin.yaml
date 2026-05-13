@@ -1,0 +1,20 @@
+# Plugin Manifest - Basic Command Plugin
+# See docs/PLUGIN_CONTRACT.md for manifest specification
+
+id: example.command.basic
+name: Basic Command Plugin
+version: "1.0.0"
+description: A simple user-triggered command plugin example
+entrypoint: main.py
+min_bot_version: "1.0.0"
+triggers:
+  - user-triggered
+
+author: AMO Team
+
+settings_schema:
+  greeting_message:
+    type: text
+    required: true
+    default: "Hello from AMO!"
+    description: The message to send when triggered
