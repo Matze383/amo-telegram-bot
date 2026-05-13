@@ -372,3 +372,186 @@ def test_plugins_shows_runtime_history_fields(tmp_path) -> None:
     assert "next_restart_at: 2030-01-01 09:10:00" in html
     assert "last_heartbeat_at: 2030-01-01 08:59:00" in html
     assert "last_error: boom" in html
+
+
+def test_plugins_policy_section_shows_defaults(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'plugins10.db'}"
+    plugins_dir = tmp_path / "plugins"
+    plugin_dir = plugins_dir / "scope"
+    plugin_dir.mkdir(parents=True)
+    (plugin_dir / "plugin.json").write_text(
+        json.dumps({"name": "scope", "version": "1.0.0", "commands": ["scope"], "required_roles": ["admin"]}),
+        encoding="utf-8",
+    )
+
+    app = create_flask_app(settings=_make_settings(db_url, str(plugins_dir), owner_id=777))
+
+    with app.test_client() as client:
+        _login(client, "test-secret")
+        response = client.get("/plugins")
+        html = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    assert '<select name="roles_mode">\n                        <option value="inherit" selected>inherit</option>' in html
+    assert '<select name="private_mode">\n                        <option value="inherit" selected>inherit</option>' in html
+    assert '<select name="groups_mode">\n                        <option value="inherit" selected>inherit</option>' in html
+    assert 'name="required_roles" value="owner" checked' not in html
+    assert 'name="required_roles" value="admin" checked' not in html
+    assert 'name="required_roles" value="vip" checked' not in html
+    assert 'name="required_roles" value="normal" checked' not in html
+
+
+def test_plugin_policy_post_saves_roles_override(tmp_path) -> None:
+    from amo_bot.db.base import create_session_factory
+    from amo_bot.db.repositories import PluginPolicyOverrideRepository
+
+    db_url = f"sqlite:///{tmp_path / 'plugins11.db'}"
+    plugins_dir = tmp_path / "plugins"
+    plugin_dir = plugins_dir / "scope"
+    plugin_dir.mkdir(parents=True)
+    (plugin_dir / "plugin.json").write_text(
+        json.dumps({"name": "scope", "version": "1.0.0", "commands": ["scope"], "required_roles": ["admin"]}),
+        encoding="utf-8",
+    )
+
+    app = create_flask_app(settings=_make_settings(db_url, str(plugins_dir), owner_id=777))
+
+    with app.test_client() as client:
+        _login(client, "test-secret")
+        page = client.get("/plugins")
+        token = _extract_csrf_token(page.get_data(as_text=True))
+        response = client.post(
+            "/plugins/scope/policy",
+            data={
+                "csrf_token": token,
+                "roles_mode": "override",
+                "required_roles": ["admin", "vip"],
+                "private_mode": "inherit",
+                "groups_mode": "inherit",
+            },
+            follow_redirects=False,
+        )
+
+    assert response.status_code == 302
+
+    sf = create_session_factory(db_url)
+    with sf() as session:
+        snap = PluginPolicyOverrideRepository(session).get_snapshot(plugin_name="scope")
+
+    assert snap is not None
+    assert snap.roles_mode == "override"
+    assert [role.value for role in snap.required_roles] == ["admin", "vip"]
+
+
+def test_plugin_policy_get_renders_saved_override(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'plugins12.db'}"
+    plugins_dir = tmp_path / "plugins"
+    plugin_dir = plugins_dir / "scope"
+    plugin_dir.mkdir(parents=True)
+    (plugin_dir / "plugin.json").write_text(
+        json.dumps({"name": "scope", "version": "1.0.0", "commands": ["scope"], "required_roles": ["admin"]}),
+        encoding="utf-8",
+    )
+
+    app = create_flask_app(settings=_make_settings(db_url, str(plugins_dir), owner_id=777))
+
+    with app.test_client() as client:
+        _login(client, "test-secret")
+        page = client.get("/plugins")
+        token = _extract_csrf_token(page.get_data(as_text=True))
+        response = client.post(
+            "/plugins/scope/policy",
+            data={
+                "csrf_token": token,
+                "roles_mode": "override",
+                "required_roles": ["admin", "vip"],
+                "private_mode": "deny",
+                "groups_mode": "allow",
+            },
+            follow_redirects=False,
+        )
+        assert response.status_code == 302
+
+        rendered = client.get("/plugins")
+        html = rendered.get_data(as_text=True)
+
+    assert rendered.status_code == 200
+    assert '<option value="override" selected>override</option>' in html
+    assert 'name="required_roles" value="admin" checked' in html
+    assert 'name="required_roles" value="vip" checked' in html
+    assert '<option value="deny" selected>deny</option>' in html
+    assert '<option value="allow" selected>allow</option>' in html
+
+
+def test_plugin_policy_post_rejects_invalid_modes_and_roles(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'plugins13.db'}"
+    plugins_dir = tmp_path / "plugins"
+    plugin_dir = plugins_dir / "scope"
+    plugin_dir.mkdir(parents=True)
+    (plugin_dir / "plugin.json").write_text(
+        json.dumps({"name": "scope", "version": "1.0.0", "commands": ["scope"], "required_roles": ["admin"]}),
+        encoding="utf-8",
+    )
+
+    app = create_flask_app(settings=_make_settings(db_url, str(plugins_dir), owner_id=777))
+
+    with app.test_client() as client:
+        _login(client, "test-secret")
+
+        page = client.get("/plugins")
+        token = _extract_csrf_token(page.get_data(as_text=True))
+        resp_invalid_roles_mode = client.post(
+            "/plugins/scope/policy",
+            data={
+                "csrf_token": token,
+                "roles_mode": "nope",
+                "private_mode": "inherit",
+                "groups_mode": "inherit",
+            },
+            follow_redirects=False,
+        )
+
+        page2 = client.get("/plugins")
+        token2 = _extract_csrf_token(page2.get_data(as_text=True))
+        resp_invalid_private_mode = client.post(
+            "/plugins/scope/policy",
+            data={
+                "csrf_token": token2,
+                "roles_mode": "inherit",
+                "private_mode": "nope",
+                "groups_mode": "inherit",
+            },
+            follow_redirects=False,
+        )
+
+        page3 = client.get("/plugins")
+        token3 = _extract_csrf_token(page3.get_data(as_text=True))
+        resp_invalid_groups_mode = client.post(
+            "/plugins/scope/policy",
+            data={
+                "csrf_token": token3,
+                "roles_mode": "inherit",
+                "private_mode": "inherit",
+                "groups_mode": "nope",
+            },
+            follow_redirects=False,
+        )
+
+        page4 = client.get("/plugins")
+        token4 = _extract_csrf_token(page4.get_data(as_text=True))
+        resp_invalid_role = client.post(
+            "/plugins/scope/policy",
+            data={
+                "csrf_token": token4,
+                "roles_mode": "override",
+                "required_roles": ["hacker"],
+                "private_mode": "inherit",
+                "groups_mode": "inherit",
+            },
+            follow_redirects=False,
+        )
+
+    assert resp_invalid_roles_mode.status_code == 400
+    assert resp_invalid_private_mode.status_code == 400
+    assert resp_invalid_groups_mode.status_code == 400
+    assert resp_invalid_role.status_code == 400

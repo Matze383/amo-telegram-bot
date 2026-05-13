@@ -20,6 +20,7 @@
           <th>Rollen</th>
           <th>Capabilities</th>
           <th>Settings</th>
+          <th>Policy Override</th>
           <th>Aktionen</th>
         </tr>
       </thead>
@@ -71,6 +72,45 @@
                     {% endfor %}
                   </ul>
                 </details>
+              {% else %}
+                -
+              {% endif %}
+            </td>
+            <td>
+              {% if owner_mutation_enabled %}
+                {% set override = policy_overrides.get(plugin.name, {'roles_mode': 'inherit', 'required_roles': [], 'private_mode': 'inherit', 'groups_mode': 'inherit'}) %}
+                <form method="post" action="{{ url_for('plugins.save_plugin_policy', plugin_name=plugin.name) }}">
+                  {{ mutation_form.hidden_tag() }}
+                  <fieldset>
+                    <legend>Policy</legend>
+                    <label>Rollenmodus
+                      <select name="roles_mode">
+                        <option value="inherit" {% if override.roles_mode == 'inherit' %}selected{% endif %}>inherit</option>
+                        <option value="override" {% if override.roles_mode == 'override' %}selected{% endif %}>override</option>
+                      </select>
+                    </label><br>
+                    <label><input type="checkbox" name="required_roles" value="owner" {% if 'owner' in override.required_roles %}checked{% endif %}> owner</label>
+                    <label><input type="checkbox" name="required_roles" value="admin" {% if 'admin' in override.required_roles %}checked{% endif %}> admin</label>
+                    <label><input type="checkbox" name="required_roles" value="vip" {% if 'vip' in override.required_roles %}checked{% endif %}> vip</label>
+                    <label><input type="checkbox" name="required_roles" value="normal" {% if 'normal' in override.required_roles %}checked{% endif %}> normal</label><br>
+                    <label>Private mode
+                      <select name="private_mode">
+                        <option value="inherit" {% if override.private_mode == 'inherit' %}selected{% endif %}>inherit</option>
+                        <option value="allow" {% if override.private_mode == 'allow' %}selected{% endif %}>allow</option>
+                        <option value="deny" {% if override.private_mode == 'deny' %}selected{% endif %}>deny</option>
+                      </select>
+                    </label><br>
+                    <label>Group mode
+                      <select name="groups_mode">
+                        <option value="inherit" {% if override.groups_mode == 'inherit' %}selected{% endif %}>inherit</option>
+                        <option value="allow" {% if override.groups_mode == 'allow' %}selected{% endif %}>allow</option>
+                        <option value="deny" {% if override.groups_mode == 'deny' %}selected{% endif %}>deny</option>
+                      </select>
+                    </label><br>
+                    <small>Topic mode bleibt in Block 2 bewusst auf inherit.</small><br>
+                    <button type="submit">Policy speichern</button>
+                  </fieldset>
+                </form>
               {% else %}
                 -
               {% endif %}

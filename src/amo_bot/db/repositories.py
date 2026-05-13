@@ -122,6 +122,38 @@ class PluginPolicyOverrideRepository:
             allowed_topics=[(int(chat_id), int(message_thread_id)) for chat_id, message_thread_id in allowed_topics],
         )
 
+    def upsert_override(
+        self,
+        *,
+        plugin_name: str,
+        roles_mode: str,
+        required_roles: list[Role],
+        private_mode: str,
+        groups_mode: str,
+        topics_mode: str,
+    ) -> None:
+        row = self._session.scalar(select(PluginPolicyOverride).where(PluginPolicyOverride.plugin_name == plugin_name))
+        required_roles_json = json.dumps([role.value for role in required_roles])
+
+        if row is None:
+            row = PluginPolicyOverride(
+                plugin_name=plugin_name,
+                roles_mode=roles_mode,
+                required_roles_json=required_roles_json,
+                private_mode=private_mode,
+                groups_mode=groups_mode,
+                topics_mode=topics_mode,
+            )
+            self._session.add(row)
+        else:
+            row.roles_mode = roles_mode
+            row.required_roles_json = required_roles_json
+            row.private_mode = private_mode
+            row.groups_mode = groups_mode
+            row.topics_mode = topics_mode
+
+        self._session.commit()
+
 
 class UserRoleRepository:
     """Minimal DB service for user-role lookup/set operations."""
