@@ -2,7 +2,7 @@
 
 ## Block 10: Post-MVP – Plugin-Übersicht / Block 10: Post-MVP – Plugin Overview
 
-**Last Updated:** 2026-05-13
+**Last Updated:** 2026-05-13 (Block 3 – Gruppen-Allowlist / Group Allowlist)
 
 ---
 
@@ -26,7 +26,7 @@ Jedes Plugin in der Übersicht zeigt folgende Informationen:
 | **Settings** | Konfigurierbare Felder aus `settings_schema` | Feldname, Typ, aktueller Wert (Secrets maskiert) |
 | **Policy Override** | Rollen- und Sichtbarkeits-Einstellungen | Siehe unten |
 
-### Policy Override (Block 2)
+### Policy Override (Block 2 + Block 3)
 
 In der WebUI können berechtigte WebUI-Nutzer plugin-spezifische Policy-Overrides konfigurieren, die die Manifest-Vorgaben überschreiben. Diese Einstellungen werden in der Override-Datenbank gespeichert und nicht im Manifest geändert.
 
@@ -38,9 +38,22 @@ In der WebUI können berechtigte WebUI-Nutzer plugin-spezifische Policy-Override
 | **Erlaubte Rollen** | `owner` / `admin` / `vip` / `normal` | Rollen, die bei `override` Zugriff erhalten |
 | **Privater Chat** | `inherit` / `allow` / `deny` | Plugin-Nutzung in privaten Chats |
 | **Gruppen** | `inherit` / `allow` / `deny` | Plugin-Nutzung in Gruppen |
+| **Gruppen-Allowlist** | Liste bekannter Gruppen | Spezifische Gruppen, in denen das Plugin erlaubt ist (nur bei `groups_mode=allow`) |
 | **Topics** | `inherit` | Topic-Modus (in Block 2 nur `inherit`, UI-relevant für spätere Blöcke) |
 
 **Hinweis:** `inherit` bedeutet, dass der Wert aus dem Plugin-Manifest verwendet wird. `override` aktiviert die benutzerdefinierten Einstellungen.
+
+#### Gruppen-Allowlist (Block 3)
+
+Wenn **Gruppen** auf `allow` gesetzt ist, können spezifische Gruppen ausgewählt werden, in denen das Plugin erlaubt ist:
+
+- **Bekannte Gruppen:** Die WebUI zeigt alle bekannten Gruppen (`group`/`supergroup`) als Auswahlliste an
+- **Auswahl:** Gespeicherte Gruppen werden als checked gerendert
+- **Validierung:** POST validiert Integer-IDs und bekannte Gruppen; unbekannte/ungültige Gruppen führen zu **400 Bad Request**
+- **Keine Topic-UI:** In diesem Block wird keine Topic-Auswahl angeboten; `topics_mode` bleibt auf `inherit`
+- **Semantik:** `groups_mode=allow` + keine Gruppe ausgewählt = **deny all** (alle Gruppen verweigert)
+
+**Wichtig:** Es werden nur bekannte Gruppen angezeigt – Gruppen, die der Bot noch nicht gesehen hat, können nicht ausgewählt werden.
 
 ### Status-Anzeige
 
@@ -322,9 +335,9 @@ Each plugin in the overview displays the following information:
 | **Settings** | Configurable fields from `settings_schema` | Field name, type, current value (secrets masked) |
 | **Policy Override** | Role and visibility settings | See below |
 
-### Policy Override (Block 2)
+### Policy Override (Block 2 + Block 3)
 
-In the WebUI, authorized WebUI users can configure plugin-specific policy overrides that supersede the manifest defaults. These settings are stored in the override database and do not modify the manifest.
+In the WebUI, authorized users can configure plugin-specific policy overrides that supersede the manifest defaults. These settings are stored in the override database and do not modify the manifest.
 
 **Available Override Fields:**
 
@@ -334,9 +347,22 @@ In the WebUI, authorized WebUI users can configure plugin-specific policy overri
 | **Allowed Roles** | `owner` / `admin` / `vip` / `normal` | Roles that are granted access when `override` is enabled |
 | **Private Chat** | `inherit` / `allow` / `deny` | Plugin usage in private chats |
 | **Groups** | `inherit` / `allow` / `deny` | Plugin usage in groups |
+| **Group Allowlist** | List of known groups | Specific groups where the plugin is allowed (only when `groups_mode=allow`) |
 | **Topics** | `inherit` | Topic mode (in Block 2 only `inherit`, UI-relevant for future blocks) |
 
 **Note:** `inherit` means the value from the plugin manifest is used. `override` enables custom settings.
+
+#### Group Allowlist (Block 3)
+
+When **Groups** is set to `allow`, specific groups can be selected where the plugin is permitted:
+
+- **Known Groups:** The WebUI displays all known groups (`group`/`supergroup`) as a selection list
+- **Selection:** Saved groups are rendered as checked
+- **Validation:** POST validates integer IDs and known groups; unknown/invalid groups result in **400 Bad Request**
+- **No Topic UI:** In this block, no topic selection is offered; `topics_mode` remains `inherit`
+- **Semantics:** `groups_mode=allow` + no groups selected = **deny all** (all groups denied)
+
+**Important:** Only known groups are displayed – groups the bot has not yet seen cannot be selected.
 
 ### Status Display
 
@@ -624,6 +650,11 @@ POST /api/v1/plugins/{id}/retry  // For error
 | QA-10.18 | Policy-Override-Formular ist verfügbar | Funktionaler Test |
 | QA-10.19 | Policy-Override-Werte werden in DB gespeichert | Datenbank-Test |
 | QA-10.20 | `inherit` verwendet Manifest-Werte | Integrationstest |
+| QA-10.21 | Gruppen-Allowlist zeigt bekannte Gruppen | Funktionaler Test |
+| QA-10.22 | Gespeicherte Gruppen werden checked gerendert | Visueller Test |
+| QA-10.23 | POST validiert Integer-IDs und bekannte Gruppen | API-Test |
+| QA-10.24 | Ungültige/unbekannte Gruppen ergeben 400 | API-Test |
+| QA-10.25 | `groups_mode=allow` + leere Liste = deny all | Semantik-Test |
 
 ### English
 
@@ -649,16 +680,23 @@ POST /api/v1/plugins/{id}/retry  // For error
 | QA-10.18 | Policy override form is available | Functional test |
 | QA-10.19 | Policy override values are saved to DB | Database test |
 | QA-10.20 | `inherit` uses manifest values | Integration test |
+| QA-10.21 | Group allowlist displays known groups | Functional test |
+| QA-10.22 | Saved groups rendered as checked | Visual test |
+| QA-10.23 | POST validates integer IDs and known groups | API test |
+| QA-10.24 | Invalid/unknown groups return 400 | API test |
+| QA-10.25 | `groups_mode=allow` + empty list = deny all | Semantic test |
 
 ---
 
 ## Zusammenfassung / Summary
 
+### Deutsch
+
 Dieses Dokument beschreibt die WebUI Plugin-Hauptseite (Übersicht) für Block 10 (Post-MVP). Es deckt alle wichtigen Aspekte ab:
 
 - **Liste der Felder:** Name, Version, Status, Scope, Error, Settings, Policy Override
 - **Settings-Anzeige:** Schema-Felder mit Typ, aktuellem Wert, Secret-Maskierung
-- **Policy Override (Block 2):** Rollen-Modus, erforderliche Rolle, Private/Gruppen/Topics-Modus
+- **Policy Override (Block 2 + 3):** Rollen-Modus, erforderliche Rolle, Private/Gruppen/Topics-Modus, Gruppen-Allowlist
 - **Filter:** Status-Filter, Quellen-Filter
 - **Sortierung:** Name, Version, Status, Datum, Aktivität
 - **Rollenbasierte Aktionen:** Owner, Group-Admin, VIP/Normal
@@ -666,8 +704,26 @@ Dieses Dokument beschreibt die WebUI Plugin-Hauptseite (Übersicht) für Block 1
 - **Fehler-Zustände:** Plugin-Fehler, System-Fehler
 - **Konsistenz:** Block 3 (Status), Block 4 (Rechte), Block 5 (Aktivierung)
 
+### English
+
+This document describes the WebUI Plugin Overview page for Block 10 (Post-MVP). It covers all key aspects:
+
+- **List of Fields:** Name, Version, Status, Scope, Error, Settings, Policy Override
+- **Settings Display:** Schema fields with type, current value, secret masking
+- **Policy Override (Block 2 + 3):** Roles mode, required role, private/groups/topics mode, group allowlist
+- **Filter:** Status filter, source filter
+- **Sorting:** Name, Version, Status, Date, Activity
+- **Role-Based Actions:** Owner, Group-Admin, VIP/Normal
+- **Empty States:** No plugins, no results, no permission
+- **Error States:** Plugin errors, system errors
+- **Consistency:** Block 3 (status), Block 4 (rights), Block 5 (activation)
+
 ---
 
-**Dokument-Version:** 1.1.0
-**Gilt für:** Block 10 – WebUI Plugin-Hauptseite (Übersicht)  
+**Dokument-Version:** 1.2.0
+**Gilt für:** Block 10 – WebUI Plugin-Hauptseite (Übersicht), Block 3 – Gruppen-Allowlist
 **Konsistent mit:** PLUGIN_CONTRACT.md v1.2.0, WEBUI_PLUGIN_DETAIL.md v1.1.0
+
+**Document Version:** 1.2.0
+**Applies to:** Block 10 – WebUI Plugin Overview, Block 3 – Group Allowlist
+**Consistent with:** PLUGIN_CONTRACT.md v1.2.0, WEBUI_PLUGIN_DETAIL.md v1.1.0
