@@ -97,6 +97,17 @@ def test_plugins_shows_valid_manifest_data(tmp_path) -> None:
                 "commands": ["/weather", "/forecast"],
                 "required_roles": ["admin", "vip"],
                 "required_permissions": ["send_message", "read_chat"],
+                "settings_schema": {
+                    "api_key": {
+                        "type": "secret",
+                        "required": True,
+                        "default": "super-secret-default"
+                    },
+                    "city": {
+                        "type": "text",
+                        "default": "Berlin"
+                    }
+                },
             }
         ),
         encoding="utf-8",
@@ -116,6 +127,13 @@ def test_plugins_shows_valid_manifest_data(tmp_path) -> None:
     assert "admin, vip" in html
     assert "send_message, read_chat" in html
     assert "activation_pending" in html
+    assert "Settings" in html
+    assert "<code>api_key</code>" in html
+    assert "<code>city</code>" in html
+    assert "type: secret, required" in html
+    assert "type: text" in html
+    assert "super-secret-default" not in html
+    assert "kein Wert gesetzt" in html
 
 
 def test_plugin_enable_disable_requires_owner_id_and_audits(tmp_path) -> None:

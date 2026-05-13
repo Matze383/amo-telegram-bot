@@ -21,6 +21,7 @@ def _mk_executor(
     plugin_code: str,
     *,
     required_permissions: list[str] | None = None,
+    commands: list[str] | None = None,
 ) -> tuple[PluginCommandExecutor, list[tuple[int, str]], list[tuple[int, int, str, int | None]]]:
     plugins_dir = tmp_path / "plugins"
     pdir = plugins_dir / plugin_name
@@ -31,7 +32,7 @@ def _mk_executor(
                 "name": plugin_name,
                 "version": "1.0.0",
                 "description": "demo",
-                "commands": ["plug"],
+                "commands": ["plug"] if commands is None else commands,
                 "required_roles": ["admin", "owner"],
                 "required_permissions": ["send_message"] if required_permissions is None else required_permissions,
             }
@@ -200,6 +201,75 @@ async def handle_command(context, host_api):
     assert "plugin_command_error" in events
     assert error_events
     assert "operation 'reply' requires capability 'send_message'" in (error_events[-1].payload_json or "")
+
+
+def test_plugin_command_manifest_slash_command_matches_slashless_invocation(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'plugin_runtime6.db'}"
+    init_db(db_url)
+    executor, sent, replied = _mk_executor(
+        tmp_path,
+        db_url,
+        "slash_demo",
+        """
+async def handle_command(context, host_api):
+    await host_api.reply(context.chat_id, context.message_id, "slash-ok")
+""",
+        commands=["/pluginping"],
+    )
+
+    asyncio.run(
+        executor.execute(
+            actor=CommandActor(telegram_user_id=100, role=Role.ADMIN),
+            invocation=CommandInvocation(command_name="pluginping", argument=None, chat_id=77, message_id=9),
+        )
+    )
+
+    assert sent == []
+    assert replied == [(77, 9, "slash-ok", None)]
+
+
+def test_plugin_command_handler_uses_reply_or_send_contract(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'plugin_runtime7.db'}"
+    init_db(db_url)
+
+    reply_executor, sent_reply, replied_reply = _mk_executor(
+        tmp_path,
+        db_url,
+        "contract_reply_demo",
+        """
+async def handle_command(context, host_api):
+    await host_api.reply(context.chat_id, context.message_id, "reply-path")
+""",
+        commands=["pluginping"],
+    )
+    asyncio.run(
+        reply_executor.execute(
+            actor=CommandActor(telegram_user_id=100, role=Role.ADMIN),
+            invocation=CommandInvocation(command_name="pluginping", argument=None, chat_id=77, message_id=9),
+        )
+    )
+
+    send_executor, sent_send, replied_send = _mk_executor(
+        tmp_path,
+        db_url,
+        "contract_send_demo",
+        """
+async def handle_command(context, host_api):
+    await host_api.send_message(context.chat_id, "send-path")
+""",
+        commands=["pluginping", "plug"],
+    )
+    asyncio.run(
+        send_executor.execute(
+            actor=CommandActor(telegram_user_id=100, role=Role.ADMIN),
+            invocation=CommandInvocation(command_name="plug", argument=None, chat_id=77, message_id=9),
+        )
+    )
+
+    assert replied_reply == [(77, 9, "reply-path", None)]
+    assert sent_reply == []
+    assert sent_send == [(77, "send-path")]
+    assert replied_send == []
 
 
 def test_plugin_command_timeout_and_error_are_isolated(tmp_path) -> None:

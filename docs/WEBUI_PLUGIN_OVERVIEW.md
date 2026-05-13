@@ -23,6 +23,7 @@ Jedes Plugin in der Übersicht zeigt folgende Informationen:
 | **Status** | Aktueller Plugin-Status | "aktiv", "ausstehend", "deaktiviert", "Fehler" |
 | **Scope** | Geltungsbereich des Plugins | "global", "Gruppe: XYZ", "Topic: ABC" |
 | **Error** | Fehlermeldung (nur bei Status "error") | "Verbindung fehlgeschlagen" |
+| **Settings** | Konfigurierbare Felder aus `settings_schema` | Feldname, Typ, aktueller Wert (Secrets maskiert) |
 
 ### Status-Anzeige
 
@@ -129,6 +130,22 @@ Jede Plugin-Zeile bietet folgende Basis-Aktionen:
 - Aktivieren / Deaktivieren (je nach aktuellem Status)
 - Konfigurieren
 - Duplizieren (für Template-Nutzung)
+
+### Settings-Anzeige
+
+Wenn ein Plugin ein `settings_schema` definiert, werden die konfigurierbaren Felder in der Übersicht angezeigt:
+
+- **Feldname**: Der Key aus dem Schema (z.B. `api_key`, `city`)
+- **Typ**: `text`, `number`, `bool`, `select` oder `secret`
+- **Erforderlich**: Markiert wenn `required: true`
+- **Aktueller Wert**: 
+  - Wert aus `plugin.settings` wenn vorhanden
+  - "kein Wert gesetzt" wenn leer oder nicht konfiguriert
+  - **Secrets** werden niemals im Klartext angezeigt (aktuell maskiert als `***`)
+
+Die Settings werden als kollabierbare Details angezeigt, um die Übersichtlichkeit zu wahren.
+
+**Sicherheits Hinweis:** Secret-Defaults aus dem Manifest werden niemals im HTML gerendert.
 
 ### Leer-Zustände
 
@@ -285,6 +302,7 @@ Each plugin in the overview displays the following information:
 | **Status** | Current plugin status | "active", "pending", "disabled", "error" |
 | **Scope** | Scope of the plugin | "global", "Group: XYZ", "Topic: ABC" |
 | **Error** | Error message (only when status is "error") | "Connection failed" |
+| **Settings** | Configurable fields from `settings_schema` | Field name, type, current value (secrets masked) |
 
 ### Status Display
 
@@ -391,6 +409,22 @@ Each plugin row provides the following base actions:
 - Activate / Deactivate (depending on current status)
 - Configure
 - Duplicate (for template use)
+
+### Settings Display
+
+When a plugin defines a `settings_schema`, the configurable fields are shown in the overview:
+
+- **Field Name**: The key from the schema (e.g., `api_key`, `city`)
+- **Type**: `text`, `number`, `bool`, `select`, or `secret`
+- **Required**: Marked if `required: true`
+- **Current Value**:
+  - Value from `plugin.settings` if present
+  - "no value set" (or localized equivalent) if empty or not configured
+  - **Secrets** are never displayed in plaintext (currently masked as `***`)
+
+Settings are displayed as collapsible details to maintain clarity.
+
+**Security Note:** Secret defaults from the manifest are never rendered in HTML.
 
 ### Empty States
 
@@ -536,7 +570,7 @@ POST /api/v1/plugins/{id}/retry  // For error
 
 | ID | Kriterium | Test-Methode |
 |----|-----------|--------------|
-| QA-10.1 | Liste zeigt alle 5 Felder (Name, Version, Status, Scope, Error) | Visuelle Inspektion |
+| QA-10.1 | Liste zeigt alle 6 Felder (Name, Version, Status, Scope, Error, Settings) | Visuelle Inspektion |
 | QA-10.2 | Farbcodierung der Status ist korrekt | Visuelle Inspektion |
 | QA-10.3 | Filter nach Status funktioniert | Funktionaler Test |
 | QA-10.4 | Filter nach Quelle funktioniert | Funktionaler Test |
@@ -551,12 +585,14 @@ POST /api/v1/plugins/{id}/retry  // For error
 | QA-10.13 | Konsistenz mit Block 3 Status-Modell | Dokumenten-Review |
 | QA-10.14 | Konsistenz mit Block 4 Rechte-Modell | Dokumenten-Review |
 | QA-10.15 | Konsistenz mit Block 5 Aktivierungs-Flow | Dokumenten-Review |
+| QA-10.16 | Settings-Spalte zeigt Schema-Felder mit Typ und Wert | Visuelle Inspektion |
+| QA-10.17 | Secret-Defaults werden nicht im HTML angezeigt | Security-Test |
 
 ### English
 
 | ID | Criterion | Test Method |
 |----|-----------|-------------|
-| QA-10.1 | List displays all 5 fields (Name, Version, Status, Scope, Error) | Visual inspection |
+| QA-10.1 | List displays all 6 fields (Name, Version, Status, Scope, Error, Settings) | Visual inspection |
 | QA-10.2 | Status color coding is correct | Visual inspection |
 | QA-10.3 | Filter by status works | Functional test |
 | QA-10.4 | Filter by source works | Functional test |
@@ -571,6 +607,8 @@ POST /api/v1/plugins/{id}/retry  // For error
 | QA-10.13 | Consistency with Block 3 status model | Document review |
 | QA-10.14 | Consistency with Block 4 rights model | Document review |
 | QA-10.15 | Consistency with Block 5 activation flow | Document review |
+| QA-10.16 | Settings column shows schema fields with type and value | Visual inspection |
+| QA-10.17 | Secret defaults are not shown in HTML | Security test |
 
 ---
 
@@ -578,7 +616,8 @@ POST /api/v1/plugins/{id}/retry  // For error
 
 Dieses Dokument beschreibt die WebUI Plugin-Hauptseite (Übersicht) für Block 10 (Post-MVP). Es deckt alle wichtigen Aspekte ab:
 
-- **Liste der Felder:** Name, Version, Status, Scope, Error
+- **Liste der Felder:** Name, Version, Status, Scope, Error, Settings
+- **Settings-Anzeige:** Schema-Felder mit Typ, aktuellem Wert, Secret-Maskierung
 - **Filter:** Status-Filter, Quellen-Filter
 - **Sortierung:** Name, Version, Status, Datum, Aktivität
 - **Rollenbasierte Aktionen:** Owner, Group-Admin, VIP/Normal
@@ -588,6 +627,6 @@ Dieses Dokument beschreibt die WebUI Plugin-Hauptseite (Übersicht) für Block 1
 
 ---
 
-**Dokument-Version:** 1.0.0  
+**Dokument-Version:** 1.1.0
 **Gilt für:** Block 10 – WebUI Plugin-Hauptseite (Übersicht)  
-**Konsistent mit:** PLUGIN_CONTRACT.md v1.2.0
+**Konsistent mit:** PLUGIN_CONTRACT.md v1.2.0, WEBUI_PLUGIN_DETAIL.md v1.1.0

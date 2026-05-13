@@ -220,12 +220,18 @@ class PluginCommandExecutor:
             },
         )
 
+    def _normalize_command(self, command: str) -> str:
+        normalized = command.strip().casefold()
+        if not normalized:
+            return ""
+        return normalized[1:] if normalized.startswith("/") else normalized
+
     def _find_manifest_for_command(self, command_name: str) -> PluginManifest | None:
         discovery = self._loader.discover()
-        command = command_name.casefold()
+        command = self._normalize_command(command_name)
         for manifest in discovery.valid:
-            commands = {item.casefold() for item in manifest.commands}
-            if command in commands:
+            commands = {self._normalize_command(item) for item in manifest.commands}
+            if command and command in commands:
                 return manifest
         return None
 

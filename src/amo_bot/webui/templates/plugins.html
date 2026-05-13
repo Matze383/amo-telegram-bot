@@ -19,6 +19,7 @@
           <th>Worker-Status</th>
           <th>Rollen</th>
           <th>Capabilities</th>
+          <th>Settings</th>
           <th>Aktionen</th>
         </tr>
       </thead>
@@ -46,6 +47,34 @@
             </td>
             <td>{{ plugin.required_roles | join(", ") if plugin.required_roles else "-" }}</td>
             <td>{{ plugin.required_permissions | join(", ") if plugin.required_permissions else "-" }}</td>
+            <td>
+              {% set settings_schema = plugin.settings_schema if plugin.settings_schema else {} %}
+              {% set settings_values = plugin.settings if plugin.settings else {} %}
+              {% if settings_schema %}
+                <details>
+                  <summary>{{ settings_schema | length }} Feld(er)</summary>
+                  <ul>
+                    {% for key, schema in settings_schema.items() %}
+                      {% set field_type = schema.type if schema.type else "text" %}
+                      {% set label = schema.label if schema.label else key %}
+                      {% set required = schema.required if schema.required else false %}
+                      {% set value = settings_values.get(key) %}
+                      <li>
+                        <strong>{{ label }}</strong> <code>{{ key }}</code>
+                        <small>(type: {{ field_type }}{% if required %}, required{% endif %})</small><br>
+                        {% if value is not none and value != "" %}
+                          <code>{{ value }}</code>
+                        {% else %}
+                          <em>kein Wert gesetzt</em>
+                        {% endif %}
+                      </li>
+                    {% endfor %}
+                  </ul>
+                </details>
+              {% else %}
+                -
+              {% endif %}
+            </td>
             <td>
               {% if owner_mutation_enabled %}
                 {% if plugin.enabled %}
