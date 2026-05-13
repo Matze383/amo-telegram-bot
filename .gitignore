@@ -29,6 +29,9 @@ docs/**/TODO.md
 *.sqlite3-journal
 *.sqlite3-shm
 *.sqlite3-wal
+
+# Local user plugin root (do not commit local plugin experiments)
+plugins/
 local/
 .private/
 *.local.md
