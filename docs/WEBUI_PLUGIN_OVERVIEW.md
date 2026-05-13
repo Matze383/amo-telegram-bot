@@ -2,7 +2,7 @@
 
 ## Block 10: Post-MVP – Plugin-Übersicht / Block 10: Post-MVP – Plugin Overview
 
-**Last Updated:** 2026-05-13 (Block 3 – Gruppen-Allowlist / Group Allowlist)
+**Last Updated:** 2026-05-13 (Block 4 – Topic-Allowlist / Topic Allowlist)
 
 ---
 
@@ -39,7 +39,8 @@ In der WebUI können berechtigte WebUI-Nutzer plugin-spezifische Policy-Override
 | **Privater Chat** | `inherit` / `allow` / `deny` | Plugin-Nutzung in privaten Chats |
 | **Gruppen** | `inherit` / `allow` / `deny` | Plugin-Nutzung in Gruppen |
 | **Gruppen-Allowlist** | Liste bekannter Gruppen | Spezifische Gruppen, in denen das Plugin erlaubt ist (nur bei `groups_mode=allow`) |
-| **Topics** | `inherit` | Topic-Modus (in Block 2 nur `inherit`, UI-relevant für spätere Blöcke) |
+| **Topics** | `inherit` / `allow` / `deny` | Plugin-Nutzung in Topics |
+| **Topic-Allowlist** | Liste bekannter Topics | Spezifische Topics, in denen das Plugin erlaubt ist (nur bei `topics_mode=allow`)
 
 **Hinweis:** `inherit` bedeutet, dass der Wert aus dem Plugin-Manifest verwendet wird. `override` aktiviert die benutzerdefinierten Einstellungen.
 
@@ -54,6 +55,19 @@ Wenn **Gruppen** auf `allow` gesetzt ist, können spezifische Gruppen ausgewähl
 - **Semantik:** `groups_mode=allow` + keine Gruppe ausgewählt = **deny all** (alle Gruppen verweigert)
 
 **Wichtig:** Es werden nur bekannte Gruppen angezeigt – Gruppen, die der Bot noch nicht gesehen hat, können nicht ausgewählt werden.
+
+#### Topic-Allowlist (Block 4)
+
+Wenn **Topics** auf `allow` gesetzt ist, können spezifische Topics ausgewählt werden, in denen das Plugin erlaubt ist:
+
+- **Bekannte Topics:** Die WebUI zeigt alle bekannten Topics aus bekannten Gruppen/Supergroups als Auswahlliste an
+- **Topic-Format:** `chat_id:message_thread_id` (z.B. `-1001234567890:5`)
+- **Auswahl:** Gespeicherte Topics werden als checked gerendert
+- **Validierung:** POST validiert das Format `chat_id:thread_id` und bekannte Topic-Paare; ungültiges Format oder unbekannte Topics führen zu **400 Bad Request**
+- **Semantik:** `topics_mode=allow` + keine Topics ausgewählt = **deny all** (alle Topics verweigert)
+- **Datenquelle:** Topics werden aus der Datenbank-Funktion `list_topics(chat_id)` für bekannte Gruppen/Supergroups abgerufen
+
+**Wichtig:** Es werden nur Topics aus bekannten Gruppen angezeigt – Topics, die der Bot noch nicht gesehen hat, können nicht ausgewählt werden.
 
 ### Status-Anzeige
 
@@ -348,7 +362,8 @@ In the WebUI, authorized users can configure plugin-specific policy overrides th
 | **Private Chat** | `inherit` / `allow` / `deny` | Plugin usage in private chats |
 | **Groups** | `inherit` / `allow` / `deny` | Plugin usage in groups |
 | **Group Allowlist** | List of known groups | Specific groups where the plugin is allowed (only when `groups_mode=allow`) |
-| **Topics** | `inherit` | Topic mode (in Block 2 only `inherit`, UI-relevant for future blocks) |
+| **Topics** | `inherit` / `allow` / `deny` | Plugin usage in topics |
+| **Topic Allowlist** | List of known topics | Specific topics where the plugin is allowed (only when `topics_mode=allow`)
 
 **Note:** `inherit` means the value from the plugin manifest is used. `override` enables custom settings.
 
@@ -363,6 +378,19 @@ When **Groups** is set to `allow`, specific groups can be selected where the plu
 - **Semantics:** `groups_mode=allow` + no groups selected = **deny all** (all groups denied)
 
 **Important:** Only known groups are displayed – groups the bot has not yet seen cannot be selected.
+
+#### Topic Allowlist (Block 4)
+
+When **Topics** is set to `allow`, specific topics can be selected where the plugin is permitted:
+
+- **Known Topics:** The WebUI displays all known topics from known groups/supergroups as a selection list
+- **Topic Format:** `chat_id:message_thread_id` (e.g., `-1001234567890:5`)
+- **Selection:** Saved topics are rendered as checked
+- **Validation:** POST validates the `chat_id:thread_id` format and known topic pairs; invalid format or unknown topics result in **400 Bad Request**
+- **Semantics:** `topics_mode=allow` + no topics selected = **deny all** (all topics denied)
+- **Data Source:** Topics are retrieved from the database function `list_topics(chat_id)` for known groups/supergroups
+
+**Important:** Only topics from known groups are displayed – topics the bot has not yet seen cannot be selected.
 
 ### Status Display
 
@@ -655,6 +683,12 @@ POST /api/v1/plugins/{id}/retry  // For error
 | QA-10.23 | POST validiert Integer-IDs und bekannte Gruppen | API-Test |
 | QA-10.24 | Ungültige/unbekannte Gruppen ergeben 400 | API-Test |
 | QA-10.25 | `groups_mode=allow` + leere Liste = deny all | Semantik-Test |
+| QA-10.26 | Topic-Allowlist zeigt bekannte Topics aus bekannten Gruppen | Funktionaler Test |
+| QA-10.27 | Gespeicherte Topics werden checked gerendert | Visueller Test |
+| QA-10.28 | POST validiert Topic-Format `chat_id:thread_id` | API-Test |
+| QA-10.29 | POST validiert bekannte Topic-Paare | API-Test |
+| QA-10.30 | Ungültige/unbekannte Topics ergeben 400 | API-Test |
+| QA-10.31 | `topics_mode=allow` + leere Liste = deny all | Semantik-Test |
 
 ### English
 
@@ -685,6 +719,12 @@ POST /api/v1/plugins/{id}/retry  // For error
 | QA-10.23 | POST validates integer IDs and known groups | API test |
 | QA-10.24 | Invalid/unknown groups return 400 | API test |
 | QA-10.25 | `groups_mode=allow` + empty list = deny all | Semantic test |
+| QA-10.26 | Topic allowlist displays known topics from known groups | Functional test |
+| QA-10.27 | Saved topics rendered as checked | Visual test |
+| QA-10.28 | POST validates topic format `chat_id:thread_id` | API test |
+| QA-10.29 | POST validates known topic pairs | API test |
+| QA-10.30 | Invalid/unknown topics return 400 | API test |
+| QA-10.31 | `topics_mode=allow` + empty list = deny all | Semantic test |
 
 ---
 
@@ -696,7 +736,7 @@ Dieses Dokument beschreibt die WebUI Plugin-Hauptseite (Übersicht) für Block 1
 
 - **Liste der Felder:** Name, Version, Status, Scope, Error, Settings, Policy Override
 - **Settings-Anzeige:** Schema-Felder mit Typ, aktuellem Wert, Secret-Maskierung
-- **Policy Override (Block 2 + 3):** Rollen-Modus, erforderliche Rolle, Private/Gruppen/Topics-Modus, Gruppen-Allowlist
+- **Policy Override (Block 2 + 3 + 4):** Rollen-Modus, erforderliche Rolle, Private/Gruppen/Topics-Modus, Gruppen-Allowlist (Block 3), Topic-Allowlist (Block 4)
 - **Filter:** Status-Filter, Quellen-Filter
 - **Sortierung:** Name, Version, Status, Datum, Aktivität
 - **Rollenbasierte Aktionen:** Owner, Group-Admin, VIP/Normal
@@ -710,7 +750,7 @@ This document describes the WebUI Plugin Overview page for Block 10 (Post-MVP). 
 
 - **List of Fields:** Name, Version, Status, Scope, Error, Settings, Policy Override
 - **Settings Display:** Schema fields with type, current value, secret masking
-- **Policy Override (Block 2 + 3):** Roles mode, required role, private/groups/topics mode, group allowlist
+- **Policy Override (Block 2 + 3 + 4):** Roles mode, required role, private/groups/topics mode, group allowlist (Block 3), topic allowlist (Block 4)
 - **Filter:** Status filter, source filter
 - **Sorting:** Name, Version, Status, Date, Activity
 - **Role-Based Actions:** Owner, Group-Admin, VIP/Normal
@@ -721,9 +761,9 @@ This document describes the WebUI Plugin Overview page for Block 10 (Post-MVP). 
 ---
 
 **Dokument-Version:** 1.2.0
-**Gilt für:** Block 10 – WebUI Plugin-Hauptseite (Übersicht), Block 3 – Gruppen-Allowlist
+**Gilt für:** Block 10 – WebUI Plugin-Hauptseite (Übersicht), Block 3 – Gruppen-Allowlist, Block 4 – Topic-Allowlist
 **Konsistent mit:** PLUGIN_CONTRACT.md v1.2.0, WEBUI_PLUGIN_DETAIL.md v1.1.0
 
-**Document Version:** 1.2.0
-**Applies to:** Block 10 – WebUI Plugin Overview, Block 3 – Group Allowlist
+**Document Version:** 1.3.0
+**Applies to:** Block 10 – WebUI Plugin Overview, Block 3 – Group Allowlist, Block 4 – Topic Allowlist
 **Consistent with:** PLUGIN_CONTRACT.md v1.2.0, WEBUI_PLUGIN_DETAIL.md v1.1.0
