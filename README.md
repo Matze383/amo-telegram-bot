@@ -24,7 +24,7 @@ Dieses Projekt befindet sich in der frühen Entwicklung. Funktionen können sich
 | ✅ **Consent Management** | `/accept`, `/decline`, `/consent` commands for user consent; automatic one-shot DM prompt with **inline buttons** (✅ Accept / ❌ Decline) for pending users; fallback commands remain available; runtime gate blocks normal usage until consent is accepted (allowed: `/accept`, `/decline`, `/consent`, `/start`) | `/accept`, `/decline`, `/consent` Commands für Nutzer-Consent; automatischer One-Shot-DM-Prompt mit **Inline-Buttons** (✅ Akzeptieren / ❌ Ablehnen) für Pending-User; Fallback-Commands weiterhin verfügbar; Runtime-Gate blockiert normale Nutzung bis Consent akzeptiert ist (erlaubt: `/accept`, `/decline`, `/consent`, `/start`) |
 | 🔌 **Plugin System** | Defensive manifest-based plugin loader | Defensiver, manifest-basierter Plugin-Loader |
 | 🌐 **WebUI** | Local Flask-based management interface | Lokale Flask-basierte Verwaltungsoberfläche |
-| 🤖 **AI Integration** | Optional Ollama `/ask` command (stateless) | Optionales Ollama `/ask` Kommando (stateless) |
+| 🤖 **AI Integration** | Optional Ollama `/ask` command (stateless); auto-reply on mentions/replies in active scopes (VIP/Admin/Owner + consent required) | Optionales Ollama `/ask` Kommando (stateless); Auto-Antwort bei Erwähnungen/Antworten in aktiven Scopes (VIP/Admin/Owner + Consent erforderlich) |
 | 🧪 **Testing** | pytest + smoke tests included | pytest + Smoke-Tests enthalten |
 
 ---

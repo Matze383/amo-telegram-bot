@@ -1,18 +1,23 @@
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Protocol
 
+from amo_bot.ai.router import AIRouter, AIRouterReasonCode
 from amo_bot.auth.permissions import can_use_bot
 from amo_bot.auth.roles import Role
 from amo_bot.consent import CONSENT_UNREACHABLE, ConsentService
 from amo_bot.db.base import create_session_factory
-from amo_bot.db.models import User
+from amo_bot.db.models import AuditEvent, User
 from amo_bot.plugins.command_runtime import CommandActor, CommandInvocation, PluginCommandExecutor
 from amo_bot.telegram.commands import CommandContext, CommandRegistry, RoleResolver
 from amo_bot.telegram.owner_notify import OwnerNotifier
 from amo_bot.telegram.update_parser import TelegramMessage, parse_update
+
+
+AUTOREPLY_ALLOWED_ROLES: set[Role] = {Role.OWNER, Role.ADMIN, Role.VIP}
 
 SendTextFn = Callable[[int, str, int | None], Awaitable[object]]
 SendMarkupFn = Callable[[int, str, dict[str, Any], int | None], Awaitable[object]]
@@ -39,6 +44,7 @@ class Dispatcher:
     plugin_command_executor: PluginCommandExecutor | None = None
     database_url: str | None = None
     owner_notifier: OwnerNotifier | None = None
+    ai_service: Any | None = None
 
     async def handle_raw_update(self, raw_update: object) -> None:
         update = parse_update(raw_update)
@@ -64,28 +70,33 @@ class Dispatcher:
                 logger.exception("Failed to persist Telegram message; continuing update handling")
 
         command = message.parse_command(bot_username=self.bot_username)
-        if command is None:
-            return
 
         role = await self.role_resolver.resolve(
             message.from_user.id,
             chat_id=message.chat.id,
             chat_type=message.chat.type,
         )
+
+        if command is None:
+            await self._maybe_handle_ai_autoreply(message=message, role=role, bot_username=self.bot_username)
+            return
+
         if not can_use_bot(role):
             return
 
-        if self._is_consent_command(command.name):
+        command_name = command.name
+        if command is not None and self._is_consent_command(command_name):
             pass
         elif self._is_consent_blocked(
             user_id=message.from_user.id,
             role=role,
-            command_name=command.name,
+            command_name=command_name,
             chat_type=message.chat.type,
         ):
-            response = self._consent_block_message(chat_type=message.chat.type, blocked_as_unreachable=self._is_user_unreachable(message.from_user.id))
-            if response:
-                await self.send_text(message.chat.id, response, message.message_thread_id)
+            if command is not None:
+                response = self._consent_block_message(chat_type=message.chat.type, blocked_as_unreachable=self._is_user_unreachable(message.from_user.id))
+                if response:
+                    await self.send_text(message.chat.id, response, message.message_thread_id)
             return
 
         command_def = self.command_registry.get(command.name)
@@ -284,3 +295,131 @@ class Dispatcher:
         if blocked_as_unreachable:
             return "Bitte starte den Bot privat und bestätige mit /accept."
         return "Bitte bestätige zuerst mit /accept oder prüfe /consent."
+
+
+    async def _maybe_handle_ai_autoreply(self, *, message: TelegramMessage, role: Role, bot_username: str | None) -> None:
+        if self.ai_service is None or self.database_url is None:
+            return
+
+        raw_text = message.text or ""
+        text = raw_text.strip()
+        if not text:
+            return
+
+        with create_session_factory(self.database_url)() as session:
+            router = AIRouter(topic_agent_memory_repository=__import__("amo_bot.db.repositories", fromlist=["TopicAgentMemoryRepository"]).TopicAgentMemoryRepository(session))
+            topic_id = message.message_thread_id
+            normalized_text = text
+            decision = router.decide(
+                prompt=text,
+                chat_id=message.chat.id,
+                topic_id=topic_id,
+                user_id=message.from_user.id,
+                chat_type=message.chat.type,
+                bot_username=bot_username,
+                reply_to_is_bot=message.reply_to_is_bot,
+            )
+
+            if decision.reason_code not in {
+                AIRouterReasonCode.MENTION_IN_ACTIVE_SCOPE,
+                AIRouterReasonCode.REPLY_TO_BOT_IN_ACTIVE_SCOPE,
+            }:
+                return
+
+            if role not in AUTOREPLY_ALLOWED_ROLES:
+                self._write_ai_audit(
+                    session=session,
+                    actor_user_id=message.from_user.id,
+                    chat_id=message.chat.id,
+                    message_id=message.message_id,
+                    message_thread_id=message.message_thread_id,
+                    event_type="ai_autoreply_denied",
+                    payload={"reason": "role_denied", "router_reason": decision.reason_code.value, "role": role.value},
+                )
+                session.commit()
+                return
+
+            user = session.query(User).filter(User.telegram_user_id == message.from_user.id).one_or_none()
+            if user is None:
+                self._write_ai_audit(
+                    session=session,
+                    actor_user_id=message.from_user.id,
+                    chat_id=message.chat.id,
+                    message_id=message.message_id,
+                    message_thread_id=message.message_thread_id,
+                    event_type="ai_autoreply_denied",
+                    payload={"reason": "user_missing", "router_reason": decision.reason_code.value},
+                )
+                session.commit()
+                return
+
+            if ConsentService().is_effectively_blocked(user, global_role=role, is_owner=role is Role.OWNER):
+                self._write_ai_audit(
+                    session=session,
+                    actor_user_id=message.from_user.id,
+                    chat_id=message.chat.id,
+                    message_id=message.message_id,
+                    message_thread_id=message.message_thread_id,
+                    event_type="ai_autoreply_denied",
+                    payload={"reason": "consent_denied", "router_reason": decision.reason_code.value},
+                )
+                session.commit()
+                return
+
+        try:
+            response = await self.ai_service.ask(normalized_text)
+        except Exception:
+            logger.exception("ai_autoreply failed: user_id=%s chat_id=%s", message.from_user.id, message.chat.id)
+            with create_session_factory(self.database_url)() as session:
+                self._write_ai_audit(
+                    session=session,
+                    actor_user_id=message.from_user.id,
+                    chat_id=message.chat.id,
+                    message_id=message.message_id,
+                    message_thread_id=message.message_thread_id,
+                    event_type="ai_autoreply_error",
+                    payload={"reason": "ai_error", "router_reason": decision.reason_code.value},
+                )
+                session.commit()
+            return
+
+        if not response:
+            return
+
+        await self.send_text(message.chat.id, response, message.message_thread_id)
+
+        with create_session_factory(self.database_url)() as session:
+            self._write_ai_audit(
+                session=session,
+                actor_user_id=message.from_user.id,
+                chat_id=message.chat.id,
+                message_id=message.message_id,
+                message_thread_id=message.message_thread_id,
+                event_type="ai_autoreply_sent",
+                payload={"router_reason": decision.reason_code.value},
+            )
+            session.commit()
+
+    @staticmethod
+    def _write_ai_audit(
+        *,
+        session: Any,
+        actor_user_id: int,
+        chat_id: int,
+        message_id: int,
+        message_thread_id: int | None,
+        event_type: str,
+        payload: dict[str, Any],
+    ) -> None:
+        session.add(
+            AuditEvent(
+                event_type=event_type,
+                actor_telegram_user_id=actor_user_id,
+                payload_json=json.dumps({
+                    "chat_id": chat_id,
+                    "message_id": message_id,
+                    "message_thread_id": message_thread_id,
+                    **payload,
+                }, ensure_ascii=False),
+            )
+        )

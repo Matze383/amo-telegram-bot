@@ -295,6 +295,30 @@ curl http://127.0.0.1:11434/api/tags
 
 ---
 
+### AI Auto-Reply (Mention/Reply)
+
+The bot can auto-respond via AI when mentioned or replied to in **active scopes** (topics or private chats with AI enabled).
+
+**How it works:**
+- **Mention:** Type `@YourBotName` in an active topic or private chat
+- **Reply:** Reply to one of the bot's messages in an active scope
+- The bot sends the message text to the configured AI and returns the response
+
+**Requirements:**
+- User must have role `vip`, `admin`, or `owner`
+- User must have accepted consent (`/accept`)
+- The scope (topic or private chat) must have AI enabled in the configuration
+- The AI service must be configured (Ollama)
+
+**Audit Events:**
+- `ai_autoreply_sent` — Response successfully sent
+- `ai_autoreply_denied` — Blocked (role or consent)
+- `ai_autoreply_error` — AI service error
+
+**Note:** This is separate from the `/ask` command. Auto-reply is triggered implicitly by mentions/replies; `/ask` is an explicit command.
+
+---
+
 ### Plugin Test via WebUI
 
 1. Open http://127.0.0.1:8080 in browser
@@ -614,6 +638,8 @@ Use this checklist for your test:
 - [ ] Role test /setrole vip: OK
 - [ ] Role test restriction admin/owner: OK
 - [ ] /ask test (optional): OK / Not tested
+- [ ] AI auto-reply via mention in active scope (optional): OK / Not tested
+- [ ] AI auto-reply via reply in active scope (optional): OK / Not tested
 - [ ] WebUI login: OK
 - [ ] WebUI plugin list: OK
 - [ ] WebUI plugin activate/deactivate: OK / Not tested

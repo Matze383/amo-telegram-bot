@@ -295,6 +295,30 @@ curl http://127.0.0.1:11434/api/tags
 
 ---
 
+### KI-Auto-Antwort (Erwähnung/Antwort)
+
+Der Bot kann bei Erwähnung oder als Antwort in **aktiven Scopes** (Themen oder private Chats mit aktivierter KI) automatisch per KI antworten.
+
+**Funktionsweise:**
+- **Erwähnung:** Tippe `@DeinBotName` in einem aktiven Thema oder privaten Chat
+- **Antwort:** Antworte auf eine Nachricht des Bots in einem aktiven Scope
+- Der Bot sendet den Nachrichtentext an die konfigurierte KI und gibt die Antwort zurück
+
+**Voraussetzungen:**
+- Nutzer muss Rolle `vip`, `admin` oder `owner` haben
+- Nutzer muss Consent akzeptiert haben (`/accept`)
+- Der Scope (Thema oder privater Chat) muss KI-aktiviert konfiguriert sein
+- Der KI-Service muss konfiguriert sein (Ollama)
+
+**Audit-Events:**
+- `ai_autoreply_sent` — Antwort erfolgreich gesendet
+- `ai_autoreply_denied` — Blockiert (Rolle oder Consent)
+- `ai_autoreply_error` — Fehler beim KI-Service
+
+**Hinweis:** Dies ist separate vom `/ask`-Kommando. Auto-Antwort wird implizit durch Erwähnungen/Antworten ausgelöst; `/ask` ist ein explizites Kommando.
+
+---
+
 ### Plugin-Test über WebUI
 
 1. Öffne http://127.0.0.1:8080 im Browser
@@ -614,6 +638,8 @@ Nutze diese Checkliste für deinen Test:
 - [ ] Rollen-Test /setrole vip: OK
 - [ ] Rollen-Test Einschränkung Admin/Owner: OK
 - [ ] /ask-Test (optional): OK / Nicht getestet
+- [ ] KI-Auto-Antwort via Erwähnung in aktivem Scope (optional): OK / Nicht getestet
+- [ ] KI-Auto-Antwort via Antwort in aktivem Scope (optional): OK / Nicht getestet
 - [ ] WebUI Login: OK
 - [ ] WebUI Plugin-Liste: OK
 - [ ] WebUI Plugin aktivieren/deaktivieren: OK / Nicht getestet
