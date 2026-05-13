@@ -31,7 +31,7 @@ docs/**/TODO.md
 *.sqlite3-wal
 
 # Local user plugin root (do not commit local plugin experiments)
-plugins/
+/plugins/
 local/
 .private/
 *.local.md
