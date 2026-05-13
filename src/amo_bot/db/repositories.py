@@ -11,7 +11,17 @@ from sqlalchemy.orm import Session
 
 from amo_bot.auth.roles import Role
 from amo_bot.consent import ConsentService
-from amo_bot.db.models import AuditEvent, ChatSeenUser, ChatUserRole, DbRole, Plugin, TelegramChat, TelegramTopic, User
+from amo_bot.db.models import (
+    AuditEvent,
+    ChatSeenUser,
+    ChatUserRole,
+    DbRole,
+    Plugin,
+    PluginActivationRequest,
+    TelegramChat,
+    TelegramTopic,
+    User,
+)
 
 if TYPE_CHECKING:
     from amo_bot.plugins.manifest import PluginManifest
@@ -28,6 +38,7 @@ class RoleChangeResult:
 class PluginStatus:
     name: str
     enabled: bool
+    activation_status: str = "activation_pending"
     worker_state: str | None = None
     worker_last_heartbeat_at: datetime | None = None
     worker_restart_count: int = 0
@@ -36,6 +47,18 @@ class PluginStatus:
     last_run_at: datetime | None = None
     last_status: str | None = None
     next_run_at: datetime | None = None
+
+
+@dataclass(slots=True)
+class PluginActivationRequestStatus:
+    id: int
+    plugin_name: str
+    status: str
+    requested_by_telegram_user_id: int | None = None
+    resolved_by_telegram_user_id: int | None = None
+    reason: str | None = None
+    requested_at: datetime | None = None
+    resolved_at: datetime | None = None
 
 
 class UserRoleRepository:
@@ -474,6 +497,8 @@ class ChatTopicRepository:
 
 
 class PluginRepository:
+    ACTIVATION_REQUEST_STATUSES = {"pending", "approved", "rejected", "blocked"}
+
     def __init__(self, session: Session) -> None:
         self._session = session
 
@@ -482,6 +507,7 @@ class PluginRepository:
         return PluginStatus(
             name=row.name,
             enabled=bool(row.enabled),
+            activation_status=(row.activation_status or "activation_pending"),
             worker_state=row.worker_state,
             worker_last_heartbeat_at=row.worker_last_heartbeat_at,
             worker_restart_count=int(row.worker_restart_count or 0),
@@ -490,6 +516,19 @@ class PluginRepository:
             last_run_at=row.last_run_at,
             last_status=row.last_status,
             next_run_at=row.next_run_at,
+        )
+
+    @staticmethod
+    def _to_activation_request_status(row: PluginActivationRequest) -> PluginActivationRequestStatus:
+        return PluginActivationRequestStatus(
+            id=row.id,
+            plugin_name=row.plugin_name,
+            status=row.status,
+            requested_by_telegram_user_id=row.requested_by_telegram_user_id,
+            resolved_by_telegram_user_id=row.resolved_by_telegram_user_id,
+            reason=row.reason,
+            requested_at=row.requested_at,
+            resolved_at=row.resolved_at,
         )
 
     def list_plugins(self) -> list[PluginStatus]:
@@ -501,6 +540,85 @@ class PluginRepository:
         if row is None:
             return None
         return self._to_status(row)
+
+    def create_activation_request(
+        self,
+        plugin_name: str,
+        *,
+        actor_telegram_user_id: int | None,
+        reason: str | None = None,
+    ) -> PluginActivationRequestStatus:
+        plugin = self._session.scalar(select(Plugin).where(Plugin.name == plugin_name))
+        if plugin is None:
+            raise ValueError("plugin not found")
+
+        if bool(plugin.enabled) or plugin.activation_status == "active":
+            raise ValueError("plugin already active")
+
+        request = PluginActivationRequest(
+            plugin_name=plugin_name,
+            status="pending",
+            requested_by_telegram_user_id=actor_telegram_user_id,
+            reason=reason,
+        )
+        self._session.add(request)
+        self._session.add(
+            AuditEvent(
+                actor_telegram_user_id=actor_telegram_user_id,
+                event_type="plugin_activation_request_created",
+                payload_json=json.dumps({"plugin_name": plugin_name, "status": "pending"}),
+            )
+        )
+        self._session.commit()
+        return self._to_activation_request_status(request)
+
+    def get_activation_request(self, request_id: int) -> PluginActivationRequestStatus | None:
+        row = self._session.get(PluginActivationRequest, request_id)
+        if row is None:
+            return None
+        return self._to_activation_request_status(row)
+
+    def resolve_activation_request(
+        self,
+        request_id: int,
+        *,
+        status: str,
+        actor_telegram_user_id: int | None,
+    ) -> bool:
+        if status not in {"approved", "rejected", "blocked"}:
+            raise ValueError("invalid activation request status")
+
+        request = self._session.get(PluginActivationRequest, request_id)
+        if request is None:
+            raise ValueError("activation request not found")
+        if request.status != "pending":
+            return False
+
+        plugin = self._session.scalar(select(Plugin).where(Plugin.name == request.plugin_name))
+        if plugin is None:
+            raise ValueError("plugin not found")
+
+        request.status = status
+        request.resolved_by_telegram_user_id = actor_telegram_user_id
+        request.resolved_at = datetime.now(timezone.utc)
+        self._session.add(
+            AuditEvent(
+                actor_telegram_user_id=actor_telegram_user_id,
+                event_type=f"plugin_activation_request_{status}",
+                payload_json=json.dumps(
+                    {"plugin_name": request.plugin_name, "activation_request_id": request.id, "status": status}
+                ),
+            )
+        )
+
+        if status == "approved":
+            # Approval is the explicit hand-off into the existing activation path.
+            return self.activate(request.plugin_name, actor_telegram_user_id=actor_telegram_user_id)
+
+        if not bool(plugin.enabled):
+            plugin.activation_status = "activation_pending"
+        self._session.commit()
+        return True
 
     def _upsert_from_manifest(self, manifest: PluginManifest) -> Plugin:
         row = self._session.scalar(select(Plugin).where(Plugin.name == manifest.name))
@@ -516,6 +634,9 @@ class PluginRepository:
         changed = False
         if row.version != manifest.version:
             row.version = manifest.version
+            changed = True
+        if not (row.activation_status or "").strip():
+            row.activation_status = "activation_pending"
             changed = True
         if row.manifest_json != manifest_json:
             row.manifest_json = manifest_json
@@ -586,6 +707,7 @@ class PluginRepository:
             return False
 
         row.enabled = 1
+        row.activation_status = "active"
         self._session.add(
             AuditEvent(
                 actor_telegram_user_id=actor_telegram_user_id,
@@ -604,6 +726,7 @@ class PluginRepository:
             return False
 
         row.enabled = 0
+        row.activation_status = "activation_pending"
         self._session.add(
             AuditEvent(
                 actor_telegram_user_id=actor_telegram_user_id,

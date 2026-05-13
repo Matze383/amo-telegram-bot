@@ -18,6 +18,7 @@ from amo_bot.db.models import AuditEvent
 from amo_bot.db.repositories import PluginRepository
 from amo_bot.plugins.loader import PluginLoader
 from amo_bot.plugins.manifest import PluginManifest
+from amo_bot.plugins.service import PluginPolicy
 
 logger = logging.getLogger(__name__)
 
@@ -230,11 +231,7 @@ class PluginCommandExecutor:
 
     @staticmethod
     def _is_role_allowed(manifest: PluginManifest, role: Role) -> bool:
-        if role is Role.IGNORE:
-            return False
-        if not manifest.required_roles:
-            return True
-        return role.value in set(manifest.required_roles)
+        return PluginPolicy.is_role_allowed(actor_role=role, plugin_required_roles=manifest.required_roles)
 
     def _load_handler(self, manifest: PluginManifest) -> Callable[[PluginCommandContext, PluginHostAPI], Awaitable[Any]]:
         plugin_dir = Path(self._loader.plugins_dir) / manifest.name

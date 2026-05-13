@@ -70,8 +70,12 @@ class ScheduledPluginExecutor:
 
     async def _execute_one(self, *, manifest: PluginManifest, now: datetime) -> None:
         run_id = str(uuid.uuid4())
-        interval_seconds = manifest.schedule["interval_seconds"] if manifest.schedule else self._backoff_seconds
-        success_next_run_at = now + timedelta(seconds=interval_seconds)
+        schedule = manifest.schedule or {}
+        interval_seconds = schedule.get("interval_seconds")
+        if isinstance(interval_seconds, int):
+            success_next_run_at = now + timedelta(seconds=interval_seconds)
+        else:
+            success_next_run_at = now + timedelta(seconds=self._backoff_seconds)
         failure_next_run_at = now + timedelta(seconds=self._backoff_seconds)
 
         context = ScheduledPluginContext(

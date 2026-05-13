@@ -115,7 +115,7 @@ def test_plugins_shows_valid_manifest_data(tmp_path) -> None:
     assert "/weather, /forecast" in html
     assert "admin, vip" in html
     assert "send_message, read_chat" in html
-    assert "disabled" in html
+    assert "activation_pending" in html
 
 
 def test_plugin_enable_disable_requires_owner_id_and_audits(tmp_path) -> None:

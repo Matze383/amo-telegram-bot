@@ -62,6 +62,7 @@ class Plugin(Base):
     name: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
     version: Mapped[str] = mapped_column(String(64), nullable=False)
     enabled: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    activation_status: Mapped[str] = mapped_column(String(32), nullable=False, default="activation_pending", server_default="activation_pending")
     manifest_json: Mapped[str] = mapped_column(Text, nullable=False)
     next_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -71,6 +72,19 @@ class Plugin(Base):
     worker_restart_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     worker_next_restart_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     worker_last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class PluginActivationRequest(Base):
+    __tablename__ = "plugin_activation_requests"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    plugin_name: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending", server_default="pending")
+    requested_by_telegram_user_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    resolved_by_telegram_user_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class AuditEvent(Base):

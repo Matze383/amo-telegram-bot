@@ -34,6 +34,7 @@ def init_db(database_url: str) -> None:
             "worker_restart_count": "ALTER TABLE plugins ADD COLUMN worker_restart_count INTEGER NOT NULL DEFAULT 0",
             "worker_next_restart_at": "ALTER TABLE plugins ADD COLUMN worker_next_restart_at DATETIME",
             "worker_last_error": "ALTER TABLE plugins ADD COLUMN worker_last_error TEXT",
+            "activation_status": "ALTER TABLE plugins ADD COLUMN activation_status VARCHAR(32) NOT NULL DEFAULT 'activation_pending'",
         },
     }
 
@@ -80,6 +81,32 @@ def init_db(database_url: str) -> None:
                     """
                 )
             )
+
+        if "plugin_activation_requests" not in existing_tables:
+            connection.execute(
+                text(
+                    """
+                    CREATE TABLE plugin_activation_requests (
+                        id INTEGER NOT NULL PRIMARY KEY,
+                        plugin_name VARCHAR(128) NOT NULL,
+                        status VARCHAR(32) DEFAULT 'pending' NOT NULL,
+                        requested_by_telegram_user_id BIGINT NULL,
+                        resolved_by_telegram_user_id BIGINT NULL,
+                        reason TEXT NULL,
+                        requested_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                        resolved_at DATETIME NULL
+                    )
+                    """
+                )
+            )
+            existing_tables.add("plugin_activation_requests")
+
+        if "plugin_activation_requests" in existing_tables:
+            existing_indexes = {index["name"] for index in inspector.get_indexes("plugin_activation_requests")}
+            if "ix_plugin_activation_requests_plugin_name" not in existing_indexes:
+                connection.execute(
+                    text("CREATE INDEX ix_plugin_activation_requests_plugin_name ON plugin_activation_requests (plugin_name)")
+                )
 
         if "chat_seen_users" not in existing_tables:
             connection.execute(

@@ -28,7 +28,7 @@
             <td>{{ plugin.name }}</td>
             <td>{{ plugin.version }}</td>
             <td>command</td>
-            <td>{{ "enabled" if plugin.enabled else "disabled" }}</td>
+            <td>{{ plugin.activation_status if plugin.activation_status else ("enabled" if plugin.enabled else "disabled") }}</td>
             <td>{{ plugin.commands | join(", ") if plugin.commands else "-" }}</td>
             <td>{{ plugin.schedule if plugin.schedule else "-" }}</td>
             <td>{{ plugin.worker if plugin.worker else "-" }}</td>
