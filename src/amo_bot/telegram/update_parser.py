@@ -36,6 +36,7 @@ class TelegramMessage:
     text: str
     message_thread_id: int | None = None
     telegram_topic_name: str | None = None
+    reply_to_is_bot: bool = False
 
     def parse_command(self, bot_username: str | None = None) -> CommandMatch | None:
         raw = self.text.strip()
@@ -149,9 +150,15 @@ def _parse_message(raw: Any) -> TelegramMessage | None:
                     return cleaned_name
         return None
 
+    reply_to_message_raw = raw.get("reply_to_message")
     telegram_topic_name = _extract_topic_name(raw)
     if telegram_topic_name is None:
-        telegram_topic_name = _extract_topic_name(raw.get("reply_to_message"))
+        telegram_topic_name = _extract_topic_name(reply_to_message_raw)
+
+    reply_to_is_bot = False
+    if isinstance(reply_to_message_raw, dict):
+        reply_to_user = _parse_user(reply_to_message_raw.get("from"))
+        reply_to_is_bot = bool(reply_to_user.is_bot) if reply_to_user is not None else False
 
     return TelegramMessage(
         message_id=message_id,
@@ -160,6 +167,7 @@ def _parse_message(raw: Any) -> TelegramMessage | None:
         text=text if isinstance(text, str) else "",
         message_thread_id=message_thread_id,
         telegram_topic_name=telegram_topic_name,
+        reply_to_is_bot=reply_to_is_bot,
     )
 
 

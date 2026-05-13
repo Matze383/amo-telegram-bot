@@ -12,6 +12,7 @@ class AIRouterReasonCode(StrEnum):
     DEFAULT_NOOP = "default_noop"
     SCOPE_ENABLED = "scope_enabled"
     MENTION_IN_ACTIVE_SCOPE = "mention_in_active_scope"
+    REPLY_TO_BOT_IN_ACTIVE_SCOPE = "reply_to_bot_in_active_scope"
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,6 +39,7 @@ class AIRouter:
         user_id: int | None = None,
         chat_type: str | None = None,
         bot_username: str | None = None,
+        reply_to_is_bot: bool = False,
     ) -> AIRouterDecision:
         _ = chat_type
 
@@ -63,6 +65,13 @@ class AIRouter:
                 passthrough=True,
                 eligible=True,
                 reason_code=AIRouterReasonCode.MENTION_IN_ACTIVE_SCOPE,
+            )
+
+        if reply_to_is_bot:
+            return AIRouterDecision(
+                passthrough=True,
+                eligible=True,
+                reason_code=AIRouterReasonCode.REPLY_TO_BOT_IN_ACTIVE_SCOPE,
             )
 
         return AIRouterDecision(passthrough=True, eligible=True, reason_code=AIRouterReasonCode.SCOPE_ENABLED)
