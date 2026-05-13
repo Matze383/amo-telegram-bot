@@ -7,6 +7,8 @@ from pathlib import Path
 import re
 from typing import Any
 
+import yaml
+
 from pydantic import ValidationError
 
 from amo_bot.plugins.manifest import PluginManifest
@@ -75,23 +77,30 @@ class PluginLoader:
                     )
                 )
                 continue
-            manifest_path = plugin_dir / "plugin.json"
-            if not manifest_path.exists():
-                manifest_path = plugin_dir / "manifest.json"
-            if not manifest_path.exists():
+            manifest_candidates = [
+                plugin_dir / "plugin.yaml",
+                plugin_dir / "plugin.yml",
+                plugin_dir / "plugin.json",
+                plugin_dir / "manifest.json",
+            ]
+            manifest_path = next((path for path in manifest_candidates if path.exists()), None)
+            if manifest_path is None:
                 outcomes.append(
                     DiscoveryOutcome(
                         plugin_dir=plugin_dir.name,
                         status="discovery_invalid",
                         code=DiscoveryCode.MISSING_MANIFEST,
-                        detail="missing plugin.json/manifest.json",
+                        detail="missing plugin.yaml/plugin.yml/plugin.json/manifest.json",
                     )
                 )
                 continue
 
             try:
                 raw_text = manifest_path.read_text(encoding="utf-8")
-                raw = json.loads(raw_text)
+                if manifest_path.suffix in {".yaml", ".yml"}:
+                    raw = yaml.safe_load(raw_text)
+                else:
+                    raw = json.loads(raw_text)
                 if not isinstance(raw, dict):
                     raise ValueError("manifest root must be an object")
 
@@ -184,8 +193,12 @@ class PluginLoader:
                         detail="manifest accepted",
                     )
                 )
-            except (OSError, json.JSONDecodeError, ValidationError, ValueError) as exc:
-                code = DiscoveryCode.INVALID_YAML if isinstance(exc, json.JSONDecodeError) else DiscoveryCode.INVALID_MANIFEST
+            except (OSError, json.JSONDecodeError, yaml.YAMLError, ValidationError, ValueError) as exc:
+                code = (
+                    DiscoveryCode.INVALID_YAML
+                    if isinstance(exc, (json.JSONDecodeError, yaml.YAMLError))
+                    else DiscoveryCode.INVALID_MANIFEST
+                )
                 invalid.append(
                     InvalidPluginManifest(
                         plugin_dir=plugin_dir.name,

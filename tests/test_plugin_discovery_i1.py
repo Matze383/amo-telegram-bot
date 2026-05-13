@@ -30,7 +30,7 @@ def test_discovery_is_deterministic_and_reports_found_outcomes(tmp_path) -> None
     ]
 
 
-def test_discovery_invalid_yaml_is_non_fatal(tmp_path) -> None:
+def test_discovery_invalid_json_is_non_fatal(tmp_path) -> None:
     plugins_dir = tmp_path / "plugins"
     broken = plugins_dir / "broken"
     ok = plugins_dir / "ok"
@@ -38,6 +38,67 @@ def test_discovery_invalid_yaml_is_non_fatal(tmp_path) -> None:
     ok.mkdir(parents=True)
 
     (broken / "plugin.json").write_text('{"name": "x",', encoding="utf-8")
+    (ok / "plugin.json").write_text(json.dumps(_base_manifest("okplugin")), encoding="utf-8")
+
+    result = PluginLoader(str(plugins_dir)).discover()
+
+    assert [m.name for m in result.valid] == ["okplugin"]
+    assert any(entry.plugin_dir == "broken" for entry in result.invalid)
+    assert any(o.plugin_dir == "broken" and o.code == DiscoveryCode.INVALID_YAML for o in result.outcomes)
+
+
+def test_discovery_valid_plugin_yaml_is_accepted(tmp_path) -> None:
+    plugins_dir = tmp_path / "plugins"
+    plugin_dir = plugins_dir / "yaml_plugin"
+    plugin_dir.mkdir(parents=True)
+    (plugin_dir / "plugin.yaml").write_text(
+        """
+name: yaml_plugin
+version: 1.0.0
+commands:
+  - /demo
+required_roles:
+  - admin
+""".strip(),
+        encoding="utf-8",
+    )
+
+    result = PluginLoader(str(plugins_dir)).discover()
+
+    assert [m.name for m in result.valid] == ["yaml_plugin"]
+    assert any(o.plugin_dir == "yaml_plugin" and o.code == DiscoveryCode.FOUND for o in result.outcomes)
+
+
+def test_discovery_valid_plugin_yml_is_accepted(tmp_path) -> None:
+    plugins_dir = tmp_path / "plugins"
+    plugin_dir = plugins_dir / "yml_plugin"
+    plugin_dir.mkdir(parents=True)
+    (plugin_dir / "plugin.yml").write_text(
+        """
+name: yml_plugin
+version: 1.0.0
+commands:
+  - /demo
+required_roles:
+  - admin
+""".strip(),
+        encoding="utf-8",
+    )
+
+    result = PluginLoader(str(plugins_dir)).discover()
+
+    assert [m.name for m in result.valid] == ["yml_plugin"]
+    assert any(o.plugin_dir == "yml_plugin" and o.code == DiscoveryCode.FOUND for o in result.outcomes)
+
+
+def test_discovery_invalid_yaml_is_non_fatal(tmp_path) -> None:
+    plugins_dir = tmp_path / "plugins"
+    broken = plugins_dir / "broken"
+    ok = plugins_dir / "ok"
+    broken.mkdir(parents=True)
+    ok.mkdir(parents=True)
+
+    (broken / "plugin.yaml").write_text("name: broken\nversion: [", encoding="utf-8")
     (ok / "plugin.json").write_text(json.dumps(_base_manifest("okplugin")), encoding="utf-8")
 
     result = PluginLoader(str(plugins_dir)).discover()
