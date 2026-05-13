@@ -640,3 +640,139 @@ def test_plugin_policy_post_rejects_invalid_modes_and_roles(tmp_path) -> None:
     assert policy is not None
     assert policy.groups_mode == "allow"
     assert policy.allowed_group_ids == []
+
+
+def test_plugin_policy_topics_post_saves_and_renders_checked(tmp_path) -> None:
+    from amo_bot.db.base import create_session_factory
+    from amo_bot.db.repositories import ChatTopicRepository, PluginPolicyOverrideRepository
+
+    db_url = f"sqlite:///{tmp_path / 'plugins14.db'}"
+    plugins_dir = tmp_path / "plugins"
+    plugin_dir = plugins_dir / "scope"
+    plugin_dir.mkdir(parents=True)
+    (plugin_dir / "plugin.json").write_text(
+        json.dumps({"name": "scope", "version": "1.0.0", "commands": ["scope"], "required_roles": ["admin"]}),
+        encoding="utf-8",
+    )
+
+    app = create_flask_app(settings=_make_settings(db_url, str(plugins_dir), owner_id=777))
+
+    sf = create_session_factory(db_url)
+    with sf() as session:
+        chat_repo = ChatTopicRepository(session)
+        chat_repo.upsert_chat(chat_id=-1001, chat_type="group", title="Team Alpha", username=None)
+        chat_repo.upsert_topic(chat_id=-1001, message_thread_id=11, telegram_topic_name="Alpha Ops")
+        chat_repo.upsert_topic(chat_id=-1001, message_thread_id=12, telegram_topic_name="Alpha Dev")
+
+    with app.test_client() as client:
+        _login(client, "test-secret")
+        page = client.get("/plugins")
+        token = _extract_csrf_token(page.get_data(as_text=True))
+        response = client.post(
+            "/plugins/scope/policy",
+            data={
+                "csrf_token": token,
+                "roles_mode": "inherit",
+                "private_mode": "inherit",
+                "groups_mode": "inherit",
+                "topics_mode": "allow",
+                "allowed_topics": ["-1001:11", "-1001:12", "-1001:11"],
+            },
+            follow_redirects=False,
+        )
+        assert response.status_code == 302
+
+        rendered = client.get("/plugins")
+        html = rendered.get_data(as_text=True)
+
+    with sf() as session:
+        snap = PluginPolicyOverrideRepository(session).get_snapshot(plugin_name="scope")
+
+    assert snap is not None
+    assert snap.topics_mode == "allow"
+    assert snap.allowed_topics == [(-1001, 11), (-1001, 12)]
+    assert rendered.status_code == 200
+    assert "Alpha Ops" in html
+    assert "Alpha Dev" in html
+    assert 'value="-1001:11" checked' in html
+    assert 'value="-1001:12" checked' in html
+
+
+def test_plugin_policy_topics_rejects_invalid_unknown_and_allows_empty(tmp_path) -> None:
+    from amo_bot.db.base import create_session_factory
+    from amo_bot.db.repositories import ChatTopicRepository, PluginPolicyOverrideRepository
+
+    db_url = f"sqlite:///{tmp_path / 'plugins15.db'}"
+    plugins_dir = tmp_path / "plugins"
+    plugin_dir = plugins_dir / "scope"
+    plugin_dir.mkdir(parents=True)
+    (plugin_dir / "plugin.json").write_text(
+        json.dumps({"name": "scope", "version": "1.0.0", "commands": ["scope"], "required_roles": ["admin"]}),
+        encoding="utf-8",
+    )
+
+    app = create_flask_app(settings=_make_settings(db_url, str(plugins_dir), owner_id=777))
+
+    sf = create_session_factory(db_url)
+    with sf() as session:
+        chat_repo = ChatTopicRepository(session)
+        chat_repo.upsert_chat(chat_id=-1001, chat_type="group", title="Team Alpha", username=None)
+        chat_repo.upsert_topic(chat_id=-1001, message_thread_id=11, telegram_topic_name="Alpha Ops")
+
+    with app.test_client() as client:
+        _login(client, "test-secret")
+
+        page = client.get("/plugins")
+        token = _extract_csrf_token(page.get_data(as_text=True))
+        invalid = client.post(
+            "/plugins/scope/policy",
+            data={
+                "csrf_token": token,
+                "roles_mode": "inherit",
+                "private_mode": "inherit",
+                "groups_mode": "inherit",
+                "topics_mode": "allow",
+                "allowed_topics": ["not-a-topic"],
+            },
+            follow_redirects=False,
+        )
+
+        page2 = client.get("/plugins")
+        token2 = _extract_csrf_token(page2.get_data(as_text=True))
+        unknown = client.post(
+            "/plugins/scope/policy",
+            data={
+                "csrf_token": token2,
+                "roles_mode": "inherit",
+                "private_mode": "inherit",
+                "groups_mode": "inherit",
+                "topics_mode": "allow",
+                "allowed_topics": ["-1001:9999"],
+            },
+            follow_redirects=False,
+        )
+
+        page3 = client.get("/plugins")
+        token3 = _extract_csrf_token(page3.get_data(as_text=True))
+        empty = client.post(
+            "/plugins/scope/policy",
+            data={
+                "csrf_token": token3,
+                "roles_mode": "inherit",
+                "private_mode": "inherit",
+                "groups_mode": "inherit",
+                "topics_mode": "allow",
+            },
+            follow_redirects=False,
+        )
+
+    assert invalid.status_code == 400
+    assert unknown.status_code == 400
+    assert empty.status_code == 302
+
+    with sf() as session:
+        snap = PluginPolicyOverrideRepository(session).get_snapshot(plugin_name="scope")
+
+    assert snap is not None
+    assert snap.topics_mode == "allow"
+    assert snap.allowed_topics == []

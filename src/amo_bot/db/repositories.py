@@ -132,6 +132,7 @@ class PluginPolicyOverrideRepository:
         groups_mode: str,
         topics_mode: str,
         allowed_group_ids: list[int] | None = None,
+        allowed_topics: list[tuple[int, int]] | None = None,
     ) -> None:
         row = self._session.scalar(select(PluginPolicyOverride).where(PluginPolicyOverride.plugin_name == plugin_name))
         required_roles_json = json.dumps([role.value for role in required_roles])
@@ -159,6 +160,18 @@ class PluginPolicyOverrideRepository:
             deduped_group_ids = sorted(set(allowed_group_ids))
             for chat_id in deduped_group_ids:
                 self._session.add(PluginPolicyAllowedGroup(override_id=row.id, chat_id=chat_id))
+
+        if allowed_topics is not None:
+            self._session.query(PluginPolicyAllowedTopic).filter(PluginPolicyAllowedTopic.override_id == row.id).delete()
+            deduped_topics = sorted(set(allowed_topics), key=lambda item: (item[0], item[1]))
+            for chat_id, message_thread_id in deduped_topics:
+                self._session.add(
+                    PluginPolicyAllowedTopic(
+                        override_id=row.id,
+                        chat_id=chat_id,
+                        message_thread_id=message_thread_id,
+                    )
+                )
 
         self._session.commit()
 

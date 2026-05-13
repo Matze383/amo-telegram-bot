@@ -614,3 +614,55 @@ def test_plugin_policy_override_repository_upsert_allowed_group_ids_dedup_replac
         snap3 = repo.get_snapshot(plugin_name="scope")
         assert snap3 is not None
         assert snap3.allowed_group_ids == []
+
+
+def test_plugin_policy_override_repository_upsert_allowed_topics_dedup_replace_and_clear(tmp_path) -> None:
+    from amo_bot.auth.roles import Role
+    from amo_bot.db.base import create_session_factory
+    from amo_bot.db.repositories import PluginPolicyOverrideRepository
+    from amo_bot.db.init_db import init_db
+
+    db_url = f"sqlite:///{tmp_path / 'plugins_allowed_topics.db'}"
+    init_db(db_url)
+    sf = create_session_factory(db_url)
+
+    with sf() as session:
+        repo = PluginPolicyOverrideRepository(session)
+        repo.upsert_override(
+            plugin_name="scope",
+            roles_mode="inherit",
+            required_roles=[Role.ADMIN],
+            private_mode="inherit",
+            groups_mode="inherit",
+            topics_mode="allow",
+            allowed_topics=[(-1001, 20), (-1001, 10), (-1001, 20), (-2002, 5)],
+        )
+        snap1 = repo.get_snapshot(plugin_name="scope")
+        assert snap1 is not None
+        assert snap1.allowed_topics == [(-2002, 5), (-1001, 10), (-1001, 20)]
+
+        repo.upsert_override(
+            plugin_name="scope",
+            roles_mode="inherit",
+            required_roles=[Role.ADMIN],
+            private_mode="inherit",
+            groups_mode="inherit",
+            topics_mode="allow",
+            allowed_topics=[(-3003, 7)],
+        )
+        snap2 = repo.get_snapshot(plugin_name="scope")
+        assert snap2 is not None
+        assert snap2.allowed_topics == [(-3003, 7)]
+
+        repo.upsert_override(
+            plugin_name="scope",
+            roles_mode="inherit",
+            required_roles=[Role.ADMIN],
+            private_mode="inherit",
+            groups_mode="inherit",
+            topics_mode="allow",
+            allowed_topics=[],
+        )
+        snap3 = repo.get_snapshot(plugin_name="scope")
+        assert snap3 is not None
+        assert snap3.allowed_topics == []

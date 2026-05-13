@@ -19,12 +19,18 @@ class PluginMutationForm(FlaskForm):
 _ALLOWED_ROLE_VALUES = {Role.OWNER.value, Role.ADMIN.value, Role.VIP.value, Role.NORMAL.value}
 _ALLOWED_ROLES_MODES = {"inherit", "override"}
 _ALLOWED_SCOPE_MODES = {"inherit", "allow", "deny"}
+_ALLOWED_TOPICS_MODES = {"inherit", "allow", "deny"}
 
 
-def _validate_and_collect_policy_override_payload(*, known_group_ids: set[int]) -> tuple[str, list[Role], str, str, list[int]]:
+def _validate_and_collect_policy_override_payload(
+    *,
+    known_group_ids: set[int],
+    known_topic_pairs: set[tuple[int, int]],
+) -> tuple[str, list[Role], str, str, list[int], str, list[tuple[int, int]]]:
     roles_mode = (request.form.get("roles_mode") or "inherit").strip().lower()
     private_mode = (request.form.get("private_mode") or "inherit").strip().lower()
     groups_mode = (request.form.get("groups_mode") or "inherit").strip().lower()
+    topics_mode = (request.form.get("topics_mode") or "inherit").strip().lower()
 
     if roles_mode not in _ALLOWED_ROLES_MODES:
         abort(400, description="invalid roles mode")
@@ -32,6 +38,8 @@ def _validate_and_collect_policy_override_payload(*, known_group_ids: set[int]) 
         abort(400, description="invalid private mode")
     if groups_mode not in _ALLOWED_SCOPE_MODES:
         abort(400, description="invalid group mode")
+    if topics_mode not in _ALLOWED_TOPICS_MODES:
+        abort(400, description="invalid topics mode")
 
     selected_roles = [item.strip().lower() for item in request.form.getlist("required_roles") if item.strip()]
     if any(item not in _ALLOWED_ROLE_VALUES for item in selected_roles):
@@ -55,7 +63,28 @@ def _validate_and_collect_policy_override_payload(*, known_group_ids: set[int]) 
         parsed_group_ids.append(chat_id)
 
     allowed_group_ids = sorted(set(parsed_group_ids))
-    return roles_mode, normalized_roles, private_mode, groups_mode, allowed_group_ids
+
+    raw_topics = request.form.getlist("allowed_topics")
+    parsed_topics: list[tuple[int, int]] = []
+    for raw_topic in raw_topics:
+        value = raw_topic.strip()
+        if not value:
+            continue
+        parts = value.split(":", 1)
+        if len(parts) != 2:
+            abort(400, description="invalid allowed topic")
+        try:
+            chat_id = int(parts[0].strip())
+            message_thread_id = int(parts[1].strip())
+        except ValueError:
+            abort(400, description="invalid allowed topic")
+        pair = (chat_id, message_thread_id)
+        if pair not in known_topic_pairs:
+            abort(400, description="unknown allowed topic")
+        parsed_topics.append(pair)
+
+    allowed_topics = sorted(set(parsed_topics), key=lambda item: (item[0], item[1]))
+    return roles_mode, normalized_roles, private_mode, groups_mode, allowed_group_ids, topics_mode, allowed_topics
 
 
 def _save_policy_override(
@@ -65,7 +94,9 @@ def _save_policy_override(
     required_roles: list[Role],
     private_mode: str,
     groups_mode: str,
+    topics_mode: str,
     allowed_group_ids: list[int] | None = None,
+    allowed_topics: list[tuple[int, int]] | None = None,
 ) -> None:
     session_factory = create_session_factory(current_app.extensions["amo.settings"].database_url)
     with session_factory() as session:
@@ -75,8 +106,9 @@ def _save_policy_override(
             required_roles=required_roles,
             private_mode=private_mode,
             groups_mode=groups_mode,
-            topics_mode="inherit",
+            topics_mode=topics_mode,
             allowed_group_ids=allowed_group_ids,
+            allowed_topics=allowed_topics,
         )
 
 
@@ -89,6 +121,7 @@ def plugins_page():
     session_factory = create_session_factory(current_app.extensions["amo.settings"].database_url)
     policy_overrides: dict[str, dict[str, str | list[str] | list[int]]] = {}
     known_groups: list[dict[str, str | int]] = []
+    known_topics: list[dict[str, str | int]] = []
     with session_factory() as session:
         repository = PluginPolicyOverrideRepository(session)
         topic_repository = ChatTopicRepository(session)
@@ -104,6 +137,18 @@ def plugins_page():
                     "chat_type": chat.chat_type,
                 }
             )
+            chat_topics = topic_repository.list_topics(chat.chat_id)
+            for topic in chat_topics:
+                known_topics.append(
+                    {
+                        "chat_id": topic.chat_id,
+                        "message_thread_id": topic.message_thread_id,
+                        "topic_name": topic.display_name
+                        or topic.telegram_topic_name
+                        or f"Topic {topic.message_thread_id}",
+                        "chat_title": chat.title or "",
+                    }
+                )
         for plugin in payload["plugins"]:
             plugin_name = plugin["name"] if isinstance(plugin, dict) else plugin.name
             snapshot = repository.get_snapshot(plugin_name=plugin_name)
@@ -112,7 +157,9 @@ def plugins_page():
                 "required_roles": [role.value for role in snapshot.required_roles] if snapshot else [],
                 "private_mode": snapshot.private_mode if snapshot else "inherit",
                 "groups_mode": snapshot.groups_mode if snapshot else "inherit",
+                "topics_mode": snapshot.topics_mode if snapshot else "inherit",
                 "allowed_group_ids": snapshot.allowed_group_ids if snapshot else [],
+                "allowed_topics": snapshot.allowed_topics if snapshot else [],
             }
 
     return render_template(
@@ -123,6 +170,7 @@ def plugins_page():
         owner_mutation_enabled=current_app.extensions["amo.settings"].webui_owner_telegram_id is not None,
         policy_overrides=policy_overrides,
         known_groups=known_groups,
+        known_topics=known_topics,
     ), 200
 
 
@@ -196,14 +244,27 @@ def save_plugin_policy(plugin_name: str):
 
     session_factory = create_session_factory(current_app.extensions["amo.settings"].database_url)
     with session_factory() as session:
-        known_group_ids = {
-            chat.chat_id
-            for chat in ChatTopicRepository(session).list_chats()
-            if chat.chat_type in {"group", "supergroup"}
-        }
+        topic_repository = ChatTopicRepository(session)
+        known_group_ids = set()
+        known_topic_pairs: set[tuple[int, int]] = set()
+        for chat in topic_repository.list_chats():
+            if chat.chat_type not in {"group", "supergroup"}:
+                continue
+            known_group_ids.add(chat.chat_id)
+            for topic in topic_repository.list_topics(chat.chat_id):
+                known_topic_pairs.add((topic.chat_id, topic.message_thread_id))
 
-    roles_mode, required_roles, private_mode, groups_mode, allowed_group_ids = _validate_and_collect_policy_override_payload(
-        known_group_ids=known_group_ids
+    (
+        roles_mode,
+        required_roles,
+        private_mode,
+        groups_mode,
+        allowed_group_ids,
+        topics_mode,
+        allowed_topics,
+    ) = _validate_and_collect_policy_override_payload(
+        known_group_ids=known_group_ids,
+        known_topic_pairs=known_topic_pairs,
     )
     _save_policy_override(
         plugin_name,
@@ -211,7 +272,9 @@ def save_plugin_policy(plugin_name: str):
         required_roles=required_roles,
         private_mode=private_mode,
         groups_mode=groups_mode,
+        topics_mode=topics_mode,
         allowed_group_ids=allowed_group_ids,
+        allowed_topics=allowed_topics,
     )
     return redirect(url_for("plugins.plugins_page"), code=302)
 

@@ -78,7 +78,7 @@
             </td>
             <td>
               {% if owner_mutation_enabled %}
-                {% set override = policy_overrides.get(plugin.name, {'roles_mode': 'inherit', 'required_roles': [], 'private_mode': 'inherit', 'groups_mode': 'inherit', 'allowed_group_ids': []}) %}
+                {% set override = policy_overrides.get(plugin.name, {'roles_mode': 'inherit', 'required_roles': [], 'private_mode': 'inherit', 'groups_mode': 'inherit', 'allowed_group_ids': [], 'topics_mode': 'inherit', 'allowed_topics': []}) %}
                 <form method="post" action="{{ url_for('plugins.save_plugin_policy', plugin_name=plugin.name) }}">
                   {{ mutation_form.hidden_tag() }}
                   <fieldset>
@@ -119,7 +119,26 @@
                       <em>Keine bekannten Gruppen vorhanden.</em><br>
                     {% endif %}
                     <small>groups_mode=allow + keine Gruppe ausgewählt =&gt; deny all.</small><br>
-                    <small>Topic mode bleibt in Block 2 bewusst auf inherit.</small><br>
+                    <label>Topic mode
+                      <select name="topics_mode">
+                        <option value="inherit" {% if override.topics_mode == 'inherit' %}selected{% endif %}>inherit</option>
+                        <option value="allow" {% if override.topics_mode == 'allow' %}selected{% endif %}>allow</option>
+                        <option value="deny" {% if override.topics_mode == 'deny' %}selected{% endif %}>deny</option>
+                      </select>
+                    </label><br>
+                    <label>Allowed topics</label><br>
+                    {% if known_topics %}
+                      {% for topic in known_topics %}
+                        {% set topic_value = topic.chat_id ~ ':' ~ topic.message_thread_id %}
+                        <label>
+                          <input type="checkbox" name="allowed_topics" value="{{ topic_value }}" {% if (topic.chat_id, topic.message_thread_id) in override.allowed_topics %}checked{% endif %}>
+                          {{ topic.chat_title if topic.chat_title else '(ohne Titel)' }} / {{ topic.topic_name }} ({{ topic_value }})
+                        </label><br>
+                      {% endfor %}
+                    {% else %}
+                      <em>Keine bekannten Topics vorhanden.</em><br>
+                    {% endif %}
+                    <small>topics_mode=allow + keine Topics ausgewählt =&gt; deny all.</small><br>
                     <button type="submit">Policy speichern</button>
                   </fieldset>
                 </form>
