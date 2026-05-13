@@ -401,6 +401,16 @@ async def handle_command(context, host_api):
     assert sent == [(100, "ok")]
 
 
+def _denied_reason_payload(payload_json: str | None) -> str | None:
+    if not payload_json:
+        return None
+    try:
+        payload = json.loads(payload_json)
+    except json.JSONDecodeError:
+        return None
+    return payload.get("reason")
+
+
 def test_plugin_command_group_allow_mode_empty_denies_all_then_allows_specific_group(tmp_path) -> None:
     db_url = f"sqlite:///{tmp_path / 'plugin_runtime_group_scope.db'}"
     init_db(db_url)
@@ -431,6 +441,11 @@ async def handle_command(context, host_api):
         )
     )
     assert sent == []
+
+    with sf() as session:
+        denied = session.scalars(select(AuditEvent).where(AuditEvent.event_type == "plugin_command_denied")).all()
+    assert denied
+    assert _denied_reason_payload(denied[-1].payload_json) == "group_not_allowed"
 
     with sf() as session:
         session.add(PluginPolicyAllowedGroup(override_id=override_id, chat_id=-111))
@@ -476,6 +491,11 @@ async def handle_command(context, host_api):
     )
     assert sent == []
 
+    with sf() as session:
+        denied = session.scalars(select(AuditEvent).where(AuditEvent.event_type == "plugin_command_denied")).all()
+    assert denied
+    assert _denied_reason_payload(denied[-1].payload_json) == "group_denied"
+
 
 def test_plugin_command_topic_deny_mode_blocks_topic_messages_only(tmp_path) -> None:
     db_url = f"sqlite:///{tmp_path / 'plugin_runtime_topic_deny_scope.db'}"
@@ -516,6 +536,11 @@ async def handle_command(context, host_api):
 
     assert sent == [(-444, "ok")]
 
+    with sf() as session:
+        denied = session.scalars(select(AuditEvent).where(AuditEvent.event_type == "plugin_command_denied")).all()
+    assert denied
+    assert _denied_reason_payload(denied[-1].payload_json) == "topic_denied"
+
 
 def test_plugin_command_topic_allow_mode_empty_denies_all_then_allows_specific_topic(tmp_path) -> None:
     db_url = f"sqlite:///{tmp_path / 'plugin_runtime_topic_scope.db'}"
@@ -547,6 +572,11 @@ async def handle_command(context, host_api):
         )
     )
     assert sent == []
+
+    with sf() as session:
+        denied = session.scalars(select(AuditEvent).where(AuditEvent.event_type == "plugin_command_denied")).all()
+    assert denied
+    assert _denied_reason_payload(denied[-1].payload_json) == "topic_not_allowed"
 
     with sf() as session:
         session.add(PluginPolicyAllowedTopic(override_id=override_id, chat_id=-222, message_thread_id=1))
