@@ -13,6 +13,7 @@ class AIService:
         cleaned = prompt.strip()
         if not cleaned:
             raise ValueError("empty prompt")
+
         return await self.client.generate(cleaned)
 
 

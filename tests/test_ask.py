@@ -85,3 +85,13 @@ def test_ai_service_empty_prompt_guard() -> None:
         assert False, "expected ValueError"
     except ValueError:
         assert True
+
+
+def test_ai_service_ask_passes_through_without_router_integration() -> None:
+    class DummyClient:
+        async def generate(self, prompt: str) -> str:
+            return f"ok:{prompt}"
+
+    svc = AIService(client=DummyClient())
+    out = asyncio.run(svc.ask("  Hi there  "))
+    assert out == "ok:Hi there"
