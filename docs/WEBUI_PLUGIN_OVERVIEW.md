@@ -24,6 +24,23 @@ Jedes Plugin in der Übersicht zeigt folgende Informationen:
 | **Scope** | Geltungsbereich des Plugins | "global", "Gruppe: XYZ", "Topic: ABC" |
 | **Error** | Fehlermeldung (nur bei Status "error") | "Verbindung fehlgeschlagen" |
 | **Settings** | Konfigurierbare Felder aus `settings_schema` | Feldname, Typ, aktueller Wert (Secrets maskiert) |
+| **Policy Override** | Rollen- und Sichtbarkeits-Einstellungen | Siehe unten |
+
+### Policy Override (Block 2)
+
+In der WebUI können berechtigte WebUI-Nutzer plugin-spezifische Policy-Overrides konfigurieren, die die Manifest-Vorgaben überschreiben. Diese Einstellungen werden in der Override-Datenbank gespeichert und nicht im Manifest geändert.
+
+**Verfügbare Override-Felder:**
+
+| Feld | Optionen | Beschreibung |
+|------|----------|--------------|
+| **Rollen-Modus** | `inherit` / `override` | Ob die Manifest-Rollen oder die Override-Rollen gelten |
+| **Erlaubte Rollen** | `owner` / `admin` / `vip` / `normal` | Rollen, die bei `override` Zugriff erhalten |
+| **Privater Chat** | `inherit` / `allow` / `deny` | Plugin-Nutzung in privaten Chats |
+| **Gruppen** | `inherit` / `allow` / `deny` | Plugin-Nutzung in Gruppen |
+| **Topics** | `inherit` | Topic-Modus (in Block 2 nur `inherit`, UI-relevant für spätere Blöcke) |
+
+**Hinweis:** `inherit` bedeutet, dass der Wert aus dem Plugin-Manifest verwendet wird. `override` aktiviert die benutzerdefinierten Einstellungen.
 
 ### Status-Anzeige
 
@@ -303,6 +320,23 @@ Each plugin in the overview displays the following information:
 | **Scope** | Scope of the plugin | "global", "Group: XYZ", "Topic: ABC" |
 | **Error** | Error message (only when status is "error") | "Connection failed" |
 | **Settings** | Configurable fields from `settings_schema` | Field name, type, current value (secrets masked) |
+| **Policy Override** | Role and visibility settings | See below |
+
+### Policy Override (Block 2)
+
+In the WebUI, authorized WebUI users can configure plugin-specific policy overrides that supersede the manifest defaults. These settings are stored in the override database and do not modify the manifest.
+
+**Available Override Fields:**
+
+| Field | Options | Description |
+|-------|---------|-------------|
+| **Roles Mode** | `inherit` / `override` | Whether to use manifest roles or override roles |
+| **Allowed Roles** | `owner` / `admin` / `vip` / `normal` | Roles that are granted access when `override` is enabled |
+| **Private Chat** | `inherit` / `allow` / `deny` | Plugin usage in private chats |
+| **Groups** | `inherit` / `allow` / `deny` | Plugin usage in groups |
+| **Topics** | `inherit` | Topic mode (in Block 2 only `inherit`, UI-relevant for future blocks) |
+
+**Note:** `inherit` means the value from the plugin manifest is used. `override` enables custom settings.
 
 ### Status Display
 
@@ -587,6 +621,9 @@ POST /api/v1/plugins/{id}/retry  // For error
 | QA-10.15 | Konsistenz mit Block 5 Aktivierungs-Flow | Dokumenten-Review |
 | QA-10.16 | Settings-Spalte zeigt Schema-Felder mit Typ und Wert | Visuelle Inspektion |
 | QA-10.17 | Secret-Defaults werden nicht im HTML angezeigt | Security-Test |
+| QA-10.18 | Policy-Override-Formular ist verfügbar | Funktionaler Test |
+| QA-10.19 | Policy-Override-Werte werden in DB gespeichert | Datenbank-Test |
+| QA-10.20 | `inherit` verwendet Manifest-Werte | Integrationstest |
 
 ### English
 
@@ -609,6 +646,9 @@ POST /api/v1/plugins/{id}/retry  // For error
 | QA-10.15 | Consistency with Block 5 activation flow | Document review |
 | QA-10.16 | Settings column shows schema fields with type and value | Visual inspection |
 | QA-10.17 | Secret defaults are not shown in HTML | Security test |
+| QA-10.18 | Policy override form is available | Functional test |
+| QA-10.19 | Policy override values are saved to DB | Database test |
+| QA-10.20 | `inherit` uses manifest values | Integration test |
 
 ---
 
@@ -616,8 +656,9 @@ POST /api/v1/plugins/{id}/retry  // For error
 
 Dieses Dokument beschreibt die WebUI Plugin-Hauptseite (Übersicht) für Block 10 (Post-MVP). Es deckt alle wichtigen Aspekte ab:
 
-- **Liste der Felder:** Name, Version, Status, Scope, Error, Settings
+- **Liste der Felder:** Name, Version, Status, Scope, Error, Settings, Policy Override
 - **Settings-Anzeige:** Schema-Felder mit Typ, aktuellem Wert, Secret-Maskierung
+- **Policy Override (Block 2):** Rollen-Modus, erforderliche Rolle, Private/Gruppen/Topics-Modus
 - **Filter:** Status-Filter, Quellen-Filter
 - **Sortierung:** Name, Version, Status, Datum, Aktivität
 - **Rollenbasierte Aktionen:** Owner, Group-Admin, VIP/Normal
