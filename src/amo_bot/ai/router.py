@@ -33,6 +33,7 @@ class AIRouterContextV1:
     flag_reply_to_bot: bool = False
     assembled_soul_text: str = ""
     daily_memory_text: str = ""
+    long_memory_text: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,6 +81,7 @@ class AIRouter:
         scope = self._resolve_scope(chat_id=chat_id, topic_id=topic_id, user_id=user_id)
         assembled_soul_text = ""
         daily_memory_text = ""
+        long_memory_text = ""
         base_context = self._build_context(
             scope=scope,
             user_id=user_id,
@@ -90,6 +92,7 @@ class AIRouter:
             flag_reply_to_bot=reply_to_is_bot,
             assembled_soul_text=assembled_soul_text,
             daily_memory_text=daily_memory_text,
+            long_memory_text=long_memory_text,
         )
 
         repo = self._topic_agent_memory_repository
@@ -118,6 +121,12 @@ class AIRouter:
             topic_id=scope["topic_id"] if isinstance(scope["topic_id"], int) else None,
             user_id=scope["user_id"] if isinstance(scope["user_id"], int) else None,
         )
+        long_memory_text = self._read_long_memory_text(
+            scope_type=scope["scope_type"],
+            chat_id=scope["chat_id"] if isinstance(scope["chat_id"], int) else None,
+            topic_id=scope["topic_id"] if isinstance(scope["topic_id"], int) else None,
+            user_id=scope["user_id"] if isinstance(scope["user_id"], int) else None,
+        )
 
         if self._has_bot_mention(prompt=safe_prompt, bot_username=bot_username):
             reason_code = AIRouterReasonCode.MENTION_IN_ACTIVE_SCOPE
@@ -135,6 +144,7 @@ class AIRouter:
                     flag_reply_to_bot=reply_to_is_bot,
                     assembled_soul_text=assembled_soul_text,
                     daily_memory_text=daily_memory_text,
+                    long_memory_text=long_memory_text,
                 ),
             )
 
@@ -154,6 +164,7 @@ class AIRouter:
                     flag_reply_to_bot=True,
                     assembled_soul_text=assembled_soul_text,
                     daily_memory_text=daily_memory_text,
+                    long_memory_text=long_memory_text,
                 ),
             )
 
@@ -172,6 +183,7 @@ class AIRouter:
                 flag_reply_to_bot=reply_to_is_bot,
                 assembled_soul_text=assembled_soul_text,
                 daily_memory_text=daily_memory_text,
+                long_memory_text=long_memory_text,
             ),
         )
 
@@ -187,6 +199,7 @@ class AIRouter:
         flag_reply_to_bot: bool,
         assembled_soul_text: str,
         daily_memory_text: str,
+        long_memory_text: str,
     ) -> AIRouterContextV1:
         if scope is None:
             return AIRouterContextV1(
@@ -198,6 +211,7 @@ class AIRouter:
                 flag_reply_to_bot=flag_reply_to_bot,
                 assembled_soul_text=assembled_soul_text,
                 daily_memory_text=daily_memory_text,
+                long_memory_text=long_memory_text,
             )
 
         return AIRouterContextV1(
@@ -213,6 +227,7 @@ class AIRouter:
             flag_reply_to_bot=flag_reply_to_bot,
             assembled_soul_text=assembled_soul_text,
             daily_memory_text=daily_memory_text,
+            long_memory_text=long_memory_text,
         )
 
     @staticmethod
@@ -284,6 +299,36 @@ class AIRouter:
 
         # Reuse KI-C1 soul text bounding and redaction-style filters for daily memory injection.
         return self._sanitize_soul_text(record.summary_text)[: self._MAX_SOUL_CHARS]
+
+    def _read_long_memory_text(
+        self,
+        *,
+        scope_type: str,
+        chat_id: int | None,
+        topic_id: int | None,
+        user_id: int | None,
+    ) -> str:
+        repo = self._topic_agent_memory_repository
+        if repo is None:
+            return ""
+
+        records = repo.list_long_memories(
+            scope_type=scope_type,
+            chat_id=chat_id,
+            topic_id=topic_id,
+            user_id=user_id,
+            active_only=True,
+            limit=100,
+        )
+        if not records:
+            return ""
+
+        # Repository ordering is newest-first; reverse to deterministic oldest-first chronology.
+        parts = [self._sanitize_soul_text(record.fact_text) for record in reversed(records)]
+        joined = "\n".join(part for part in parts if part)
+        if not joined:
+            return ""
+        return joined[: self._MAX_SOUL_CHARS].rstrip()
 
     @staticmethod
     def _has_bot_mention(*, prompt: str, bot_username: str | None) -> bool:

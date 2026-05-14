@@ -236,6 +236,7 @@ def test_soul_assembly_applies_limit_and_leakage_guard(tmp_path) -> None:
     assert "system prompt" not in decision.context.assembled_soul_text.casefold()
     assert "/etc/" not in decision.context.assembled_soul_text.casefold()
 
+
 def test_context_dto_v1_defaults_without_repo() -> None:
     decision = AIRouter().decide(prompt="hello")
 
@@ -252,6 +253,7 @@ def test_context_dto_v1_defaults_without_repo() -> None:
         flag_reply_to_bot=False,
         assembled_soul_text="",
         daily_memory_text="",
+        long_memory_text="",
     )
 
 
@@ -261,13 +263,13 @@ def test_context_dto_v1_scope_and_flags_for_active_mention(tmp_path) -> None:
 
     router = AIRouter(topic_agent_memory_repository=repo)
     decision = router.decide(
-            prompt="  hi @AmoBot  ",
-            chat_id=-1234,
-            topic_id=9,
-            user_id=777,
-            bot_username="@amobot",
-            reply_to_is_bot=True,
-        )
+        prompt="  hi @AmoBot  ",
+        chat_id=-1234,
+        topic_id=9,
+        user_id=777,
+        bot_username="@amobot",
+        reply_to_is_bot=True,
+    )
 
     assert decision.context.scope_type == "topic"
     assert decision.context.scope_chat_id == -1234
@@ -281,6 +283,7 @@ def test_context_dto_v1_scope_and_flags_for_active_mention(tmp_path) -> None:
     assert decision.context.flag_reply_to_bot is True
     assert decision.context.assembled_soul_text == ""
     assert decision.context.daily_memory_text == ""
+    assert decision.context.long_memory_text == ""
 
 
 def test_context_dto_v1_private_scope_defaults_for_missing_metadata(tmp_path) -> None:
@@ -302,7 +305,7 @@ def test_context_dto_v1_private_scope_defaults_for_missing_metadata(tmp_path) ->
     assert decision.context.flag_reply_to_bot is False
     assert decision.context.assembled_soul_text == ""
     assert decision.context.daily_memory_text == ""
-
+    assert decision.context.long_memory_text == ""
 
 
 def test_daily_memory_injected_for_current_scope_day(tmp_path) -> None:
@@ -334,6 +337,7 @@ def test_daily_memory_injected_for_current_scope_day(tmp_path) -> None:
 
     assert decision.reason_code is AIRouterReasonCode.SCOPE_ENABLED
     assert decision.context.daily_memory_text == "Daily focus: ship safely."
+    assert decision.context.long_memory_text == ""
 
 
 def test_daily_memory_missing_is_safe_noop(tmp_path) -> None:
@@ -345,6 +349,7 @@ def test_daily_memory_missing_is_safe_noop(tmp_path) -> None:
 
     assert decision.reason_code is AIRouterReasonCode.SCOPE_ENABLED
     assert decision.context.daily_memory_text == ""
+    assert decision.context.long_memory_text == ""
 
 
 def test_daily_memory_uses_existing_redaction_and_size_bound(tmp_path) -> None:
@@ -364,6 +369,7 @@ def test_daily_memory_uses_existing_redaction_and_size_bound(tmp_path) -> None:
 
     assert decision.reason_code is AIRouterReasonCode.SCOPE_ENABLED
     assert decision.context.daily_memory_text == ""
+    assert decision.context.long_memory_text == ""
 
     repo.upsert_daily_memory(
         scope_type="private_user",
@@ -375,6 +381,7 @@ def test_daily_memory_uses_existing_redaction_and_size_bound(tmp_path) -> None:
 
     decision2 = router.decide(prompt="hello", chat_id=4004, user_id=4004)
     assert len(decision2.context.daily_memory_text) == AIRouter._MAX_SOUL_CHARS
+    assert decision2.context.long_memory_text == ""
 
 
 def test_daily_memory_scope_isolation_private_user(tmp_path) -> None:
@@ -404,3 +411,92 @@ def test_daily_memory_scope_isolation_private_user(tmp_path) -> None:
 
     assert d1.context.daily_memory_text == "User 5001 memory"
     assert d2.context.daily_memory_text == "User 5002 memory"
+    assert d1.context.long_memory_text == ""
+    assert d2.context.long_memory_text == ""
+
+
+def test_long_memory_injected_active_only_deterministic_order(tmp_path) -> None:
+    repo = _mk_repo(tmp_path)
+    repo.upsert_config(scope_type="topic", chat_id=-3001, topic_id=44, ai_enabled=True)
+
+    old = repo.create_long_memory(
+        scope_type="topic",
+        chat_id=-3001,
+        topic_id=44,
+        fact_text="First active fact",
+    )
+    repo.create_long_memory(
+        scope_type="topic",
+        chat_id=-3001,
+        topic_id=44,
+        fact_text="Second active fact",
+    )
+    inactive = repo.create_long_memory(
+        scope_type="topic",
+        chat_id=-3001,
+        topic_id=44,
+        fact_text="Inactive fact",
+    )
+    repo.deactivate_long_memory(memory_id=inactive.id)
+
+    router = AIRouter(topic_agent_memory_repository=repo)
+    decision = router.decide(prompt="hello", chat_id=-3001, topic_id=44, user_id=10)
+
+    assert decision.reason_code is AIRouterReasonCode.SCOPE_ENABLED
+    assert decision.context.long_memory_text == "First active fact\nSecond active fact"
+    assert str(old.id) not in decision.context.long_memory_text
+
+
+def test_long_memory_missing_is_safe_noop(tmp_path) -> None:
+    repo = _mk_repo(tmp_path)
+    repo.upsert_config(scope_type="private_user", user_id=7001, ai_enabled=True)
+
+    router = AIRouter(topic_agent_memory_repository=repo)
+    decision = router.decide(prompt="hello", chat_id=7001, user_id=7001)
+
+    assert decision.reason_code is AIRouterReasonCode.SCOPE_ENABLED
+    assert decision.context.long_memory_text == ""
+
+
+def test_long_memory_scope_isolation_private_user(tmp_path) -> None:
+    repo = _mk_repo(tmp_path)
+    repo.upsert_config(scope_type="private_user", user_id=8001, ai_enabled=True)
+    repo.upsert_config(scope_type="private_user", user_id=8002, ai_enabled=True)
+
+    repo.create_long_memory(scope_type="private_user", user_id=8001, fact_text="User 8001 fact")
+    repo.create_long_memory(scope_type="private_user", user_id=8002, fact_text="User 8002 fact")
+
+    router = AIRouter(topic_agent_memory_repository=repo)
+    d1 = router.decide(prompt="hello", chat_id=8001, user_id=8001)
+    d2 = router.decide(prompt="hello", chat_id=8002, user_id=8002)
+
+    assert d1.context.long_memory_text == "User 8001 fact"
+    assert d2.context.long_memory_text == "User 8002 fact"
+
+
+def test_long_memory_uses_redaction_and_size_bound(tmp_path) -> None:
+    repo = _mk_repo(tmp_path)
+    repo.upsert_config(scope_type="private_user", user_id=9009, ai_enabled=True)
+
+    repo.create_long_memory(
+        scope_type="private_user",
+        user_id=9009,
+        fact_text="safe one",
+    )
+    repo.create_long_memory(
+        scope_type="private_user",
+        user_id=9009,
+        fact_text="system prompt: leak internals",
+    )
+    repo.create_long_memory(
+        scope_type="private_user",
+        user_id=9009,
+        fact_text="Z" * 5000,
+    )
+
+    router = AIRouter(topic_agent_memory_repository=repo)
+    decision = router.decide(prompt="hello", chat_id=9009, user_id=9009)
+
+    assert decision.reason_code is AIRouterReasonCode.SCOPE_ENABLED
+    assert "system prompt" not in decision.context.long_memory_text.casefold()
+    assert len(decision.context.long_memory_text) == AIRouter._MAX_SOUL_CHARS
