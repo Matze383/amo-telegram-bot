@@ -416,3 +416,15 @@ After logging in, group roles can be managed under "Groups":
 - Roles are group-scoped, not global
 
 **Note on user list:** The WebUI only shows users the bot has seen in that group. Existing role assignments remain visible and are marked `[assigned/not seen]` if the user has not yet been active in the group.
+
+---
+
+## WebUI: Plugin AI Tool Toggle (Read-Only)
+
+The Plugins page displays an **AI Tool** toggle indicator for each plugin:
+
+- **Read-only indicator:** Shows whether the plugin is currently allowed as an AI tool
+- **Default-off:** Disabled tools remain denied at runtime
+- **Policy-gated:** Actual enablement is governed by KI-E policy gates, not via WebUI toggle
+
+This is a transparency/security feature to help owners understand which plugins can be invoked by the AI system. To change AI tool permissions, configure the appropriate policy gates.

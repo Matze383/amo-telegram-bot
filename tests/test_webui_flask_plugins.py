@@ -776,3 +776,83 @@ def test_plugin_policy_topics_rejects_invalid_unknown_and_allows_empty(tmp_path)
     assert snap is not None
     assert snap.topics_mode == "allow"
     assert snap.allowed_topics == []
+
+
+def test_plugins_policy_section_shows_ai_tool_toggle_default_off(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'plugins16.db'}"
+    plugins_dir = tmp_path / "plugins"
+    plugin_dir = plugins_dir / "scope"
+    plugin_dir.mkdir(parents=True)
+    (plugin_dir / "plugin.json").write_text(
+        json.dumps({"name": "scope", "version": "1.0.0", "commands": ["scope"], "required_roles": ["admin"]}),
+        encoding="utf-8",
+    )
+
+    app = create_flask_app(settings=_make_settings(db_url, str(plugins_dir), owner_id=777))
+
+    with app.test_client() as client:
+        _login(client, "test-secret")
+        response = client.get("/plugins")
+        html = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    assert 'name="ai_tool_enabled" value="1"' in html
+    assert 'name="ai_tool_enabled" value="1" checked' not in html
+    assert 'name="ai_tool_enabled" value="1" disabled' in html
+
+
+def test_plugin_policy_post_ignores_ai_tool_enabled_input_and_runtime_deny_remains(tmp_path) -> None:
+    import asyncio
+
+    from amo_bot.ai.tool_registry import (
+        AIRole,
+        AIScopeKind,
+        AIToolPolicy,
+        AIToolScopeContext,
+        invoke_tool_noop,
+        validate_tool_invocation_request,
+    )
+
+    db_url = f"sqlite:///{tmp_path / 'plugins17.db'}"
+    plugins_dir = tmp_path / "plugins"
+    plugin_dir = plugins_dir / "scope"
+    plugin_dir.mkdir(parents=True)
+    (plugin_dir / "plugin.json").write_text(
+        json.dumps({"name": "scope", "version": "1.0.0", "commands": ["scope"], "required_roles": ["admin"]}),
+        encoding="utf-8",
+    )
+
+    app = create_flask_app(settings=_make_settings(db_url, str(plugins_dir), owner_id=777))
+
+    with app.test_client() as client:
+        _login(client, "test-secret")
+        page = client.get("/plugins")
+        token = _extract_csrf_token(page.get_data(as_text=True))
+        response = client.post(
+            "/plugins/scope/policy",
+            data={
+                "csrf_token": token,
+                "roles_mode": "inherit",
+                "private_mode": "inherit",
+                "groups_mode": "inherit",
+                "topics_mode": "inherit",
+                "ai_tool_enabled": "1",
+            },
+            follow_redirects=False,
+        )
+
+    assert response.status_code == 302
+
+    req, err = validate_tool_invocation_request({"tool_name": "scope", "arguments": {}})
+    assert err is None and req is not None
+    denied = asyncio.run(
+        invoke_tool_noop(
+            request=req,
+            policy=AIToolPolicy(),
+            role=AIRole.OWNER,
+            scope=AIToolScopeContext(scope_kind=AIScopeKind.TOPIC, chat_id=-1001, topic_id=11),
+        )
+    )
+    assert denied.status.value == "denied"
+    assert denied.error_code == "policy_denied"
+    assert denied.reason == "tools_disabled"

@@ -416,3 +416,15 @@ Nach dem Login unter "Groups" können Gruppenrollen verwaltet werden:
 - Rollen sind gruppen-spezifisch, nicht global gültig
 
 **Hinweis zur Nutzerliste:** Die WebUI zeigt pro Gruppe nur Nutzer an, die der Bot in dieser Gruppe gesehen hat. Bereits zugewiesene Rollen bleiben sichtbar und werden mit `[zugewiesen/nicht gesehen]` markiert, falls der Nutzer noch nicht in der Gruppe aktiv war.
+
+---
+
+## WebUI: Plugin AI Tool Toggle (Read-Only)
+
+Die Plugins-Seite zeigt für jedes Plugin einen **AI Tool**-Toggle-Indikator:
+
+- **Read-only-Indikator:** Zeigt an, ob das Plugin aktuell als AI Tool erlaubt ist
+- **Default-off:** Deaktivierte Tools bleiben zur Laufzeit denied
+- **Policy-gesteuert:** Die tatsächliche Freigabe erfolgt über KI-E-Policy-Gates, nicht über den WebUI-Toggle
+
+Dies ist ein Transparenz-/Sicherheitsfeature, das Ownern hilft zu verstehen, welche Plugins vom KI-System aufgerufen werden können. Um AI-Tool-Berechtigungen zu ändern, konfiguriere die entsprechenden Policy-Gates.

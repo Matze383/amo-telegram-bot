@@ -6,6 +6,7 @@ from flask_wtf import FlaskForm
 from amo_bot.auth.roles import Role
 from amo_bot.db.base import create_session_factory
 from amo_bot.db.repositories import ChatTopicRepository, PluginPolicyOverrideRepository
+from amo_bot.ai.tool_registry import AIToolPolicy
 from amo_bot.plugins.service import ActionContext, PluginPolicyError
 from amo_bot.webui.flask_blueprints.ui import login_required
 
@@ -120,6 +121,7 @@ def plugins_page():
 
     session_factory = create_session_factory(current_app.extensions["amo.settings"].database_url)
     policy_overrides: dict[str, dict[str, str | list[str] | list[int]]] = {}
+    ai_tool_toggles: dict[str, bool] = {}
     known_groups: list[dict[str, str | int]] = []
     known_topics: list[dict[str, str | int]] = []
     with session_factory() as session:
@@ -149,9 +151,11 @@ def plugins_page():
                         "chat_title": chat.title or "",
                     }
                 )
+        policy = AIToolPolicy()
         for plugin in payload["plugins"]:
             plugin_name = plugin["name"] if isinstance(plugin, dict) else plugin.name
             snapshot = repository.get_snapshot(plugin_name=plugin_name)
+            ai_tool_toggles[plugin_name] = policy.is_allowed(tool_name=plugin_name)
             policy_overrides[plugin_name] = {
                 "roles_mode": snapshot.roles_mode if snapshot else "inherit",
                 "required_roles": [role.value for role in snapshot.required_roles] if snapshot else [],
@@ -171,6 +175,7 @@ def plugins_page():
         policy_overrides=policy_overrides,
         known_groups=known_groups,
         known_topics=known_topics,
+        ai_tool_toggles=ai_tool_toggles,
     ), 200
 
 

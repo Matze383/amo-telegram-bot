@@ -83,6 +83,10 @@
                   {{ mutation_form.hidden_tag() }}
                   <fieldset>
                     <legend>Policy</legend>
+                    <label>AI Tool erlaubt
+                      <input type="checkbox" name="ai_tool_enabled" value="1" disabled {% if ai_tool_toggles.get(plugin.name, false) %}checked{% endif %}>
+                    </label><br>
+                    <small>Default-off (read-only in KI-F4 scope): disabled bleibt zur Laufzeit denied.</small><br>
                     <label>Rollenmodus
                       <select name="roles_mode">
                         <option value="inherit" {% if override.roles_mode == 'inherit' %}selected{% endif %}>inherit</option>
