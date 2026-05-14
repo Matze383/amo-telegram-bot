@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from enum import Enum
 import re
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 
 class AIToolCapability(str, Enum):
@@ -272,12 +273,19 @@ def build_tool_invocation_error(
     )
 
 
-def invoke_tool_noop(
-    *, request: AIToolInvocationRequest, policy: AIToolPolicy, role: AIRole = AIRole.OWNER, scope: AIToolScopeContext | None = None
+async def invoke_tool_noop(
+    *,
+    request: AIToolInvocationRequest,
+    policy: AIToolPolicy,
+    role: AIRole = AIRole.OWNER,
+    scope: AIToolScopeContext | None = None,
+    timeout_seconds: float = 1.0,
+    executor: Callable[[AIToolInvocationRequest], Awaitable[dict[str, Any]]] | None = None,
 ) -> AIToolInvocationResponse:
-    """No-op/fake tool invocation handler for KI-E2/KI-E3.
+    """No-op/fake tool invocation handler for KI-E2/KI-E3/KI-E4.
 
     This intentionally performs no real tool execution.
+    KI-E4 adds timeout/error wrapping for the fake execution path.
     """
 
     evaluation_scope = scope or AIToolScopeContext(scope_kind=AIScopeKind.TOPIC, chat_id=None, topic_id=None)
@@ -293,11 +301,33 @@ def invoke_tool_noop(
             reason=decision.reason_code,
         )
 
+    async def _default_noop_executor(_: AIToolInvocationRequest) -> dict[str, Any]:
+        return {"mode": "noop", "executed": False}
+
+    run_executor = executor or _default_noop_executor
+
+    try:
+        result = await asyncio.wait_for(run_executor(request), timeout=timeout_seconds)
+    except asyncio.TimeoutError:
+        return build_tool_invocation_error(
+            tool_name=request.tool_name,
+            call_id=request.call_id,
+            error_code="execution_timeout",
+            reason="timeout",
+        )
+    except Exception:
+        return build_tool_invocation_error(
+            tool_name=request.tool_name,
+            call_id=request.call_id,
+            error_code="execution_error",
+            reason="execution_failed",
+        )
+
     return AIToolInvocationResponse(
         status=AIToolInvocationStatus.SUCCESS,
         tool_name=request.tool_name,
         call_id=request.call_id,
-        result={"mode": "noop", "executed": False},
+        result=result if isinstance(result, dict) else {"mode": "noop", "executed": False},
         error_code=None,
         reason=None,
     )

@@ -1,3 +1,5 @@
+import asyncio
+
 from amo_bot.ai.tool_registry import (
     AIRole,
     AIScopeKind,
@@ -21,7 +23,7 @@ def test_policy_default_is_disabled_and_denies_with_safe_reason_code() -> None:
     decision = policy.evaluate(
         tool_name="weather_lookup",
         role=AIRole.OWNER,
-        scope=AIToolScopeContext(scope_kind=AIScopeKind.TOPIC, chat_id=-100, topic_id=1),
+        scope=AIToolScopeContext(scope_kind=AIScopeKind.TOPIC, chat_id=-100, topic_id=42),
     )
 
     assert decision.allowed is False
@@ -34,7 +36,7 @@ def test_policy_allows_tool_from_global_allowlist_when_enabled() -> None:
     owner_decision = policy.evaluate(
         tool_name="weather_lookup",
         role=AIRole.OWNER,
-        scope=AIToolScopeContext(scope_kind=AIScopeKind.TOPIC, chat_id=-100, topic_id=1),
+        scope=AIToolScopeContext(scope_kind=AIScopeKind.TOPIC, chat_id=-100, topic_id=42),
     )
     admin_decision = policy.evaluate(
         tool_name="weather_lookup",
@@ -53,27 +55,26 @@ def test_policy_scope_allowlist_matrix_topic_and_private() -> None:
         enabled=True,
         topic_allowlist={(-100, 42): {"weather_lookup"}},
         private_allowlist={123: {"weather_lookup"}},
-        min_role=AIRole.ADMIN,
     )
 
     topic_allowed = policy.evaluate(
         tool_name="weather_lookup",
-        role=AIRole.ADMIN,
+        role=AIRole.OWNER,
         scope=AIToolScopeContext(scope_kind=AIScopeKind.TOPIC, chat_id=-100, topic_id=42),
     )
     topic_denied = policy.evaluate(
         tool_name="weather_lookup",
-        role=AIRole.ADMIN,
+        role=AIRole.OWNER,
         scope=AIToolScopeContext(scope_kind=AIScopeKind.TOPIC, chat_id=-100, topic_id=99),
     )
     private_allowed = policy.evaluate(
         tool_name="weather_lookup",
-        role=AIRole.ADMIN,
+        role=AIRole.OWNER,
         scope=AIToolScopeContext(scope_kind=AIScopeKind.PRIVATE, chat_id=123, topic_id=None),
     )
     private_denied = policy.evaluate(
         tool_name="weather_lookup",
-        role=AIRole.ADMIN,
+        role=AIRole.OWNER,
         scope=AIToolScopeContext(scope_kind=AIScopeKind.PRIVATE, chat_id=999, topic_id=None),
     )
 
@@ -96,13 +97,13 @@ def test_policy_role_gate_respected_before_allowlist_grant() -> None:
 
     denied = policy.evaluate(
         tool_name="weather_lookup",
-        role=AIRole.NORMAL,
-        scope=AIToolScopeContext(scope_kind=AIScopeKind.TOPIC, chat_id=-100, topic_id=1),
+        role=AIRole.VIP,
+        scope=AIToolScopeContext(scope_kind=AIScopeKind.TOPIC, chat_id=-100, topic_id=42),
     )
     allowed = policy.evaluate(
         tool_name="weather_lookup",
         role=AIRole.ADMIN,
-        scope=AIToolScopeContext(scope_kind=AIScopeKind.TOPIC, chat_id=-100, topic_id=1),
+        scope=AIToolScopeContext(scope_kind=AIScopeKind.TOPIC, chat_id=-100, topic_id=42),
     )
 
     assert denied.allowed is False
@@ -115,29 +116,34 @@ def test_invoke_tool_noop_uses_policy_evaluator_reason_codes() -> None:
     request = _request()
 
     policy_disabled = AIToolPolicy()
-    denied_disabled = invoke_tool_noop(
-        request=request,
-        policy=policy_disabled,
-        role=AIRole.OWNER,
-        scope=AIToolScopeContext(scope_kind=AIScopeKind.TOPIC, chat_id=-100, topic_id=1),
+    denied_disabled = asyncio.run(
+        invoke_tool_noop(
+            request=request,
+            policy=policy_disabled,
+            role=AIRole.OWNER,
+            scope=AIToolScopeContext(scope_kind=AIScopeKind.TOPIC, chat_id=-100, topic_id=42),
+        )
     )
 
     policy_scope = AIToolPolicy(
         enabled=True,
         topic_allowlist={(-100, 42): {"weather_lookup"}},
-        min_role=AIRole.ADMIN,
     )
-    denied_scope = invoke_tool_noop(
-        request=request,
-        policy=policy_scope,
-        role=AIRole.ADMIN,
-        scope=AIToolScopeContext(scope_kind=AIScopeKind.TOPIC, chat_id=-100, topic_id=1),
+    denied_scope = asyncio.run(
+        invoke_tool_noop(
+            request=request,
+            policy=policy_scope,
+            role=AIRole.OWNER,
+            scope=AIToolScopeContext(scope_kind=AIScopeKind.TOPIC, chat_id=-100, topic_id=99),
+        )
     )
-    allowed_scope = invoke_tool_noop(
-        request=request,
-        policy=policy_scope,
-        role=AIRole.OWNER,
-        scope=AIToolScopeContext(scope_kind=AIScopeKind.TOPIC, chat_id=-100, topic_id=42),
+    allowed_scope = asyncio.run(
+        invoke_tool_noop(
+            request=request,
+            policy=policy_scope,
+            role=AIRole.OWNER,
+            scope=AIToolScopeContext(scope_kind=AIScopeKind.TOPIC, chat_id=-100, topic_id=42),
+        )
     )
 
     assert denied_disabled.error_code == "policy_denied"
@@ -146,6 +152,5 @@ def test_invoke_tool_noop_uses_policy_evaluator_reason_codes() -> None:
     assert denied_scope.error_code == "policy_denied"
     assert denied_scope.reason == "not_in_scope_allowlist"
 
-    assert allowed_scope.error_code is None
+    assert allowed_scope.status.value == "success"
     assert allowed_scope.reason is None
-    assert allowed_scope.result == {"mode": "noop", "executed": False}

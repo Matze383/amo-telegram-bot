@@ -1,3 +1,5 @@
+import asyncio
+
 from amo_bot.ai import (
     AIToolCapability,
     AIToolDescriptor,
@@ -84,7 +86,7 @@ def test_invoke_tool_noop_denies_by_default_policy_without_execution() -> None:
     assert error is None
     assert request is not None
 
-    response = invoke_tool_noop(request=request, policy=policy)
+    response = asyncio.run(invoke_tool_noop(request=request, policy=policy))
 
     assert response.status == AIToolInvocationStatus.DENIED
     assert response.tool_name == "weather_lookup"
