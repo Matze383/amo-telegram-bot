@@ -64,6 +64,12 @@ from .api_coreplugin_cp_e2 import (
     APICorepluginExecutionResult,
     execute_api_request_mvp,
 )
+from .contextwindow_builder import (
+    ContextWindowAuditEntry,
+    ContextWindowBuildResult,
+    ContextWindowSource,
+    build_contextwindow_v1,
+)
 
 __all__ = [
     "AIRole",
@@ -89,6 +95,9 @@ __all__ = [
     "APIServiceSecretRef",
     "APICorepluginExecutionInput",
     "APICorepluginExecutionResult",
+    "ContextWindowAuditEntry",
+    "ContextWindowBuildResult",
+    "ContextWindowSource",
     "CoreCapabilityPolicyDecision",
     "CapabilityQuotaCounterStore",
     "CapabilityQuotaDecision",
@@ -111,6 +120,7 @@ __all__ = [
     "MemoryMaintenanceResult",
     "MemoryMaintenanceService",
     "build_capability_denial",
+    "build_contextwindow_v1",
     "build_default_api_capability_registry",
     "execute_api_request_mvp",
     "evaluate_core_capability_policy",
