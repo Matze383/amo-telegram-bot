@@ -1,3 +1,15 @@
+from .capability_policy import (
+    CapabilityActor,
+    CapabilityActorType,
+    CapabilityCallEnvelope,
+    CapabilityDecisionResult,
+    CapabilityInputSummaryItem,
+    CapabilityPolicyDecision,
+    CapabilityScope,
+    CapabilityScopeType,
+    build_capability_denial,
+    validate_capability_call_envelope,
+)
 from .memory_maintenance import MemoryMaintenanceResult, MemoryMaintenanceService
 from .tool_registry import (
     AIRole,
@@ -19,6 +31,14 @@ from .tool_registry import (
 
 __all__ = [
     "AIRole",
+    "CapabilityActor",
+    "CapabilityActorType",
+    "CapabilityCallEnvelope",
+    "CapabilityDecisionResult",
+    "CapabilityInputSummaryItem",
+    "CapabilityPolicyDecision",
+    "CapabilityScope",
+    "CapabilityScopeType",
     "AIScopeKind",
     "AIToolCapability",
     "AIToolDescriptor",
@@ -31,8 +51,10 @@ __all__ = [
     "AIToolScopeContext",
     "MemoryMaintenanceResult",
     "MemoryMaintenanceService",
+    "build_capability_denial",
     "build_tool_invocation_error",
     "build_tool_invocation_rejection",
     "invoke_tool_noop",
+    "validate_capability_call_envelope",
     "validate_tool_invocation_request",
 ]
