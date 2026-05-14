@@ -644,6 +644,7 @@ Nutze diese Checkliste für deinen Test:
 - [ ] WebUI Plugin-Liste: OK
 - [ ] WebUI Plugin aktivieren/deaktivieren: OK / Nicht getestet
 - [ ] WebUI Gruppenrollenverwaltung: OK / Nicht getestet
+- [ ] WebUI KI-Topic-Agent-Status auf Dashboard sichtbar: OK / Nicht getestet
 - [ ] Security Headers vorhanden (Browser-Dev-Tools prüfen): OK
 
 **Notizen:**

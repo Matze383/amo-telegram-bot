@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from amo_bot.config.settings import Settings
+from amo_bot.db.repositories import TopicAgentMemoryRepository
 from amo_bot.webui.flask_app import create_flask_app
 
 
@@ -139,6 +140,66 @@ def test_dashboard_contains_expected_text_after_login(tmp_path) -> None:
     assert "AMO Telegram Bot WebUI" in html
     assert "Flask WebUI, lokal/LAN" in html
     assert '<a href="/users">Users</a>' in html
+    assert "KI Topic-Agent Status (Read-Only)" in html
+    assert "Keine KI-Topic-Agent-Konfigurationen vorhanden." in html
+
+
+def test_dashboard_renders_topic_agent_status_read_only_without_secret_or_memory_dump(tmp_path) -> None:
+    app = create_flask_app(settings=_make_settings(tmp_path))
+
+    with app.app_context():
+        session_factory = app.extensions["amo.plugin_service"]._session_factory
+        with session_factory() as session:
+            repo = TopicAgentMemoryRepository(session)
+            repo.upsert_config(
+                scope_type="topic",
+                chat_id=-1001,
+                topic_id=42,
+                ai_enabled=True,
+                response_mode="mention_or_reply",
+                main_soul_text="TOP-SECRET-MAIN-SOUL",
+                topic_soul_text="TOP-SECRET-TOPIC-SOUL",
+            )
+            repo.upsert_config(
+                scope_type="private_user",
+                user_id=555,
+                ai_enabled=False,
+                response_mode="command",
+                main_soul_text="PRIVATE-SECRET",
+                topic_soul_text="PRIVATE-TOPIC-SECRET",
+            )
+            repo.upsert_daily_memory(
+                scope_type="topic",
+                chat_id=-1001,
+                topic_id=42,
+                memory_date="2026-05-14",
+                summary_text="raw daily memory content",
+                tokens_estimate=123,
+            )
+
+    with app.test_client() as client:
+        login = _login(client, "test-secret")
+        assert login.status_code == 302
+
+        dashboard = client.get("/dashboard")
+        html = dashboard.get_data(as_text=True)
+
+    assert dashboard.status_code == 200
+    assert "topic" in html
+    assert "private_user" in html
+    assert "-1001" in html
+    assert "42" in html
+    assert "555" in html
+    assert "active" in html
+    assert "inactive" in html
+    assert "mention_or_reply" in html
+    assert "command" in html
+
+    assert "TOP-SECRET-MAIN-SOUL" not in html
+    assert "TOP-SECRET-TOPIC-SOUL" not in html
+    assert "PRIVATE-SECRET" not in html
+    assert "PRIVATE-TOPIC-SECRET" not in html
+    assert "raw daily memory content" not in html
 
 
 def test_logout_blocks_dashboard_again(tmp_path) -> None:

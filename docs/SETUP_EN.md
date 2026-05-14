@@ -249,6 +249,21 @@ Expected results:
 
 ---
 
+## WebUI: KI Topic-Agent Status (Read-Only)
+
+The WebUI Dashboard displays the current KI Topic-Agent configuration status:
+
+- **Scope:** Shows whether the configuration applies to a topic (`topic`) or private chat (`private`)
+- **Chat ID:** Telegram chat identifier (for topic scopes)
+- **Topic ID:** Topic/thread identifier within the chat (for topic scopes)
+- **User ID:** User identifier (for private scopes)
+- **AI Status:** Shows `active` or `inactive` — whether AI auto-reply is enabled for this scope
+- **Response Mode:** Current response mode (e.g., `command` for explicit commands only, or other configured modes)
+
+This is a **read-only** view. Editing topic-agent configuration via WebUI requires future implementation (KI-F2).
+
+---
+
 ## Next Steps
 
 - See [BETATEST_EN.md](BETATEST_EN.md) for detailed testing instructions

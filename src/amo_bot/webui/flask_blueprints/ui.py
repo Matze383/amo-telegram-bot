@@ -4,17 +4,19 @@ from functools import wraps
 from typing import Any, Callable, TypeVar, cast
 
 from flask import Blueprint, abort, current_app, redirect, render_template, request, session, url_for
+from sqlalchemy import select
 from flask_wtf import FlaskForm
 from wtforms import BooleanField, SelectField, StringField, TextAreaField
 from wtforms.validators import DataRequired
 
 from amo_bot.auth.roles import Role
 from amo_bot.config.settings import Settings
-from amo_bot.db.models import GROUP_CHAT_TYPES, User
+from amo_bot.db.models import GROUP_CHAT_TYPES, TopicAgentConfig, User
 from amo_bot.db.repositories import (
     ChatScopedRoleRepository,
     ChatSeenUserRepository,
     ChatTopicRepository,
+    TopicAgentMemoryRepository,
     UserRoleRepository,
 )
 
@@ -62,7 +64,34 @@ class GroupRoleForm(FlaskForm):
 @ui_bp.get("/dashboard")
 @login_required
 def dashboard():
-    return render_template("dashboard.html"), 200
+    session_factory = current_app.extensions["amo.plugin_service"]._session_factory
+    statuses: list[dict[str, Any]] = []
+    with session_factory() as db_session:
+        repo = TopicAgentMemoryRepository(db_session)
+
+        rows = db_session.scalars(select(TopicAgentConfig).order_by(TopicAgentConfig.scope_type.asc(), TopicAgentConfig.id.asc())).all()
+        for row in rows:
+            cfg = repo.get_config(
+                scope_type=row.scope_type,
+                chat_id=row.chat_id,
+                topic_id=row.topic_id,
+                user_id=row.user_id,
+            )
+            if cfg is None:
+                continue
+            statuses.append(
+                {
+                    "scope": cfg.scope_type,
+                    "chat_id": cfg.chat_id,
+                    "topic_id": cfg.topic_id,
+                    "user_id": cfg.user_id,
+                    "ai_enabled": cfg.ai_enabled,
+                    "response_mode": cfg.response_mode,
+                }
+            )
+
+    statuses.sort(key=lambda item: (item["scope"], item["chat_id"] or 0, item["topic_id"] or 0, item["user_id"] or 0))
+    return render_template("dashboard.html", topic_agent_statuses=statuses), 200
 
 
 @ui_bp.get("/users")

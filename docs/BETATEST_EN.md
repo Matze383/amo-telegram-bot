@@ -644,6 +644,7 @@ Use this checklist for your test:
 - [ ] WebUI plugin list: OK
 - [ ] WebUI plugin activate/deactivate: OK / Not tested
 - [ ] WebUI group role management: OK / Not tested
+- [ ] WebUI KI Topic-Agent Status visible on Dashboard: OK / Not tested
 - [ ] Security headers present (check browser dev tools): OK
 
 **Notes:**

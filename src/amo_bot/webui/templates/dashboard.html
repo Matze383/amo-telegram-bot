@@ -17,4 +17,34 @@
   <p><a href="{{ url_for('ui.users_page') }}">Users</a></p>
   <p><a href="{{ url_for('ui.groups_page') }}">Groups</a></p>
   <p><a href="{{ url_for('plugins.plugins_page') }}">Plugins</a></p>
+
+  <h2>KI Topic-Agent Status (Read-Only)</h2>
+  {% if topic_agent_statuses %}
+    <table>
+      <thead>
+        <tr>
+          <th>Scope</th>
+          <th>Chat ID</th>
+          <th>Topic ID</th>
+          <th>User ID</th>
+          <th>AI</th>
+          <th>Mode</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in topic_agent_statuses %}
+          <tr>
+            <td>{{ item.scope }}</td>
+            <td>{{ item.chat_id if item.chat_id is not none else '-' }}</td>
+            <td>{{ item.topic_id if item.topic_id is not none else '-' }}</td>
+            <td>{{ item.user_id if item.user_id is not none else '-' }}</td>
+            <td>{{ 'active' if item.ai_enabled else 'inactive' }}</td>
+            <td>{{ item.response_mode }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p>Keine KI-Topic-Agent-Konfigurationen vorhanden.</p>
+  {% endif %}
 {% endblock %}
