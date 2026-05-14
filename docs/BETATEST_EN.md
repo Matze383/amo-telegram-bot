@@ -607,6 +607,65 @@ The Groups page includes a **Topic Soul Editor** for configuring topic-specific 
 
 ---
 
+### WebUI: KI Memory Controls (KI-F3)
+
+The Dashboard includes a **KI Memory** section for inspecting and managing AI memory entries.
+
+**Prerequisites:**
+- `WEBUI_OWNER_TELEGRAM_ID` must be set in `.env` for deactivation actions
+- Authenticated WebUI session
+
+**Test Steps:**
+
+1. **View Memory Section:**
+   - Open http://127.0.0.1:8080 and log in
+   - Navigate to Dashboard
+   - Expected: "KI Memory (Read-Only + Deactivate Long Memory)" section is visible
+
+2. **Daily Memory (Redacted):**
+   - Look at the "Daily memory" entries for any scope
+   - Expected: Only dates are shown (e.g., "2026-05-14, 2026-05-13")
+   - Expected: No raw summary text is displayed (privacy/conservative default)
+
+3. **Long Memory List:**
+   - Check "Long Memories" table for any scope with memory entries
+   - Expected: Columns show ID, Summary (fact_text), Status, Created, Updated, Action
+   - Expected: Status shows "active" or "inactive"
+
+4. **Deactivate Long Memory as Owner:**
+   - Ensure `WEBUI_OWNER_TELEGRAM_ID` is configured in `.env`
+   - Find an active long memory entry
+   - Click "Deactivate" button (CSRF-protected form)
+   - Expected: Page reloads, entry now shows "inactive" status
+
+5. **Verify Deactivation Persistence:**
+   - Reload Dashboard
+   - Expected: Deactivated entry remains "inactive"
+
+**Negative Tests:**
+
+6. **Deactivate without Owner Config:**
+   - Temporarily remove `WEBUI_OWNER_TELEGRAM_ID` from `.env` (or set to empty)
+   - Restart WebUI
+   - Attempt to deactivate a long memory entry
+   - Expected: **403 Forbidden** — mutation is disabled
+
+7. **CSRF Protection:**
+   - Try sending POST to `/memory/long/<id>/deactivate` without CSRF token
+   - Expected: **400 Bad Request** or redirect with error
+
+**Checklist:**
+- [ ] Dashboard shows KI Memory section
+- [ ] Daily memory shows dates only (no raw text)
+- [ ] Long memory shows fact_text, status, timestamps
+- [ ] Deactivate button visible for active entries (with owner config)
+- [ ] Deactivation works via CSRF-protected POST
+- [ ] Deactivated entries show "inactive" status
+- [ ] Without owner config, deactivation returns 403
+- [ ] CSRF token required for deactivation
+
+---
+
 ### Future Features (Not Yet Implemented)
 
 The following features are planned for future releases and are **not available** in the current beta:
@@ -706,6 +765,7 @@ Use this checklist for your test:
 - [ ] WebUI group role management: OK / Not tested
 - [ ] WebUI KI Topic-Agent Status visible on Dashboard: OK / Not tested
 - [ ] WebUI Topic Soul Editor (owner-only, in Groups): OK / Not tested
+- [ ] WebUI KI Memory Controls (redacted daily, long memory deactivate): OK / Not tested
 - [ ] Security headers present (check browser dev tools): OK
 
 **Notes:**

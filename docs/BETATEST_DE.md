@@ -607,6 +607,65 @@ Die Groups-Seite enthält einen **Topic Soul Editor** zur Konfiguration von Them
 
 ---
 
+### WebUI: KI Memory Controls (KI-F3)
+
+Das Dashboard enthält einen **KI Memory**-Bereich zum Einsehen und Verwalten von KI-Memory-Einträgen.
+
+**Voraussetzungen:**
+- `WEBUI_OWNER_TELEGRAM_ID` muss in `.env` gesetzt sein für Deaktivierungs-Aktionen
+- Authentifizierte WebUI-Session
+
+**Test-Schritte:**
+
+1. **Memory-Bereich ansehen:**
+   - http://127.0.0.1:8080 öffnen und einloggen
+   - Zum Dashboard navigieren
+   - Erwartet: Abschnitt "KI Memory (Read-Only + Deactivate Long Memory)" ist sichtbar
+
+2. **Daily Memory (Redacted):**
+   - Die "Daily memory"-Einträge für einen Scope ansehen
+   - Erwartet: Nur Daten werden angezeigt (z.B. "2026-05-14, 2026-05-13")
+   - Erwartet: Kein Raw-Summary-Text wird angezeigt (Datenschutz/konservativer Default)
+
+3. **Long Memory Liste:**
+   - Tabelle "Long Memories" für Scopes mit Memory-Einträgen prüfen
+   - Erwartet: Spalten zeigen ID, Summary (fact_text), Status, Created, Updated, Action
+   - Erwartet: Status zeigt "active" oder "inactive"
+
+4. **Long Memory als Owner deaktivieren:**
+   - Sicherstellen, dass `WEBUI_OWNER_TELEGRAM_ID` in `.env` konfiguriert ist
+   - Einen aktiven Long-Memory-Eintrag finden
+   - "Deactivate"-Button klicken (CSRF-geschütztes Formular)
+   - Erwartet: Seite lädt neu, Eintrag zeigt jetzt "inactive"-Status
+
+5. **Deaktivierung-Persistenz prüfen:**
+   - Dashboard neu laden
+   - Erwartet: Deaktivierter Eintrag bleibt "inactive"
+
+**Negative Tests:**
+
+6. **Deaktivieren ohne Owner-Config:**
+   - `WEBUI_OWNER_TELEGRAM_ID` temporär aus `.env` entfernen (oder leer setzen)
+   - WebUI neu starten
+   - Versuch, einen Long-Memory-Eintrag zu deaktivieren
+   - Erwartet: **403 Forbidden** — Mutation ist deaktiviert
+
+7. **CSRF-Schutz:**
+   - POST an `/memory/long/<id>/deactivate` ohne CSRF-Token senden
+   - Erwartet: **400 Bad Request** oder Redirect mit Fehler
+
+**Checkliste:**
+- [ ] Dashboard zeigt KI Memory-Abschnitt
+- [ ] Daily Memory zeigt nur Daten (kein Raw-Text)
+- [ ] Long Memory zeigt fact_text, Status, Timestamps
+- [ ] Deactivate-Button sichtbar für aktive Einträge (mit Owner-Config)
+- [ ] Deaktivierung funktioniert via CSRF-geschütztem POST
+- [ ] Deaktivierte Einträge zeigen "inactive"-Status
+- [ ] Ohne Owner-Config gibt Deaktivierung 403 zurück
+- [ ] CSRF-Token für Deaktivierung erforderlich
+
+---
+
 ### Zukünftige Features (Noch nicht implementiert)
 
 Folgende Features sind für zukünftige Releases geplant und im aktuellen Beta **nicht verfügbar**:
@@ -706,6 +765,7 @@ Nutze diese Checkliste für deinen Test:
 - [ ] WebUI Gruppenrollenverwaltung: OK / Nicht getestet
 - [ ] WebUI KI-Topic-Agent-Status auf Dashboard sichtbar: OK / Nicht getestet
 - [ ] WebUI Topic Soul Editor (nur Owner, in Groups): OK / Nicht getestet
+- [ ] WebUI KI Memory Controls (redacted Daily, Long-Memory-Deaktivierung): OK / Nicht getestet
 - [ ] Security Headers vorhanden (Browser-Dev-Tools prüfen): OK
 
 **Notizen:**

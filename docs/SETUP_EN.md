@@ -287,6 +287,29 @@ The WebUI Groups page allows the owner to edit topic-specific **Soul text**:
 
 ---
 
+## WebUI: KI Memory Controls (KI-F3)
+
+The WebUI Dashboard includes a **KI Memory** section for inspecting and managing AI memory entries.
+
+**Daily Memory (Redacted):**
+- Shows only memory dates (e.g., "2026-05-14, 2026-05-13")
+- Raw summary text is not displayed (privacy-conscious default)
+
+**Long Memory:**
+- Lists long-term memory entries with fact text, status, and timestamps
+- Shows "active" or "inactive" status for each entry
+- Owner can deactivate entries via CSRF-protected button
+
+**Requirements:**
+- Authenticated WebUI session to view memory
+- `WEBUI_OWNER_TELEGRAM_ID` configured to deactivate entries
+
+**Security:**
+- Deactivation requires CSRF token
+- Without owner configuration, deactivation returns 403 Forbidden
+
+---
+
 ## Next Steps
 
 - See [BETATEST_EN.md](BETATEST_EN.md) for detailed testing instructions

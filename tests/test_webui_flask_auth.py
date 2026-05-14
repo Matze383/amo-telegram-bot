@@ -14,6 +14,7 @@ def _make_settings(
     webui_public_mode: bool = False,
     webui_require_https: bool = False,
     webui_session_cookie_secure: bool | None = None,
+    webui_owner_telegram_id: int | None = None,
 ) -> Settings:
     payload = {
         "BOT_TOKEN": "dummy-token",
@@ -34,6 +35,8 @@ def _make_settings(
         "WEBUI_LOGIN_DELAY_BASE_SECONDS": 0.25,
         "WEBUI_LOGIN_DELAY_MAX_SECONDS": 1.0,
     }
+    if webui_owner_telegram_id is not None:
+        payload["WEBUI_OWNER_TELEGRAM_ID"] = webui_owner_telegram_id
     return Settings(_env_file=None, **payload)
 
 
@@ -142,6 +145,8 @@ def test_dashboard_contains_expected_text_after_login(tmp_path) -> None:
     assert '<a href="/users">Users</a>' in html
     assert "KI Topic-Agent Status (Read-Only)" in html
     assert "Keine KI-Topic-Agent-Konfigurationen vorhanden." in html
+    assert "KI Memory (Read-Only + Deactivate Long Memory)" in html
+    assert "Keine Memory-Einträge vorhanden." in html
 
 
 def test_dashboard_renders_topic_agent_status_read_only_without_secret_or_memory_dump(tmp_path) -> None:
@@ -176,6 +181,13 @@ def test_dashboard_renders_topic_agent_status_read_only_without_secret_or_memory
                 summary_text="raw daily memory content",
                 tokens_estimate=123,
             )
+            repo.create_long_memory(
+                scope_type="topic",
+                chat_id=-1001,
+                topic_id=42,
+                fact_text="safe long memory summary",
+                source_daily_memory_id=1,
+            )
 
     with app.test_client() as client:
         login = _login(client, "test-secret")
@@ -194,12 +206,88 @@ def test_dashboard_renders_topic_agent_status_read_only_without_secret_or_memory
     assert "inactive" in html
     assert "mention_or_reply" in html
     assert "command" in html
+    assert "2026-05-14" in html
+    assert "safe long memory summary" in html
+    assert "raw daily memory content" not in html
 
     assert "TOP-SECRET-MAIN-SOUL" not in html
     assert "TOP-SECRET-TOPIC-SOUL" not in html
     assert "PRIVATE-SECRET" not in html
     assert "PRIVATE-TOPIC-SECRET" not in html
-    assert "raw daily memory content" not in html
+
+
+def test_deactivate_long_memory_owner_only_and_csrf(tmp_path) -> None:
+    app = create_flask_app(settings=_make_settings(tmp_path, webui_owner_telegram_id=777))
+
+    with app.app_context():
+        session_factory = app.extensions["amo.plugin_service"]._session_factory
+        with session_factory() as session:
+            repo = TopicAgentMemoryRepository(session)
+            repo.upsert_config(scope_type="topic", chat_id=-1001, topic_id=42, ai_enabled=True, response_mode="mention_or_reply")
+            row = repo.create_long_memory(
+                scope_type="topic",
+                chat_id=-1001,
+                topic_id=42,
+                fact_text="to deactivate",
+                source_daily_memory_id=1,
+            )
+            memory_id = row.id
+
+    with app.test_client() as client:
+        login = _login(client, "test-secret")
+        assert login.status_code == 302
+
+        no_csrf = client.post(f"/memory/long/{memory_id}/deactivate", data={}, follow_redirects=False)
+        assert no_csrf.status_code == 400
+
+        dashboard = client.get("/dashboard")
+        token = _extract_csrf_token(dashboard.get_data(as_text=True))
+        ok = client.post(f"/memory/long/{memory_id}/deactivate", data={"csrf_token": token}, follow_redirects=False)
+        assert ok.status_code == 302
+        assert ok.headers["Location"].endswith("/dashboard")
+
+    with app.app_context():
+        session_factory = app.extensions["amo.plugin_service"]._session_factory
+        with session_factory() as session:
+            repo = TopicAgentMemoryRepository(session)
+            rows = repo.list_long_memories(scope_type="topic", chat_id=-1001, topic_id=42, active_only=False)
+            assert len(rows) == 1
+            assert rows[0].is_active is False
+
+
+def test_deactivate_long_memory_denied_without_owner_config(tmp_path) -> None:
+    app = create_flask_app(settings=_make_settings(tmp_path))
+
+    with app.app_context():
+        session_factory = app.extensions["amo.plugin_service"]._session_factory
+        with session_factory() as session:
+            repo = TopicAgentMemoryRepository(session)
+            repo.upsert_config(scope_type="topic", chat_id=-1001, topic_id=42, ai_enabled=True, response_mode="mention_or_reply")
+            row = repo.create_long_memory(
+                scope_type="topic",
+                chat_id=-1001,
+                topic_id=42,
+                fact_text="should stay active",
+                source_daily_memory_id=1,
+            )
+            memory_id = row.id
+
+    with app.test_client() as client:
+        login = _login(client, "test-secret")
+        assert login.status_code == 302
+
+        dashboard = client.get("/dashboard")
+        token = _extract_csrf_token(dashboard.get_data(as_text=True))
+        denied = client.post(f"/memory/long/{memory_id}/deactivate", data={"csrf_token": token}, follow_redirects=False)
+        assert denied.status_code == 403
+
+    with app.app_context():
+        session_factory = app.extensions["amo.plugin_service"]._session_factory
+        with session_factory() as session:
+            repo = TopicAgentMemoryRepository(session)
+            rows = repo.list_long_memories(scope_type="topic", chat_id=-1001, topic_id=42, active_only=False)
+            assert len(rows) == 1
+            assert rows[0].is_active is True
 
 
 def test_logout_blocks_dashboard_again(tmp_path) -> None:

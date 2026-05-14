@@ -65,8 +65,10 @@ class GroupRoleForm(FlaskForm):
 @ui_bp.get("/dashboard")
 @login_required
 def dashboard():
+    settings: Settings = current_app.extensions["amo.settings"]
     session_factory = current_app.extensions["amo.plugin_service"]._session_factory
     statuses: list[dict[str, Any]] = []
+    memory_entries: list[dict[str, Any]] = []
     with session_factory() as db_session:
         repo = TopicAgentMemoryRepository(db_session)
 
@@ -91,8 +93,51 @@ def dashboard():
                 }
             )
 
+            daily_rows = repo.list_daily_memories(
+                scope_type=cfg.scope_type,
+                chat_id=cfg.chat_id,
+                topic_id=cfg.topic_id,
+                user_id=cfg.user_id,
+                limit=5,
+            )
+            daily_dates = [daily.memory_date for daily in daily_rows]
+
+            long_rows = repo.list_long_memories(
+                scope_type=cfg.scope_type,
+                chat_id=cfg.chat_id,
+                topic_id=cfg.topic_id,
+                user_id=cfg.user_id,
+                active_only=False,
+                limit=20,
+            )
+            long_entries = [
+                {
+                    "id": long_row.id,
+                    "fact_text": long_row.fact_text,
+                    "is_active": long_row.is_active,
+                }
+                for long_row in long_rows
+            ]
+
+            memory_entries.append(
+                {
+                    "scope": cfg.scope_type,
+                    "chat_id": cfg.chat_id,
+                    "topic_id": cfg.topic_id,
+                    "user_id": cfg.user_id,
+                    "daily_memory_dates": daily_dates,
+                    "long_memories": long_entries,
+                }
+            )
+
     statuses.sort(key=lambda item: (item["scope"], item["chat_id"] or 0, item["topic_id"] or 0, item["user_id"] or 0))
-    return render_template("dashboard.html", topic_agent_statuses=statuses), 200
+    memory_entries.sort(key=lambda item: (item["scope"], item["chat_id"] or 0, item["topic_id"] or 0, item["user_id"] or 0))
+    return render_template(
+        "dashboard.html",
+        topic_agent_statuses=statuses,
+        topic_memory_entries=memory_entries,
+        owner_mutation_enabled=settings.webui_owner_telegram_id is not None,
+    ), 200
 
 
 @ui_bp.get("/users")
@@ -303,6 +348,23 @@ def update_group_role(chat_id: str):
             )
 
     return redirect(url_for("ui.groups_page"), code=302)
+
+
+@ui_bp.post("/memory/long/<int:memory_id>/deactivate")
+@login_required
+def deactivate_long_memory(memory_id: int):
+    settings: Settings = current_app.extensions["amo.settings"]
+    if settings.webui_owner_telegram_id is None:
+        abort(403, description="WEBUI_OWNER_TELEGRAM_ID not configured; memory mutation is disabled")
+
+    session_factory = current_app.extensions["amo.plugin_service"]._session_factory
+    with session_factory() as db_session:
+        repo = TopicAgentMemoryRepository(db_session)
+        changed = repo.deactivate_long_memory(memory_id=memory_id)
+        if not changed:
+            abort(404, description="long memory not found")
+
+    return redirect(url_for("ui.dashboard"), code=302)
 
 
 @ui_bp.post("/groups/<chat_id>/topics/<int:message_thread_id>")

@@ -9,7 +9,7 @@
   </p>
 
   <form method="post" action="{{ url_for('auth.logout_submit') }}">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input name="csrf_token" type="hidden" value="{{ csrf_token() }}">
     <button type="submit">Logout</button>
   </form>
 
@@ -46,5 +46,61 @@
     </table>
   {% else %}
     <p>Keine KI-Topic-Agent-Konfigurationen vorhanden.</p>
+  {% endif %}
+
+  <h2>KI Memory (Read-Only + Deactivate Long Memory)</h2>
+  {% if topic_memory_entries %}
+    {% for entry in topic_memory_entries %}
+      <section>
+        <h3>{{ entry.scope }} / chat={{ entry.chat_id if entry.chat_id is not none else '-' }} / topic={{ entry.topic_id if entry.topic_id is not none else '-' }} / user={{ entry.user_id if entry.user_id is not none else '-' }}</h3>
+        <p>Daily memory (redacted):
+          {% if entry.daily_memory_dates %}
+            {{ entry.daily_memory_dates | join(', ') }}
+          {% else %}
+            -
+          {% endif %}
+        </p>
+
+        {% if entry.long_memories %}
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Summary</th>
+                <th>Status</th>
+                <th>Created</th>
+                <th>Updated</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for memory in entry.long_memories %}
+                <tr>
+                  <td>{{ memory.id }}</td>
+                  <td>{{ memory.fact_text }}</td>
+                  <td>{{ 'active' if memory.is_active else 'inactive' }}</td>
+                  <td>{{ memory.created_at }}</td>
+                  <td>{{ memory.updated_at }}</td>
+                  <td>
+                    {% if memory.is_active and owner_mutation_enabled %}
+                      <form method="post" action="{{ url_for('ui.deactivate_long_memory', memory_id=memory.id) }}">
+                        <input name="csrf_token" type="hidden" value="{{ csrf_token() }}">
+                        <button type="submit">Deactivate</button>
+                      </form>
+                    {% else %}
+                      -
+                    {% endif %}
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        {% else %}
+          <p>Keine Long-Memory-Einträge.</p>
+        {% endif %}
+      </section>
+    {% endfor %}
+  {% else %}
+    <p>Keine Memory-Einträge vorhanden.</p>
   {% endif %}
 {% endblock %}
