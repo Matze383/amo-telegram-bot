@@ -1084,6 +1084,7 @@ class TopicAgentConfigRecord:
     response_mode: str
     memory_retention_days: int
     tools_enabled: bool
+    main_soul_text: str | None
     topic_soul_text: str | None
     topic_soul_owner_only_edit: bool
 
@@ -1135,6 +1136,7 @@ class TopicAgentMemoryRepository:
         response_mode: str = "command",
         memory_retention_days: int = 30,
         tools_enabled: bool = False,
+        main_soul_text: str | None = None,
         topic_soul_text: str | None = None,
         topic_soul_owner_only_edit: bool = True,
     ) -> TopicAgentConfigRecord:
@@ -1159,6 +1161,7 @@ class TopicAgentMemoryRepository:
         row.response_mode = response_mode
         row.memory_retention_days = memory_retention_days
         row.tools_enabled = tools_enabled
+        row.main_soul_text = main_soul_text
         row.topic_soul_text = topic_soul_text
         row.topic_soul_owner_only_edit = topic_soul_owner_only_edit
         self._session.commit()
@@ -1385,6 +1388,7 @@ class TopicAgentMemoryRepository:
             response_mode=row.response_mode,
             memory_retention_days=row.memory_retention_days,
             tools_enabled=row.tools_enabled,
+            main_soul_text=row.main_soul_text,
             topic_soul_text=row.topic_soul_text,
             topic_soul_owner_only_edit=row.topic_soul_owner_only_edit,
         )

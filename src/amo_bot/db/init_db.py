@@ -26,6 +26,7 @@ def init_db(database_url: str) -> None:
                 response_mode VARCHAR(32) NOT NULL DEFAULT 'command',
                 memory_retention_days INTEGER NOT NULL DEFAULT 30,
                 tools_enabled BOOLEAN NOT NULL DEFAULT 0,
+                main_soul_text TEXT,
                 topic_soul_text TEXT,
                 topic_soul_owner_only_edit BOOLEAN NOT NULL DEFAULT 1,
                 created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -79,6 +80,9 @@ def init_db(database_url: str) -> None:
     }
 
     table_column_migrations: dict[str, dict[str, str]] = {
+        "topic_agent_configs": {
+            "main_soul_text": "ALTER TABLE topic_agent_configs ADD COLUMN main_soul_text TEXT",
+        },
         "users": {
             "first_name": "ALTER TABLE users ADD COLUMN first_name VARCHAR(255)",
             "last_name": "ALTER TABLE users ADD COLUMN last_name VARCHAR(255)",

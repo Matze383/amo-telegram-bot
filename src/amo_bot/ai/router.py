@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
+import re
 
 from amo_bot.db.repositories import TopicAgentMemoryRepository
 
@@ -29,6 +30,7 @@ class AIRouterContextV1:
     flag_ai_scope_active: bool = False
     flag_bot_mention: bool = False
     flag_reply_to_bot: bool = False
+    assembled_soul_text: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,6 +45,18 @@ class AIRouterDecision:
 
 class AIRouter:
     """Minimal router seam for KI scope gating logic."""
+
+    _MAX_SOUL_CHARS = 2000
+    _SUSPICIOUS_SOUL_MARKERS = (
+        "system prompt",
+        "system message",
+        "internal prompt",
+        "raw file",
+        "/etc/",
+        "proc/",
+        "BEGIN RSA PRIVATE KEY",
+        "OPENCLAW",
+    )
 
     def __init__(self, *, topic_agent_memory_repository: TopicAgentMemoryRepository | None = None) -> None:
         self._topic_agent_memory_repository = topic_agent_memory_repository
@@ -62,6 +76,7 @@ class AIRouter:
 
         safe_prompt = prompt.strip()
         scope = self._resolve_scope(chat_id=chat_id, topic_id=topic_id, user_id=user_id)
+        assembled_soul_text = ""
         base_context = self._build_context(
             scope=scope,
             user_id=user_id,
@@ -70,6 +85,7 @@ class AIRouter:
             flag_ai_scope_active=False,
             flag_bot_mention=False,
             flag_reply_to_bot=reply_to_is_bot,
+            assembled_soul_text=assembled_soul_text,
         )
 
         repo = self._topic_agent_memory_repository
@@ -88,6 +104,11 @@ class AIRouter:
         if config is None or not config.ai_enabled:
             return AIRouterDecision(context=base_context)
 
+        assembled_soul_text = self._assemble_soul_text(
+            main_soul=config.main_soul_text,
+            topic_soul=config.topic_soul_text,
+        )
+
         if self._has_bot_mention(prompt=safe_prompt, bot_username=bot_username):
             reason_code = AIRouterReasonCode.MENTION_IN_ACTIVE_SCOPE
             return AIRouterDecision(
@@ -102,6 +123,7 @@ class AIRouter:
                     flag_ai_scope_active=True,
                     flag_bot_mention=True,
                     flag_reply_to_bot=reply_to_is_bot,
+                    assembled_soul_text=assembled_soul_text,
                 ),
             )
 
@@ -119,6 +141,7 @@ class AIRouter:
                     flag_ai_scope_active=True,
                     flag_bot_mention=False,
                     flag_reply_to_bot=True,
+                    assembled_soul_text=assembled_soul_text,
                 ),
             )
 
@@ -135,6 +158,7 @@ class AIRouter:
                 flag_ai_scope_active=True,
                 flag_bot_mention=False,
                 flag_reply_to_bot=reply_to_is_bot,
+                assembled_soul_text=assembled_soul_text,
             ),
         )
 
@@ -148,6 +172,7 @@ class AIRouter:
         flag_ai_scope_active: bool,
         flag_bot_mention: bool,
         flag_reply_to_bot: bool,
+        assembled_soul_text: str,
     ) -> AIRouterContextV1:
         if scope is None:
             return AIRouterContextV1(
@@ -157,6 +182,7 @@ class AIRouter:
                 flag_ai_scope_active=flag_ai_scope_active,
                 flag_bot_mention=flag_bot_mention,
                 flag_reply_to_bot=flag_reply_to_bot,
+                assembled_soul_text=assembled_soul_text,
             )
 
         return AIRouterContextV1(
@@ -170,6 +196,7 @@ class AIRouter:
             flag_ai_scope_active=flag_ai_scope_active,
             flag_bot_mention=flag_bot_mention,
             flag_reply_to_bot=flag_reply_to_bot,
+            assembled_soul_text=assembled_soul_text,
         )
 
     @staticmethod
@@ -189,6 +216,32 @@ class AIRouter:
             return {"scope_type": "private_user", "chat_id": None, "topic_id": None, "user_id": private_user_id}
 
         return None
+
+    @classmethod
+    def _sanitize_soul_text(cls, value: str | None) -> str:
+        if not value:
+            return ""
+
+        normalized = value.strip()
+        if not normalized:
+            return ""
+
+        lower = normalized.casefold()
+        for marker in cls._SUSPICIOUS_SOUL_MARKERS:
+            if marker.casefold() in lower:
+                return ""
+
+        normalized = re.sub(r"\s+", " ", normalized)
+        return normalized.strip()
+
+    @classmethod
+    def _assemble_soul_text(cls, *, main_soul: str | None, topic_soul: str | None) -> str:
+        # deterministic order: main first, topic second
+        parts = [cls._sanitize_soul_text(main_soul), cls._sanitize_soul_text(topic_soul)]
+        assembled = "\n\n".join(part for part in parts if part)
+        if len(assembled) > cls._MAX_SOUL_CHARS:
+            return assembled[: cls._MAX_SOUL_CHARS].rstrip()
+        return assembled
 
     @staticmethod
     def _has_bot_mention(*, prompt: str, bot_username: str | None) -> bool:

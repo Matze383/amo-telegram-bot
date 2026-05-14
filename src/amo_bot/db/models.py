@@ -222,6 +222,7 @@ class TopicAgentConfig(Base):
     response_mode: Mapped[str] = mapped_column(String(32), nullable=False, default="command", server_default="command")
     memory_retention_days: Mapped[int] = mapped_column(Integer, nullable=False, default=30, server_default="30")
     tools_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="0")
+    main_soul_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     topic_soul_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     topic_soul_owner_only_edit: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="1")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
