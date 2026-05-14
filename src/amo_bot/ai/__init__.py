@@ -68,6 +68,16 @@ from .tool_registry import (
     invoke_tool_noop,
     validate_tool_invocation_request,
 )
+
+from .sql_coreplugin_cp_h1 import (
+    SQLCorepluginRequest,
+    SQLCorepluginResponse,
+    SQLCorepluginService,
+    SQLExecutionResult,
+    SQLTemplate,
+    build_default_sql_templates,
+)
+
 from .api_capability_registry import (
     APICapabilityRegistry,
     APIEndpointDescriptor,
@@ -154,6 +164,12 @@ __all__ = [
     "build_capability_denial",
     "build_contextwindow_v1",
     "build_default_api_capability_registry",
+    "SQLExecutionResult",
+    "SQLTemplate",
+    "SQLCorepluginRequest",
+    "SQLCorepluginResponse",
+    "SQLCorepluginService",
+    "build_default_sql_templates",
     "execute_api_request_mvp",
     "evaluate_core_capability_policy",
     "execute_rss_noop",

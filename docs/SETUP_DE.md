@@ -439,3 +439,67 @@ Die Plugins-Seite zeigt für jedes Plugin einen **AI Tool**-Toggle-Indikator:
 - **Policy-gesteuert:** Die tatsächliche Freigabe erfolgt über KI-E-Policy-Gates, nicht über den WebUI-Toggle
 
 Dies ist ein Transparenz-/Sicherheitsfeature, das Ownern hilft zu verstehen, welche Plugins vom KI-System aufgerufen werden können. Um AI-Tool-Berechtigungen zu ändern, konfiguriere die entsprechenden Policy-Gates.
+
+---
+
+## SQL-Capability-Templates (CP-H1)
+
+Das SQL-Coreplugin bietet eine **Template-basierte, nur-Lesen** SQL-Ausführungsschnittstelle für KI und User-Plugins. Raw-SQL wird niemals direkt ausgeführt.
+
+### Sicherheitsmodell
+
+**Default-deny:**
+- Alle SQL-Ausführungen sind blockiert, sofern nicht explizit durch Capability-Policy und Template-Allowlist erlaubt
+- Unbekannte Templates werden abgelehnt
+
+**Nur Template-Ausführung:**
+- Nur vordefinierte Templates mit gebundenen Parametern können ausgeführt werden
+- Keine Raw-SQL-Injection möglich
+- Template-SQL wird auf reine `SELECT`-Statements validiert
+
+**Nur-Lesen-Views:**
+- Templates können nur allowgelistete Views abfragen (z.B. `v_topic_activity_summary`, `v_plugin_health_overview`)
+- Verbotene Tabellen (sensible Daten wie `users`, `user_secrets`, `topic_daily_memories`, `plugin_settings`) werden blockiert
+
+**Begrenzte Ergebnisse:**
+- Zeilenlimits erzwungen (Standard 100, global max 500)
+- Spaltenlimits erzwungen (max 12 Spalten, capped bei 24)
+- Ergebnisse werden bei Überschreitung sicher abgeschnitten
+
+**Spalten-Masking:**
+- Sensible Spalten (`chat_id`, `user_id`, `topic_id`) werden standardmäßig maskiert
+- Ausgabe zeigt `***MASKED***` statt tatsächlicher Werte
+
+**Actor/Scope-Validierung:**
+- Erfordert gültigen `actor_type` (`ki` oder `user_plugin`)
+- Erfordert gültigen `scope_type` (`chat` oder `topic`)
+- Erhöhte Context-Flags (`admin`, `tunnel`, `elevated`) werden explizit abgelehnt
+- KI erbt keine Admin-Rechte
+- UserPlugins können nicht durch KI-Privilegien tunneln
+
+**Injection-Schutz:**
+- Parameter-Validierung lehnt SQL-Injection-Versuche ab (`--`, `;`, `/*`, `*/`, `UNION`, `DROP`)
+- Parameter-Länge begrenzt (120 Zeichen)
+- Nur Skalarwerte (String, Int, Float, Bool) akzeptiert
+
+### Reason Codes
+
+Audit-Events enthalten Reason Codes für Transparenz:
+- `unknown_template` — Template-ID nicht in Allowlist
+- `forbidden_table` — SQL referenziert sensible Tabellen
+- `invalid_sql_template` — SQL ist kein sicheres SELECT über allowgelistete Views
+- `invalid_params` — Parameter außerhalb des erlaubten Sets oder malformed
+- `injection_detected` — Verdächtige Muster in Parametern
+- `missing_or_invalid_actor` — Actor/Scope nicht angegeben oder ungültig
+- `elevated_context_denied` — Versuch, erhöhte Privilegien zu nutzen
+- `db_error` — Datenbank-Ausführungsfehler (sicheres Fail)
+- `ok` — Ausführung erfolgreich
+
+### Keine autonomen Operationen
+
+Die SQL-Capability:
+- **Kann keine** Daten modifizieren (INSERT/UPDATE/DELETE blockiert)
+- **Kann nicht** auf Raw-Memory-Tabellen zugreifen
+- **Kann keine** Privilegien eskalieren
+- **Kann kein** beliebiges SQL ausführen
+- **Kann nicht** Audit-Logging umgehen

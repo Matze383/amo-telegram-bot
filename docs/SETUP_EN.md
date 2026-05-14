@@ -439,3 +439,67 @@ The Plugins page displays an **AI Tool** toggle indicator for each plugin:
 - **Policy-gated:** Actual enablement is governed by KI-E policy gates, not via WebUI toggle
 
 This is a transparency/security feature to help owners understand which plugins can be invoked by the AI system. To change AI tool permissions, configure the appropriate policy gates.
+
+---
+
+## SQL Capability Templates (CP-H1)
+
+The SQL coreplugin provides a **template-only, read-only** SQL execution interface for AI and user plugins. Raw SQL is never executed directly.
+
+### Security Model
+
+**Default-deny:**
+- All SQL execution is blocked unless explicitly allowed by capability policy and template allowlist
+- Unknown templates are rejected
+
+**Template-only execution:**
+- Only pre-defined templates with bound parameters can execute
+- No raw SQL injection possible
+- Template SQL is validated for `SELECT` statements only
+
+**Read-only views:**
+- Templates can only query allowlisted views (e.g., `v_topic_activity_summary`, `v_plugin_health_overview`)
+- Forbidden tables (sensitive data like `users`, `user_secrets`, `topic_daily_memories`, `plugin_settings`) are blocked
+
+**Bounded results:**
+- Row limits enforced (default 100, global max 500)
+- Column limits enforced (max 12 columns, capped at 24)
+- Results truncated safely when limits exceeded
+
+**Column masking:**
+- Sensitive columns (`chat_id`, `user_id`, `topic_id`) are masked by default
+- Output shows `***MASKED***` instead of actual values
+
+**Actor/scope validation:**
+- Requires valid `actor_type` (`ki` or `user_plugin`)
+- Requires valid `scope_type` (`chat` or `topic`)
+- Elevated context flags (`admin`, `tunnel`, `elevated`) are explicitly denied
+- KI does not inherit admin privileges
+- UserPlugins cannot tunnel through KI privileges
+
+**Injection protection:**
+- Parameter validation rejects SQL injection attempts (`--`, `;`, `/*`, `*/`, `UNION`, `DROP`)
+- Parameter length capped (120 characters)
+- Only scalar values (string, int, float, bool) accepted
+
+### Reason Codes
+
+Audit events include reason codes for transparency:
+- `unknown_template` — Template ID not in allowlist
+- `forbidden_table` — SQL references sensitive tables
+- `invalid_sql_template` — SQL is not a safe SELECT over allowlisted views
+- `invalid_params` — Parameters outside allowed set or malformed
+- `injection_detected` — Suspicious patterns in parameters
+- `missing_or_invalid_actor` — Actor/scope not provided or invalid
+- `elevated_context_denied` — Attempt to use elevated privileges
+- `db_error` — Database execution error (safe failure)
+- `ok` — Execution successful
+
+### No Autonomous Operations
+
+The SQL capability:
+- **Cannot** modify data (INSERT/UPDATE/DELETE blocked)
+- **Cannot** access raw memory tables
+- **Cannot** escalate privileges
+- **Cannot** execute arbitrary SQL
+- **Cannot** bypass audit logging
