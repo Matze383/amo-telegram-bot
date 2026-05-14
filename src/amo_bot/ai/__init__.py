@@ -24,6 +24,14 @@ from .core_capability_policy import (
     CorePolicyDecisionResult,
     evaluate_core_capability_policy,
 )
+from .capability_quota import (
+    CapabilityQuotaCounterStore,
+    CapabilityQuotaDecision,
+    CapabilityQuotaRequest,
+    CapabilityQuotaRule,
+    CoreCapabilityQuotaLimiter,
+    QuotaDecisionResult,
+)
 from .memory_maintenance import MemoryMaintenanceResult, MemoryMaintenanceService
 from .tool_registry import (
     AIRole,
@@ -60,9 +68,15 @@ __all__ = [
     "CapabilityScopeType",
     "AIScopeKind",
     "CoreCapabilityPolicyDecision",
+    "CapabilityQuotaCounterStore",
+    "CapabilityQuotaDecision",
+    "CapabilityQuotaRequest",
+    "CapabilityQuotaRule",
+    "CoreCapabilityQuotaLimiter",
     "InMemoryCapabilityAuditSink",
     "CoreCapabilityPolicyRequest",
     "CorePolicyDecisionResult",
+    "QuotaDecisionResult",
     "AIToolCapability",
     "AIToolDescriptor",
     "AIToolInvocationRequest",
