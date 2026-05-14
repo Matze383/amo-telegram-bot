@@ -1091,6 +1091,7 @@ class TopicAgentConfigRecord:
 
 @dataclass(slots=True)
 class TopicDailyMemoryRecord:
+    id: int
     scope_type: str
     chat_id: int | None
     topic_id: int | None
@@ -1313,6 +1314,7 @@ class TopicAgentMemoryRepository:
         user_id: int | None = None,
         source_daily_memory_id: int | None = None,
         promotion_status: str = "none",
+        auto_commit: bool = True,
     ) -> TopicLongMemoryRecord:
         if promotion_status not in {"none", "candidate"}:
             raise ValueError("invalid promotion_status")
@@ -1328,8 +1330,11 @@ class TopicAgentMemoryRepository:
             promotion_status=promotion_status,
         )
         self._session.add(row)
-        self._session.commit()
-        self._session.refresh(row)
+        if auto_commit:
+            self._session.commit()
+            self._session.refresh(row)
+        else:
+            self._session.flush()
         return self._to_long_record(row)
 
     def list_long_memories(
@@ -1461,6 +1466,7 @@ class TopicAgentMemoryRepository:
     @staticmethod
     def _to_daily_record(row: TopicDailyMemory) -> TopicDailyMemoryRecord:
         return TopicDailyMemoryRecord(
+            id=row.id,
             scope_type=row.scope_type,
             chat_id=row.chat_id,
             topic_id=row.topic_id,

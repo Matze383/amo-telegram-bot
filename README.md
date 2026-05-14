@@ -25,6 +25,7 @@ Dieses Projekt befindet sich in der frühen Entwicklung. Funktionen können sich
 | 🔌 **Plugin System** | Defensive manifest-based plugin loader | Defensiver, manifest-basierter Plugin-Loader |
 | 🌐 **WebUI** | Local Flask-based management interface | Lokale Flask-basierte Verwaltungsoberfläche |
 | 🤖 **AI Integration** | Optional Ollama `/ask` command (stateless); auto-reply on mentions/replies in active scopes (VIP/Admin/Owner + consent required) | Optionales Ollama `/ask` Kommando (stateless); Auto-Antwort bei Erwähnungen/Antworten in aktiven Scopes (VIP/Admin/Owner + Consent erforderlich) |
+| 🧠 **Memory Curation (KI-D5)** | Optional automatic, bounded daily→long-memory curation (candidate-only); failure-safe (no partial writes on promotion failure); can be disabled via maintenance config | Optionale automatische, begrenzte Daily→Long-Memory-Kuratierung (nur als Kandidaten); fehlersicher (keine Teilwrites bei Fehlern); per Maintenance-Konfiguration deaktivierbar |
 | 🧪 **Testing** | pytest + smoke tests included | pytest + Smoke-Tests enthalten |
 
 ---
