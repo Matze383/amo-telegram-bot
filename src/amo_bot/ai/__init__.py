@@ -93,6 +93,14 @@ __all__ = [
     "execute_rss_noop",
     "execute_rss_fetch",
     "validate_rss_input",
+    "validate_websearch_input",
+    "execute_websearch_noop",
+    "execute_websearch_fake_allowed",
+    "WebsearchResultItem",
+    "WebsearchInputValidationResult",
+    "WebsearchInput",
+    "WebsearchExecutionResult",
+    "FakeWebsearchProvider",
     "RSSInputValidationResult",
     "RSSNoOpResult",
     "RSSFeedEntry",
@@ -116,4 +124,15 @@ from .rss_coreplugin import (
     execute_rss_fetch,
     execute_rss_noop,
     validate_rss_input,
+)
+
+from .websearch_coreplugin import (
+    FakeWebsearchProvider,
+    WebsearchExecutionResult,
+    WebsearchInput,
+    WebsearchInputValidationResult,
+    WebsearchResultItem,
+    execute_websearch_fake_allowed,
+    execute_websearch_noop,
+    validate_websearch_input,
 )

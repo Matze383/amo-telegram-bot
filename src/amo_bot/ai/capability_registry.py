@@ -37,6 +37,14 @@ _DEFAULT_CAPABILITY_DESCRIPTORS: tuple[CapabilityDescriptor, ...] = (
         scopes=("topic", "user"),
         default_enabled=False,
     ),
+    CapabilityDescriptor(
+        id="ki.websearch.query",
+        version="1.0.0",
+        risk_level="medium",
+        actor_types=("ki",),
+        scopes=("topic", "user"),
+        default_enabled=False,
+    ),
 )
 
 
