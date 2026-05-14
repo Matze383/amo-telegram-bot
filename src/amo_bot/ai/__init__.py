@@ -101,6 +101,11 @@ __all__ = [
     "WebsearchInputValidationResult",
     "WebsearchInput",
     "WebsearchExecutionResult",
+    "WebscrapingInput",
+    "WebscrapingValidationResult",
+    "WebscrapingExecutionResult",
+    "validate_webscraping_input",
+    "execute_webscraping_noop",
     "WebsearchProviderConfig",
     "FakeWebsearchProvider",
     "RSSInputValidationResult",
@@ -139,4 +144,13 @@ from .websearch_coreplugin import (
     execute_websearch_noop,
     execute_websearch_provider_mvp,
     validate_websearch_input,
+)
+
+
+from .webscraping_coreplugin import (
+    WebscrapingExecutionResult,
+    WebscrapingInput,
+    WebscrapingValidationResult,
+    execute_webscraping_noop,
+    validate_webscraping_input,
 )
