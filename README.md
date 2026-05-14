@@ -56,6 +56,7 @@ python main.py
 | [📗 Setup-Anleitung (DE)](docs/SETUP_DE.md) | — | Vollständige Setup-Anleitung |
 | [🧪 Beta Testing (EN)](docs/BETATEST_EN.md) / [DE](docs/BETATEST_DE.md) | Step-by-step beta test guide | Schritt-für-Schritt-Betatest-Anleitung |
 | [📝 Release Notes (EN)](docs/RELEASE_NOTES_2026.05.10-Beta_EN.md) / [DE](docs/RELEASE_NOTES_2026.05.10-Beta_DE.md) | Changelog and version history | Changelog und Versionshistorie |
+| [🚀 Release Baseline](docs/release-baseline.md) | Release readiness and support matrix | Release-Bereitschaft und Support-Matrix |
 
 ---
 
