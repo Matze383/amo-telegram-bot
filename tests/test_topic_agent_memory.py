@@ -181,6 +181,7 @@ def test_topic_memory_repository_config_daily_long_and_session_scopes() -> None:
         assert len(active) == 1
         assert active[0].id == long_row.id
         assert active[0].is_active is True
+        assert active[0].promotion_status == "none"
 
         assert repo.deactivate_long_memory(memory_id=long_row.id) is True
         active_after = repo.list_long_memories(scope_type="topic", chat_id=-100123, topic_id=777, active_only=True)
@@ -200,3 +201,48 @@ def test_topic_memory_repository_config_daily_long_and_session_scopes() -> None:
         fetched_session = repo.get_ai_session(scope_type="private_user", user_id=42)
         assert fetched_session is not None
         assert fetched_session.session_payload == {"context": ["hello"]}
+
+
+def test_topic_long_memory_promotion_candidate_lifecycle_and_scope_isolation() -> None:
+    engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
+    Base.metadata.create_all(engine)
+
+    with Session(engine, future=True) as session:
+        repo = TopicAgentMemoryRepository(session)
+
+        topic_a = repo.create_long_memory(
+            scope_type="topic",
+            chat_id=-1001,
+            topic_id=11,
+            fact_text="topic-a",
+        )
+        topic_b = repo.create_long_memory(
+            scope_type="topic",
+            chat_id=-1002,
+            topic_id=22,
+            fact_text="topic-b",
+        )
+
+        assert repo.mark_long_memory_candidate(memory_id=topic_a.id) is True
+
+        listed_a = repo.list_long_memories(scope_type="topic", chat_id=-1001, topic_id=11, active_only=False)
+        listed_b = repo.list_long_memories(scope_type="topic", chat_id=-1002, topic_id=22, active_only=False)
+        assert len(listed_a) == 1
+        assert listed_a[0].promotion_status == "candidate"
+        assert len(listed_b) == 1
+        assert listed_b[0].promotion_status == "none"
+
+        assert repo.clear_long_memory_candidate(memory_id=topic_a.id) is True
+        listed_a_after_clear = repo.list_long_memories(scope_type="topic", chat_id=-1001, topic_id=11, active_only=False)
+        assert listed_a_after_clear[0].promotion_status == "none"
+
+        assert repo.mark_long_memory_candidate(memory_id=topic_a.id) is True
+        assert repo.deactivate_long_memory(memory_id=topic_a.id) is True
+        listed_a_after_deactivate = repo.list_long_memories(scope_type="topic", chat_id=-1001, topic_id=11, active_only=False)
+        assert listed_a_after_deactivate[0].is_active is False
+        assert listed_a_after_deactivate[0].promotion_status == "none"
+
+        assert repo.mark_long_memory_candidate(memory_id=topic_a.id) is False
+
+        assert repo.mark_long_memory_candidate(memory_id=999999) is False
+        assert repo.clear_long_memory_candidate(memory_id=999999) is False

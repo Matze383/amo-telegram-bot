@@ -59,6 +59,7 @@ def init_db(database_url: str) -> None:
                 fact_text TEXT NOT NULL,
                 is_active BOOLEAN NOT NULL DEFAULT 1,
                 source_daily_memory_id INTEGER,
+                promotion_status VARCHAR(16) NOT NULL DEFAULT 'none',
                 created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
@@ -82,6 +83,9 @@ def init_db(database_url: str) -> None:
     table_column_migrations: dict[str, dict[str, str]] = {
         "topic_agent_configs": {
             "main_soul_text": "ALTER TABLE topic_agent_configs ADD COLUMN main_soul_text TEXT",
+        },
+        "topic_long_memories": {
+            "promotion_status": "ALTER TABLE topic_long_memories ADD COLUMN promotion_status VARCHAR(16) NOT NULL DEFAULT 'none'",
         },
         "users": {
             "first_name": "ALTER TABLE users ADD COLUMN first_name VARCHAR(255)",

@@ -1110,6 +1110,7 @@ class TopicLongMemoryRecord:
     fact_text: str
     is_active: bool
     source_daily_memory_id: int | None
+    promotion_status: str
 
 
 @dataclass(slots=True)
@@ -1311,7 +1312,11 @@ class TopicAgentMemoryRepository:
         topic_id: int | None = None,
         user_id: int | None = None,
         source_daily_memory_id: int | None = None,
+        promotion_status: str = "none",
     ) -> TopicLongMemoryRecord:
+        if promotion_status not in {"none", "candidate"}:
+            raise ValueError("invalid promotion_status")
+
         row = TopicLongMemory(
             scope_type=scope_type,
             chat_id=chat_id,
@@ -1320,6 +1325,7 @@ class TopicAgentMemoryRepository:
             fact_text=fact_text,
             is_active=True,
             source_daily_memory_id=source_daily_memory_id,
+            promotion_status=promotion_status,
         )
         self._session.add(row)
         self._session.commit()
@@ -1352,8 +1358,34 @@ class TopicAgentMemoryRepository:
         row = self._session.scalar(select(TopicLongMemory).where(TopicLongMemory.id == memory_id))
         if row is None:
             return False
+        changed = False
         if row.is_active:
             row.is_active = False
+            changed = True
+        if row.promotion_status != "none":
+            row.promotion_status = "none"
+            changed = True
+        if changed:
+            self._session.commit()
+        return True
+
+    def mark_long_memory_candidate(self, *, memory_id: int) -> bool:
+        row = self._session.scalar(select(TopicLongMemory).where(TopicLongMemory.id == memory_id))
+        if row is None:
+            return False
+        if not row.is_active:
+            return False
+        if row.promotion_status != "candidate":
+            row.promotion_status = "candidate"
+            self._session.commit()
+        return True
+
+    def clear_long_memory_candidate(self, *, memory_id: int) -> bool:
+        row = self._session.scalar(select(TopicLongMemory).where(TopicLongMemory.id == memory_id))
+        if row is None:
+            return False
+        if row.promotion_status != "none":
+            row.promotion_status = "none"
             self._session.commit()
         return True
 
@@ -1449,6 +1481,7 @@ class TopicAgentMemoryRepository:
             fact_text=row.fact_text,
             is_active=row.is_active,
             source_daily_memory_id=row.source_daily_memory_id,
+            promotion_status=row.promotion_status,
         )
 
     @staticmethod

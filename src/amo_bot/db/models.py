@@ -263,6 +263,7 @@ class TopicLongMemory(Base):
     fact_text: Mapped[str] = mapped_column(Text, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="1")
     source_daily_memory_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    promotion_status: Mapped[str] = mapped_column(String(16), nullable=False, default="none", server_default="none")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
 
