@@ -33,6 +33,14 @@ from .capability_quota import (
     QuotaDecisionResult,
 )
 from .memory_maintenance import MemoryMaintenanceResult, MemoryMaintenanceService
+from .memory_coreplugin_cp_g2 import (
+    MemoryCorepluginRequest,
+    MemoryCorepluginService,
+    MemoryEntrySummary,
+    MemoryOperationResponse,
+    MemoryOperationResult,
+    MemoryScopeRef,
+)
 from .memory_capability import (
     MEMORY_CAPABILITIES,
     MemoryCapabilityDecision,
@@ -129,6 +137,12 @@ __all__ = [
     "AIToolScopeContext",
     "MemoryMaintenanceResult",
     "MemoryMaintenanceService",
+    "MemoryScopeRef",
+    "MemoryOperationResult",
+    "MemoryOperationResponse",
+    "MemoryEntrySummary",
+    "MemoryCorepluginService",
+    "MemoryCorepluginRequest",
     "MEMORY_CAPABILITIES",
     "MemoryCapabilityDecision",
     "MemoryCapabilityDescriptor",

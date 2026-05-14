@@ -766,6 +766,7 @@ Use this checklist for your test:
 - [ ] WebUI KI Topic-Agent Status visible on Dashboard: OK / Not tested
 - [ ] WebUI Topic Soul Editor (owner-only, in Groups): OK / Not tested
 - [ ] WebUI KI Memory Controls (redacted daily, long memory deactivate): OK / Not tested
+- [ ] CP-G2 Memory Privacy: Scope isolation, default-deny policy, redacted outputs verified: OK / Not tested
 - [ ] Security headers present (check browser dev tools): OK
 
 **Notes:**

@@ -76,6 +76,68 @@ License not specified yet.
 
 Lizenz noch nicht festgelegt.
 
+## Memory Management MVP Safe Operations (CP-G2)
+
+Memory operations are policy-gated with default-deny. All memory access requires explicit capability approval.
+
+**Scope Isolation:**
+- Memory is strictly scoped to topics, private chats, or users
+- No cross-scope memory leakage possible
+- Each scope maintains independent memory boundaries
+
+**Operations (Bounded & Auditable):**
+- `put` — Store memory entries with TTL/retention rules
+- `get` — Retrieve memory (redacted outputs, no raw memory text in MVP)
+- `search` — Query memory (returns metadata placeholders only)
+- `delete` — Permanent removal (auditable, no memory text in audit)
+- `deactivate` — Soft-disable entries without deletion (reversible)
+
+**Privacy & Security:**
+- **Default-deny:** All memory operations blocked unless explicitly allowed by CP-G1 policy
+- **Redacted outputs:** Raw memory text is never exposed in WebUI, Telegram, or audit events
+- **Audit events:** Include scope, action, and metadata only — never memory content
+- **TTL/Retention:** Automatic pruning via maintenance hooks
+- **MVP limitation:** Raw memory output intentionally not exposed; only redacted metadata placeholders
+
+**Audit Event Types:**
+- `memory_put` — Memory stored (scope, entry ID, no content)
+- `memory_get` — Memory accessed (scope, entry ID, no content)
+- `memory_delete` — Memory permanently deleted (scope, entry ID)
+- `memory_deactivate` — Memory soft-disabled (scope, entry ID)
+
+---
+
+## Memory Management MVP Safe Operations (CP-G2) — Deutsch
+
+Speicher-Operationen sind Policy-gated mit Default-Deny. Jeder Speicherzugriff erfordert explizite Capability-Genehmigung.
+
+**Scope-Isolation:**
+- Speicher ist streng an Topics, private Chats oder Nutzer gebunden
+- Keine Cross-Scope-Speicherlecks möglich
+- Jeder Scope pflegt unabhängige Speichergrenzen
+
+**Operationen (Begrenzt & Auditierbar):**
+- `put` — Speicher-Einträge mit TTL/Retention-Regeln speichern
+- `get` — Speicher abrufen (redigierte Ausgaben, kein Raw-Memory-Text im MVP)
+- `search` — Speicher abfragen (gibt nur Metadaten-Platzhalter zurück)
+- `delete` — Permanentes Löschen (auditierbar, kein Memory-Text im Audit)
+- `deactivate` — Soft-Disable von Einträgen ohne Löschung (reversibel)
+
+**Datenschutz & Sicherheit:**
+- **Default-deny:** Alle Speicher-Operationen blockiert, sofern nicht durch CP-G1-Policy explizit erlaubt
+- **Redigierte Ausgaben:** Raw-Speichertext wird nie in WebUI, Telegram oder Audit-Events preisgegeben
+- **Audit-Events:** Enthalten nur Scope, Aktion und Metadaten — niemals Memory-Inhalt
+- **TTL/Retention:** Automatisches Pruning via Maintenance-Hooks
+- **MVP-Einschränkung:** Raw-Speicherausgabe absichtlich nicht verfügbar; nur redigierte Metadaten-Platzhalter
+
+**Audit-Event-Typen:**
+- `memory_put` — Speicher gespeichert (Scope, Entry-ID, kein Inhalt)
+- `memory_get` — Speicher abgerufen (Scope, Entry-ID, kein Inhalt)
+- `memory_delete` — Speicher permanent gelöscht (Scope, Entry-ID)
+- `memory_deactivate` — Speicher soft-deaktiviert (Scope, Entry-ID)
+
+---
+
 ## Websearch Provider MVP (CP-C2)
 
 Websearch provider execution remains default-deny unless capability policy and tool policy gates explicitly allow it.

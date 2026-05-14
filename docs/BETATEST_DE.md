@@ -766,6 +766,7 @@ Nutze diese Checkliste für deinen Test:
 - [ ] WebUI KI-Topic-Agent-Status auf Dashboard sichtbar: OK / Nicht getestet
 - [ ] WebUI Topic Soul Editor (nur Owner, in Groups): OK / Nicht getestet
 - [ ] WebUI KI Memory Controls (redacted Daily, Long-Memory-Deaktivierung): OK / Nicht getestet
+- [ ] CP-G2 Memory Privacy: Scope-Isolation, Default-Deny-Policy, redigierte Ausgaben verifiziert: OK / Nicht getestet
 - [ ] Security Headers vorhanden (Browser-Dev-Tools prüfen): OK
 
 **Notizen:**

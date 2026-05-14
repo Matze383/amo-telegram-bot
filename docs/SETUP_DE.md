@@ -287,18 +287,28 @@ Die WebUI Groups-Seite ermöglicht dem Owner das Bearbeiten von Topic-spezifisch
 
 ---
 
-## WebUI: KI Memory Controls (KI-F3)
+## WebUI: KI Memory Controls (KI-F3 + CP-G2)
 
-Das WebUI-Dashboard enthält einen **KI Memory**-Bereich zum Einsehen und Verwalten von KI-Memory-Einträgen.
+Das WebUI-Dashboard enthält einen **KI Memory**-Bereich zum Einsehen und Verwalten von KI-Memory-Einträgen mit datenschutzgehärteten Kontrollen.
 
 **Daily Memory (Redacted):**
 - Zeigt nur Memory-Daten an (z.B. "2026-05-14, 2026-05-13")
 - Raw-Summary-Text wird nicht angezeigt (datenschonender Default)
+- Keine Raw-Memory-Inhalte werden im MVP preisgegeben
 
 **Long Memory:**
 - Listet Langzeit-Memory-Einträge mit Fakten-Text, Status und Timestamps
 - Zeigt "active" oder "inactive" Status für jeden Eintrag
 - Owner kann Einträge via CSRF-geschütztem Button deaktivieren
+- Löschung und Deaktivierung sind auditierbar (kein Memory-Text in Audit-Events)
+
+**Memory-Management-Policy (CP-G2):**
+- **Default-deny:** Speicher-Operationen erfordern explizite Policy-Genehmigung (CP-G1)
+- **Scope-Isolation:** Speicher ist streng an Topics/private Chats gebunden; kein Cross-Scope-Zugriff
+- **Begrenzte Operationen:** put/get/search/delete/deactivate sind Größen-/Zeit-begrenzt
+- **TTL/Retention:** Automatisches Pruning via Maintenance-Hooks
+- **Redigierte Ausgaben:** Nur Metadaten-Platzhalter werden angezeigt; Raw-Speichertext nie preisgegeben
+- **Audit-Events:** Enthalten nur Scope und Entry-ID — niemals Memory-Inhalt
 
 **Anforderungen:**
 - Authentifizierte WebUI-Session zum Ansehen des Memory
@@ -307,6 +317,7 @@ Das WebUI-Dashboard enthält einen **KI Memory**-Bereich zum Einsehen und Verwal
 **Sicherheit:**
 - Deaktivierung erfordert CSRF-Token
 - Ohne Owner-Konfiguration gibt Deaktivierung 403 Forbidden zurück
+- Audit-Events: Audit-Entscheidungen für Memory-Operationen protokollieren Reason-Codes für put/get/search/delete/deactivate-Operationen (z.B. `memory_put_ok`, `memory_get_ok`, etc.). Diese Events sind metadata-only und enthalten keinen Memory-Inhalt.
 
 ---
 

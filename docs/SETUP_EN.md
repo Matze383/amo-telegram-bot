@@ -287,18 +287,28 @@ The WebUI Groups page allows the owner to edit topic-specific **Soul text**:
 
 ---
 
-## WebUI: KI Memory Controls (KI-F3)
+## WebUI: KI Memory Controls (KI-F3 + CP-G2)
 
-The WebUI Dashboard includes a **KI Memory** section for inspecting and managing AI memory entries.
+The WebUI Dashboard includes a **KI Memory** section for inspecting and managing AI memory entries with privacy-hardened controls.
 
 **Daily Memory (Redacted):**
 - Shows only memory dates (e.g., "2026-05-14, 2026-05-13")
 - Raw summary text is not displayed (privacy-conscious default)
+- No raw memory content exposed in MVP
 
 **Long Memory:**
 - Lists long-term memory entries with fact text, status, and timestamps
 - Shows "active" or "inactive" status for each entry
 - Owner can deactivate entries via CSRF-protected button
+- Deletion and deactivation are auditable (no memory text in audit events)
+
+**Memory Management Policy (CP-G2):**
+- **Default-deny:** Memory operations require explicit policy approval (CP-G1)
+- **Scope isolation:** Memory is strictly scoped to topics/private chats; no cross-scope access
+- **Bounded operations:** put/get/search/delete/deactivate are size/time bounded
+- **TTL/Retention:** Automatic pruning via maintenance hooks
+- **Redacted outputs:** Only metadata placeholders shown; raw memory text never exposed
+- **Audit events:** Include scope and entry ID only — never memory content
 
 **Requirements:**
 - Authenticated WebUI session to view memory
@@ -307,6 +317,7 @@ The WebUI Dashboard includes a **KI Memory** section for inspecting and managing
 **Security:**
 - Deactivation requires CSRF token
 - Without owner configuration, deactivation returns 403 Forbidden
+- Audit events: Memory operation audit decisions record reason codes for put/get/search/delete/deactivate operations (e.g., `memory_put_ok`, `memory_get_ok`, etc.). These events are metadata-only and contain no memory content.
 
 ---
 
