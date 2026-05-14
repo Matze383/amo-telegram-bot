@@ -91,9 +91,14 @@ __all__ = [
     "build_capability_denial",
     "evaluate_core_capability_policy",
     "execute_rss_noop",
+    "execute_rss_fetch",
     "validate_rss_input",
     "RSSInputValidationResult",
     "RSSNoOpResult",
+    "RSSFeedEntry",
+    "RSSFetchRequest",
+    "RSSFetchResult",
+    "RSSHTTPResponse",
     "build_tool_invocation_error",
     "build_tool_invocation_rejection",
     "invoke_tool_noop",
@@ -101,4 +106,14 @@ __all__ = [
     "validate_tool_invocation_request",
 ]
 
-from .rss_coreplugin import RSSNoOpResult, RSSInputValidationResult, execute_rss_noop, validate_rss_input
+from .rss_coreplugin import (
+    RSSFeedEntry,
+    RSSFetchRequest,
+    RSSFetchResult,
+    RSSHTTPResponse,
+    RSSNoOpResult,
+    RSSInputValidationResult,
+    execute_rss_fetch,
+    execute_rss_noop,
+    validate_rss_input,
+)
