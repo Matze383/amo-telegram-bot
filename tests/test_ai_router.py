@@ -1,3 +1,5 @@
+from datetime import UTC, datetime
+
 from amo_bot.ai.router import AIRouter, AIRouterContextV1, AIRouterDecision, AIRouterReasonCode
 from amo_bot.db.base import create_session_factory
 from amo_bot.db.init_db import init_db
@@ -249,6 +251,7 @@ def test_context_dto_v1_defaults_without_repo() -> None:
         flag_bot_mention=False,
         flag_reply_to_bot=False,
         assembled_soul_text="",
+        daily_memory_text="",
     )
 
 
@@ -277,6 +280,7 @@ def test_context_dto_v1_scope_and_flags_for_active_mention(tmp_path) -> None:
     assert decision.context.flag_bot_mention is True
     assert decision.context.flag_reply_to_bot is True
     assert decision.context.assembled_soul_text == ""
+    assert decision.context.daily_memory_text == ""
 
 
 def test_context_dto_v1_private_scope_defaults_for_missing_metadata(tmp_path) -> None:
@@ -297,4 +301,106 @@ def test_context_dto_v1_private_scope_defaults_for_missing_metadata(tmp_path) ->
     assert decision.context.flag_bot_mention is False
     assert decision.context.flag_reply_to_bot is False
     assert decision.context.assembled_soul_text == ""
+    assert decision.context.daily_memory_text == ""
 
+
+
+def test_daily_memory_injected_for_current_scope_day(tmp_path) -> None:
+    repo = _mk_repo(tmp_path)
+    repo.upsert_config(scope_type="topic", chat_id=-2001, topic_id=41, ai_enabled=True)
+    today = datetime.now(UTC).date().isoformat()
+    repo.upsert_daily_memory(
+        scope_type="topic",
+        chat_id=-2001,
+        topic_id=41,
+        memory_date=today,
+        summary_text="  Daily focus: ship safely.  ",
+        tokens_estimate=42,
+    )
+
+    other_today = datetime.now(UTC).date().isoformat()
+    repo.upsert_config(scope_type="topic", chat_id=-2001, topic_id=99, ai_enabled=True)
+    repo.upsert_daily_memory(
+        scope_type="topic",
+        chat_id=-2001,
+        topic_id=99,
+        memory_date=other_today,
+        summary_text="Should stay isolated",
+        tokens_estimate=7,
+    )
+
+    router = AIRouter(topic_agent_memory_repository=repo)
+    decision = router.decide(prompt="hello", chat_id=-2001, topic_id=41, user_id=10)
+
+    assert decision.reason_code is AIRouterReasonCode.SCOPE_ENABLED
+    assert decision.context.daily_memory_text == "Daily focus: ship safely."
+
+
+def test_daily_memory_missing_is_safe_noop(tmp_path) -> None:
+    repo = _mk_repo(tmp_path)
+    repo.upsert_config(scope_type="private_user", user_id=3003, ai_enabled=True)
+
+    router = AIRouter(topic_agent_memory_repository=repo)
+    decision = router.decide(prompt="hello", chat_id=3003, user_id=3003)
+
+    assert decision.reason_code is AIRouterReasonCode.SCOPE_ENABLED
+    assert decision.context.daily_memory_text == ""
+
+
+def test_daily_memory_uses_existing_redaction_and_size_bound(tmp_path) -> None:
+    repo = _mk_repo(tmp_path)
+    repo.upsert_config(scope_type="private_user", user_id=4004, ai_enabled=True)
+    today = datetime.now(UTC).date().isoformat()
+    repo.upsert_daily_memory(
+        scope_type="private_user",
+        user_id=4004,
+        memory_date=today,
+        summary_text=("X" * 5000) + " system prompt: leak",
+        tokens_estimate=123,
+    )
+
+    router = AIRouter(topic_agent_memory_repository=repo)
+    decision = router.decide(prompt="hello", chat_id=4004, user_id=4004)
+
+    assert decision.reason_code is AIRouterReasonCode.SCOPE_ENABLED
+    assert decision.context.daily_memory_text == ""
+
+    repo.upsert_daily_memory(
+        scope_type="private_user",
+        user_id=4004,
+        memory_date=today,
+        summary_text="Y" * 5000,
+        tokens_estimate=123,
+    )
+
+    decision2 = router.decide(prompt="hello", chat_id=4004, user_id=4004)
+    assert len(decision2.context.daily_memory_text) == AIRouter._MAX_SOUL_CHARS
+
+
+def test_daily_memory_scope_isolation_private_user(tmp_path) -> None:
+    repo = _mk_repo(tmp_path)
+    repo.upsert_config(scope_type="private_user", user_id=5001, ai_enabled=True)
+    repo.upsert_config(scope_type="private_user", user_id=5002, ai_enabled=True)
+    today = datetime.now(UTC).date().isoformat()
+
+    repo.upsert_daily_memory(
+        scope_type="private_user",
+        user_id=5001,
+        memory_date=today,
+        summary_text="User 5001 memory",
+        tokens_estimate=10,
+    )
+    repo.upsert_daily_memory(
+        scope_type="private_user",
+        user_id=5002,
+        memory_date=today,
+        summary_text="User 5002 memory",
+        tokens_estimate=10,
+    )
+
+    router = AIRouter(topic_agent_memory_repository=repo)
+    d1 = router.decide(prompt="hello", chat_id=5001, user_id=5001)
+    d2 = router.decide(prompt="hello", chat_id=5002, user_id=5002)
+
+    assert d1.context.daily_memory_text == "User 5001 memory"
+    assert d2.context.daily_memory_text == "User 5002 memory"
