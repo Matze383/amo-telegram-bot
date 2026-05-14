@@ -92,6 +92,15 @@ from .api_coreplugin_cp_e2 import (
     APICorepluginExecutionResult,
     execute_api_request_mvp,
 )
+from .self_improvement_coreplugin_cp_i1 import (
+    SelfImprovementAction,
+    SelfImprovementDecision,
+    SelfImprovementProposal,
+    SelfImprovementRequest,
+    SelfImprovementResult,
+    evaluate_self_improvement_request,
+)
+
 from .contextwindow_builder import (
     ContextWindowAuditEntry,
     ContextWindowBuildResult,
@@ -147,6 +156,12 @@ __all__ = [
     "AIToolScopeContext",
     "MemoryMaintenanceResult",
     "MemoryMaintenanceService",
+    "SelfImprovementAction",
+    "SelfImprovementDecision",
+    "SelfImprovementProposal",
+    "SelfImprovementRequest",
+    "SelfImprovementResult",
+    "evaluate_self_improvement_request",
     "MemoryScopeRef",
     "MemoryOperationResult",
     "MemoryOperationResponse",
