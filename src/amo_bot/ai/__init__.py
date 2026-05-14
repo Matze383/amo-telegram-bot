@@ -1,12 +1,16 @@
 from .memory_maintenance import MemoryMaintenanceResult, MemoryMaintenanceService
 from .tool_registry import (
+    AIRole,
+    AIScopeKind,
     AIToolCapability,
     AIToolDescriptor,
     AIToolInvocationRequest,
     AIToolInvocationResponse,
     AIToolInvocationStatus,
     AIToolPolicy,
+    AIToolPolicyDecision,
     AIToolRegistry,
+    AIToolScopeContext,
     build_tool_invocation_error,
     build_tool_invocation_rejection,
     invoke_tool_noop,
@@ -14,13 +18,17 @@ from .tool_registry import (
 )
 
 __all__ = [
+    "AIRole",
+    "AIScopeKind",
     "AIToolCapability",
     "AIToolDescriptor",
     "AIToolInvocationRequest",
     "AIToolInvocationResponse",
     "AIToolInvocationStatus",
     "AIToolPolicy",
+    "AIToolPolicyDecision",
     "AIToolRegistry",
+    "AIToolScopeContext",
     "MemoryMaintenanceResult",
     "MemoryMaintenanceService",
     "build_tool_invocation_error",

@@ -89,5 +89,5 @@ def test_invoke_tool_noop_denies_by_default_policy_without_execution() -> None:
     assert response.status == AIToolInvocationStatus.DENIED
     assert response.tool_name == "weather_lookup"
     assert response.error_code == "policy_denied"
-    assert response.reason == "tool_not_allowed"
+    assert response.reason == "tools_disabled"
     assert response.result is None

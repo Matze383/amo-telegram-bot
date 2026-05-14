@@ -51,15 +51,122 @@ class AIToolRegistry:
         return [tool for tool in self.list_tools() if tool.capability == capability]
 
 
+class AIScopeKind(str, Enum):
+    """Supported AI scope kinds for policy decisions."""
+
+    TOPIC = "topic"
+    PRIVATE = "private"
+
+
+class AIRole(str, Enum):
+    """Role levels used by the AI tool policy evaluator."""
+
+    NORMAL = "normal"
+    VIP = "vip"
+    ADMIN = "admin"
+    OWNER = "owner"
+
+
+_ROLE_RANK: dict[AIRole, int] = {
+    AIRole.NORMAL: 10,
+    AIRole.VIP: 20,
+    AIRole.ADMIN: 30,
+    AIRole.OWNER: 40,
+}
+
+
+@dataclass(frozen=True, slots=True)
+class AIToolScopeContext:
+    """Scope metadata for evaluating whether a tool can be invoked."""
+
+    scope_kind: AIScopeKind
+    chat_id: int | None
+    topic_id: int | None
+    user_id: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class AIToolPolicyDecision:
+    """Machine-safe allow/deny decision for a tool invocation request."""
+
+    allowed: bool
+    reason_code: str
+
+
 class AIToolPolicy:
     """Policy gate for AI tool usage.
 
     Default policy is deny-all for every tool, regardless of registration.
     """
 
+    def __init__(
+        self,
+        *,
+        enabled: bool = False,
+        global_allowlist: set[str] | None = None,
+        topic_allowlist: dict[tuple[int, int | None], set[str]] | None = None,
+        private_allowlist: dict[int, set[str]] | None = None,
+        min_role: AIRole = AIRole.OWNER,
+    ) -> None:
+        self._enabled = enabled
+        self._global_allowlist = self._normalize_allowlist(global_allowlist)
+        self._topic_allowlist = {
+            key: self._normalize_allowlist(value) for key, value in (topic_allowlist or {}).items()
+        }
+        self._private_allowlist = {
+            key: self._normalize_allowlist(value) for key, value in (private_allowlist or {}).items()
+        }
+        self._min_role = min_role
+
+    @staticmethod
+    def _normalize_allowlist(names: set[str] | None) -> set[str]:
+        if not names:
+            return set()
+        normalized: set[str] = set()
+        for name in names:
+            if not isinstance(name, str):
+                continue
+            key = name.strip().lower()
+            if key:
+                normalized.add(key)
+        return normalized
+
     def is_allowed(self, *, tool_name: str) -> bool:
-        _ = tool_name
-        return False
+        decision = self.evaluate(
+            tool_name=tool_name,
+            role=AIRole.OWNER,
+            scope=AIToolScopeContext(scope_kind=AIScopeKind.TOPIC, chat_id=None, topic_id=None),
+        )
+        return decision.allowed
+
+    def evaluate(self, *, tool_name: str, role: AIRole, scope: AIToolScopeContext) -> AIToolPolicyDecision:
+        normalized_tool_name = tool_name.strip().lower() if isinstance(tool_name, str) else ""
+        if not normalized_tool_name:
+            return AIToolPolicyDecision(allowed=False, reason_code="invalid_tool_name")
+
+        if not self._enabled:
+            return AIToolPolicyDecision(allowed=False, reason_code="tools_disabled")
+
+        if _ROLE_RANK[role] < _ROLE_RANK[self._min_role]:
+            return AIToolPolicyDecision(allowed=False, reason_code="role_denied")
+
+        if normalized_tool_name in self._global_allowlist:
+            return AIToolPolicyDecision(allowed=True, reason_code="allowed_global")
+
+        if scope.scope_kind is AIScopeKind.TOPIC:
+            key = (scope.chat_id or 0, scope.topic_id)
+            topic_allowed = self._topic_allowlist.get(key, set())
+            if normalized_tool_name in topic_allowed:
+                return AIToolPolicyDecision(allowed=True, reason_code="allowed_scope")
+            return AIToolPolicyDecision(allowed=False, reason_code="not_in_scope_allowlist")
+
+        if scope.scope_kind is AIScopeKind.PRIVATE:
+            private_allowed = self._private_allowlist.get(scope.chat_id or 0, set())
+            if normalized_tool_name in private_allowed:
+                return AIToolPolicyDecision(allowed=True, reason_code="allowed_scope")
+            return AIToolPolicyDecision(allowed=False, reason_code="not_in_scope_allowlist")
+
+        return AIToolPolicyDecision(allowed=False, reason_code="scope_not_supported")
 
 
 _SAFE_TOKEN_PATTERN = re.compile(r"^[a-z0-9_]{1,32}$")
@@ -166,21 +273,24 @@ def build_tool_invocation_error(
 
 
 def invoke_tool_noop(
-    *, request: AIToolInvocationRequest, policy: AIToolPolicy
+    *, request: AIToolInvocationRequest, policy: AIToolPolicy, role: AIRole = AIRole.OWNER, scope: AIToolScopeContext | None = None
 ) -> AIToolInvocationResponse:
-    """No-op/fake tool invocation handler for KI-E2.
+    """No-op/fake tool invocation handler for KI-E2/KI-E3.
 
     This intentionally performs no real tool execution.
     """
 
-    if not policy.is_allowed(tool_name=request.tool_name):
+    evaluation_scope = scope or AIToolScopeContext(scope_kind=AIScopeKind.TOPIC, chat_id=None, topic_id=None)
+    decision = policy.evaluate(tool_name=request.tool_name, role=role, scope=evaluation_scope)
+
+    if not decision.allowed:
         return AIToolInvocationResponse(
             status=AIToolInvocationStatus.DENIED,
             tool_name=request.tool_name,
             call_id=request.call_id,
             result=None,
             error_code="policy_denied",
-            reason="tool_not_allowed",
+            reason=decision.reason_code,
         )
 
     return AIToolInvocationResponse(
