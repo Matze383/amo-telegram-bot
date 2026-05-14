@@ -500,3 +500,45 @@ def test_long_memory_uses_redaction_and_size_bound(tmp_path) -> None:
     assert decision.reason_code is AIRouterReasonCode.SCOPE_ENABLED
     assert "system prompt" not in decision.context.long_memory_text.casefold()
     assert len(decision.context.long_memory_text) == AIRouter._MAX_SOUL_CHARS
+
+
+class _RaisingMemoryRepo:
+    def get_config(self, **kwargs):
+        class _Cfg:
+            ai_enabled = True
+            main_soul_text = None
+            topic_soul_text = None
+
+        return _Cfg()
+
+    def get_daily_memory(self, **kwargs):
+        raise RuntimeError("daily boom")
+
+    def list_long_memories(self, **kwargs):
+        raise RuntimeError("long boom")
+
+
+def test_context_guard_fallback_handles_memory_exceptions() -> None:
+    router = AIRouter(topic_agent_memory_repository=_RaisingMemoryRepo())
+    decision = router.decide(prompt="hello @amo_bot", chat_id=123, user_id=123, bot_username="amo_bot")
+
+    assert decision.eligible is True
+    assert decision.reason_code is AIRouterReasonCode.CONTEXT_GUARD_FALLBACK
+    assert decision.context.route_reason is AIRouterReasonCode.CONTEXT_GUARD_FALLBACK
+    assert decision.context.context_error == "daily_memory_error,long_memory_error"
+    assert decision.context.daily_memory_text == ""
+    assert decision.context.long_memory_text == ""
+
+
+def test_context_guard_fallback_redacts_sensitive_exception_payloads() -> None:
+    class _PartialRaisingRepo(_RaisingMemoryRepo):
+        def get_daily_memory(self, **kwargs):
+            raise RuntimeError("token=abc123 password=hunter2")
+
+    router = AIRouter(topic_agent_memory_repository=_PartialRaisingRepo())
+    decision = router.decide(prompt="hello", chat_id=456, user_id=456)
+
+    assert decision.reason_code is AIRouterReasonCode.CONTEXT_GUARD_FALLBACK
+    assert decision.context.context_error == "daily_memory_error,long_memory_error"
+    assert "abc123" not in str(decision.context)
+    assert "hunter2" not in str(decision.context)
