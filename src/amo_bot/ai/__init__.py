@@ -59,6 +59,11 @@ from .api_capability_registry import (
     APIServiceSecretRef,
     build_default_api_capability_registry,
 )
+from .api_coreplugin_cp_e2 import (
+    APICorepluginExecutionInput,
+    APICorepluginExecutionResult,
+    execute_api_request_mvp,
+)
 
 __all__ = [
     "AIRole",
@@ -82,6 +87,8 @@ __all__ = [
     "APIPayloadValidationResult",
     "APIServiceDescriptor",
     "APIServiceSecretRef",
+    "APICorepluginExecutionInput",
+    "APICorepluginExecutionResult",
     "CoreCapabilityPolicyDecision",
     "CapabilityQuotaCounterStore",
     "CapabilityQuotaDecision",
@@ -105,6 +112,7 @@ __all__ = [
     "MemoryMaintenanceService",
     "build_capability_denial",
     "build_default_api_capability_registry",
+    "execute_api_request_mvp",
     "evaluate_core_capability_policy",
     "execute_rss_noop",
     "execute_rss_fetch",
