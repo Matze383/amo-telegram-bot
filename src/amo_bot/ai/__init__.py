@@ -33,6 +33,16 @@ from .capability_quota import (
     QuotaDecisionResult,
 )
 from .memory_maintenance import MemoryMaintenanceResult, MemoryMaintenanceService
+from .memory_capability import (
+    MEMORY_CAPABILITIES,
+    MemoryCapabilityDecision,
+    MemoryCapabilityDescriptor,
+    MemoryCapabilityRequest,
+    MemoryOperation,
+    MemoryPolicyDecisionResult,
+    MemorySensitivityClass,
+    evaluate_memory_capability_policy,
+)
 from .tool_registry import (
     AIRole,
     AIScopeKind,
@@ -119,6 +129,14 @@ __all__ = [
     "AIToolScopeContext",
     "MemoryMaintenanceResult",
     "MemoryMaintenanceService",
+    "MEMORY_CAPABILITIES",
+    "MemoryCapabilityDecision",
+    "MemoryCapabilityDescriptor",
+    "MemoryCapabilityRequest",
+    "MemoryOperation",
+    "MemoryPolicyDecisionResult",
+    "MemorySensitivityClass",
+    "evaluate_memory_capability_policy",
     "build_capability_denial",
     "build_contextwindow_v1",
     "build_default_api_capability_registry",
