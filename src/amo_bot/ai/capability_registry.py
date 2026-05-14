@@ -6,11 +6,6 @@ from typing import Iterable
 
 @dataclass(frozen=True, slots=True)
 class CapabilityDescriptor:
-    """Descriptor-only metadata for a capability.
-
-    This registry is intentionally metadata-only and does not execute anything.
-    """
-
     id: str
     version: str
     risk_level: str
@@ -25,12 +20,33 @@ class CapabilityDecision:
     reason_code: str
 
 
+_DEFAULT_CAPABILITY_DESCRIPTORS: tuple[CapabilityDescriptor, ...] = (
+    CapabilityDescriptor(
+        id="ki.memory.read",
+        version="1.0.0",
+        risk_level="low",
+        actor_types=("ki",),
+        scopes=("topic", "user"),
+        default_enabled=False,
+    ),
+    CapabilityDescriptor(
+        id="ki.rss.fetch",
+        version="1.0.0",
+        risk_level="medium",
+        actor_types=("ki",),
+        scopes=("topic", "user"),
+        default_enabled=False,
+    ),
+)
+
+
 class CapabilityRegistry:
     """Deterministic in-memory capability descriptor registry (default deny)."""
 
     def __init__(self, descriptors: Iterable[CapabilityDescriptor] | None = None) -> None:
         self._by_id: dict[str, CapabilityDescriptor] = {}
-        for descriptor in descriptors or ():
+        source = _DEFAULT_CAPABILITY_DESCRIPTORS if descriptors is None else descriptors
+        for descriptor in source:
             self.register(descriptor)
 
     def register(self, descriptor: CapabilityDescriptor) -> None:

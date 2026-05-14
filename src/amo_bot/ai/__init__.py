@@ -90,9 +90,15 @@ __all__ = [
     "MemoryMaintenanceService",
     "build_capability_denial",
     "evaluate_core_capability_policy",
+    "execute_rss_noop",
+    "validate_rss_input",
+    "RSSInputValidationResult",
+    "RSSNoOpResult",
     "build_tool_invocation_error",
     "build_tool_invocation_rejection",
     "invoke_tool_noop",
     "validate_capability_call_envelope",
     "validate_tool_invocation_request",
 ]
+
+from .rss_coreplugin import RSSNoOpResult, RSSInputValidationResult, execute_rss_noop, validate_rss_input

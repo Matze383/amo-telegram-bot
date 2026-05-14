@@ -60,3 +60,27 @@ def test_registered_capabilities_are_default_deny() -> None:
     decision = registry.evaluate("ki.topic.summarize")
     assert decision.allowed is False
     assert decision.reason_code == "default_deny"
+
+
+def test_rss_descriptor_present_in_registry() -> None:
+    registry = CapabilityRegistry(
+        descriptors=[
+            CapabilityDescriptor(
+                id="ki.rss.fetch",
+                version="1.0.0",
+                risk_level="medium",
+                actor_types=("ki",),
+                scopes=("topic", "user"),
+                default_enabled=False,
+            )
+        ]
+    )
+
+    descriptor = registry.get("KI.RSS.FETCH")
+    assert descriptor is not None
+    assert descriptor.id == "ki.rss.fetch"
+    assert descriptor.default_enabled is False
+
+    decision = registry.evaluate("ki.rss.fetch")
+    assert decision.allowed is False
+    assert decision.reason_code == "default_deny"

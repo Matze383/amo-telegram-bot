@@ -35,6 +35,12 @@ _SAFE_DENY_REASONS: set[str] = {
     "scope_not_allowed",
 }
 
+_KNOWN_CAPABILITIES: set[str] = {
+    "ki.memory.read",
+    "ki.rss.fetch",
+    "plugin.status.read",
+}
+
 # Central allowlist by actor type -> capability -> permitted scope set.
 # Default deny is enforced when any mapping step is missing.
 _CORE_POLICY_ALLOWLIST: dict[CapabilityActorType, dict[str, set[CapabilityScopeType]]] = {
@@ -73,7 +79,7 @@ def _normalize_capability_name(value: str) -> str:
 
 
 def _is_known_capability(capability_name: str) -> bool:
-    return any(capability_name in actor_capabilities for actor_capabilities in _CORE_POLICY_ALLOWLIST.values())
+    return capability_name in _KNOWN_CAPABILITIES
 
 
 def _deny(reason_code: str) -> CoreCapabilityPolicyDecision:

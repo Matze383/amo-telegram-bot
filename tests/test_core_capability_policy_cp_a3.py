@@ -85,3 +85,25 @@ def test_userplugin_scope_isolation() -> None:
     )
     assert denied_scope.result == CorePolicyDecisionResult.DENY
     assert denied_scope.reason_code == "scope_not_allowed"
+
+
+def test_rss_capability_default_denied_for_ai_and_userplugin() -> None:
+    denied_ai = evaluate_core_capability_policy(
+        CoreCapabilityPolicyRequest(
+            actor_type=CapabilityActorType.AI,
+            capability_name="ki.rss.fetch",
+            scope_type=CapabilityScopeType.TOPIC,
+        )
+    )
+    assert denied_ai.result == CorePolicyDecisionResult.DENY
+    assert denied_ai.reason_code == "actor_type_not_allowed"
+
+    denied_userplugin = evaluate_core_capability_policy(
+        CoreCapabilityPolicyRequest(
+            actor_type=CapabilityActorType.USERPLUGIN,
+            capability_name="ki.rss.fetch",
+            scope_type=CapabilityScopeType.TOPIC,
+        )
+    )
+    assert denied_userplugin.result == CorePolicyDecisionResult.DENY
+    assert denied_userplugin.reason_code == "actor_type_not_allowed"
