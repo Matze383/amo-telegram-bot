@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 from sqlalchemy import create_engine, inspect
 from sqlalchemy.orm import Session
@@ -28,6 +28,70 @@ def test_init_db_is_idempotent_for_topic_agent_tables(tmp_path) -> None:
         "topic_ai_sessions",
     }
     assert expected.issubset(tables)
+
+
+def test_topic_memory_repository_daily_memory_retention_prune_boundary_and_idempotency() -> None:
+    engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
+    Base.metadata.create_all(engine)
+
+    with Session(engine, future=True) as session:
+        repo = TopicAgentMemoryRepository(session)
+
+        repo.upsert_daily_memory(
+            scope_type="topic",
+            chat_id=-100123,
+            topic_id=777,
+            memory_date="2026-04-13",
+            summary_text="older-than-30d",
+            tokens_estimate=10,
+        )
+        repo.upsert_daily_memory(
+            scope_type="topic",
+            chat_id=-100123,
+            topic_id=777,
+            memory_date="2026-04-14",
+            summary_text="exactly-30d-boundary",
+            tokens_estimate=10,
+        )
+        repo.upsert_daily_memory(
+            scope_type="topic",
+            chat_id=-100123,
+            topic_id=777,
+            memory_date="2026-04-15",
+            summary_text="inside-retention",
+            tokens_estimate=10,
+        )
+        repo.upsert_daily_memory(
+            scope_type="private_user",
+            user_id=42,
+            memory_date="2026-04-01",
+            summary_text="private-must-stay",
+            tokens_estimate=10,
+        )
+
+        deleted_first = repo.prune_daily_memories(
+            scope_type="topic",
+            chat_id=-100123,
+            topic_id=777,
+            retention_days=30,
+            today=date(2026, 5, 14),
+        )
+        assert deleted_first == 1
+
+        remaining_topic = repo.list_daily_memories(scope_type="topic", chat_id=-100123, topic_id=777, limit=10)
+        assert [row.memory_date for row in remaining_topic] == ["2026-04-15", "2026-04-14"]
+
+        private_row = repo.get_daily_memory(scope_type="private_user", user_id=42, memory_date="2026-04-01")
+        assert private_row is not None
+
+        deleted_second = repo.prune_daily_memories(
+            scope_type="topic",
+            chat_id=-100123,
+            topic_id=777,
+            retention_days=30,
+            today=date(2026, 5, 14),
+        )
+        assert deleted_second == 0
 
 
 def test_topic_memory_repository_config_daily_long_and_session_scopes() -> None:

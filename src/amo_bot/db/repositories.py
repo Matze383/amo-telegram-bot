@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from collections.abc import Iterable
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, date, datetime, timedelta, timezone
 from typing import TYPE_CHECKING
 
 from sqlalchemy import select
@@ -1268,6 +1268,39 @@ class TopicAgentMemoryRepository:
             .limit(safe_limit)
         ).all()
         return [self._to_daily_record(row) for row in rows]
+
+    def prune_daily_memories(
+        self,
+        *,
+        scope_type: str,
+        chat_id: int | None = None,
+        topic_id: int | None = None,
+        user_id: int | None = None,
+        retention_days: int = 30,
+        today: date | None = None,
+    ) -> int:
+        effective_retention = max(1, retention_days)
+        current_day = today or datetime.now(UTC).date()
+        cutoff_date = (current_day - timedelta(days=effective_retention)).isoformat()
+
+        rows = self._session.scalars(
+            select(TopicDailyMemory).where(
+                TopicDailyMemory.scope_type == scope_type,
+                TopicDailyMemory.chat_id == chat_id,
+                TopicDailyMemory.topic_id == topic_id,
+                TopicDailyMemory.user_id == user_id,
+                TopicDailyMemory.memory_date < cutoff_date,
+            )
+        ).all()
+
+        if not rows:
+            return 0
+
+        deleted = len(rows)
+        for row in rows:
+            self._session.delete(row)
+        self._session.commit()
+        return deleted
 
     def create_long_memory(
         self,
