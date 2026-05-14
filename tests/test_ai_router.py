@@ -1,6 +1,4 @@
-from sqlalchemy.orm import Session
-
-from amo_bot.ai.router import AIRouter, AIRouterDecision, AIRouterReasonCode
+from amo_bot.ai.router import AIRouter, AIRouterContextV1, AIRouterDecision, AIRouterReasonCode
 from amo_bot.db.base import create_session_factory
 from amo_bot.db.init_db import init_db
 from amo_bot.db.repositories import TopicAgentMemoryRepository
@@ -19,6 +17,10 @@ def test_default_decision_is_passthrough_noop() -> None:
         passthrough=True,
         eligible=False,
         reason_code=AIRouterReasonCode.DEFAULT_NOOP,
+        context=AIRouterContextV1(
+            message_text="hello",
+            route_reason=AIRouterReasonCode.DEFAULT_NOOP,
+        ),
     )
 
 
@@ -26,7 +28,9 @@ def test_default_decision_is_deterministic() -> None:
     router = AIRouter()
     first = router.decide(prompt="one")
     second = router.decide(prompt="two")
-    assert first == second
+    assert first.passthrough == second.passthrough
+    assert first.eligible == second.eligible
+    assert first.reason_code is second.reason_code
 
 
 def test_every_decision_has_exactly_one_reason_code() -> None:
@@ -172,3 +176,65 @@ def test_bot_username_parsing_edge_cases(tmp_path) -> None:
         bot_username="   ",
     )
     assert empty_username.reason_code is AIRouterReasonCode.SCOPE_ENABLED
+
+def test_context_dto_v1_defaults_without_repo() -> None:
+    decision = AIRouter().decide(prompt="hello")
+
+    assert decision.context == AIRouterContextV1(
+        scope_type="none",
+        scope_chat_id=None,
+        scope_topic_id=None,
+        scope_user_id=None,
+        user_id=None,
+        message_text="hello",
+        route_reason=AIRouterReasonCode.DEFAULT_NOOP,
+        flag_ai_scope_active=False,
+        flag_bot_mention=False,
+        flag_reply_to_bot=False,
+    )
+
+
+def test_context_dto_v1_scope_and_flags_for_active_mention(tmp_path) -> None:
+    repo = _mk_repo(tmp_path)
+    repo.upsert_config(scope_type="topic", chat_id=-1234, topic_id=9, user_id=None, ai_enabled=True)
+
+    router = AIRouter(topic_agent_memory_repository=repo)
+    decision = router.decide(
+            prompt="  hi @AmoBot  ",
+            chat_id=-1234,
+            topic_id=9,
+            user_id=777,
+            bot_username="@amobot",
+            reply_to_is_bot=True,
+        )
+
+    assert decision.context.scope_type == "topic"
+    assert decision.context.scope_chat_id == -1234
+    assert decision.context.scope_topic_id == 9
+    assert decision.context.scope_user_id is None
+    assert decision.context.user_id == 777
+    assert decision.context.message_text == "hi @AmoBot"
+    assert decision.context.route_reason is AIRouterReasonCode.MENTION_IN_ACTIVE_SCOPE
+    assert decision.context.flag_ai_scope_active is True
+    assert decision.context.flag_bot_mention is True
+    assert decision.context.flag_reply_to_bot is True
+
+
+def test_context_dto_v1_private_scope_defaults_for_missing_metadata(tmp_path) -> None:
+    repo = _mk_repo(tmp_path)
+    repo.upsert_config(scope_type="private_user", chat_id=None, topic_id=None, user_id=404, ai_enabled=True)
+
+    router = AIRouter(topic_agent_memory_repository=repo)
+    decision = router.decide(prompt="   ", chat_id=404, user_id=None, bot_username=None)
+
+    assert decision.context.scope_type == "private_user"
+    assert decision.context.scope_chat_id is None
+    assert decision.context.scope_topic_id is None
+    assert decision.context.scope_user_id == 404
+    assert decision.context.user_id is None
+    assert decision.context.message_text == ""
+    assert decision.context.route_reason is AIRouterReasonCode.SCOPE_ENABLED
+    assert decision.context.flag_ai_scope_active is True
+    assert decision.context.flag_bot_mention is False
+    assert decision.context.flag_reply_to_bot is False
+

@@ -16,12 +16,29 @@ class AIRouterReasonCode(StrEnum):
 
 
 @dataclass(frozen=True, slots=True)
+class AIRouterContextV1:
+    """Minimal deterministic context object for router decisions."""
+
+    scope_type: str = "none"
+    scope_chat_id: int | None = None
+    scope_topic_id: int | None = None
+    scope_user_id: int | None = None
+    user_id: int | None = None
+    message_text: str = ""
+    route_reason: AIRouterReasonCode = AIRouterReasonCode.DEFAULT_NOOP
+    flag_ai_scope_active: bool = False
+    flag_bot_mention: bool = False
+    flag_reply_to_bot: bool = False
+
+
+@dataclass(frozen=True, slots=True)
 class AIRouterDecision:
     """Deterministic KI-B routing decision metadata."""
 
     passthrough: bool = True
     eligible: bool = False
     reason_code: AIRouterReasonCode = AIRouterReasonCode.DEFAULT_NOOP
+    context: AIRouterContextV1 = AIRouterContextV1()
 
 
 class AIRouter:
@@ -43,13 +60,24 @@ class AIRouter:
     ) -> AIRouterDecision:
         _ = chat_type
 
+        safe_prompt = prompt.strip()
+        scope = self._resolve_scope(chat_id=chat_id, topic_id=topic_id, user_id=user_id)
+        base_context = self._build_context(
+            scope=scope,
+            user_id=user_id,
+            message_text=safe_prompt,
+            route_reason=AIRouterReasonCode.DEFAULT_NOOP,
+            flag_ai_scope_active=False,
+            flag_bot_mention=False,
+            flag_reply_to_bot=reply_to_is_bot,
+        )
+
         repo = self._topic_agent_memory_repository
         if repo is None:
-            return AIRouterDecision()
+            return AIRouterDecision(context=base_context)
 
-        scope = self._resolve_scope(chat_id=chat_id, topic_id=topic_id, user_id=user_id)
         if scope is None:
-            return AIRouterDecision()
+            return AIRouterDecision(context=base_context)
 
         config = repo.get_config(
             scope_type=scope["scope_type"],
@@ -58,23 +86,91 @@ class AIRouter:
             user_id=scope["user_id"],
         )
         if config is None or not config.ai_enabled:
-            return AIRouterDecision()
+            return AIRouterDecision(context=base_context)
 
-        if self._has_bot_mention(prompt=prompt, bot_username=bot_username):
+        if self._has_bot_mention(prompt=safe_prompt, bot_username=bot_username):
+            reason_code = AIRouterReasonCode.MENTION_IN_ACTIVE_SCOPE
             return AIRouterDecision(
                 passthrough=True,
                 eligible=True,
-                reason_code=AIRouterReasonCode.MENTION_IN_ACTIVE_SCOPE,
+                reason_code=reason_code,
+                context=self._build_context(
+                    scope=scope,
+                    user_id=user_id,
+                    message_text=safe_prompt,
+                    route_reason=reason_code,
+                    flag_ai_scope_active=True,
+                    flag_bot_mention=True,
+                    flag_reply_to_bot=reply_to_is_bot,
+                ),
             )
 
         if reply_to_is_bot:
+            reason_code = AIRouterReasonCode.REPLY_TO_BOT_IN_ACTIVE_SCOPE
             return AIRouterDecision(
                 passthrough=True,
                 eligible=True,
-                reason_code=AIRouterReasonCode.REPLY_TO_BOT_IN_ACTIVE_SCOPE,
+                reason_code=reason_code,
+                context=self._build_context(
+                    scope=scope,
+                    user_id=user_id,
+                    message_text=safe_prompt,
+                    route_reason=reason_code,
+                    flag_ai_scope_active=True,
+                    flag_bot_mention=False,
+                    flag_reply_to_bot=True,
+                ),
             )
 
-        return AIRouterDecision(passthrough=True, eligible=True, reason_code=AIRouterReasonCode.SCOPE_ENABLED)
+        reason_code = AIRouterReasonCode.SCOPE_ENABLED
+        return AIRouterDecision(
+            passthrough=True,
+            eligible=True,
+            reason_code=reason_code,
+            context=self._build_context(
+                scope=scope,
+                user_id=user_id,
+                message_text=safe_prompt,
+                route_reason=reason_code,
+                flag_ai_scope_active=True,
+                flag_bot_mention=False,
+                flag_reply_to_bot=reply_to_is_bot,
+            ),
+        )
+
+    @staticmethod
+    def _build_context(
+        *,
+        scope: dict[str, int | str | None] | None,
+        user_id: int | None,
+        message_text: str,
+        route_reason: AIRouterReasonCode,
+        flag_ai_scope_active: bool,
+        flag_bot_mention: bool,
+        flag_reply_to_bot: bool,
+    ) -> AIRouterContextV1:
+        if scope is None:
+            return AIRouterContextV1(
+                user_id=user_id,
+                message_text=message_text,
+                route_reason=route_reason,
+                flag_ai_scope_active=flag_ai_scope_active,
+                flag_bot_mention=flag_bot_mention,
+                flag_reply_to_bot=flag_reply_to_bot,
+            )
+
+        return AIRouterContextV1(
+            scope_type=str(scope["scope_type"]),
+            scope_chat_id=scope["chat_id"] if isinstance(scope["chat_id"], int) else None,
+            scope_topic_id=scope["topic_id"] if isinstance(scope["topic_id"], int) else None,
+            scope_user_id=scope["user_id"] if isinstance(scope["user_id"], int) else None,
+            user_id=user_id,
+            message_text=message_text,
+            route_reason=route_reason,
+            flag_ai_scope_active=flag_ai_scope_active,
+            flag_bot_mention=flag_bot_mention,
+            flag_reply_to_bot=flag_reply_to_bot,
+        )
 
     @staticmethod
     def _resolve_scope(
@@ -114,4 +210,4 @@ class AIRouter:
         return False
 
 
-__all__ = ["AIRouter", "AIRouterDecision", "AIRouterReasonCode"]
+__all__ = ["AIRouter", "AIRouterContextV1", "AIRouterDecision", "AIRouterReasonCode"]
