@@ -1,3 +1,11 @@
+from .capability_audit import (
+    CapabilityAuditEvent,
+    CapabilityAuditEventStatus,
+    CapabilityAuditRecorder,
+    CapabilityAuditTrail,
+    CapabilityExecutionResult,
+    InMemoryCapabilityAuditSink,
+)
 from .capability_policy import (
     CapabilityActor,
     CapabilityActorType,
@@ -38,6 +46,11 @@ from .tool_registry import (
 __all__ = [
     "AIRole",
     "CapabilityActor",
+    "CapabilityAuditEvent",
+    "CapabilityAuditEventStatus",
+    "CapabilityAuditRecorder",
+    "CapabilityAuditTrail",
+    "CapabilityExecutionResult",
     "CapabilityActorType",
     "CapabilityCallEnvelope",
     "CapabilityDecisionResult",
@@ -47,6 +60,7 @@ __all__ = [
     "CapabilityScopeType",
     "AIScopeKind",
     "CoreCapabilityPolicyDecision",
+    "InMemoryCapabilityAuditSink",
     "CoreCapabilityPolicyRequest",
     "CorePolicyDecisionResult",
     "AIToolCapability",

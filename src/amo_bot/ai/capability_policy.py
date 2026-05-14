@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 
+from .capability_audit import CapabilityAuditRecorder, CapabilityAuditTrail
+
 _MAX_ID_LENGTH = 128
 _MAX_VERSION_LENGTH = 32
 _MAX_REQUEST_ID_LENGTH = 128
@@ -110,30 +112,98 @@ def validate_capability_call_envelope(
     expected_capability_name: str,
     expected_capability_version: str,
     policy_result_hint: CapabilityDecisionResult | str | None = None,
+    audit_recorder: CapabilityAuditRecorder | None = None,
 ) -> CapabilityPolicyDecision:
     expected_name = _normalize_identifier(expected_capability_name)
     expected_version = expected_capability_version.strip()
+    audit = CapabilityAuditTrail(recorder=audit_recorder)
+    audit.record_requested(
+        request_id=envelope.request_id,
+        capability_name=envelope.capability_name,
+        capability_version=envelope.capability_version,
+        actor_type=envelope.actor.actor_type.value,
+        scope_type=envelope.scope.scope_type.value,
+        input_summary_count=len(envelope.input_summary),
+        input_summary_approx_bytes=sum(item.approx_size for item in envelope.input_summary),
+        risk_flags_count=len(envelope.risk_flags),
+    )
 
     if not expected_name:
-        return build_capability_denial("invalid_expected_capability")
+        decision = build_capability_denial("invalid_expected_capability")
+        audit.record_decision(
+            request_id=envelope.request_id,
+            capability_name=envelope.capability_name,
+            capability_version=envelope.capability_version,
+            decision_result=decision.result.value,
+            reason_code=decision.reason_code,
+        )
+        return decision
     if not expected_version:
-        return build_capability_denial("invalid_expected_version")
+        decision = build_capability_denial("invalid_expected_version")
+        audit.record_decision(
+            request_id=envelope.request_id,
+            capability_name=envelope.capability_name,
+            capability_version=envelope.capability_version,
+            decision_result=decision.result.value,
+            reason_code=decision.reason_code,
+        )
+        return decision
 
     if _normalize_identifier(envelope.capability_name) != expected_name:
-        return build_capability_denial("unknown_capability")
+        decision = build_capability_denial("unknown_capability")
+        audit.record_decision(
+            request_id=envelope.request_id,
+            capability_name=envelope.capability_name,
+            capability_version=envelope.capability_version,
+            decision_result=decision.result.value,
+            reason_code=decision.reason_code,
+        )
+        return decision
     if envelope.capability_version.strip() != expected_version:
-        return build_capability_denial("capability_version_mismatch")
+        decision = build_capability_denial("capability_version_mismatch")
+        audit.record_decision(
+            request_id=envelope.request_id,
+            capability_name=envelope.capability_name,
+            capability_version=envelope.capability_version,
+            decision_result=decision.result.value,
+            reason_code=decision.reason_code,
+        )
+        return decision
 
     decision_result = _parse_policy_result_hint(policy_result_hint)
     if decision_result is CapabilityDecisionResult.ALLOW:
-        return CapabilityPolicyDecision(result=CapabilityDecisionResult.ALLOW, reason_code="policy_allow")
+        decision = CapabilityPolicyDecision(result=CapabilityDecisionResult.ALLOW, reason_code="policy_allow")
+        audit.record_decision(
+            request_id=envelope.request_id,
+            capability_name=envelope.capability_name,
+            capability_version=envelope.capability_version,
+            decision_result=decision.result.value,
+            reason_code=decision.reason_code,
+        )
+        return decision
     if decision_result is CapabilityDecisionResult.ALLOW_WITH_REDACTION:
-        return CapabilityPolicyDecision(
+        decision = CapabilityPolicyDecision(
             result=CapabilityDecisionResult.ALLOW_WITH_REDACTION,
             reason_code="policy_allow_with_redaction",
         )
+        audit.record_decision(
+            request_id=envelope.request_id,
+            capability_name=envelope.capability_name,
+            capability_version=envelope.capability_version,
+            decision_result=decision.result.value,
+            reason_code=decision.reason_code,
+        )
+        return decision
 
-    return build_capability_denial("default_deny")
+    decision = build_capability_denial("default_deny")
+    audit.record_decision(
+        request_id=envelope.request_id,
+        capability_name=envelope.capability_name,
+        capability_version=envelope.capability_version,
+        decision_result=decision.result.value,
+        reason_code=decision.reason_code,
+    )
+    return decision
 
 
 def _ensure_non_empty_bounded_str(value: str, field_name: str, max_length: int) -> None:
