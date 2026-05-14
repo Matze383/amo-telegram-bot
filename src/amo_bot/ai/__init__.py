@@ -10,6 +10,12 @@ from .capability_policy import (
     build_capability_denial,
     validate_capability_call_envelope,
 )
+from .core_capability_policy import (
+    CoreCapabilityPolicyDecision,
+    CoreCapabilityPolicyRequest,
+    CorePolicyDecisionResult,
+    evaluate_core_capability_policy,
+)
 from .memory_maintenance import MemoryMaintenanceResult, MemoryMaintenanceService
 from .tool_registry import (
     AIRole,
@@ -40,6 +46,9 @@ __all__ = [
     "CapabilityScope",
     "CapabilityScopeType",
     "AIScopeKind",
+    "CoreCapabilityPolicyDecision",
+    "CoreCapabilityPolicyRequest",
+    "CorePolicyDecisionResult",
     "AIToolCapability",
     "AIToolDescriptor",
     "AIToolInvocationRequest",
@@ -52,6 +61,7 @@ __all__ = [
     "MemoryMaintenanceResult",
     "MemoryMaintenanceService",
     "build_capability_denial",
+    "evaluate_core_capability_policy",
     "build_tool_invocation_error",
     "build_tool_invocation_rejection",
     "invoke_tool_noop",
