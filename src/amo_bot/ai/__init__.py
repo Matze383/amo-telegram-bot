@@ -50,6 +50,15 @@ from .tool_registry import (
     invoke_tool_noop,
     validate_tool_invocation_request,
 )
+from .api_capability_registry import (
+    APICapabilityRegistry,
+    APIEndpointDescriptor,
+    APIEndpointLookupResult,
+    APIPayloadValidationResult,
+    APIServiceDescriptor,
+    APIServiceSecretRef,
+    build_default_api_capability_registry,
+)
 
 __all__ = [
     "AIRole",
@@ -67,6 +76,12 @@ __all__ = [
     "CapabilityScope",
     "CapabilityScopeType",
     "AIScopeKind",
+    "APICapabilityRegistry",
+    "APIEndpointDescriptor",
+    "APIEndpointLookupResult",
+    "APIPayloadValidationResult",
+    "APIServiceDescriptor",
+    "APIServiceSecretRef",
     "CoreCapabilityPolicyDecision",
     "CapabilityQuotaCounterStore",
     "CapabilityQuotaDecision",
@@ -89,6 +104,7 @@ __all__ = [
     "MemoryMaintenanceResult",
     "MemoryMaintenanceService",
     "build_capability_denial",
+    "build_default_api_capability_registry",
     "evaluate_core_capability_policy",
     "execute_rss_noop",
     "execute_rss_fetch",
