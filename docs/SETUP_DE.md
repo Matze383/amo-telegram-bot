@@ -260,7 +260,30 @@ Das WebUI-Dashboard zeigt den aktuellen KI-Topic-Agent-Konfigurationsstatus an:
 - **AI-Status:** Zeigt `active` oder `inactive` — ob AI-Auto-Antwort für diesen Scope aktiviert ist
 - **Response Mode:** Aktueller Antwortmodus (z.B. `command` für nur explizite Kommandos, oder andere konfigurierte Modi)
 
-Dies ist eine **read-only** Ansicht. Das Bearbeiten der Topic-Agent-Konfiguration über die WebUI erfordert zukünftige Implementierung (KI-F2).
+Dies ist eine **read-only** Ansicht. Das Bearbeiten von AI-Status und Response Mode über die WebUI erfordert zukünftige Implementierung.
+
+---
+
+## WebUI: Topic Soul Editor (nur Owner)
+
+Die WebUI Groups-Seite ermöglicht dem Owner das Bearbeiten von Topic-spezifischem **Soul-Text**:
+
+- **Ort:** Groups → Topics-Tabelle → "Topic Soul"-Spalte
+- **Bearbeitbare Felder:**
+  - Display Name (optional)
+  - Notes (optional)
+  - Topic Soul Text (optional, max 4000 Zeichen)
+  - Enabled-Checkbox
+- **Sicherheit:**
+  - Nur der konfigurierte `WEBUI_OWNER_TELEGRAM_ID` kann bearbeiten
+  - Erfordert Login + CSRF-Token
+  - Eingabe ist HTML-escaped und längen-begrenzt
+- **Verhalten:**
+  - Änderungen wirken sofort (kein Neustart erforderlich)
+  - Leerer Topic Soul entfernt den benutzerdefinierten Soul-Text
+  - Wird inline in der Topics-Tabelle mit Live-Vorschau angezeigt
+
+**Hinweis:** Nicht-Owner können den Topic Soul ansehen, aber nicht bearbeiten. Der Speichern-Button ist deaktiviert, wenn `WEBUI_OWNER_TELEGRAM_ID` nicht konfiguriert ist.
 
 ---
 

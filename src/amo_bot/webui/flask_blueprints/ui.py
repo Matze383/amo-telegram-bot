@@ -7,7 +7,7 @@ from flask import Blueprint, abort, current_app, redirect, render_template, requ
 from sqlalchemy import select
 from flask_wtf import FlaskForm
 from wtforms import BooleanField, SelectField, StringField, TextAreaField
-from wtforms.validators import DataRequired
+from wtforms.validators import DataRequired, Length
 
 from amo_bot.auth.roles import Role
 from amo_bot.config.settings import Settings
@@ -51,8 +51,9 @@ class UserRoleForm(FlaskForm):
 
 
 class TopicMetadataForm(FlaskForm):
-    display_name = StringField("Display Name")
-    notes = TextAreaField("Notes")
+    display_name = StringField("Display Name", validators=[Length(max=255)])
+    notes = TextAreaField("Notes", validators=[Length(max=2000)])
+    topic_soul_text = TextAreaField("Topic Soul", validators=[Length(max=4000)])
     enabled = BooleanField("Enabled", default=True)
 
 
@@ -158,6 +159,7 @@ def groups_page():
     groups: list[dict[str, Any]] = []
     with session_factory() as db_session:
         repo = ChatTopicRepository(db_session)
+        memory_repo = TopicAgentMemoryRepository(db_session)
         chats = repo.list_chats()
         users = db_session.query(User).order_by(User.telegram_user_id.asc()).all()
         users_by_id = {row.telegram_user_id: row for row in users}
@@ -216,6 +218,18 @@ def groups_page():
                             "display_name": topic.display_name,
                             "notes": topic.notes,
                             "enabled": topic.enabled,
+                            "topic_soul_text": (
+                                cfg.topic_soul_text
+                                if (
+                                    cfg := memory_repo.get_config(
+                                        scope_type="topic",
+                                        chat_id=chat.chat_id,
+                                        topic_id=topic.message_thread_id,
+                                        user_id=None,
+                                    )
+                                )
+                                else None
+                            ),
                         }
                         for topic in topics
                     ],
@@ -308,10 +322,12 @@ def update_topic_metadata(chat_id: str, message_thread_id: int):
 
     display_name = (form.display_name.data or "").strip() or None
     notes = (form.notes.data or "").strip() or None
+    topic_soul_text = (form.topic_soul_text.data or "").strip() or None
 
     session_factory = current_app.extensions["amo.plugin_service"]._session_factory
     with session_factory() as db_session:
         repo = ChatTopicRepository(db_session)
+        memory_repo = TopicAgentMemoryRepository(db_session)
         try:
             repo.update_topic_metadata(
                 chat_id=parsed_chat_id,
@@ -320,6 +336,25 @@ def update_topic_metadata(chat_id: str, message_thread_id: int):
                 notes=notes,
                 enabled=bool(form.enabled.data),
                 actor_telegram_user_id=settings.webui_owner_telegram_id,
+            )
+            existing = memory_repo.get_config(
+                scope_type="topic",
+                chat_id=parsed_chat_id,
+                topic_id=message_thread_id,
+                user_id=None,
+            )
+            memory_repo.upsert_config(
+                scope_type="topic",
+                chat_id=parsed_chat_id,
+                topic_id=message_thread_id,
+                user_id=None,
+                ai_enabled=existing.ai_enabled if existing else False,
+                response_mode=existing.response_mode if existing else "command",
+                memory_retention_days=existing.memory_retention_days if existing else 30,
+                tools_enabled=existing.tools_enabled if existing else False,
+                main_soul_text=existing.main_soul_text if existing else None,
+                topic_soul_text=topic_soul_text,
+                topic_soul_owner_only_edit=existing.topic_soul_owner_only_edit if existing else True,
             )
         except ValueError:
             abort(404, description="topic not found")

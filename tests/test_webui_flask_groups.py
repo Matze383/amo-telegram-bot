@@ -130,7 +130,13 @@ def test_topic_metadata_update_with_owner_id_persists(tmp_path) -> None:
         token = _extract_csrf_token(page.get_data(as_text=True))
         response = client.post(
             "/groups/-100200/topics/88",
-            data={"display_name": "Ops", "notes": "Runbook", "enabled": "", "csrf_token": token},
+            data={
+                "display_name": "Ops",
+                "notes": "Runbook",
+                "topic_soul_text": "Topic Soul v1",
+                "enabled": "",
+                "csrf_token": token,
+            },
             follow_redirects=False,
         )
 
@@ -145,6 +151,18 @@ def test_topic_metadata_update_with_owner_id_persists(tmp_path) -> None:
         assert topic.display_name == "Ops"
         assert topic.notes == "Runbook"
         assert topic.enabled is False
+
+        from amo_bot.db.models import TopicAgentConfig
+
+        cfg = s.scalar(
+            select(TopicAgentConfig).where(
+                TopicAgentConfig.scope_type == "topic",
+                TopicAgentConfig.chat_id == -100200,
+                TopicAgentConfig.topic_id == 88,
+            )
+        )
+        assert cfg is not None
+        assert cfg.topic_soul_text == "Topic Soul v1"
 
 
 def test_topic_metadata_update_without_owner_id_blocked(tmp_path) -> None:
@@ -161,7 +179,7 @@ def test_topic_metadata_update_without_owner_id_blocked(tmp_path) -> None:
         token = _extract_csrf_token(page.get_data(as_text=True))
         response = client.post(
             "/groups/-100201/topics/89",
-            data={"display_name": "X", "notes": "Y", "enabled": "y", "csrf_token": token},
+            data={"display_name": "X", "notes": "Y", "topic_soul_text": "Denied edit", "enabled": "y", "csrf_token": token},
             follow_redirects=False,
         )
 
@@ -180,7 +198,7 @@ def test_topic_metadata_update_requires_csrf(tmp_path) -> None:
         _login(client, "test-secret")
         response = client.post(
             "/groups/-100202/topics/90",
-            data={"display_name": "X", "notes": "Y", "enabled": "y"},
+            data={"display_name": "X", "notes": "Y", "topic_soul_text": "Needs csrf", "enabled": "y"},
             follow_redirects=False,
         )
 
@@ -482,8 +500,69 @@ def test_topic_metadata_update_missing_topic_returns_404(tmp_path) -> None:
         token = _extract_csrf_token(page.get_data(as_text=True))
         response = client.post(
             "/groups/-100203/topics/999",
-            data={"display_name": "X", "notes": "Y", "enabled": "y", "csrf_token": token},
+            data={"display_name": "X", "notes": "Y", "topic_soul_text": "X", "enabled": "y", "csrf_token": token},
             follow_redirects=False,
         )
 
     assert response.status_code == 404
+
+
+def test_groups_renders_topic_soul_escaped_and_preserves_whitespace(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'groups8.db'}"
+    init_db(db_url)
+    _seed_chat_topic(db_url, -100204, 91)
+
+    soul_text = "Line1\n<script>alert(1)</script>\nLine3"
+    sf = create_session_factory(db_url)
+    with sf() as s:
+        from amo_bot.db.repositories import TopicAgentMemoryRepository
+
+        TopicAgentMemoryRepository(s).upsert_config(
+            scope_type="topic",
+            chat_id=-100204,
+            topic_id=91,
+            user_id=None,
+            topic_soul_text=soul_text,
+        )
+
+    settings = _make_settings(db_url, owner_id=777)
+    app = create_flask_app(settings=settings)
+
+    with app.test_client() as client:
+        _login(client, "test-secret")
+        response = client.get("/groups")
+        html = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    assert "Line1" in html
+    assert "Line3" in html
+    assert "&lt;script&gt;alert(1)&lt;/script&gt;" in html
+    assert "<script>alert(1)</script>" not in html
+
+
+def test_topic_metadata_topic_soul_text_max_length_validation(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'groups9.db'}"
+    init_db(db_url)
+    _seed_chat_topic(db_url, -100205, 92)
+
+    settings = _make_settings(db_url, owner_id=777)
+    app = create_flask_app(settings=settings)
+
+    too_long = "a" * 4001
+    with app.test_client() as client:
+        _login(client, "test-secret")
+        page = client.get("/groups")
+        token = _extract_csrf_token(page.get_data(as_text=True))
+        response = client.post(
+            "/groups/-100205/topics/92",
+            data={
+                "display_name": "Ops",
+                "notes": "Runbook",
+                "topic_soul_text": too_long,
+                "enabled": "y",
+                "csrf_token": token,
+            },
+            follow_redirects=False,
+        )
+
+    assert response.status_code == 400

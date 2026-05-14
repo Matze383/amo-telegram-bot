@@ -547,6 +547,66 @@ The bot automatically sends a private consent prompt to users who are in "pendin
 
 ---
 
+### WebUI: Topic Soul Editor (KI-F2)
+
+The Groups page includes a **Topic Soul Editor** for configuring topic-specific AI behavior instructions.
+
+**Prerequisites:**
+- `WEBUI_OWNER_TELEGRAM_ID` must be set in `.env`
+- At least one group with topics (supergroup with topics/threads)
+
+**Test Steps:**
+
+1. **Navigate to Groups page:**
+   - Open http://127.0.0.1:8080 and log in
+   - Go to "Groups" page
+   - Expected: Groups with topics are listed
+
+2. **View Topic Soul:**
+   - Find a group with topics in the topics table
+   - Look at the "topic_soul" column
+   - Expected: Shows current soul text or "-" if not set
+   - Note: Content is HTML-escaped (safe rendering)
+
+3. **Edit as Owner:**
+   - Locate a topic row with the edit form
+   - Enter text in "Topic Soul" textarea (max 4000 chars)
+   - Enter optional Display Name and Notes
+   - Toggle "enabled" checkbox if needed
+   - Click "Speichern" (Save)
+   - Expected: Page reloads, changes persisted
+
+4. **Verify persistence:**
+   - Reload the Groups page
+   - Expected: Edited values are displayed
+
+5. **Verify HTML escaping:**
+   - Try entering: `<script>alert(1)</script>`
+   - Save and reload
+   - Expected: Text is escaped, no alert dialog
+
+**Negative Tests:**
+
+6. **Non-owner cannot edit (if applicable):**
+   - When `WEBUI_OWNER_TELEGRAM_ID` is not set or different user
+   - Expected: Save button is disabled
+
+7. **Length validation:**
+   - Try entering >4000 characters
+   - Expected: Form validation rejects or truncates
+
+**Checklist:**
+- [ ] Groups page shows topics with Topic Soul column
+- [ ] Topic Soul textarea accepts input (max 4000 chars)
+- [ ] Display Name and Notes can be edited
+- [ ] Enabled checkbox works
+- [ ] Changes persist after reload
+- [ ] HTML content is properly escaped
+- [ ] Save button disabled when owner not configured
+- [ ] Form requires CSRF token
+
+---
+
 ### Future Features (Not Yet Implemented)
 
 The following features are planned for future releases and are **not available** in the current beta:
@@ -645,6 +705,7 @@ Use this checklist for your test:
 - [ ] WebUI plugin activate/deactivate: OK / Not tested
 - [ ] WebUI group role management: OK / Not tested
 - [ ] WebUI KI Topic-Agent Status visible on Dashboard: OK / Not tested
+- [ ] WebUI Topic Soul Editor (owner-only, in Groups): OK / Not tested
 - [ ] Security headers present (check browser dev tools): OK
 
 **Notes:**

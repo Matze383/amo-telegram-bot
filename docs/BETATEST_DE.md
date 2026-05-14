@@ -547,6 +547,66 @@ Der Bot sendet automatisch einen privaten Consent-Hinweis an Nutzer mit dem Stat
 
 ---
 
+### WebUI: Topic Soul Editor (KI-F2)
+
+Die Groups-Seite enthält einen **Topic Soul Editor** zur Konfiguration von Themen-spezifischen KI-Verhaltensanweisungen.
+
+**Voraussetzungen:**
+- `WEBUI_OWNER_TELEGRAM_ID` muss in `.env` gesetzt sein
+- Mindestens eine Gruppe mit Topics (Supergruppe mit Themen/Threads)
+
+**Test-Schritte:**
+
+1. **Zur Groups-Seite navigieren:**
+   - http://127.0.0.1:8080 öffnen und einloggen
+   - Zur Seite "Groups" gehen
+   - Erwartet: Gruppen mit Topics werden aufgelistet
+
+2. **Topic Soul ansehen:**
+   - Gruppe mit Topics in der Topics-Tabelle finden
+   - Spalte "topic_soul" ansehen
+   - Erwartet: Zeigt aktuellen Soul-Text oder "-" falls nicht gesetzt
+   - Hinweis: Inhalt ist HTML-escaped (sichere Darstellung)
+
+3. **Als Owner bearbeiten:**
+   - Topic-Zeile mit Bearbeitungsformular lokalisieren
+   - Text in "Topic Soul"-Textarea eingeben (max 4000 Zeichen)
+   - Optional Display Name und Notes eingeben
+   - "enabled"-Checkbox bei Bedarf toggeln
+   - Auf "Speichern" klicken
+   - Erwartet: Seite lädt neu, Änderungen persistiert
+
+4. **Persistenz prüfen:**
+   - Groups-Seite neu laden
+   - Erwartet: Bearbeitete Werte werden angezeigt
+
+5. **HTML-Escaping prüfen:**
+   - Eingabe versuchen: `<script>alert(1)</script>`
+   - Speichern und neu laden
+   - Erwartet: Text ist escaped, kein Alert-Dialog
+
+**Negative Tests:**
+
+6. **Nicht-Owner kann nicht bearbeiten (falls zutreffend):**
+   - Wenn `WEBUI_OWNER_TELEGRAM_ID` nicht gesetzt oder anderer User
+   - Erwartet: Speichern-Button ist deaktiviert
+
+7. **Längenvalidierung:**
+   - Versuch mit >4000 Zeichen
+   - Erwartet: Formularvalidierung lehnt ab oder kürzt
+
+**Checkliste:**
+- [ ] Groups-Seite zeigt Topics mit Topic Soul-Spalte
+- [ ] Topic Soul-Textarea akzeptiert Eingabe (max 4000 Zeichen)
+- [ ] Display Name und Notes können bearbeitet werden
+- [ ] Enabled-Checkbox funktioniert
+- [ ] Änderungen bleiben nach Reload erhalten
+- [ ] HTML-Inhalt wird korrekt escaped
+- [ ] Speichern-Button deaktiviert, wenn Owner nicht konfiguriert
+- [ ] Formular erfordert CSRF-Token
+
+---
+
 ### Zukünftige Features (Noch nicht implementiert)
 
 Folgende Features sind für zukünftige Releases geplant und im aktuellen Beta **nicht verfügbar**:
@@ -645,6 +705,7 @@ Nutze diese Checkliste für deinen Test:
 - [ ] WebUI Plugin aktivieren/deaktivieren: OK / Nicht getestet
 - [ ] WebUI Gruppenrollenverwaltung: OK / Nicht getestet
 - [ ] WebUI KI-Topic-Agent-Status auf Dashboard sichtbar: OK / Nicht getestet
+- [ ] WebUI Topic Soul Editor (nur Owner, in Groups): OK / Nicht getestet
 - [ ] Security Headers vorhanden (Browser-Dev-Tools prüfen): OK
 
 **Notizen:**
