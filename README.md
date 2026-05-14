@@ -75,3 +75,20 @@ python main.py
 License not specified yet.
 
 Lizenz noch nicht festgelegt.
+
+## Websearch Provider MVP (CP-C2)
+
+Websearch provider execution remains default-deny unless capability policy and tool policy gates explicitly allow it.
+Provider configuration is hook-based only (no secrets in code/logs/docs):
+
+- `provider_name` (example: `fake`)
+- `provider_allowlist` (must include configured provider)
+- `timeout_seconds` (positive, bounded by runtime policy)
+- `retry_count` (0..3)
+
+Security/safety expectations:
+
+- Never log provider tokens/credentials/raw private text.
+- Return only normalized safe result fields (`title`, `url`, `snippet`) with strict caps.
+- Enforce quota before provider execution.
+- Provider timeout/failure must fail closed with safe reason codes.

@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
+from typing import Protocol
 from urllib.parse import urlparse
 
 from .capability_audit import CapabilityAuditTrail
 from .capability_policy import CapabilityDecisionResult
+from .capability_quota import CapabilityQuotaRequest
+from .capability_policy import CapabilityActorType, CapabilityScopeType
 
 _MAX_QUERY_LENGTH = 256
 _MAX_LOCALE_LENGTH = 16
@@ -14,6 +18,10 @@ _MAX_URL_LENGTH = 2048
 _ALLOWED_SAFESEARCH = {"off", "moderate", "strict"}
 _DEFAULT_PROVIDER_RESULT_CAP = 3
 _MAX_PROVIDER_RESULT_CAP = 5
+_DEFAULT_PROVIDER_ALLOWLIST = frozenset({"fake"})
+_DEFAULT_TIMEOUT_SECONDS = 1.0
+_DEFAULT_RETRY_COUNT = 1
+_MAX_RETRY_COUNT = 3
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,6 +56,40 @@ class WebsearchProviderResult:
     title: str
     url: str
     snippet: str
+
+
+@dataclass(frozen=True, slots=True)
+class WebsearchProviderConfig:
+    provider_name: str = "fake"
+    provider_allowlist: frozenset[str] = _DEFAULT_PROVIDER_ALLOWLIST
+    timeout_seconds: float = _DEFAULT_TIMEOUT_SECONDS
+    retry_count: int = _DEFAULT_RETRY_COUNT
+
+    def __post_init__(self) -> None:
+        normalized_name = _normalize_provider_name(self.provider_name)
+        if not normalized_name:
+            raise ValueError("provider_name must not be empty")
+
+        normalized_allowlist = frozenset(
+            item for item in (_normalize_provider_name(name) for name in self.provider_allowlist) if item
+        )
+        if not normalized_allowlist:
+            raise ValueError("provider_allowlist must not be empty")
+
+        if self.timeout_seconds <= 0:
+            raise ValueError("timeout_seconds must be positive")
+
+        if self.retry_count < 0 or self.retry_count > _MAX_RETRY_COUNT:
+            raise ValueError("retry_count is out of range")
+
+    @property
+    def normalized_provider_name(self) -> str:
+        return _normalize_provider_name(self.provider_name)
+
+
+class WebsearchProvider(Protocol):
+    def search(self, *, query: str, locale: str, safesearch: str, max_results: int) -> tuple[WebsearchProviderResult, ...]:
+        ...
 
 
 class FakeWebsearchProvider:
@@ -112,7 +154,7 @@ def validate_websearch_input(request: WebsearchInput) -> WebsearchInputValidatio
 def execute_websearch_noop(
     *,
     request: WebsearchInput,
-    provider: FakeWebsearchProvider,
+    provider: WebsearchProvider,
     audit_trail: CapabilityAuditTrail | None = None,
 ) -> WebsearchExecutionResult:
     validation = validate_websearch_input(request)
@@ -150,7 +192,7 @@ def execute_websearch_noop(
 def execute_websearch_fake_allowed(
     *,
     request: WebsearchInput,
-    provider: FakeWebsearchProvider,
+    provider: WebsearchProvider,
     max_results: int = _DEFAULT_PROVIDER_RESULT_CAP,
     audit_trail: CapabilityAuditTrail | None = None,
 ) -> WebsearchExecutionResult:
@@ -171,11 +213,9 @@ def execute_websearch_fake_allowed(
     )
 
     safe_items: list[WebsearchResultItem] = []
-    dropped_items = 0
     for item in provider_results[:bounded_max]:
         parsed = urlparse(item.url)
         if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-            dropped_items += 1
             continue
         safe_items.append(
             WebsearchResultItem(
@@ -187,8 +227,6 @@ def execute_websearch_fake_allowed(
 
     if audit_trail is not None:
         query = request.query.strip()
-        locale = request.locale.strip().lower()
-        safesearch = request.safesearch.strip().lower()
         request_id = f"websearch_fake_q{len(query)}"[:64]
         audit_trail.record_completed(
             request_id=request_id,
@@ -203,7 +241,94 @@ def execute_websearch_fake_allowed(
     )
 
 
+def execute_websearch_provider_mvp(
+    *,
+    request: WebsearchInput,
+    provider: WebsearchProvider,
+    provider_config: WebsearchProviderConfig,
+    quota_limiter,
+    audit_trail: CapabilityAuditTrail | None = None,
+    max_results: int = _DEFAULT_PROVIDER_RESULT_CAP,
+) -> WebsearchExecutionResult:
+    validation = validate_websearch_input(request)
+    if not validation.ok:
+        return WebsearchExecutionResult(result=CapabilityDecisionResult.DENY, reason_code=validation.reason_code, results=())
+
+    normalized_provider = provider_config.normalized_provider_name
+    if normalized_provider not in provider_config.provider_allowlist:
+        return WebsearchExecutionResult(result=CapabilityDecisionResult.DENY, reason_code="provider_not_allowed", results=())
+
+    quota_decision = quota_limiter.evaluate(_build_websearch_quota_request(provider_name=normalized_provider, query=request.query))
+    if not quota_decision.allowed:
+        return WebsearchExecutionResult(result=CapabilityDecisionResult.DENY, reason_code=quota_decision.reason_code, results=())
+
+    bounded_max = min(max(max_results, 1), _MAX_PROVIDER_RESULT_CAP)
+    attempts = provider_config.retry_count + 1
+    failure_reason = "provider_error"
+    for _attempt in range(attempts):
+        started = time.monotonic()
+        try:
+            provider_results = provider.search(
+                query=request.query.strip(),
+                locale=request.locale.strip().lower(),
+                safesearch=request.safesearch.strip().lower(),
+                max_results=bounded_max,
+            )
+            if (time.monotonic() - started) > provider_config.timeout_seconds:
+                raise TimeoutError("provider timeout")
+
+            safe_items: list[WebsearchResultItem] = []
+            for item in provider_results[:bounded_max]:
+                parsed = urlparse(item.url)
+                if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+                    continue
+                safe_items.append(
+                    WebsearchResultItem(
+                        title=item.title[:_MAX_TITLE_LENGTH],
+                        url=item.url[:_MAX_URL_LENGTH],
+                        snippet=item.snippet[:_MAX_SNIPPET_LENGTH],
+                    )
+                )
+
+            if audit_trail is not None:
+                audit_trail.record_completed(
+                    request_id=f"websearch_provider_{normalized_provider}_q{len(request.query.strip())}"[:64],
+                    capability_name="ki.websearch.query",
+                    capability_version="1.0.0",
+                )
+            return WebsearchExecutionResult(result=CapabilityDecisionResult.ALLOW, reason_code="ok", results=tuple(safe_items))
+        except TimeoutError:
+            failure_reason = "provider_timeout"
+            continue
+        except Exception:
+            failure_reason = "provider_error"
+            continue
+
+    if audit_trail is not None:
+        audit_trail.record_failed(
+            request_id=f"websearch_provider_{normalized_provider}_q{len(request.query.strip())}"[:64],
+            capability_name="ki.websearch.query",
+            capability_version="1.0.0",
+            error_code=failure_reason,
+        )
+    return WebsearchExecutionResult(result=CapabilityDecisionResult.DENY, reason_code=failure_reason, results=())
+
+
 def _slug(value: str) -> str:
     cleaned = "".join(ch if ch.isalnum() else "-" for ch in value.lower().strip())
     collapsed = "-".join(part for part in cleaned.split("-") if part)
     return (collapsed or "query")[:64]
+
+
+def _normalize_provider_name(value: str) -> str:
+    return value.strip().lower() if isinstance(value, str) else ""
+
+
+def _build_websearch_quota_request(*, provider_name: str, query: str) -> CapabilityQuotaRequest:
+    return CapabilityQuotaRequest(
+        capability_name="ki.websearch.query",
+        actor_type=CapabilityActorType.AI,
+        actor_id=f"provider:{provider_name}",
+        scope_type=CapabilityScopeType.TOPIC,
+        scope_id=f"query-len:{len(query.strip())}",
+    )
