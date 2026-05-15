@@ -46,7 +46,7 @@ def test_ask_usage_for_empty_argument() -> None:
     assert ask_cmd is not None
 
     out = asyncio.run(
-        ask_cmd.handler(CommandContext(chat_id=1, user_id=1, role=Role.VIP, command_name="ask", argument="   "))
+        ask_cmd.handler(CommandContext(chat_id=1, user_id=1, role=Role.VIP, command_name="ask", argument="   ", locale="en"))
     )
     assert out == "usage: /ask <question>"
 
@@ -68,7 +68,7 @@ def test_ask_handles_service_error_cleanly() -> None:
     assert ask_cmd is not None
 
     out = asyncio.run(
-        ask_cmd.handler(CommandContext(chat_id=1, user_id=1, role=Role.OWNER, command_name="ask", argument="Hi?"))
+        ask_cmd.handler(CommandContext(chat_id=1, user_id=1, role=Role.OWNER, command_name="ask", argument="Hi?", locale="en"))
     )
     assert out == "Sorry, I cannot answer right now. Please try again later."
 
@@ -95,3 +95,70 @@ def test_ai_service_ask_passes_through_without_router_integration() -> None:
     svc = AIService(client=DummyClient())
     out = asyncio.run(svc.ask("  Hi there  "))
     assert out == "ok:Hi there"
+
+
+def test_start_and_help_locale_argument_selection() -> None:
+    reg = create_builtin_registry()
+
+    help_cmd = reg.get("help")
+    start_cmd = reg.get("start")
+    assert help_cmd is not None
+    assert start_cmd is not None
+
+    out_help_en = asyncio.run(
+        help_cmd.handler(CommandContext(chat_id=1, user_id=1, role=Role.NORMAL, command_name="help", argument="en", locale="en"))
+    )
+    assert out_help_en is not None
+    assert out_help_en.startswith("available commands:")
+    assert "/ping - Check bot health" in out_help_en
+    assert "/consent - Show consent status" in out_help_en
+
+    out_help_de = asyncio.run(
+        help_cmd.handler(CommandContext(chat_id=1, user_id=1, role=Role.NORMAL, command_name="help", argument="de", locale="de"))
+    )
+    assert out_help_de is not None
+    assert out_help_de.startswith("Verfügbare Befehle:")
+    assert "/ping - Bot-Erreichbarkeit prüfen" in out_help_de
+    assert "/consent - Consent-Status anzeigen" in out_help_de
+
+    out_start_group_en = asyncio.run(
+        start_cmd.handler(CommandContext(chat_id=-1, user_id=1, role=Role.NORMAL, command_name="start", argument="en", locale="en"))
+    )
+    assert out_start_group_en == "Consent management is not configured."
+
+
+def test_consent_group_privacy_message_is_localized() -> None:
+    reg = create_builtin_registry()
+    consent_cmd = reg.get("consent")
+    assert consent_cmd is not None
+
+    out_group_de = asyncio.run(
+        consent_cmd.handler(CommandContext(chat_id=-1, user_id=1, role=Role.NORMAL, command_name="consent", argument=None, locale="de"))
+    )
+    out_group_en = asyncio.run(
+        consent_cmd.handler(CommandContext(chat_id=-1, user_id=1, role=Role.NORMAL, command_name="consent", argument=None, locale="en"))
+    )
+
+    assert out_group_de == "Aus Datenschutzgründen nutze bitte /consent im privaten Chat mit mir."
+    assert out_group_en == "For privacy, please use /consent in a private chat with me."
+
+
+def test_ask_error_and_usage_messages_are_localized() -> None:
+    reg_fail = create_builtin_registry(ai_service=FakeAIService(fail=True))
+    ask_cmd_fail = reg_fail.get("ask")
+    assert ask_cmd_fail is not None
+
+    out_usage_de = asyncio.run(
+        ask_cmd_fail.handler(CommandContext(chat_id=1, user_id=1, role=Role.ADMIN, command_name="ask", argument="   ", locale="de"))
+    )
+    assert out_usage_de == "Nutzung: /ask <frage>"
+
+    out_error_de = asyncio.run(
+        ask_cmd_fail.handler(CommandContext(chat_id=1, user_id=1, role=Role.ADMIN, command_name="ask", argument="Hi?", locale="de"))
+    )
+    assert out_error_de == "Sorry, ich kann gerade nicht antworten. Bitte versuche es später erneut."
+
+    out_error_en = asyncio.run(
+        ask_cmd_fail.handler(CommandContext(chat_id=1, user_id=1, role=Role.ADMIN, command_name="ask", argument="Hi?", locale="en"))
+    )
+    assert out_error_en == "Sorry, I cannot answer right now. Please try again later."

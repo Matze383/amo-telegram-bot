@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 import json
 import logging
-from typing import Awaitable, Callable
+from typing import Awaitable, Callable, Literal
 
 
 from amo_bot.ai.service import AIService, OllamaError
@@ -26,6 +26,7 @@ class CommandContext:
     role: Role
     command_name: str
     argument: str | None
+    locale: Locale = "de"
 
     @property
     def chat_type(self) -> str:
@@ -41,9 +42,32 @@ class Command:
     description: str
     allowed_roles: set[Role]
     handler: CommandHandler
+    description_de: str | None = None
+    description_en: str | None = None
 
 
 logger = logging.getLogger(__name__)
+
+
+Locale = Literal["de", "en"]
+
+
+def resolve_locale(*, explicit_arg: str | None, telegram_language_code: str | None = None) -> Locale:
+    if explicit_arg:
+        normalized = explicit_arg.strip().casefold()
+        if normalized in {"de", "de-de", "deutsch", "german"}:
+            return "de"
+        if normalized in {"en", "en-us", "en-gb", "english"}:
+            return "en"
+
+    if telegram_language_code:
+        language = telegram_language_code.strip().casefold()
+        if language.startswith("de"):
+            return "de"
+        if language.startswith("en"):
+            return "en"
+
+    return "de"
 
 
 class CommandRegistry:
@@ -59,6 +83,8 @@ class CommandRegistry:
             description=command.description,
             allowed_roles=set(command.allowed_roles),
             handler=command.handler,
+            description_de=command.description_de,
+            description_en=command.description_en,
         )
 
     def get(self, name: str) -> Command | None:
@@ -104,13 +130,16 @@ def create_builtin_registry(
     session_factory = create_session_factory(database_url) if database_url else None
 
     async def ping_handler(ctx: CommandContext) -> str:
-        return "pong"
+        return _lang(ctx, "pong", "pong")
+
+    def _lang(ctx: CommandContext, de: str, en: str) -> str:
+        return de if ctx.locale == "de" else en
 
     async def start_handler(ctx: CommandContext) -> dict[str, object] | str:
         if session_factory is None:
-            return "consent management not configured"
+            return _lang(ctx, "Consent-Verwaltung ist nicht konfiguriert.", "Consent management is not configured.")
         if ctx.chat_type != "private":
-            return "Bitte öffne die Policy privat über den Button."
+            return _lang(ctx, "Bitte öffne die Policy privat über den Button.", "Please open the policy in a private chat via the button.")
 
         with session_factory() as session:
             user = session.query(User).filter(User.telegram_user_id == ctx.user_id).one_or_none()
@@ -136,10 +165,10 @@ def create_builtin_registry(
             }
 
         if status == CONSENT_ACCEPTED:
-            return "Consent ist bereits akzeptiert. ✅"
+            return _lang(ctx, "Consent ist bereits akzeptiert. ✅", "Consent has already been accepted. ✅")
 
         if status == CONSENT_DECLINED:
-            return "Consent ist aktuell abgelehnt. Du kannst mit /accept wieder zustimmen."
+            return _lang(ctx, "Consent ist aktuell abgelehnt. Du kannst mit /accept wieder zustimmen.", "Consent is currently declined. You can agree again with /accept.")
 
         return {
             "text": ConsentPromptService.build_prompt_text(),
@@ -236,7 +265,7 @@ def create_builtin_registry(
 
     async def accept_handler(ctx: CommandContext) -> str:
         if session_factory is None:
-            return "consent management not configured"
+            return _lang(ctx, "Consent-Verwaltung ist nicht konfiguriert.", "Consent management is not configured.")
         with session_factory() as session:
             user = session.query(User).filter(User.telegram_user_id == ctx.user_id).one_or_none()
             if user is None:
@@ -249,7 +278,7 @@ def create_builtin_registry(
 
     async def decline_handler(ctx: CommandContext) -> str:
         if session_factory is None:
-            return "consent management not configured"
+            return _lang(ctx, "Consent-Verwaltung ist nicht konfiguriert.", "Consent management is not configured.")
         with session_factory() as session:
             user = session.query(User).filter(User.telegram_user_id == ctx.user_id).one_or_none()
             if user is None:
@@ -262,9 +291,9 @@ def create_builtin_registry(
 
     async def consent_handler(ctx: CommandContext) -> str:
         if ctx.chat_type != "private":
-            return "for privacy, please use /consent in a private chat with me."
+            return _lang(ctx, "Aus Datenschutzgründen nutze bitte /consent im privaten Chat mit mir.", "For privacy, please use /consent in a private chat with me.")
         if session_factory is None:
-            return "consent management not configured"
+            return _lang(ctx, "Consent-Verwaltung ist nicht konfiguriert.", "Consent management is not configured.")
         with session_factory() as session:
             user = session.query(User).filter(User.telegram_user_id == ctx.user_id).one_or_none()
             if user is None:
@@ -285,18 +314,18 @@ def create_builtin_registry(
 
     async def ask_handler(ctx: CommandContext) -> str:
         if not ctx.argument or not ctx.argument.strip():
-            return "usage: /ask <question>"
+            return _lang(ctx, "Nutzung: /ask <frage>", "usage: /ask <question>")
         if ai_service is None:
-            return "AI service is not configured"
+            return _lang(ctx, "AI-Service ist nicht konfiguriert.", "AI service is not configured")
 
         try:
             return await ai_service.ask(ctx.argument)
         except OllamaError:
             logger.exception("/ask failed: ollama runtime error user_id=%s chat_id=%s", ctx.user_id, ctx.chat_id)
-            return "Sorry, I cannot answer right now. Please try again later."
+            return _lang(ctx, "Sorry, ich kann gerade nicht antworten. Bitte versuche es später erneut.", "Sorry, I cannot answer right now. Please try again later.")
         except ValueError:
             logger.exception("/ask failed: invalid prompt user_id=%s chat_id=%s", ctx.user_id, ctx.chat_id)
-            return "Sorry, I cannot answer right now. Please try again later."
+            return _lang(ctx, "Sorry, ich kann gerade nicht antworten. Bitte versuche es später erneut.", "Sorry, I cannot answer right now. Please try again later.")
 
     async def webui_handler(ctx: CommandContext) -> str:
         if session_factory is None:
@@ -424,35 +453,40 @@ def create_builtin_registry(
         }
         if ctx.chat_type != "private":
             payload["target_user_id"] = ctx.user_id
-            payload["group_success_text"] = "Ich habe dir den Button-Test privat geschickt."
-            payload["group_fallback_text"] = "Ich kann dir aktuell keine private Nachricht senden. Bitte starte den Bot zuerst privat mit /start."
+            payload["group_success_text"] = _lang(ctx, "Ich habe dir den Button-Test privat geschickt.", "I sent you the button test in private.")
+            payload["group_fallback_text"] = _lang(ctx, "Ich kann dir aktuell keine private Nachricht senden. Bitte starte den Bot zuerst privat mit /start.", "I can't send you a private message right now. Please start the bot in private first with /start.")
         return payload
 
     async def help_handler(ctx: CommandContext) -> str:
         allowed = registry.list_allowed(ctx.role)
         if not allowed:
-            return "no commands available"
-        lines = ["available commands:"]
+            return _lang(ctx, "Keine Befehle verfügbar.", "no commands available")
+        lines = [_lang(ctx, "Verfügbare Befehle:", "available commands:")]
         for cmd in allowed:
-            lines.append(f"/{cmd.name} - {cmd.description}")
+            description = cmd.description_de if ctx.locale == "de" else cmd.description_en
+            if not description:
+                description = cmd.description
+            lines.append(f"/{cmd.name} - {description}")
         return "\n".join(lines)
 
     normal_plus = {Role.OWNER, Role.ADMIN, Role.VIP, Role.NORMAL}
     ask_roles = {Role.OWNER, Role.ADMIN, Role.VIP}
     admin_plus = {Role.OWNER, Role.ADMIN}
 
-    registry.register(Command(name="ping", description="Health check", allowed_roles=normal_plus, handler=ping_handler))
-    registry.register(Command(name="help", description="List available commands", allowed_roles=normal_plus, handler=help_handler))
-    registry.register(Command(name="role", description="Show your current role", allowed_roles=normal_plus, handler=role_handler))
-    registry.register(Command(name="start", description="Start consent flow in private chat", allowed_roles=normal_plus, handler=start_handler))
-    registry.register(Command(name="accept", description="Accept consent", allowed_roles=normal_plus, handler=accept_handler))
-    registry.register(Command(name="decline", description="Decline consent", allowed_roles=normal_plus, handler=decline_handler))
-    registry.register(Command(name="consent", description="Show consent status", allowed_roles=normal_plus, handler=consent_handler))
-    registry.register(Command(name="ask", description="Ask Ollama: /ask <question>", allowed_roles=ask_roles, handler=ask_handler))
+    registry.register(Command(name="ping", description="Health check", description_de="Bot-Erreichbarkeit prüfen", description_en="Check bot health", allowed_roles=normal_plus, handler=ping_handler))
+    registry.register(Command(name="help", description="List available commands", description_de="Verfügbare Befehle anzeigen", description_en="List available commands", allowed_roles=normal_plus, handler=help_handler))
+    registry.register(Command(name="role", description="Show your current role", description_de="Deine aktuelle Rolle anzeigen", description_en="Show your current role", allowed_roles=normal_plus, handler=role_handler))
+    registry.register(Command(name="start", description="Start consent flow in private chat", description_de="Consent-Flow im privaten Chat starten", description_en="Start consent flow in private chat", allowed_roles=normal_plus, handler=start_handler))
+    registry.register(Command(name="accept", description="Accept consent", description_de="Consent akzeptieren", description_en="Accept consent", allowed_roles=normal_plus, handler=accept_handler))
+    registry.register(Command(name="decline", description="Decline consent", description_de="Consent ablehnen", description_en="Decline consent", allowed_roles=normal_plus, handler=decline_handler))
+    registry.register(Command(name="consent", description="Show consent status", description_de="Consent-Status anzeigen", description_en="Show consent status", allowed_roles=normal_plus, handler=consent_handler))
+    registry.register(Command(name="ask", description="Ask Ollama: /ask <question>", description_de="Ollama fragen: /ask <frage>", description_en="Ask Ollama: /ask <question>", allowed_roles=ask_roles, handler=ask_handler))
     registry.register(
         Command(
             name="setrole",
             description="Set role: /setrole <telegram_user_id> <role>",
+            description_de="Rolle setzen: /setrole <telegram_user_id> <rolle>",
+            description_en="Set role: /setrole <telegram_user_id> <role>",
             allowed_roles=admin_plus,
             handler=setrole_handler,
         )
@@ -461,6 +495,8 @@ def create_builtin_registry(
         Command(
             name="test",
             description="Send inline-button smoke test",
+            description_de="Inline-Button-Smoketest senden",
+            description_en="Send inline button smoke test",
             allowed_roles=admin_plus,
             handler=test_handler,
         )
@@ -469,6 +505,8 @@ def create_builtin_registry(
         Command(
             name="webui",
             description="WebUI access window: /webui <on|off|status>",
+            description_de="WebUI-Zugriff: /webui <on|off|status>",
+            description_en="WebUI access window: /webui <on|off|status>",
             allowed_roles={Role.OWNER, Role.ADMIN, Role.VIP, Role.NORMAL},
             handler=webui_handler,
         )

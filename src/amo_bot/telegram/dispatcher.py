@@ -12,7 +12,7 @@ from amo_bot.consent import CONSENT_UNREACHABLE, ConsentService
 from amo_bot.db.base import create_session_factory
 from amo_bot.db.models import AuditEvent, User
 from amo_bot.plugins.command_runtime import CommandActor, CommandInvocation, PluginCommandExecutor
-from amo_bot.telegram.commands import CommandContext, CommandRegistry, RoleResolver
+from amo_bot.telegram.commands import CommandContext, CommandRegistry, RoleResolver, resolve_locale
 from amo_bot.telegram.owner_notify import OwnerNotifier
 from amo_bot.telegram.update_parser import TelegramMessage, parse_update
 
@@ -101,8 +101,9 @@ class Dispatcher:
 
         command_def = self.command_registry.get(command.name)
         if command_def is None:
+            plugin_handled = False
             if self.plugin_command_executor is not None:
-                await self.plugin_command_executor.execute(
+                plugin_handled = await self.plugin_command_executor.execute(
                     actor=CommandActor(telegram_user_id=message.from_user.id, role=role),
                     invocation=CommandInvocation(
                         command_name=command.name,
@@ -112,6 +113,13 @@ class Dispatcher:
                         message_thread_id=message.message_thread_id,
                     ),
                 )
+            if plugin_handled:
+                return
+            await self.send_text(
+                message.chat.id,
+                self._unknown_command_message(message=message, command_name=command.name),
+                message.message_thread_id,
+            )
             return
 
         if not self.command_registry.is_allowed(command.name, role):
@@ -123,6 +131,10 @@ class Dispatcher:
             role=role,
             command_name=command.name,
             argument=command.argument,
+            locale=resolve_locale(
+                explicit_arg=command.argument if command.name.casefold() in {"start", "help", "consent", "accept", "decline", "ask", "webui", "test", "ping", "role", "setrole"} else None,
+                telegram_language_code=getattr(message.from_user, "language_code", None),
+            ),
         )
         response = await command_def.handler(ctx)
         if isinstance(response, dict):
@@ -230,7 +242,7 @@ class Dispatcher:
     async def _handle_consent_callback(self, *, callback_query: Any, role: Role, data: str) -> None:
         if self.database_url is None:
             if self.answer_callback is not None:
-                await self.answer_callback(callback_query.id, "Consent nicht verfügbar")
+                await self.answer_callback(callback_query.id, self._consent_callback_message("unavailable", callback_query))
             return
 
         session_factory = create_session_factory(self.database_url)
@@ -238,7 +250,7 @@ class Dispatcher:
             user = session.query(User).filter(User.telegram_user_id == callback_query.from_user.id).one_or_none()
             if user is None:
                 if self.answer_callback is not None:
-                    await self.answer_callback(callback_query.id, "Profil nicht gefunden")
+                    await self.answer_callback(callback_query.id, self._consent_callback_message("profile_missing", callback_query))
                 return
 
             consent_service = ConsentService()
@@ -248,7 +260,7 @@ class Dispatcher:
                 if self.owner_notifier is not None:
                     await self.owner_notifier.notify_consent_decision(user=user, accepted=True, source="button:consent:accept")
                 if self.answer_callback is not None:
-                    await self.answer_callback(callback_query.id, "Consent akzeptiert")
+                    await self.answer_callback(callback_query.id, self._consent_callback_message("accepted", callback_query))
                 return
 
             if data == "consent:decline":
@@ -257,7 +269,7 @@ class Dispatcher:
                 if self.owner_notifier is not None:
                     await self.owner_notifier.notify_consent_decision(user=user, accepted=False, source="button:consent:decline")
                 if self.answer_callback is not None:
-                    await self.answer_callback(callback_query.id, "Consent abgelehnt")
+                    await self.answer_callback(callback_query.id, self._consent_callback_message("declined", callback_query))
                 return
 
     @staticmethod
@@ -289,12 +301,37 @@ class Dispatcher:
             return ConsentService().get_status(user) == CONSENT_UNREACHABLE
 
     @staticmethod
+    def _message_locale_from_callback(callback_query: Any) -> str:
+        language_code = getattr(getattr(callback_query, "from_user", None), "language_code", None)
+        if isinstance(language_code, str) and language_code.casefold().startswith("en"):
+            return "en"
+        return "de"
+
+    @classmethod
+    def _consent_callback_message(cls, key: str, callback_query: Any) -> str:
+        locale = cls._message_locale_from_callback(callback_query)
+        messages = {
+            "unavailable": {"de": "Consent nicht verfügbar", "en": "Consent unavailable"},
+            "profile_missing": {"de": "Profil nicht gefunden", "en": "Profile not found"},
+            "accepted": {"de": "Consent akzeptiert", "en": "Consent accepted"},
+            "declined": {"de": "Consent abgelehnt", "en": "Consent declined"},
+        }
+        return messages.get(key, messages["unavailable"])[locale]
+
+    @staticmethod
+    def _unknown_command_message(*, message: TelegramMessage, command_name: str) -> str:
+        locale = resolve_locale(explicit_arg=None, telegram_language_code=getattr(message.from_user, "language_code", None))
+        if locale == "de":
+            return f"Unbekannter Befehl: /{command_name}. Nutze /help für verfügbare Befehle."
+        return f"Unknown command: /{command_name}. Use /help for available commands."
+
+    @staticmethod
     def _consent_block_message(*, chat_type: str | None, blocked_as_unreachable: bool) -> str:
         if chat_type in {"group", "supergroup"}:
-            return "Bitte kläre Consent privat mit dem Bot."
+            return "Bitte kläre Consent privat mit dem Bot.\nPlease resolve consent privately with the bot."
         if blocked_as_unreachable:
-            return "Bitte starte den Bot privat und bestätige mit /accept."
-        return "Bitte bestätige zuerst mit /accept oder prüfe /consent."
+            return "Bitte starte den Bot privat und bestätige mit /accept.\nPlease start the bot in private and confirm with /accept."
+        return "Bitte bestätige zuerst mit /accept oder prüfe /consent.\nPlease confirm first with /accept or check /consent."
 
 
     async def _maybe_handle_ai_autoreply(self, *, message: TelegramMessage, role: Role, bot_username: str | None) -> None:

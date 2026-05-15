@@ -11,6 +11,7 @@ class TelegramUser:
     first_name: str
     last_name: str | None = None
     username: str | None = None
+    language_code: str | None = None
 
 
 @dataclass(slots=True)
@@ -91,6 +92,7 @@ def _parse_user(raw: Any) -> TelegramUser | None:
             first_name=str(raw.get("first_name", "")),
             last_name=str(raw["last_name"]) if raw.get("last_name") is not None else None,
             username=str(raw["username"]) if raw.get("username") is not None else None,
+            language_code=str(raw["language_code"]) if raw.get("language_code") is not None else None,
         )
     except (KeyError, TypeError, ValueError):
         return None

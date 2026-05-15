@@ -585,3 +585,211 @@ def test_consent_buttons_notify_owner(tmp_path) -> None:
     assert len(sent_owner) == 2
     assert "Consent akzeptiert" in sent_owner[0]
     assert "Consent abgelehnt" in sent_owner[1]
+
+
+def test_dispatcher_help_supports_explicit_locale_override() -> None:
+    sent: list[tuple[int, str, int | None]] = []
+
+    async def fake_send(chat_id: int, text: str, message_thread_id: int | None = None) -> object:
+        sent.append((chat_id, text, message_thread_id))
+        return {"ok": True}
+
+    dispatcher = Dispatcher(
+        command_registry=create_builtin_registry(),
+        role_resolver=InMemoryRoleResolver({42: Role.NORMAL, 43: Role.NORMAL}),
+        send_text=fake_send,
+        bot_username="BotName",
+    )
+
+    raw_update_de = {
+        "update_id": 1400,
+        "message": {
+            "message_id": 17,
+            "from": {"id": 42, "is_bot": False, "first_name": "T", "username": "tester", "language_code": "en"},
+            "chat": {"id": 98, "type": "private"},
+            "text": "/help de",
+        },
+    }
+    raw_update_en = {
+        "update_id": 14001,
+        "message": {
+            "message_id": 18,
+            "from": {"id": 43, "is_bot": False, "first_name": "T", "username": "tester", "language_code": "de"},
+            "chat": {"id": 99, "type": "private"},
+            "text": "/help en",
+        },
+    }
+
+    asyncio.run(dispatcher.handle_raw_update(raw_update_de))
+    asyncio.run(dispatcher.handle_raw_update(raw_update_en))
+
+    assert sent[0][0] == 98
+    assert sent[0][1].startswith("Verfügbare Befehle:")
+    assert "/ping - Bot-Erreichbarkeit prüfen" in sent[0][1]
+
+    assert sent[1][0] == 99
+    assert sent[1][1].startswith("available commands:")
+    assert "/ping - Check bot health" in sent[1][1]
+
+
+def test_dispatcher_sends_bilingual_unknown_command_reply() -> None:
+    sent: list[tuple[int, str, int | None]] = []
+
+    async def fake_send(chat_id: int, text: str, message_thread_id: int | None = None) -> object:
+        sent.append((chat_id, text, message_thread_id))
+        return {"ok": True}
+
+    dispatcher = Dispatcher(
+        command_registry=create_builtin_registry(),
+        role_resolver=InMemoryRoleResolver({42: Role.NORMAL, 43: Role.NORMAL}),
+        send_text=fake_send,
+        bot_username="BotName",
+    )
+
+    raw_update_de = {
+        "update_id": 1401,
+        "message": {
+            "message_id": 18,
+            "from": {"id": 42, "is_bot": False, "first_name": "T", "username": "tester", "language_code": "de"},
+            "chat": {"id": 99, "type": "private"},
+            "text": "/doesnotexist",
+        },
+    }
+    raw_update_en = {
+        "update_id": 1402,
+        "message": {
+            "message_id": 19,
+            "from": {"id": 43, "is_bot": False, "first_name": "T", "username": "tester", "language_code": "en"},
+            "chat": {"id": 100, "type": "private"},
+            "text": "/doesnotexist",
+        },
+    }
+
+    asyncio.run(dispatcher.handle_raw_update(raw_update_de))
+    asyncio.run(dispatcher.handle_raw_update(raw_update_en))
+
+    assert sent == [
+        (99, "Unbekannter Befehl: /doesnotexist. Nutze /help für verfügbare Befehle.", None),
+        (100, "Unknown command: /doesnotexist. Use /help for available commands.", None),
+    ]
+
+
+def test_dispatcher_does_not_send_unknown_fallback_for_handled_plugin_command() -> None:
+    sent: list[tuple[int, str, int | None]] = []
+    plugin_calls: list[tuple[str, str | None, int, int, int | None]] = []
+
+    async def fake_send(chat_id: int, text: str, message_thread_id: int | None = None) -> object:
+        sent.append((chat_id, text, message_thread_id))
+        return {"ok": True}
+
+    class _HandledPluginExecutor:
+        async def execute(self, *, actor, invocation):
+            plugin_calls.append(
+                (
+                    invocation.command_name,
+                    invocation.argument,
+                    invocation.chat_id,
+                    invocation.message_id,
+                    invocation.message_thread_id,
+                )
+            )
+            return True
+
+    dispatcher = Dispatcher(
+        command_registry=create_builtin_registry(),
+        role_resolver=InMemoryRoleResolver({42: Role.NORMAL}),
+        send_text=fake_send,
+        bot_username="BotName",
+        plugin_command_executor=_HandledPluginExecutor(),
+    )
+
+    raw_update = {
+        "update_id": 1501,
+        "message": {
+            "message_id": 77,
+            "from": {"id": 42, "is_bot": False, "first_name": "T", "username": "tester", "language_code": "en"},
+            "chat": {"id": 101, "type": "private"},
+            "text": "/plugincmd arg1",
+        },
+    }
+
+    asyncio.run(dispatcher.handle_raw_update(raw_update))
+
+    assert plugin_calls == [("plugincmd", "arg1", 101, 77, None)]
+    assert sent == []
+
+
+def test_dispatcher_sends_unknown_fallback_for_falsey_plugin_result() -> None:
+    sent: list[tuple[int, str, int | None]] = []
+
+    async def fake_send(chat_id: int, text: str, message_thread_id: int | None = None) -> object:
+        sent.append((chat_id, text, message_thread_id))
+        return {"ok": True}
+
+    class _FalseyPluginExecutor:
+        async def execute(self, *, actor, invocation):
+            return None
+
+    dispatcher = Dispatcher(
+        command_registry=create_builtin_registry(),
+        role_resolver=InMemoryRoleResolver({42: Role.NORMAL}),
+        send_text=fake_send,
+        bot_username="BotName",
+        plugin_command_executor=_FalseyPluginExecutor(),
+    )
+
+    raw_update = {
+        "update_id": 1503,
+        "message": {
+            "message_id": 79,
+            "from": {"id": 42, "is_bot": False, "first_name": "T", "username": "tester", "language_code": "en"},
+            "chat": {"id": 101, "type": "private"},
+            "text": "/plugincmd arg1",
+        },
+    }
+
+    asyncio.run(dispatcher.handle_raw_update(raw_update))
+
+    assert sent == [(101, "Unknown command: /plugincmd. Use /help for available commands.", None)]
+
+
+def test_dispatcher_ping_uses_locale_neutral_pong_for_de_and_en() -> None:
+    sent: list[tuple[int, str, int | None]] = []
+
+    async def fake_send(chat_id: int, text: str, message_thread_id: int | None = None) -> object:
+        sent.append((chat_id, text, message_thread_id))
+        return {"ok": True}
+
+    dispatcher = Dispatcher(
+        command_registry=create_builtin_registry(),
+        role_resolver=InMemoryRoleResolver({42: Role.NORMAL, 43: Role.NORMAL}),
+        send_text=fake_send,
+        bot_username="BotName",
+    )
+
+    raw_update_de = {
+        "update_id": 1601,
+        "message": {
+            "message_id": 81,
+            "from": {"id": 42, "is_bot": False, "first_name": "T", "username": "tester", "language_code": "de"},
+            "chat": {"id": 201, "type": "private"},
+            "text": "/ping",
+        },
+    }
+    raw_update_en = {
+        "update_id": 1602,
+        "message": {
+            "message_id": 82,
+            "from": {"id": 43, "is_bot": False, "first_name": "T", "username": "tester", "language_code": "en"},
+            "chat": {"id": 202, "type": "private"},
+            "text": "/ping",
+        },
+    }
+
+    asyncio.run(dispatcher.handle_raw_update(raw_update_de))
+    asyncio.run(dispatcher.handle_raw_update(raw_update_en))
+
+    assert sent == [
+        (201, "pong", None),
+        (202, "pong", None),
+    ]
