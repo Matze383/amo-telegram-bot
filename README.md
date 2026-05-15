@@ -13,6 +13,12 @@ AMO ist ein erweiterbarer Telegram-Bot für Gruppen und private Chats. Er bietet
 
 **Status:** Beta / MVP — Nicht für den Produktivbetrieb geeignet.
 
+### Unterstützte Plattformen
+
+- ✅ Linux
+- ✅ macOS
+- ✅ Windows (PowerShell / Eingabeaufforderung)
+
 ### Funktionen
 
 | Feature | Beschreibung |
@@ -25,6 +31,8 @@ AMO ist ein erweiterbarer Telegram-Bot für Gruppen und private Chats. Er bietet
 | 🧠 **Memory-System** | Tägliche Langzeitgedächtnis-Kuratierung mit Datenschutz-Defaults |
 
 ### Schnellstart
+
+**Linux / macOS:**
 
 ```bash
 # 1. Repository klonen
@@ -46,12 +54,32 @@ cp .env.example .env
 python main.py
 ```
 
+**Windows (PowerShell):**
+
+```powershell
+# 1. Repository klonen
+git clone <repository-url>
+cd AMO-telegram-bot
+
+# 2. Virtuelle Umgebung erstellen
+python -m venv venv
+.\venv\Scripts\Activate.ps1
+
+# 3. Abhängigkeiten installieren
+pip install -r requirements.txt
+
+# 4. Konfiguration anlegen
+copy .env.example .env
+# .env mit eigenen Werten bearbeiten (siehe Dokumentation)
+
+# 5. Bot starten
+python main.py
+```
+
 **Voraussetzungen:**
 - Python 3.12+
 - Windows, macOS oder Linux
 - Telegram Bot Token von [@BotFather](https://t.me/BotFather)
-
-> **Hinweis:** Die Schnellstart-Befehle (`source venv/bin/activate`) gelten für macOS/Linux. Unter Windows: `venv\Scripts\activate`. OS-spezifische Installationsanleitungen folgen in RR-07.
 
 ### Dokumentation
 
@@ -64,7 +92,7 @@ python main.py
 | [📝 Release Notes](docs/) | Changelogs und Versionshistorie |
 | [🚀 Release Baseline](docs/release-baseline.md) | Support-Matrix und Release-Status |
 
-> **Hinweis:** Plattformspezifische Installationsanleitungen (Windows, macOS, Ubuntu/Debian, etc.) sind für RR-07 geplant. Bis dahin: siehe [SETUP_DE.md](docs/SETUP_DE.md).
+> **Hinweis:** Detaillierte Installationsanleitungen für alle Plattformen siehe [SETUP_DE.md](docs/SETUP_DE.md) (Deutsch) oder [SETUP_EN.md](docs/SETUP_EN.md) (Englisch).
 
 ---
 
@@ -75,6 +103,12 @@ python main.py
 AMO is an extensible Telegram bot for groups and private chats. It provides a role-based permission system, a local WebUI for management, and optional AI features via Ollama.
 
 **Status:** Beta / MVP — Not production-ready.
+
+### Supported Platforms
+
+- ✅ Linux
+- ✅ macOS
+- ✅ Windows (PowerShell / Command Prompt)
 
 ### Features
 
@@ -88,6 +122,8 @@ AMO is an extensible Telegram bot for groups and private chats. It provides a ro
 | 🧠 **Memory System** | Daily long-term memory curation with privacy-first defaults |
 
 ### Quick Start
+
+**Linux / macOS:**
 
 ```bash
 # 1. Clone repository
@@ -109,12 +145,32 @@ cp .env.example .env
 python main.py
 ```
 
+**Windows (PowerShell):**
+
+```powershell
+# 1. Clone repository
+git clone <repository-url>
+cd AMO-telegram-bot
+
+# 2. Create virtual environment
+python -m venv venv
+.\venv\Scripts\Activate.ps1
+
+# 3. Install dependencies
+pip install -r requirements.txt
+
+# 4. Configure environment
+copy .env.example .env
+# Edit .env with your values (see documentation)
+
+# 5. Start the bot
+python main.py
+```
+
 **Requirements:**
 - Python 3.12+
 - Windows, macOS or Linux
 - Telegram Bot Token from [@BotFather](https://t.me/BotFather)
-
-> **Note:** Quickstart commands (`source venv/bin/activate`) are for macOS/Linux. On Windows: `venv\Scripts\activate`. OS-specific setup guides coming in RR-07.
 
 ### Documentation
 
@@ -127,7 +183,7 @@ python main.py
 | [📝 Release Notes](docs/) | Changelogs and version history |
 | [🚀 Release Baseline](docs/release-baseline.md) | Support matrix and release status |
 
-> **Note:** OS-specific setup guides (Windows, macOS, Ubuntu/Debian, etc.) are planned for RR-07. Until then, see [SETUP_EN.md](docs/SETUP_EN.md).
+> **Note:** Detailed platform-specific setup instructions see [SETUP_EN.md](docs/SETUP_EN.md) (English) or [SETUP_DE.md](docs/SETUP_DE.md) (German).
 
 ---
 
@@ -168,9 +224,9 @@ See docs for detailed contribution guidelines (planned).
 | Milestone | Status |
 |-----------|--------|
 | RR-01..RR-05 | ✅ Complete — Core Bot, WebUI, Consent, Security, AI Features |
-| RR-06 | ✅ README Polish — Public-ready documentation (current) |
-| RR-07 | 🔄 Planned — OS-specific setup guides (Windows, macOS, Ubuntu/Debian) |
-| RR-08 | ⏳ Planned — Advanced deployment documentation |
+| RR-06        | ✅ Complete — README Polish |
+| RR-07        | ✅ Complete — Cross-Platform Setup Docs (Windows, macOS, Linux) |
+| RR-08        | ⏳ Planned — Contribution Guide |
 
 ---
 

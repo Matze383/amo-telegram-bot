@@ -7,15 +7,97 @@ Vollständige Anleitung zum lokalen Betrieb des Bots.
 ## Voraussetzungen
 
 - Python 3.12 oder höher
-- Linux- oder macOS-Entwicklungsumgebung
+- Windows, macOS oder Linux
 - Telegram Bot Token (von [@BotFather](https://t.me/BotFather))
 - Optional: Lokale [Ollama](https://ollama.com/)-Instanz für KI-Funktionen
+
+---
+
+## Plattformspezifischer Schnellstart
+
+### Linux / macOS
+
+```bash
+# Repository klonen
+git clone <repository-url>
+cd AMO-telegram-bot
+
+# Virtuelle Umgebung erstellen
+python3.12 -m venv venv
+
+# Virtuelle Umgebung aktivieren
+source venv/bin/activate
+
+# Abhängigkeiten installieren
+pip install -r requirements.txt
+
+# Konfiguration kopieren und bearbeiten
+cp .env.example .env
+# .env bearbeiten: BOT_TOKEN, WEBUI_PASSWORD, etc.
+
+# Bot starten
+python main.py
+```
+
+### Windows (PowerShell)
+
+```powershell
+# Repository klonen
+git clone <repository-url>
+cd AMO-telegram-bot
+
+# Virtuelle Umgebung erstellen
+python -m venv venv
+
+# Virtuelle Umgebung aktivieren
+.\venv\Scripts\Activate.ps1
+
+# Abhängigkeiten installieren
+pip install -r requirements.txt
+
+# Konfiguration kopieren und bearbeiten
+copy .env.example .env
+# .env bearbeiten: BOT_TOKEN, WEBUI_PASSWORD, etc. (mit Notepad, VS Code, etc.)
+
+# Bot starten
+python main.py
+```
+
+### Windows (Eingabeaufforderung / cmd.exe)
+
+```cmd
+REM Repository klonen
+git clone <repository-url>
+cd AMO-telegram-bot
+
+REM Virtuelle Umgebung erstellen
+python -m venv venv
+
+REM Virtuelle Umgebung aktivieren
+venv\Scripts\activate.bat
+
+REM Abhängigkeiten installieren
+pip install -r requirements.txt
+
+REM Konfiguration kopieren
+copy .env.example .env
+REM .env bearbeiten: BOT_TOKEN, WEBUI_PASSWORD, etc.
+
+REM Bot starten
+python main.py
+```
+
+> **Windows-Hinweis:** Falls die PowerShell-Ausführungsrichtlinie Skripte blockiert, PowerShell als Administrator öffnen und ausführen: `Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser`
+
+---
 
 ---
 
 ## Installation
 
 ### 1. Repository klonen und einrichten
+
+**Linux / macOS:**
 
 ```bash
 git clone <repository-url>
@@ -25,12 +107,46 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
+**Windows (PowerShell):**
+
+```powershell
+git clone <repository-url>
+cd AMO-telegram-bot
+python -m venv venv
+.\venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+```
+
+**Windows (Eingabeaufforderung):**
+
+```cmd
+git clone <repository-url>
+cd AMO-telegram-bot
+python -m venv venv
+venv\Scripts\activate.bat
+pip install -r requirements.txt
+```
+
 ### 2. Umgebungsvariablen konfigurieren
 
 Beispieldatei kopieren und bearbeiten:
 
+**Linux / macOS:**
+
 ```bash
 cp .env.example .env
+```
+
+**Windows (PowerShell):**
+
+```powershell
+copy .env.example .env
+```
+
+**Windows (Eingabeaufforderung):**
+
+```cmd
+copy .env.example .env
 ```
 
 `.env` mit deinen Werten bearbeiten:
@@ -179,22 +295,70 @@ Die WebUI bricht bei unsicherer Konfiguration im Public-Modus sofort mit einer k
 
 ### Nur Bot (Polling)
 
+**Linux / macOS:**
+
 ```bash
 source venv/bin/activate
 python main.py
 ```
 
+**Windows (PowerShell):**
+
+```powershell
+.\venv\Scripts\Activate.ps1
+python main.py
+```
+
+**Windows (Eingabeaufforderung):**
+
+```cmd
+venv\Scripts\activate.bat
+python main.py
+```
+
 ### Nur WebUI
+
+**Linux / macOS:**
 
 ```bash
 source venv/bin/activate
 python main.py --webui
 ```
 
-### Bot + WebUI zusammen
+**Windows (PowerShell):**
+
+```powershell
+.\venv\Scripts\Activate.ps1
+python main.py --webui
+```
+
+**Windows (Eingabeaufforderung):**
+
+```cmd
+venv\Scripts\activate.bat
+python main.py --webui
+```
+
+### Bot + WebUI zusammen (Standard)
+
+**Linux / macOS:**
 
 ```bash
 source venv/bin/activate
+python main.py
+```
+
+**Windows (PowerShell):**
+
+```powershell
+.\venv\Scripts\Activate.ps1
+python main.py
+```
+
+**Windows (Eingabeaufforderung):**
+
+```cmd
+venv\Scripts\activate.bat
 python main.py
 ```
 
@@ -213,8 +377,26 @@ python main.py
 
 Vor der Verbindung zu echten Telegram-APIs:
 
+**Linux / macOS:**
+
 ```bash
 source venv/bin/activate
+pytest -q
+python -m amo_bot.smoke
+```
+
+**Windows (PowerShell):**
+
+```powershell
+.\venv\Scripts\Activate.ps1
+pytest -q
+python -m amo_bot.smoke
+```
+
+**Windows (Eingabeaufforderung):**
+
+```cmd
+venv\Scripts\activate.bat
 pytest -q
 python -m amo_bot.smoke
 ```
@@ -232,10 +414,48 @@ Erwartete Ergebnisse:
 - `.env` prüfen: Ist `BOT_TOKEN` korrekt?
 - Telegram prüfen: Wurde "Start" im Bot-Chat geklickt?
 
+### Virtuelle Umgebung lässt sich nicht aktivieren (Windows)
+
+**PowerShell-Ausführungsrichtlinie-Fehler:**
+```
+.\venv\Scripts\Activate.ps1 : cannot be loaded because running scripts is disabled
+```
+
+**Lösung:** PowerShell als Administrator öffnen und ausführen:
+```powershell
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+```
+
+Danach Aktivierung erneut versuchen.
+
+### Python nicht gefunden
+- Python 3.12+ muss installiert und im PATH sein
+- Windows: `py` oder vollen Pfad verwenden, z.B. `C:\Python312\python.exe`
+- Linux/macOS: `python3` verwenden, falls `python` auf Python 2 zeigt
+
+### Zugriff verweigert beim Erstellen des `data/`-Verzeichnisses
+
+**Linux / macOS:**
+```bash
+mkdir -p data
+chmod 755 data
+```
+
+**Windows:**
+- Ordner manuell im Explorer erstellen
+- Oder Eingabeaufforderung/PowerShell als Administrator ausführen
+
 ### Datenbank/SQLite-Fehler
+
+**Linux / macOS:**
 - Existiert das Verzeichnis `data/`?
 - Schreibrechte vorhanden?
 - Nur für Tests: `rm data/amo_bot.db` und Neustart
+
+**Windows:**
+- Existiert das Verzeichnis `data\`?
+- Ordnerberechtigungen prüfen (Rechtsklick → Eigenschaften → Sicherheit)
+- Nur für Tests: `del data\amo_bot.db` und Neustart
 
 ### Ollama nicht erreichbar
 - Läuft Ollama? `curl http://127.0.0.1:11434/api/tags`
@@ -503,3 +723,55 @@ Die SQL-Capability:
 - **Kann keine** Privilegien eskalieren
 - **Kann kein** beliebiges SQL ausführen
 - **Kann nicht** Audit-Logging umgehen
+
+---
+
+## Fehlerbehebung
+
+### Bot antwortet nicht
+- Terminal prüfen: Läuft `python main.py`?
+- `.env` prüfen: Ist `BOT_TOKEN` korrekt?
+- Telegram prüfen: Wurde "Start" im Bot-Chat geklickt?
+
+### Virtuelle Umgebung lässt sich nicht aktivieren (Windows)
+
+**PowerShell-Ausführungsrichtlinie-Fehler:**
+```
+.\venv\Scripts\Activate.ps1 : cannot be loaded because running scripts is disabled
+```
+
+**Lösung:** PowerShell als Administrator öffnen und ausführen:
+```powershell
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+```
+
+Danach Aktivierung erneut versuchen.
+
+### Python nicht gefunden
+- Python 3.12+ muss installiert und im PATH sein
+- Windows: `py` oder vollen Pfad verwenden, z.B. `C:\Python312\python.exe`
+- Linux/macOS: `python3` verwenden, falls `python` auf Python 2 zeigt
+
+### Zugriff verweigert beim Erstellen des `data/`-Verzeichnisses
+
+**Linux / macOS:**
+```bash
+mkdir -p data
+chmod 755 data
+```
+
+**Windows:**
+- Ordner manuell im Explorer erstellen
+- Oder Eingabeaufforderung/PowerShell als Administrator ausführen
+
+### Datenbank/SQLite-Fehler
+
+**Linux / macOS:**
+- Existiert das Verzeichnis `data/`?
+- Schreibrechte vorhanden?
+- Nur für Tests: `rm data/amo_bot.db` und Neustart
+
+**Windows:**
+- Existiert das Verzeichnis `data\`?
+- Ordnerberechtigungen prüfen (Rechtsklick → Eigenschaften → Sicherheit)
+- Nur für Tests: `del data\amo_bot.db` und Neustart
