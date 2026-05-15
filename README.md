@@ -1,158 +1,186 @@
 # AMO Telegram Bot
 
-> **EN:** A modular, role-based Telegram bot with plugin support, WebUI management, and optional Ollama AI integration.  
-> **DE:** Ein modularer, rollenbasierter Telegram-Bot mit Plugin-Unterstützung, WebUI-Verwaltung und optionaler Ollama-KI-Integration.
+> **DE:** Ein modularer, rollenbasierter Telegram-Bot mit Plugin-Unterstützung, WebUI-Verwaltung und optionaler KI-Integration.  
+> **EN:** A modular, role-based Telegram bot with plugin support, WebUI management, and optional AI integration.
 
 ---
 
-## Status
+## Deutsch 🇩🇪
 
-**Beta / MVP — Private Beta — Not Production-Ready**
+### Übersicht
 
-This project is in early development. Features may change, and security hardening is not complete. Do not use in production environments.
+AMO ist ein erweiterbarer Telegram-Bot für Gruppen und private Chats. Er bietet ein rollenbasiertes Berechtigungssystem, eine lokale WebUI zur Verwaltung und optionale KI-Funktionen über Ollama.
 
-Dieses Projekt befindet sich in der frühen Entwicklung. Funktionen können sich ändern, und die Sicherheitshärtung ist nicht vollständig. Nicht für den Produktivbetrieb verwenden.
+**Status:** Beta / MVP — Nicht für den Produktivbetrieb geeignet.
 
----
+### Funktionen
 
-## Features
+| Feature | Beschreibung |
+|---------|--------------|
+| 🤖 **Modularer Aufbau** | Plugin-System für eigene Erweiterungen |
+| 🔐 **Rollen-System** | Owner, Admin, VIP, Normal, Ignore — gruppenspezifisch und berechtigungsbasiert |
+| ✅ **Consent-Management** | Nutzer müssen explizit zustimmen, bevor der Bot aktiv wird |
+| 🌐 **WebUI** | Lokale Flask-Oberfläche für Verwaltung und Konfiguration |
+| 🤖 **KI-Integration** | Optionales `/ask`-Kommando und Auto-Antworten via Ollama |
+| 🧠 **Memory-System** | Tägliche Langzeitgedächtnis-Kuratierung mit Datenschutz-Defaults |
 
-| Feature | EN | DE |
-|---------|-----|-----|
-| 🤖 **Telegram Bot** | Long polling, custom API integration (no external bot library) | Long Polling, eigene API-Integration (ohne externe Bot-Bibliothek) |
-| 🔐 **Role System** | Owner, Admin, VIP, Normal, Ignore — group-scoped and permission-based | Owner, Admin, VIP, Normal, Ignore — gruppenspezifisch und berechtigungsbasiert |
-| ✅ **Consent Management** | `/accept`, `/decline`, `/consent` commands for user consent; automatic one-shot DM prompt with **inline buttons** (✅ Accept / ❌ Decline) for pending users; fallback commands remain available; runtime gate blocks normal usage until consent is accepted (allowed: `/accept`, `/decline`, `/consent`, `/start`) | `/accept`, `/decline`, `/consent` Commands für Nutzer-Consent; automatischer One-Shot-DM-Prompt mit **Inline-Buttons** (✅ Akzeptieren / ❌ Ablehnen) für Pending-User; Fallback-Commands weiterhin verfügbar; Runtime-Gate blockiert normale Nutzung bis Consent akzeptiert ist (erlaubt: `/accept`, `/decline`, `/consent`, `/start`) |
-| 🌍 **Language / Sprache** | Default locale is **German (`de`)**. If Telegram `language_code` starts with `en`, bot replies default to English. `/help` and `/start` also accept explicit language argument (`/help en`, `/start de`) that overrides auto-detection for that command. | Standard-Locale ist **Deutsch (`de`)**. Wenn Telegram-`language_code` mit `en` beginnt, antwortet der Bot standardmäßig auf Englisch. `/help` und `/start` akzeptieren zusätzlich ein explizites Sprachargument (`/help en`, `/start de`), das die Auto-Erkennung für diesen Befehl überschreibt. |
-| 🔌 **Plugin System** | Defensive manifest-based plugin loader | Defensiver, manifest-basierter Plugin-Loader |
-| 🌐 **WebUI** | Local Flask-based management interface | Lokale Flask-basierte Verwaltungsoberfläche |
-| 🤖 **AI Integration** | Optional Ollama `/ask` command (stateless); auto-reply on mentions/replies in active scopes (VIP/Admin/Owner + consent required) | Optionales Ollama `/ask` Kommando (stateless); Auto-Antwort bei Erwähnungen/Antworten in aktiven Scopes (VIP/Admin/Owner + Consent erforderlich) |
-| 🧠 **Topic Soul Editor** | Owner-only WebUI editing of topic-specific Soul text on groups/topics UI; non-owner cannot edit; bounded/escaped (KI-F2) | Owner-only WebUI-Bearbeitung von Topic-spezifischem Soul-Text auf der Groups/Topics-Oberfläche; Nicht-Owner können nicht bearbeiten; begrenzt/escaped (KI-F2) |
-| 🧠 **Memory Curation (KI-D5)** | Optional automatic, bounded daily→long-memory curation (candidate-only); failure-safe (no partial writes on promotion failure); can be disabled via maintenance config | Optionale automatische, begrenzte Daily→Long-Memory-Kuratierung (nur als Kandidaten); fehlersicher (keine Teilwrites bei Fehlern); per Maintenance-Konfiguration deaktivierbar |
-| 🧠 **WebUI Memory Controls (KI-F3)** | Owner/authenticated WebUI can inspect safe/high-level memory entries; daily memory visibility is conservative/redacted (dates only); long memory summaries/facts listable; owner can deactivate long-memory entries via CSRF-protected POST; denied (403) without owner mutation config | Owner/authentifizierte WebUI kann sichere/high-level Memory-Einträge einsehen; Daily-Memory-Sichtbarkeit ist konservativ/redacted (nur Daten); Long-Memory-Summary/Fakten listbar; Owner kann Long-Memory-Einträge via CSRF-geschütztem POST deaktivieren; verweigert (403) ohne Owner-Mutation-Konfiguration |
-| 📊 **WebUI KI Status** | Read-only dashboard view showing topic/private AI config status (scope, active/inactive, response mode) | Read-only Dashboard-Ansicht mit Topic/Private AI-Konfigurationsstatus (Scope, aktiv/inaktiv, Antwortmodus) |
-| 🧪 **Testing** | pytest + smoke tests included | pytest + Smoke-Tests enthalten |
-
----
-
-## Quick Start
+### Schnellstart
 
 ```bash
+# 1. Repository klonen
 git clone <repository-url>
 cd AMO-telegram-bot
+
+# 2. Virtuelle Umgebung erstellen
 python3.12 -m venv venv
 source venv/bin/activate
+
+# 3. Abhängigkeiten installieren
 pip install -r requirements.txt
+
+# 4. Konfiguration anlegen
 cp .env.example .env
-# Edit .env with your values
+# .env mit eigenen Werten bearbeiten (siehe Dokumentation)
+
+# 5. Bot starten
 python main.py
 ```
 
----
+**Voraussetzungen:**
+- Python 3.12+
+- Windows, macOS oder Linux
+- Telegram Bot Token von [@BotFather](https://t.me/BotFather)
 
-## Documentation / Dokumentation
+> **Hinweis:** Die Schnellstart-Befehle (`source venv/bin/activate`) gelten für macOS/Linux. Unter Windows: `venv\Scripts\activate`. OS-spezifische Installationsanleitungen folgen in RR-07.
 
-| Document | Description | Beschreibung |
-|----------|-------------|--------------|
-| [📘 Setup Guide (EN)](docs/SETUP_EN.md) | Full setup instructions | — |
-| [📗 Setup-Anleitung (DE)](docs/SETUP_DE.md) | — | Vollständige Setup-Anleitung |
-| [🧪 Beta Testing (EN)](docs/BETATEST_EN.md) / [DE](docs/BETATEST_DE.md) | Step-by-step beta test guide | Schritt-für-Schritt-Betatest-Anleitung |
-| [📝 Release Notes (EN)](docs/RELEASE_NOTES_2026.05.10-Beta_EN.md) / [DE](docs/RELEASE_NOTES_2026.05.10-Beta_DE.md) | Changelog and version history | Changelog und Versionshistorie |
-| [🚀 Release Baseline](docs/release-baseline.md) | Release readiness and support matrix | Release-Bereitschaft und Support-Matrix |
+### Dokumentation
 
----
+| Dokument | Inhalt |
+|----------|--------|
+| [📗 Setup-Anleitung (DE)](docs/SETUP_DE.md) | Vollständige Installation und Konfiguration |
+| [📘 Setup Guide (EN)](docs/SETUP_EN.md) | English setup guide |
+| [🧪 Beta-Test (DE)](docs/BETATEST_DE.md) | Schritt-für-Schritt Testanleitung |
+| [🧪 Beta Test (EN)](docs/BETATEST_EN.md) | Step-by-step testing guide |
+| [📝 Release Notes](docs/) | Changelogs und Versionshistorie |
+| [🚀 Release Baseline](docs/release-baseline.md) | Support-Matrix und Release-Status |
 
-## Security Notes / Sicherheitshinweise
-
-- **Never commit secrets** — `.env` is gitignored
-- **WebUI is local-only** — Default `127.0.0.1`, never expose to internet
-- **Token protection** — Never share `BOT_TOKEN` in chats, logs, or repositories
-- **Niemals Secrets committen** — `.env` ist in .gitignore
-- **WebUI nur lokal** — Standard `127.0.0.1`, niemals ins Internet freigeben
-- **Token-Schutz** — `BOT_TOKEN` niemals in Chats, Logs oder Repositories teilen
+> **Hinweis:** Plattformspezifische Installationsanleitungen (Windows, macOS, Ubuntu/Debian, etc.) sind für RR-07 geplant. Bis dahin: siehe [SETUP_DE.md](docs/SETUP_DE.md).
 
 ---
 
-## License / Lizenz
+## English 🇬🇧
 
-This project is licensed under the MIT License — see [LICENSE](LICENSE) for details.
+### Overview
 
-Dieses Projekt steht unter der MIT License — siehe [LICENSE](LICENSE) für Details.
+AMO is an extensible Telegram bot for groups and private chats. It provides a role-based permission system, a local WebUI for management, and optional AI features via Ollama.
 
-## Memory Management MVP Safe Operations (CP-G2)
+**Status:** Beta / MVP — Not production-ready.
 
-Memory operations are policy-gated with default-deny. All memory access requires explicit capability approval.
+### Features
 
-**Scope Isolation:**
-- Memory is strictly scoped to topics, private chats, or users
-- No cross-scope memory leakage possible
-- Each scope maintains independent memory boundaries
+| Feature | Description |
+|---------|-------------|
+| 🤖 **Modular Design** | Plugin system for custom extensions |
+| 🔐 **Role System** | Owner, Admin, VIP, Normal, Ignore — group-scoped and permission-based |
+| ✅ **Consent Management** | Users must explicitly opt-in before the bot becomes active |
+| 🌐 **WebUI** | Local Flask interface for management and configuration |
+| 🤖 **AI Integration** | Optional `/ask` command and auto-replies via Ollama |
+| 🧠 **Memory System** | Daily long-term memory curation with privacy-first defaults |
 
-**Operations (Bounded & Auditable):**
-- `put` — Store memory entries with TTL/retention rules
-- `get` — Retrieve memory (redacted outputs, no raw memory text in MVP)
-- `search` — Query memory (returns metadata placeholders only)
-- `delete` — Permanent removal (auditable, no memory text in audit)
-- `deactivate` — Soft-disable entries without deletion (reversible)
+### Quick Start
 
-**Privacy & Security:**
-- **Default-deny:** All memory operations blocked unless explicitly allowed by CP-G1 policy
-- **Redacted outputs:** Raw memory text is never exposed in WebUI, Telegram, or audit events
-- **Audit events:** Include scope, action, and metadata only — never memory content
-- **TTL/Retention:** Automatic pruning via maintenance hooks
-- **MVP limitation:** Raw memory output intentionally not exposed; only redacted metadata placeholders
+```bash
+# 1. Clone repository
+git clone <repository-url>
+cd AMO-telegram-bot
 
-**Audit Event Types:**
-- `memory_put` — Memory stored (scope, entry ID, no content)
-- `memory_get` — Memory accessed (scope, entry ID, no content)
-- `memory_delete` — Memory permanently deleted (scope, entry ID)
-- `memory_deactivate` — Memory soft-disabled (scope, entry ID)
+# 2. Create virtual environment
+python3.12 -m venv venv
+source venv/bin/activate
 
----
+# 3. Install dependencies
+pip install -r requirements.txt
 
-## Memory Management MVP Safe Operations (CP-G2) — Deutsch
+# 4. Configure environment
+cp .env.example .env
+# Edit .env with your values (see documentation)
 
-Speicher-Operationen sind Policy-gated mit Default-Deny. Jeder Speicherzugriff erfordert explizite Capability-Genehmigung.
+# 5. Start the bot
+python main.py
+```
 
-**Scope-Isolation:**
-- Speicher ist streng an Topics, private Chats oder Nutzer gebunden
-- Keine Cross-Scope-Speicherlecks möglich
-- Jeder Scope pflegt unabhängige Speichergrenzen
+**Requirements:**
+- Python 3.12+
+- Windows, macOS or Linux
+- Telegram Bot Token from [@BotFather](https://t.me/BotFather)
 
-**Operationen (Begrenzt & Auditierbar):**
-- `put` — Speicher-Einträge mit TTL/Retention-Regeln speichern
-- `get` — Speicher abrufen (redigierte Ausgaben, kein Raw-Memory-Text im MVP)
-- `search` — Speicher abfragen (gibt nur Metadaten-Platzhalter zurück)
-- `delete` — Permanentes Löschen (auditierbar, kein Memory-Text im Audit)
-- `deactivate` — Soft-Disable von Einträgen ohne Löschung (reversibel)
+> **Note:** Quickstart commands (`source venv/bin/activate`) are for macOS/Linux. On Windows: `venv\Scripts\activate`. OS-specific setup guides coming in RR-07.
 
-**Datenschutz & Sicherheit:**
-- **Default-deny:** Alle Speicher-Operationen blockiert, sofern nicht durch CP-G1-Policy explizit erlaubt
-- **Redigierte Ausgaben:** Raw-Speichertext wird nie in WebUI, Telegram oder Audit-Events preisgegeben
-- **Audit-Events:** Enthalten nur Scope, Aktion und Metadaten — niemals Memory-Inhalt
-- **TTL/Retention:** Automatisches Pruning via Maintenance-Hooks
-- **MVP-Einschränkung:** Raw-Speicherausgabe absichtlich nicht verfügbar; nur redigierte Metadaten-Platzhalter
+### Documentation
 
-**Audit-Event-Typen:**
-- `memory_put` — Speicher gespeichert (Scope, Entry-ID, kein Inhalt)
-- `memory_get` — Speicher abgerufen (Scope, Entry-ID, kein Inhalt)
-- `memory_delete` — Speicher permanent gelöscht (Scope, Entry-ID)
-- `memory_deactivate` — Speicher soft-deaktiviert (Scope, Entry-ID)
+| Document | Content |
+|----------|---------|
+| [📘 Setup Guide (EN)](docs/SETUP_EN.md) | Complete installation and configuration |
+| [📗 Setup-Anleitung (DE)](docs/SETUP_DE.md) | German setup guide |
+| [🧪 Beta Test (EN)](docs/BETATEST_EN.md) | Step-by-step testing guide |
+| [🧪 Beta-Test (DE)](docs/BETATEST_DE.md) | German testing guide |
+| [📝 Release Notes](docs/) | Changelogs and version history |
+| [🚀 Release Baseline](docs/release-baseline.md) | Support matrix and release status |
+
+> **Note:** OS-specific setup guides (Windows, macOS, Ubuntu/Debian, etc.) are planned for RR-07. Until then, see [SETUP_EN.md](docs/SETUP_EN.md).
 
 ---
 
-## Websearch Provider MVP (CP-C2)
+## 🔒 Security Notes / Sicherheitshinweise
 
-Websearch provider execution remains default-deny unless capability policy and tool policy gates explicitly allow it.
-Provider configuration is hook-based only (no secrets in code/logs/docs):
+**DE:**
+- WebUI ist **lokal only** (`127.0.0.1`) — niemals ins Internet freigeben
+- `BOT_TOKEN` niemals in Chats, Logs oder Repositories teilen
+- `.env` ist in `.gitignore` — Secrets niemals committen
+- Für öffentliche Deployments: Reverse Proxy (nginx, Caddy) mit HTTPS verwenden
 
-- `provider_name` (example: `fake`)
-- `provider_allowlist` (must include configured provider)
-- `timeout_seconds` (positive, bounded by runtime policy)
-- `retry_count` (0..3)
+**EN:**
+- WebUI is **local-only** (`127.0.0.1`) — never expose to the internet
+- Never share `BOT_TOKEN` in chats, logs, or repositories
+- `.env` is in `.gitignore` — never commit secrets
+- For public deployments: Use a reverse proxy (nginx, Caddy) with HTTPS
 
-Security/safety expectations:
+---
 
-- Never log provider tokens/credentials/raw private text.
-- Return only normalized safe result fields (`title`, `url`, `snippet`) with strict caps.
-- Enforce quota before provider execution.
-- Provider timeout/failure must fail closed with safe reason codes.
+## 🤝 Contributing / Mitwirken
+
+**EN:** Contributions are welcome. Please ensure:
+- Python 3.12+ compatibility
+- All tests pass (`pytest -q`)
+- Code follows existing patterns
+
+**DE:** Mitwirkungen sind willkommen. Bitte beachten:
+- Python 3.12+ Kompatibilität
+- Alle Tests bestehen (`pytest -q`)
+- Code folgt bestehenden Mustern
+
+See docs for detailed contribution guidelines (planned).
+
+---
+
+## 📋 Roadmap
+
+| Milestone | Status |
+|-----------|--------|
+| RR-01..RR-05 | ✅ Complete — Core Bot, WebUI, Consent, Security, AI Features |
+| RR-06 | ✅ README Polish — Public-ready documentation (current) |
+| RR-07 | 🔄 Planned — OS-specific setup guides (Windows, macOS, Ubuntu/Debian) |
+| RR-08 | ⏳ Planned — Advanced deployment documentation |
+
+---
+
+## 📄 License / Lizenz
+
+MIT License — see [LICENSE](LICENSE) for details.  
+MIT License — siehe [LICENSE](LICENSE) für Details.
+
+---
+
+<p align="center">
+  <sub>AMO Telegram Bot — Beta / MVP</sub>
+</p>
