@@ -1,11 +1,21 @@
 <!doctype html>
-<html lang="de">
+<html lang="{{ lang }}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}AMO WebUI{% endblock %}</title>
 </head>
 <body>
+  <nav>
+    <a href="{{ url_for('ui.dashboard', lang=lang) }}">{{ t('nav.dashboard') }}</a> |
+    <a href="{{ url_for('ui.users_page', lang=lang) }}">{{ t('nav.users') }}</a> |
+    <a href="{{ url_for('ui.groups_page', lang=lang) }}">{{ t('nav.groups') }}</a> |
+    <a href="{{ url_for('plugins.plugins_page', lang=lang) }}">{{ t('nav.plugins') }}</a> |
+    <a href="{{ url_for('health.health', lang=lang) }}">{{ t('nav.health') }}</a>
+    <span style="margin-left: 1rem;">{{ t('nav.language') }}:</span>
+    <a href="{{ lang_url('de') }}">{{ t('lang.de') }}</a>
+    <a href="{{ lang_url('en') }}">{{ t('lang.en') }}</a>
+  </nav>
   {% with messages = get_flashed_messages(with_categories=true) %}
     {% if messages %}
       <ul>

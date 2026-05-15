@@ -3,7 +3,9 @@ from __future__ import annotations
 import hashlib
 from datetime import timedelta
 
-from flask import Flask, abort, jsonify, request, session
+from flask import Flask, abort, jsonify, request, session, url_for
+
+from amo_bot.webui.i18n import resolve_lang, translate
 from flask_wtf import CSRFProtect
 
 from amo_bot.config.settings import Settings, get_settings
@@ -85,6 +87,30 @@ def create_flask_app(
     app.extensions["amo.settings"] = app_settings
     app.extensions["amo.plugin_service"] = plugins
     app.extensions["amo.worker_manager"] = worker_manager
+
+
+    @app.before_request
+    def _resolve_language() -> None:
+        lang = resolve_lang()
+        app.extensions["amo.lang"] = lang
+
+    @app.context_processor
+    def _inject_i18n_context():
+        lang = app.extensions.get("amo.lang", "de")
+
+        def _t(key: str) -> str:
+            return translate(key, lang=lang)
+
+        def _lang_url(target_lang: str) -> str:
+            args = request.args.to_dict(flat=True)
+            args["lang"] = target_lang
+            endpoint = request.endpoint
+            if endpoint and endpoint != "static":
+                return url_for(endpoint, **(request.view_args or {}), **args)
+            query = "&".join(f"{k}={v}" for k, v in args.items())
+            return f"{request.path}?{query}" if query else request.path
+
+        return {"lang": lang, "t": _t, "lang_url": _lang_url}
 
     @app.before_request
     def _webui_access_window_gate() -> None:

@@ -566,3 +566,17 @@ def test_topic_metadata_topic_soul_text_max_length_validation(tmp_path) -> None:
         )
 
     assert response.status_code == 400
+
+
+def test_groups_language_switch_en(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'groups_lang.db'}"
+    app = create_flask_app(settings=_make_settings(db_url))
+
+    with app.test_client() as client:
+        with client.session_transaction() as flask_session:
+            flask_session["authenticated"] = True
+        response = client.get("/groups?lang=en")
+        assert response.status_code == 200
+        html = response.get_data(as_text=True)
+        assert "Language:" in html
+        assert "Topic management disabled: WEBUI_OWNER_TELEGRAM_ID is not set." in html

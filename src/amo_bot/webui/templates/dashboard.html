@@ -1,8 +1,8 @@
 {% extends "base.html" %}
-{% block title %}Dashboard{% endblock %}
+{% block title %}{{ t('dashboard.title') }}{% endblock %}
 {% block content %}
-  <h1>AMO Telegram Bot WebUI</h1>
-  <p>Status: Flask WebUI, lokal/LAN.</p>
+  <h1>{{ t('dashboard.header') }}</h1>
+  <p>{{ t('dashboard.status_local') }}</p>
 
   <p>
     <a href="{{ url_for('health.health') }}">Health</a>
@@ -10,15 +10,15 @@
 
   <form method="post" action="{{ url_for('auth.logout_submit') }}">
     <input name="csrf_token" type="hidden" value="{{ csrf_token() }}">
-    <button type="submit">Logout</button>
+    <button type="submit">{{ t('action.logout') }}</button>
   </form>
 
-  <h2>Bereiche</h2>
+  <h2>{{ t('dashboard.sections') }}</h2>
   <p><a href="{{ url_for('ui.users_page') }}">Users</a></p>
   <p><a href="{{ url_for('ui.groups_page') }}">Groups</a></p>
   <p><a href="{{ url_for('plugins.plugins_page') }}">Plugins</a></p>
 
-  <h2>KI Topic-Agent Status (Read-Only)</h2>
+  <h2>{{ t('dashboard.ai_status') }}</h2>
   {% if topic_agent_statuses %}
     <table>
       <thead>
@@ -45,10 +45,10 @@
       </tbody>
     </table>
   {% else %}
-    <p>Keine KI-Topic-Agent-Konfigurationen vorhanden.</p>
+    <p>{{ t('dashboard.ai_empty') }}</p>
   {% endif %}
 
-  <h2>KI Memory (Read-Only + Deactivate Long Memory)</h2>
+  <h2>{{ t('dashboard.memory') }}</h2>
   {% if topic_memory_entries %}
     {% for entry in topic_memory_entries %}
       <section>
@@ -85,7 +85,7 @@
                     {% if memory.is_active and owner_mutation_enabled %}
                       <form method="post" action="{{ url_for('ui.deactivate_long_memory', memory_id=memory.id) }}">
                         <input name="csrf_token" type="hidden" value="{{ csrf_token() }}">
-                        <button type="submit">Deactivate</button>
+                        <button type="submit">{{ t('action.deactivate') }}</button>
                       </form>
                     {% else %}
                       -
@@ -96,11 +96,11 @@
             </tbody>
           </table>
         {% else %}
-          <p>Keine Long-Memory-Einträge.</p>
+          <p>{{ t('dashboard.no_long_memory') }}</p>
         {% endif %}
       </section>
     {% endfor %}
   {% else %}
-    <p>Keine Memory-Einträge vorhanden.</p>
+    <p>{{ t('dashboard.memory_empty') }}</p>
   {% endif %}
 {% endblock %}

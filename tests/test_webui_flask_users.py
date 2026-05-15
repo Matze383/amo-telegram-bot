@@ -227,3 +227,17 @@ def test_role_change_requires_csrf(tmp_path) -> None:
         )
 
     assert response.status_code == 400
+
+
+def test_users_language_switch_en(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'users_lang.db'}"
+    app = create_flask_app(settings=_make_settings(db_url))
+
+    with app.test_client() as client:
+        with client.session_transaction() as flask_session:
+            flask_session["authenticated"] = True
+        response = client.get("/users?lang=en")
+        assert response.status_code == 200
+        html = response.get_data(as_text=True)
+        assert "Language:" in html
+        assert "Role mutation disabled: WEBUI_OWNER_TELEGRAM_ID is not set." in html

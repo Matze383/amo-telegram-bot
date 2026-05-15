@@ -1,13 +1,13 @@
 {% extends "base.html" %}
-{% block title %}Users{% endblock %}
+{% block title %}{{ t('users.title') }}{% endblock %}
 {% block content %}
-  <h1>Users</h1>
-  <p><a href="{{ url_for('ui.dashboard') }}">Zurück zum Dashboard</a></p>
+  <h1>{{ t('users.title') }}</h1>
+  <p><a href="{{ url_for('ui.dashboard') }}">{{ t('users.back') }}</a></p>
 
   {% if owner_mutation_enabled %}
-    <p>Rollenänderung ist aktiv.</p>
+    <p>{{ t('users.mutation_on') }}</p>
   {% else %}
-    <p>Rollenänderung deaktiviert: WEBUI_OWNER_TELEGRAM_ID nicht gesetzt.</p>
+    <p>{{ t('users.mutation_off') }}</p>
   {% endif %}
 
   {% if error_message %}
@@ -18,12 +18,12 @@
     <table>
       <thead>
         <tr>
-          <th>Telegram User ID</th>
-          <th>Username</th>
-          <th>Name</th>
-          <th>Last Seen</th>
-          <th>Rolle</th>
-          <th>Rolle ändern</th>
+          <th>{{ t('table.telegram_user_id') }}</th>
+          <th>{{ t('table.username') }}</th>
+          <th>{{ t('table.name') }}</th>
+          <th>{{ t('table.last_seen') }}</th>
+          <th>{{ t('table.role') }}</th>
+          <th>{{ t('table.change_role') }}</th>
         </tr>
       </thead>
       <tbody>
@@ -42,7 +42,7 @@
                     <option value="{{ role_name }}" {% if role_name == user.role %}selected{% endif %}>{{ role_name }}</option>
                   {% endfor %}
                 </select>
-                <button type="submit" {% if not owner_mutation_enabled %}disabled{% endif %}>Speichern</button>
+                <button type="submit" {% if not owner_mutation_enabled %}disabled{% endif %}>{{ t('action.save') }}</button>
               </form>
             </td>
           </tr>
@@ -50,6 +50,6 @@
       </tbody>
     </table>
   {% else %}
-    <p>Keine User vorhanden.</p>
+    <p>{{ t('users.empty') }}</p>
   {% endif %}
 {% endblock %}

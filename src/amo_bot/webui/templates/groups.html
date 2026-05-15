@@ -1,13 +1,13 @@
 {% extends "base.html" %}
-{% block title %}Groups{% endblock %}
+{% block title %}{{ t('groups.title') }}{% endblock %}
 {% block content %}
-  <h1>Groups</h1>
-  <p><a href="{{ url_for('ui.dashboard') }}">Zurück zum Dashboard</a></p>
+  <h1>{{ t('groups.title') }}</h1>
+  <p><a href="{{ url_for('ui.dashboard') }}">{{ t('groups.back') }}</a></p>
 
   {% if owner_mutation_enabled %}
-    <p>Topic-Verwaltung ist aktiv.</p>
+    <p>{{ t('groups.mutation_on') }}</p>
   {% else %}
-    <p>Topic-Verwaltung deaktiviert: WEBUI_OWNER_TELEGRAM_ID nicht gesetzt.</p>
+    <p>{{ t('groups.mutation_off') }}</p>
   {% endif %}
 
   {% if error_message %}
@@ -27,7 +27,7 @@
         </ul>
 
         {% if group.chat_type in ["group", "supergroup"] %}
-          <h3>Gruppenrollen</h3>
+          <h3>{{ t('groups.roles') }}</h3>
           <form method="post" action="{{ url_for('ui.update_group_role', chat_id=group.chat_id) }}" style="margin-bottom: 0.75rem;">
             {{ group_role_form.csrf_token }}
             <select name="telegram_user_id">
@@ -40,16 +40,16 @@
                 <option value="{{ role_name }}">{{ role_name }}</option>
               {% endfor %}
             </select>
-            <button type="submit" {% if not owner_mutation_enabled %}disabled{% endif %}>Rolle setzen</button>
+            <button type="submit" {% if not owner_mutation_enabled %}disabled{% endif %}>{{ t('action.set_role') }}</button>
           </form>
 
           {% if group.group_user_roles %}
             <table>
               <thead>
                 <tr>
-                  <th>Telegram User ID</th>
-                  <th>User</th>
-                  <th>Gruppenrolle</th>
+                  <th>{{ t('table.telegram_user_id') }}</th>
+                  <th>{{ t('table.user') }}</th>
+                  <th>{{ t('table.group_role') }}</th>
                 </tr>
               </thead>
               <tbody>
@@ -66,7 +66,7 @@
               </tbody>
             </table>
           {% else %}
-            <p>Keine bekannten User vorhanden.</p>
+            <p>{{ t('groups.no_known_users') }}</p>
           {% endif %}
         {% endif %}
 
@@ -77,10 +77,10 @@
                 <th>message_thread_id</th>
                 <th>telegram_topic_name</th>
                 <th>display_name</th>
-                <th>notes</th>
-                <th>enabled</th>
-                <th>topic_soul</th>
-                <th>Aktion</th>
+                <th>{{ t('table.notes') }}</th>
+                <th>{{ t('table.enabled') }}</th>
+                <th>{{ t('table.topic_soul') }}</th>
+                <th>{{ t('table.action') }}</th>
               </tr>
             </thead>
             <tbody>
@@ -90,7 +90,7 @@
                   <td>{{ topic.telegram_topic_name or "-" }}</td>
                   <td>{{ topic.display_name or "-" }}</td>
                   <td>{{ topic.notes or "-" }}</td>
-                  <td>{{ "ja" if topic.enabled else "nein" }}</td>
+                  <td>{{ 'yes' if lang == 'en' and topic.enabled else 'no' if lang == 'en' else 'ja' if topic.enabled else 'nein' }}</td>
                   <td><pre style="white-space: pre-wrap; margin: 0;">{{ topic.topic_soul_text or "-" }}</pre></td>
                   <td>
                     <form method="post" action="{{ url_for('ui.update_topic_metadata', chat_id=group.chat_id, message_thread_id=topic.message_thread_id) }}">
@@ -103,7 +103,7 @@
                       </label>
                       <br>
                       <textarea name="topic_soul_text" rows="3" cols="36" maxlength="4000" placeholder="Topic Soul">{{ topic.topic_soul_text or '' }}</textarea>
-                      <button type="submit" {% if not owner_mutation_enabled %}disabled{% endif %}>Speichern</button>
+                      <button type="submit" {% if not owner_mutation_enabled %}disabled{% endif %}>{{ t('action.save') }}</button>
                     </form>
                   </td>
                 </tr>
@@ -117,11 +117,11 @@
               <button type="submit" hidden aria-hidden="true" tabindex="-1"></button>
             </form>
           {% endif %}
-          <p>Keine Topics vorhanden.</p>
+          <p>{{ t('groups.no_topics') }}</p>
         {% endif %}
       </section>
     {% endfor %}
   {% else %}
-    <p>Keine Gruppen vorhanden.</p>
+    <p>{{ t('groups.empty') }}</p>
   {% endif %}
 {% endblock %}

@@ -8,6 +8,7 @@ from wtforms import PasswordField, SubmitField
 from wtforms.validators import DataRequired
 
 from amo_bot.db.repositories import AuthAuditRepository
+from amo_bot.webui.i18n import resolve_lang, translate
 
 
 auth_bp = Blueprint("auth", __name__)
@@ -93,7 +94,7 @@ def login_submit():
             "login.html",
             form=form,
             insecure_password=True,
-            error_message="Login deaktiviert: WEBUI_PASSWORD fehlt oder ist unsicher (change_me).",
+            error_message=translate("login.disabled", lang=resolve_lang()),
         ), 503
 
     if not form.validate_on_submit():
@@ -105,7 +106,7 @@ def login_submit():
         delay_fn = current_app.extensions.get("amo.login_delay_fn", _sleep_delay)
         delay_fn(delay_seconds)
         _write_auth_audit(event_type="webui_login_failure", remote_addr=request.remote_addr)
-        flash("Ungültiges Passwort.", "error")
+        flash(translate("login.invalid_password", lang=resolve_lang()), "error")
         return render_template("login.html", form=form, insecure_password=False), 401
 
     _get_login_attempt_tracker().reset(key)

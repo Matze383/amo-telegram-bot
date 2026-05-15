@@ -523,3 +523,44 @@ def test_public_mode_closed_logout_remains_allowed(tmp_path) -> None:
 
     assert response.status_code == 302
     assert response.headers["Location"].endswith("/login")
+
+
+def test_login_page_language_switch_renders_english(tmp_path) -> None:
+    app = create_flask_app(settings=_make_settings(tmp_path))
+
+    with app.test_client() as client:
+        response = client.get("/login?lang=en")
+        assert response.status_code == 200
+        html = response.get_data(as_text=True)
+        assert "Language:" in html
+        assert "Password" in html
+
+
+
+
+def test_language_switch_preserves_existing_query_args(tmp_path) -> None:
+    app = create_flask_app(settings=_make_settings(tmp_path))
+
+    with app.test_client() as client:
+        response = client.get("/login?next=%2Fdashboard&foo=bar&lang=de")
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert '/login?next=/dashboard&amp;foo=bar&amp;lang=en' in html
+    assert '/login?next=/dashboard&amp;foo=bar&amp;lang=de' in html
+
+def test_login_invalid_password_flash_is_bilingual(tmp_path) -> None:
+    app = create_flask_app(settings=_make_settings(tmp_path, password="secret123"))
+
+    with app.test_client() as client:
+        page = client.get("/login?lang=en")
+        token = _extract_csrf_token(page.get_data(as_text=True))
+        bad = client.post("/login", data={"password": "wrong", "csrf_token": token}, follow_redirects=False)
+        assert bad.status_code == 401
+        assert "Invalid password." in bad.get_data(as_text=True)
+
+        page = client.get("/login?lang=de")
+        token = _extract_csrf_token(page.get_data(as_text=True))
+        bad = client.post("/login", data={"password": "wrong", "csrf_token": token}, follow_redirects=False)
+        assert bad.status_code == 401
+        assert "Ungültiges Passwort." in bad.get_data(as_text=True)

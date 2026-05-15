@@ -1,8 +1,8 @@
 {% extends "base.html" %}
-{% block title %}Plugins{% endblock %}
+{% block title %}{{ t('plugins.title') }}{% endblock %}
 {% block content %}
-  <h1>Plugins</h1>
-  <p><a href="{{ url_for('ui.dashboard') }}">Zurück zum Dashboard</a></p>
+  <h1>{{ t('plugins.title') }}</h1>
+  <p><a href="{{ url_for('ui.dashboard') }}">{{ t('plugins.back') }}</a></p>
 
   {% if plugins %}
     <table>
@@ -66,7 +66,7 @@
                         {% if value is not none and value != "" %}
                           <code>{{ value }}</code>
                         {% else %}
-                          <em>kein Wert gesetzt</em>
+                          <em>{{ t('plugins.no_value') }}</em>
                         {% endif %}
                       </li>
                     {% endfor %}
@@ -120,7 +120,7 @@
                         </label><br>
                       {% endfor %}
                     {% else %}
-                      <em>Keine bekannten Gruppen vorhanden.</em><br>
+                      <em>{{ t('plugins.none_known_groups') }}</em><br>
                     {% endif %}
                     <small>groups_mode=allow + keine Gruppe ausgewählt =&gt; deny all.</small><br>
                     <label>Topic mode
@@ -140,10 +140,10 @@
                         </label><br>
                       {% endfor %}
                     {% else %}
-                      <em>Keine bekannten Topics vorhanden.</em><br>
+                      <em>{{ t('plugins.none_known_topics') }}</em><br>
                     {% endif %}
                     <small>topics_mode=allow + keine Topics ausgewählt =&gt; deny all.</small><br>
-                    <button type="submit">Policy speichern</button>
+                    <button type="submit">{{ t('action.save_policy') }}</button>
                   </fieldset>
                 </form>
               {% else %}
@@ -155,30 +155,30 @@
                 {% if plugin.enabled %}
                   <form method="post" action="{{ url_for('plugins.disable_plugin', plugin_name=plugin.name) }}">
                     {{ mutation_form.hidden_tag() }}
-                    <button type="submit">Disable</button>
+                    <button type="submit">{{ t('action.disable') }}</button>
                   </form>
                 {% else %}
                   <form method="post" action="{{ url_for('plugins.enable_plugin', plugin_name=plugin.name) }}">
                     {{ mutation_form.hidden_tag() }}
-                    <button type="submit">Enable</button>
+                    <button type="submit">{{ t('action.enable') }}</button>
                   </form>
                 {% endif %}
                 {% if plugin.worker %}
                   <form method="post" action="{{ url_for('plugins.mutate_worker', plugin_name=plugin.name, action='start') }}">
                     {{ mutation_form.hidden_tag() }}
-                    <button type="submit">Start</button>
+                    <button type="submit">{{ t('action.start') }}</button>
                   </form>
                   <form method="post" action="{{ url_for('plugins.mutate_worker', plugin_name=plugin.name, action='stop') }}">
                     {{ mutation_form.hidden_tag() }}
-                    <button type="submit">Stop</button>
+                    <button type="submit">{{ t('action.stop') }}</button>
                   </form>
                   <form method="post" action="{{ url_for('plugins.mutate_worker', plugin_name=plugin.name, action='restart') }}">
                     {{ mutation_form.hidden_tag() }}
-                    <button type="submit">Restart</button>
+                    <button type="submit">{{ t('action.restart') }}</button>
                   </form>
                 {% endif %}
               {% else %}
-                deaktiviert: WEBUI_OWNER_TELEGRAM_ID nicht gesetzt
+                {{ t('plugins.mutation_off') }}
               {% endif %}
             </td>
           </tr>
@@ -186,11 +186,11 @@
       </tbody>
     </table>
   {% else %}
-    <p>Keine Plugins gefunden.</p>
+    <p>{{ t('plugins.empty') }}</p>
   {% endif %}
 
   {% if invalid_manifests %}
-    <h2>Fehlerhafte Manifeste</h2>
+    <h2>{{ t('plugins.invalid_manifests') }}</h2>
     <table>
       <thead>
         <tr>

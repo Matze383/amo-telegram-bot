@@ -856,3 +856,20 @@ def test_plugin_policy_post_ignores_ai_tool_enabled_input_and_runtime_deny_remai
     assert denied.status.value == "denied"
     assert denied.error_code == "policy_denied"
     assert denied.reason == "tools_disabled"
+
+
+def test_plugins_language_switch_en(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'plugins_lang.db'}"
+    plugins_dir = tmp_path / "plugins"
+    plugins_dir.mkdir(parents=True)
+    app = create_flask_app(settings=_make_settings(db_url, str(plugins_dir)))
+
+    with app.test_client() as client:
+        with client.session_transaction() as flask_session:
+            flask_session["authenticated"] = True
+        response = client.get("/plugins?lang=en")
+        assert response.status_code == 200
+        html = response.get_data(as_text=True)
+        assert "Language:" in html
+        assert "Plugins" in html
+        assert "No plugins found." in html
