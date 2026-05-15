@@ -73,9 +73,9 @@ python main.py
 
 ## License / Lizenz
 
-License not specified yet.
+This project is licensed under the MIT License — see [LICENSE](LICENSE) for details.
 
-Lizenz noch nicht festgelegt.
+Dieses Projekt steht unter der MIT License — siehe [LICENSE](LICENSE) für Details.
 
 ## Memory Management MVP Safe Operations (CP-G2)
 
