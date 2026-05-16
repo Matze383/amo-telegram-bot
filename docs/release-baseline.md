@@ -13,10 +13,10 @@ This document defines the first public release readiness baseline for the AMO Te
 
 ### Target Release
 
-**Proposed version:** `v0.1.0-beta.1` → `v0.1.0`
+**Version:** `2026.05.16`
 
-- Follows SemVer-like versioning
-- Beta phase for initial public testing
+- Date-based versioning (YYYY.MM.DD)
+- Public release candidate
 - Stable release after quality gates pass
 
 ### Supported Python / Runtime Matrix
@@ -83,10 +83,10 @@ Dieses Dokument definiert die Release-Baseline für die erste öffentliche Versi
 
 ### Ziel-Release
 
-**Vorgeschlagene Version:** `v0.1.0-beta.1` → `v0.1.0`
+**Version:** `2026.05.16`
 
-- SemVer-ähnliches Versionsschema
-- Beta-Phase für erstes öffentliches Testing
+- Datumsbasiertes Versionsschema (JJJJ.MM.TT)
+- Öffentlicher Release-Kandidat
 - Stabiles Release nach Bestehen der Quality Gates
 
 ### Unterstützte Python / Runtime-Matrix

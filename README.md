@@ -89,7 +89,7 @@ python main.py
 | [📘 Setup Guide (EN)](docs/SETUP_EN.md) | English setup guide |
 | [🧪 Beta-Test (DE)](docs/BETATEST_DE.md) | Schritt-für-Schritt Testanleitung |
 | [🧪 Beta Test (EN)](docs/BETATEST_EN.md) | Step-by-step testing guide |
-| [📝 Release Notes](docs/) | Changelogs und Versionshistorie |
+| [📝 Changelog](CHANGELOG.md) | Änderungsprotokoll und Versionshistorie |
 | [🚀 Release Baseline](docs/release-baseline.md) | Support-Matrix und Release-Status |
 | [🗺️ Roadmap](ROADMAP.md) | Projekt-Richtung und geplante Features |
 
@@ -181,7 +181,7 @@ python main.py
 | [📗 Setup-Anleitung (DE)](docs/SETUP_DE.md) | German setup guide |
 | [🧪 Beta Test (EN)](docs/BETATEST_EN.md) | Step-by-step testing guide |
 | [🧪 Beta-Test (DE)](docs/BETATEST_DE.md) | German testing guide |
-| [📝 Release Notes](docs/) | Changelogs and version history |
+| [📝 Changelog](CHANGELOG.md) | Changelog and version history |
 | [🚀 Release Baseline](docs/release-baseline.md) | Support matrix and release status |
 | [🗺️ Roadmap](ROADMAP.md) | Project direction and planned features |
 
