@@ -329,6 +329,8 @@ def test_users_page_renders_private_chat_policy_controls_and_excludes_ignore(tmp
     assert 'value="vip" selected' in policy_form
     assert policy_form.count('value="normal" selected') == 2
     assert 'value="ignore"' not in policy_form
+    assert '<button type="submit"' in policy_form
+    assert '>Speichern</button>' in policy_form
 
 
 def test_private_chat_policy_post_updates_thresholds(tmp_path) -> None:
@@ -393,6 +395,21 @@ def test_private_chat_policy_post_invalid_role_blocked_without_write(tmp_path) -
         assert policy.min_ai_role.value == "admin"
         assert policy.min_general_command_role.value == "vip"
         assert policy.min_plugin_command_role.value == "owner"
+
+
+def test_private_chat_policy_save_button_disabled_when_owner_mutation_off(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'users_policy_save_disabled.db'}"
+    init_db(db_url)
+    app = create_flask_app(settings=_make_settings(db_url))
+
+    with app.test_client() as client:
+        _login(client, "test-secret")
+        response = client.get("/users")
+        assert response.status_code == 200
+        html = response.get_data(as_text=True)
+
+    policy_form = html.split('action="/users/private-chat-policy"', 1)[1].split("</form>", 1)[0]
+    assert '<button type="submit" disabled>Speichern</button>' in policy_form
 
 
 def test_users_language_switch_en(tmp_path) -> None:
