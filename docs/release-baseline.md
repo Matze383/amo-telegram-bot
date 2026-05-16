@@ -171,5 +171,73 @@ Aktuelle Beta-Bereiche:
 
 ---
 
-*Last updated: 2026-05-14*  
-*RR-01 Block – Release Baseline + Support Matrix*
+---
+
+## RR-13 – Cross-Platform Smoke Validation Evidence
+
+### Deutsch
+
+#### Linux Smoke-Validierung – PASS
+
+- **Status:** PASS
+- **Datum:** 2026-05-16
+- **Python-Version:** 3.12.3
+- **Repository-Zustand:** Clean, 30 Commits ahead of origin/main
+- **Test-Ergebnisse:** 15 Tests bestanden in ~0,9s (fokussierte Smoke-Tests)
+- **Manuelle Prüfungen:**
+  - `main.py --help` beendet mit Exit Code 0
+  - `pip check`: Keine defekten Requirements gefunden
+
+#### macOS Smoke-Validierung – PENDING/BLOCKED
+
+- **Status:** BLOCKED
+- **Grund:** Kein nativer macOS-Runner verfügbar
+- **Hinweis:** Vollständige Cross-Platform-Validierung nicht abgeschlossen
+
+#### Windows Smoke-Validierung – PENDING/BLOCKED
+
+- **Status:** BLOCKED
+- **Grund:** Kein nativer Windows-Runner verfügbar
+- **Hinweis:** Vollständige Cross-Platform-Validierung nicht abgeschlossen
+
+#### Release-Status
+
+- Öffentliches Release bleibt gesperrt, bis die ausstehende Validierung abgeschlossen und die finale Freigabe erteilt ist.
+- Keine vollständige Cross-Platform-Unterstützung wird derzeit beansprucht.
+
+---
+
+### English
+
+#### Linux Smoke Validation – PASS
+
+- **Status:** PASS
+- **Date:** 2026-05-16
+- **Python Version:** 3.12.3
+- **Repository State:** Clean, 30 commits ahead of origin/main
+- **Test Results:** 15 tests passed in ~0.9s (focused smoke tests)
+- **Manual Checks:**
+  - `main.py --help` exits with exit code 0
+  - `pip check`: No broken requirements found
+
+#### macOS Smoke Validation – PENDING/BLOCKED
+
+- **Status:** BLOCKED
+- **Reason:** No native macOS runner available
+- **Note:** Full cross-platform validation not yet completed
+
+#### Windows Smoke Validation – PENDING/BLOCKED
+
+- **Status:** BLOCKED
+- **Reason:** No native Windows runner available
+- **Note:** Full cross-platform validation not yet completed
+
+#### Release Status
+
+- Public release remains gated until pending validation is completed and final approval is obtained.
+- No full cross-platform support is currently claimed.
+
+---
+
+*Last updated: 2026-05-16*
+*RR-13 Block – Cross-Platform Smoke Validation Evidence*
