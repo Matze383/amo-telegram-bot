@@ -40,7 +40,21 @@ This document tracks public-facing repository metadata requirements for the AMO 
 |-------|---------|----------|
 | Python Version | Show supported Python | shields.io |
 | License | Show MIT license | shields.io |
-| Build/Tests | CI status | GitHub Actions (future) |
+| Build/Tests | CI status | GitHub Actions (minimal) |
+
+### CI Decision
+
+**Decision:** Minimal GitHub Actions CI implemented (RR-14)
+
+**Trigger:** Pull requests + manual (`workflow_dispatch`)
+**Platform:** Ubuntu (Linux)
+**Python:** 3.12
+**Test runner:** pytest -q
+**Scope:** Install `requirements-dev.txt`, run tests
+**Secrets:** None used
+**Deploy/Release:** Not part of CI
+
+**Note:** CI workflow is configured but has not yet been executed on GitHub.
 
 ---
 
@@ -101,7 +115,21 @@ Dieses Dokument erfasst öffentliche Repository-Metadaten-Anforderungen für das
 |-------|-------|----------|
 | Python Version | Unterstützte Python-Version anzeigen | shields.io |
 | Lizenz | MIT-Lizenz anzeigen | shields.io |
-| Build/Tests | CI-Status | GitHub Actions (zukünftig) |
+| Build/Tests | CI-Status | GitHub Actions (minimal) |
+
+### CI-Entscheidung
+
+**Entscheidung:** Minimale GitHub Actions CI implementiert (RR-14)
+
+**Trigger:** Pull Requests + manuell (`workflow_dispatch`)
+**Plattform:** Ubuntu (Linux)
+**Python:** 3.12
+**Test-Runner:** pytest -q
+**Scope:** Installation von `requirements-dev.txt`, Ausführung der Tests
+**Secrets:** Keine verwendet
+**Deploy/Release:** Nicht Teil der CI
+
+**Hinweis:** CI-Workflow ist konfiguriert, wurde aber noch nicht auf GitHub ausgeführt.
 
 ---
 
