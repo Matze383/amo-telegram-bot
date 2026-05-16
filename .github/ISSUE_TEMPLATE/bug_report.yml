@@ -1,0 +1,172 @@
+name: Bug Report / Fehlermeldung
+description: |
+  Report a bug to help us improve AMO.
+  Melde einen Fehler, um AMO zu verbessern.
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## Deutsch 🇩🇪
+
+        Vielen Dank, dass du dir die Zeit nimmst, einen Fehler zu melden!
+
+        ---
+
+        ## English 🇬🇧
+
+        Thank you for taking the time to report a bug!
+
+  - type: checkboxes
+    id: terms
+    attributes:
+      label: Privacy Check / Datenschutz-Check
+      description: |
+        Before submitting, please confirm:
+        Bitte bestätige vor dem Absenden:
+      options:
+        - label: |
+            I have NOT included any secrets, tokens, passwords, private data, or internal system information in this report.
+            Ich habe KEINE Secrets, Tokens, Passwörter, private Daten oder interne Systeminformationen in diesen Bericht aufgenommen.
+          required: true
+        - label: |
+            I will provide logs or error details only via secure channels if they contain sensitive information.
+            Ich werde Logs oder Fehlerdetails nur über sichere Kanäle bereitstellen, falls sie sensible Informationen enthalten.
+          required: true
+
+  - type: dropdown
+    id: language
+    attributes:
+      label: Preferred Language / Bevorzugte Sprache
+      options:
+        - Deutsch
+        - English
+        - Both / Beides
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: |
+        Description / Beschreibung
+      description: |
+        A clear description of the bug.
+        Eine klare Beschreibung des Fehlers.
+      placeholder: |
+        DE: Der Bot reagiert nicht auf den /ask Befehl in privaten Chats.
+        EN: The bot does not respond to the /ask command in private chats.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: |
+        Steps to Reproduce / Schritte zur Reproduktion
+      description: |
+        Provide steps to reproduce the behavior.
+        Beschreibe die Schritte, um das Verhalten zu reproduzieren.
+      placeholder: |
+        1. Start the bot with `python -m amo_bot`
+        2. Send `/ask hello` in a private chat
+        3. Observe that no response is received
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: |
+        Expected Behavior / Erwartetes Verhalten
+      description: |
+        What you expected to happen.
+        Was du erwartet hast.
+      placeholder: |
+        DE: Der Bot sollte eine KI-generierte Antwort zurückgeben.
+        EN: The bot should return an AI-generated response.
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: |
+        Actual Behavior / Tatsächliches Verhalten
+      description: |
+        What actually happened.
+        Was tatsächlich passiert ist.
+      placeholder: |
+        DE: Keine Antwort, keine Fehlermeldung in den Logs.
+        EN: No response, no error message in logs.
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: |
+        Logs / Protokolle
+      description: |
+        If applicable, add a short sanitized excerpt of relevant log output. ⚠️ **REMOVE ALL SECRETS, TOKENS, AND PRIVATE DATA BEFORE POSTING.**
+        Falls zutreffend, füge einen kurzen bereinigten Auszug relevanter Log-Ausgaben hinzu. ⚠️ **ENTFERNE ALLE SECRETS, TOKENS UND PRIVATE DATEN VOR DEM POSTEN.**
+      placeholder: |
+        Paste only a short sanitized excerpt. Remove/redact all sensitive or private details (tokens, passwords, personal information, internal system details) before posting.
+        Füge nur einen kurzen bereinigten Auszug ein. Entferne/schwärze alle sensiblen oder privaten Details (Tokens, Passwörter, persönliche Informationen, interne Systemdetails) vor dem Posten.
+      render: shell
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating System / Betriebssystem
+      options:
+        - Linux
+        - macOS
+        - Windows
+        - Other / Sonstiges
+    validations:
+      required: true
+
+  - type: input
+    id: python_version
+    attributes:
+      label: Python Version
+      description: |
+        Run `python --version` to check.
+        Führe `python --version` aus, um zu prüfen.
+      placeholder: "3.12.0"
+
+  - type: input
+    id: version
+    attributes:
+      label: AMO Version / AMO-Version
+      description: |
+        Version or commit hash if known.
+        Version oder Commit-Hash falls bekannt.
+      placeholder: "v0.1.0 or commit abc1234"
+
+  - type: textarea
+    id: context
+    attributes:
+      label: |
+        Additional Context / Zusätzlicher Kontext
+      description: |
+        Any other relevant information about the issue.
+        Alle anderen relevanten Informationen zum Problem.
+      placeholder: |
+        - Self-hosted or development setup?
+        - Using Docker?
+        - Specific plugins enabled?
+        - Selbst gehostet oder Entwicklungs-Setup?
+        - Docker verwendet?
+        - Bestimmte Plugins aktiviert?
+
+  - type: checkboxes
+    id: confirmations
+    attributes:
+      label: Final Checklist / Abschluss-Checkliste
+      options:
+        - label: I have checked that this issue has not already been reported.
+        - label: Ich habe geprüft, dass dieses Problem noch nicht gemeldet wurde.
+        - label: I have confirmed this bug exists on the latest version.
+        - label: Ich habe bestätigt, dass dieser Fehler in der neuesten Version existiert.

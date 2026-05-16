@@ -1,0 +1,17 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security Issue / Sicherheitsproblem
+    url: https://github.com/Matze383/amo-telegram-bot/security/advisories/new
+    about: |
+      Please report security vulnerabilities privately.
+      Bitte melde Sicherheitslücken vertraulich.
+  - name: Discussions & Questions / Diskussionen & Fragen
+    url: https://github.com/Matze383/amo-telegram-bot/discussions
+    about: |
+      For general questions and discussions, please use GitHub Discussions. Do NOT share private operating details, tokens, passwords, or secrets in public discussions.
+      Für allgemeine Fragen und Diskussionen bitte GitHub Discussions verwenden. Teile KEINE privaten Betriebsdetails, Tokens, Passwörter oder Secrets in öffentlichen Diskussionen.
+  - name: Setup Documentation / Einrichtungs-Dokumentation
+    url: https://github.com/Matze383/amo-telegram-bot/tree/main/docs
+    about: |
+      Check the docs/ folder for setup instructions in German and English. Do NOT post tokens, credentials, or private configuration values in public discussions.
+      Im docs/-Ordner findest du Einrichtungsanleitungen auf Deutsch und Englisch. Poste KEINE Tokens, Zugangsdaten oder private Konfigurationswerte in öffentlichen Diskussionen.

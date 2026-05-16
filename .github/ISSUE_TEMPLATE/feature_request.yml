@@ -1,0 +1,140 @@
+name: Feature Request / Funktionswunsch
+description: |
+  Suggest an idea for AMO.
+  Schlage eine Idee für AMO vor.
+labels: ["enhancement", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## Deutsch 🇩🇪
+
+        Vielen Dank, dass du dir die Zeit nimmst, eine Idee einzureichen!
+
+        ---
+
+        ## English 🇬🇧
+
+        Thank you for taking the time to suggest an idea!
+
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy Check / Datenschutz-Check
+      description: |
+        Before submitting, please confirm:
+        Bitte bestätige vor dem Absenden:
+      options:
+        - label: |
+            I have NOT included any tokens, private IDs (user IDs, group IDs, chat IDs), internal paths, raw logs, or private operating details in this request.
+            Ich habe KEINE Tokens, privaten IDs (User-IDs, Gruppen-IDs, Chat-IDs), internen Pfade, Roh-Logs oder private Betriebsdetails in diese Anfrage aufgenommen.
+          required: true
+        - label: |
+            I understand that this is a public feature request and will not include any confidential or security-sensitive information.
+            Ich verstehe, dass dies ein öffentlicher Funktionswunsch ist und werde keine vertraulichen oder sicherheitsrelevanten Informationen einfügen.
+          required: true
+
+  - type: dropdown
+    id: language
+    attributes:
+      label: Preferred Language / Bevorzugte Sprache
+      options:
+        - Deutsch
+        - English
+        - Both / Beides
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: |
+        Problem / Problemstellung
+      description: |
+        Is your feature request related to a problem? Please describe.
+        Bezieht sich dein Funktionswunsch auf ein Problem? Bitte beschreibe es.
+      placeholder: |
+        DE: Ich habe oft das Problem, dass [...]
+        EN: I often find it frustrating when [...]
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: |
+        Proposed Solution / Vorgeschlagene Lösung
+      description: |
+        Describe the solution you'd like.
+        Beschreibe die gewünschte Lösung.
+      placeholder: |
+        DE: Es wäre hilfreich, wenn der Bot [...]
+        EN: It would be helpful if the bot could [...]
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: |
+        Alternatives Considered / Erwogene Alternativen
+      description: |
+        Describe any alternative solutions or features you've considered.
+        Beschreibe alternative Lösungen oder Funktionen, die du erwogen hast.
+      placeholder: |
+        DE: Ich habe auch daran gedacht, [...] zu verwenden, aber [...]
+        EN: I also considered using [...], but [...]
+
+  - type: dropdown
+    id: scope
+    attributes:
+      label: |
+        Scope / Umfang
+      description: |
+        Who would benefit from this feature?
+        Wer würde von dieser Funktion profitieren?
+      options:
+        - All users / Alle Nutzer
+        - Group admins / Gruppen-Admins
+        - Bot owners / Bot-Betreiber
+        - Plugin developers / Plugin-Entwickler
+        - Other / Sonstiges
+    validations:
+      required: true
+
+  - type: textarea
+    id: use_cases
+    attributes:
+      label: |
+        Use Cases / Anwendungsfälle
+      description: |
+        Provide specific use cases where this feature would be valuable.
+        Beschreibe konkrete Anwendungsfälle, in denen diese Funktion wertvoll wäre.
+      placeholder: |
+        1. In a group with 50+ members, this would help [...]
+        2. For plugin development, this enables [...]
+        3. In private chats, users could [...]
+
+  - type: checkboxes
+    id: confirmations
+    attributes:
+      label: Checklist / Checkliste
+      options:
+        - label: I have checked that this feature has not already been requested.
+        - label: Ich habe geprüft, dass diese Funktion noch nicht angefragt wurde.
+        - label: This feature aligns with the project's scope and goals.
+        - label: Diese Funktion passt zum Projektumfang und den Zielen.
+        - label: I understand that feature requests are evaluated based on project priorities.
+        - label: Ich verstehe, dass Funktionswünsche nach Projektprioritäten bewertet werden.
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: |
+        Additional Context / Zusätzlicher Kontext
+      description: |
+        Any other information, mockups, or examples.
+        Weitere Informationen, Mockups oder Beispiele.
+      placeholder: |
+        Screenshots, diagrams, or references to similar features in other projects.
+        Screenshots, Diagramme oder Referenzen zu ähnlichen Funktionen in anderen Projekten.
