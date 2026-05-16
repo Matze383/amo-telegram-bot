@@ -75,7 +75,11 @@ class ChatTopicPersistenceService:
                 if prompt_result == "unreachable":
                     if self._owner_notifier is not None:
                         await self._owner_notifier.notify_consent_unreachable(user=user, reason="private_dm_unreachable")
-                    if (self._send_group_markup is not None or self._send_group_text is not None) and message.chat.type in GROUP_CHAT_TYPES:
+                    if (
+                        existing_user is None
+                        and (self._send_group_markup is not None or self._send_group_text is not None)
+                        and message.chat.type in GROUP_CHAT_TYPES
+                    ):
                         try:
                             text = self._build_group_unreachable_text(message=message)
                             markup = self._build_group_unreachable_markup()

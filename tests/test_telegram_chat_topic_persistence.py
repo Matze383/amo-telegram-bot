@@ -846,6 +846,38 @@ def test_forbidden_dm_without_bot_username_uses_text_only_fallback(tmp_path) -> 
     assert len(block_msgs) == 1
 
 
+def test_forbidden_dm_existing_group_user_sends_no_group_fallback(tmp_path) -> None:
+    from amo_bot.telegram.client import TelegramApiError
+
+    db_url = f"sqlite:///{tmp_path / 'persist_existing_user_no_group_fallback.db'}"
+    init_db(db_url)
+    sent_group_markup: list[tuple[int, str, dict[str, object], int | None]] = []
+    sent_group_text: list[tuple[int, str, int | None]] = []
+
+    dispatcher = _build_dispatcher(
+        db_url,
+        sent_group_markup=sent_group_markup,
+        sent_group_text=sent_group_text,
+        private_send_error=TelegramApiError("Forbidden: bot can't initiate conversation with a user"),
+        bot_username="AmoBot",
+    )
+
+    update = _mk_update(update_id=101, user_id=8102, chat_id=-108102, chat_type="supergroup", title="G")
+    asyncio.run(dispatcher.handle_raw_update(update))
+    asyncio.run(dispatcher.handle_raw_update(update))
+
+    fallback_msgs = [
+        m
+        for m in sent_group_markup
+        if m[1].startswith("Willkommen") and "Nutzungsbedingungen" in m[1]
+    ]
+    consent_block_msgs = [m for m in sent_group_text if m[1] == "Bitte kläre Consent privat mit dem Bot."]
+
+    assert len(fallback_msgs) == 1
+    assert len(consent_block_msgs) == 2
+    assert len(sent_group_markup) == 1
+
+
 def test_dm_success_sends_no_group_fallback(tmp_path) -> None:
     db_url = f"sqlite:///{tmp_path / 'persist_no_group_fallback_on_dm_success.db'}"
     init_db(db_url)

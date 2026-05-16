@@ -1,6 +1,9 @@
 import asyncio
 
 from amo_bot.auth.roles import Role
+from amo_bot.db.base import create_session_factory
+from amo_bot.db.init_db import init_db
+from amo_bot.db.models import ChatSeenUser, TelegramChat, TelegramTopic
 from amo_bot.telegram.commands import create_builtin_registry
 from amo_bot.telegram.dispatcher import Dispatcher, MessagePersistence
 from amo_bot.telegram.role_resolver import InMemoryRoleResolver
@@ -394,6 +397,87 @@ def test_dispatcher_accepts_suffixed_command_for_configured_bot_username() -> No
 class _FailingPersistence(MessagePersistence):
     async def persist_message(self, message: object) -> None:
         raise RuntimeError("db down")
+
+
+def test_group_topic_plain_text_without_trigger_is_never_answered_even_when_persisting(tmp_path) -> None:
+    from amo_bot.telegram.chat_topic_persistence import ChatTopicPersistenceService
+
+    db_url = f"sqlite:///{tmp_path / 'dispatcher_group_plain_no_send.db'}"
+    init_db(db_url)
+
+    sent: list[tuple[int, str, int | None]] = []
+    ai_prompts: list[str] = []
+
+    async def _fake_send(chat_id: int, text: str, message_thread_id: int | None = None) -> object:
+        sent.append((chat_id, text, message_thread_id))
+        return {"ok": True}
+
+    class _FakeAI:
+        async def ask(self, prompt: str) -> str:
+            ai_prompts.append(prompt)
+            return "should-not-send"
+
+    dispatcher = Dispatcher(
+        command_registry=create_builtin_registry(),
+        role_resolver=InMemoryRoleResolver({777001: Role.NORMAL}),
+        send_text=_fake_send,
+        bot_username="AmoBot",
+        message_persistence=ChatTopicPersistenceService(
+            create_session_factory(db_url),
+            send_private_message=None,
+            send_group_text=None,
+            send_group_markup=None,
+            bot_username="AmoBot",
+        ),
+        database_url=db_url,
+        ai_service=_FakeAI(),
+    )
+
+    update = {
+        "update_id": 601,
+        "message": {
+            "message_id": 601,
+            "date": 1,
+            "chat": {
+                "id": -1007001,
+                "type": "supergroup",
+                "title": "Group",
+                "is_forum": True,
+            },
+            "message_thread_id": 872,
+            "from": {
+                "id": 777001,
+                "is_bot": False,
+                "first_name": "User",
+                "username": "user777001",
+                "language_code": "de",
+            },
+            "text": "ganz normale nachricht ohne mention",
+            "entities": [],
+        },
+    }
+
+    asyncio.run(dispatcher.handle_raw_update(update))
+
+    assert sent == []
+    assert ai_prompts == []
+
+    with create_session_factory(db_url)() as session:
+        chat = session.query(TelegramChat).filter(TelegramChat.chat_id == -1007001).one_or_none()
+        topic = (
+            session.query(TelegramTopic)
+            .filter(TelegramTopic.chat_id == -1007001, TelegramTopic.message_thread_id == 872)
+            .one_or_none()
+        )
+        seen = (
+            session.query(ChatSeenUser)
+            .filter(ChatSeenUser.chat_id == -1007001, ChatSeenUser.telegram_user_id == 777001)
+            .one_or_none()
+        )
+
+    assert chat is not None
+    assert topic is not None
+    assert seen is not None
 
 
 def test_dispatcher_continues_when_message_persistence_fails() -> None:
