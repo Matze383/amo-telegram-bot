@@ -389,6 +389,15 @@ class Dispatcher:
             if decision.reason_code == AIRouterReasonCode.SCOPE_ENABLED and decision.context.scope_type == "private_user":
                 allowed_reason_codes.add(AIRouterReasonCode.SCOPE_ENABLED)
 
+            # Context fallback is only safe when it came from a true reply trigger.
+            # Mention-trigger fallback is intentionally blocked to prevent false-positive
+            # mention detection from producing unsolicited group replies.
+            if (
+                decision.reason_code == AIRouterReasonCode.CONTEXT_GUARD_FALLBACK
+                and decision.context.flag_reply_to_bot
+            ):
+                allowed_reason_codes.add(AIRouterReasonCode.CONTEXT_GUARD_FALLBACK)
+
             if decision.reason_code not in allowed_reason_codes:
                 return
 

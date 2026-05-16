@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from unittest.mock import patch
 
 from sqlalchemy import select
 
@@ -311,6 +312,90 @@ def test_private_scope_ignore_role_stays_silent(tmp_path) -> None:
 
     assert sender.sent == []
     assert ai.prompts == []
+
+
+def test_group_scope_context_fallback_without_trigger_stays_silent(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'ai_autoreply_group_fallback_no_trigger.db'}"
+    init_db(db_url)
+    _seed_user(
+        db_url,
+        user_id=2210,
+        role="vip",
+        consent="accepted",
+        group_chat_id=-1210,
+        group_role="vip",
+    )
+
+    sf = create_session_factory(db_url)
+    with sf() as session:
+        repo = TopicAgentMemoryRepository(session)
+        repo.upsert_config(scope_type="topic", chat_id=-1210, topic_id=9, ai_enabled=True)
+
+    ai = FakeAIService(answer="ai-answer")
+    sender = Sender()
+    dispatcher = _mk_dispatcher(db_url, ai, sender)
+
+    with patch(
+        "amo_bot.ai.router.TopicAgentMemoryRepository.get_daily_memory",
+        side_effect=RuntimeError("simulated context read error"),
+    ), patch(
+        "amo_bot.ai.router.TopicAgentMemoryRepository.list_long_memories",
+        side_effect=RuntimeError("simulated context read error"),
+    ):
+        asyncio.run(
+            dispatcher.handle_raw_update(
+                _mk_update(uid=2210, chat_id=-1210, chat_type="supergroup", text="plain text", update_id=25, message_thread_id=9)
+            )
+        )
+
+    assert sender.sent == []
+    assert ai.prompts == []
+
+
+def test_group_scope_context_fallback_reply_to_bot_still_sends(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'ai_autoreply_group_fallback_reply_to_bot.db'}"
+    init_db(db_url)
+    _seed_user(
+        db_url,
+        user_id=2211,
+        role="vip",
+        consent="accepted",
+        group_chat_id=-1211,
+        group_role="vip",
+    )
+
+    sf = create_session_factory(db_url)
+    with sf() as session:
+        repo = TopicAgentMemoryRepository(session)
+        repo.upsert_config(scope_type="topic", chat_id=-1211, topic_id=10, ai_enabled=True)
+
+    ai = FakeAIService(answer="ai-answer")
+    sender = Sender()
+    dispatcher = _mk_dispatcher(db_url, ai, sender)
+
+    with patch(
+        "amo_bot.ai.router.TopicAgentMemoryRepository.get_daily_memory",
+        side_effect=RuntimeError("simulated context read error"),
+    ), patch(
+        "amo_bot.ai.router.TopicAgentMemoryRepository.list_long_memories",
+        side_effect=RuntimeError("simulated context read error"),
+    ):
+        asyncio.run(
+            dispatcher.handle_raw_update(
+                _mk_update(
+                    uid=2211,
+                    chat_id=-1211,
+                    chat_type="supergroup",
+                    text="reply path",
+                    update_id=26,
+                    message_thread_id=10,
+                    reply_to_is_bot=True,
+                )
+            )
+        )
+
+    assert sender.sent == [(-1211, "ai-answer", 10)]
+    assert len(ai.prompts) == 1
 
 
 def test_group_scope_unaffected_by_private_min_ai_role(tmp_path) -> None:
