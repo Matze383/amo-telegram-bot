@@ -650,6 +650,26 @@ After logging in, group roles can be managed under "Groups":
 
 ---
 
+## WebUI: Users – Private Chat Role Thresholds
+
+The "Users" page in the WebUI configures role thresholds for **private bot chats** (direct messages):
+
+- Applies only to private chats, not groups or topics
+- `owner` remains the only global special role
+- Group/topic permissions continue to be managed on their respective context pages
+
+**Configurable thresholds:**
+- **AI/KI minimum role** for private chats (default: `vip`)
+- **General/built-in commands** – minimum role (default: `normal`)
+- **Plugin commands** – minimum role (default: `normal`)
+
+**Allowed threshold roles:** `owner` > `admin` > `vip` > `normal`
+
+- `ignore` is not selectable as a threshold and remains denied
+- Hierarchy: `owner` > `admin` > `vip` > `normal` > `ignore`
+
+---
+
 ## WebUI: Plugin AI Tool Toggle (Read-Only)
 
 The Plugins page displays an **AI Tool** toggle indicator for each plugin:

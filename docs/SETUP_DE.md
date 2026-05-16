@@ -650,6 +650,26 @@ Nach dem Login unter "Groups" können Gruppenrollen verwaltet werden:
 
 ---
 
+## WebUI: Users – Private-Chat-Rollen-Schwellen
+
+Die Seite "Users" im WebUI konfiguriert Rollenschwellen für **private Bot-Chats** (Direktnachrichten):
+
+- Gilt nur für private Chats, nicht für Gruppen oder Topics
+- `owner` bleibt die einzige globale Sonderrolle
+- Gruppen-/Topic-Berechtigungen werden weiterhin auf den jeweiligen Kontextseiten verwaltet
+
+**Konfigurierbare Schwellen:**
+- **AI/KI-Minimalrolle** für private Chats (Standard: `vip`)
+- **Allgemeine/built-in Befehle** – Minimalrolle (Standard: `normal`)
+- **Plugin-Befehle** – Minimalrolle (Standard: `normal`)
+
+**Erlaubte Rollen für Schwellen:** `owner` > `admin` > `vip` > `normal`
+
+- `ignore` ist nicht als Schwellwert wählbar und bleibt verweigert
+- Hierarchie: `owner` > `admin` > `vip` > `normal` > `ignore`
+
+---
+
 ## WebUI: Plugin AI Tool Toggle (Read-Only)
 
 Die Plugins-Seite zeigt für jedes Plugin einen **AI Tool**-Toggle-Indikator:
