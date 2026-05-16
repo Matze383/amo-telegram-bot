@@ -1,6 +1,6 @@
 # AMO Telegram Bot
 
-> **DE:** Ein modularer, rollenbasierter Telegram-Bot mit Plugin-Unterstützung, WebUI-Verwaltung und optionaler KI-Integration.  
+> **DE:** Ein modularer, rollenbasierter Telegram-Bot mit Plugin-Unterstützung, WebUI-Verwaltung und optionaler KI-Integration.
 > **EN:** A modular, role-based Telegram bot with plugin support, WebUI management, and optional AI integration.
 
 ---
@@ -205,17 +205,25 @@ python main.py
 
 ## 🤝 Contributing / Mitwirken
 
-**EN:** Contributions are welcome. Please ensure:
-- Python 3.12+ compatibility
-- All tests pass (`pytest -q`)
-- Code follows existing patterns
+**EN:** Contributions are welcome. Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines on:
+- Local development setup
+- Branch and commit conventions
+- Pull request process
+- Code style and tests
 
-**DE:** Mitwirkungen sind willkommen. Bitte beachten:
-- Python 3.12+ Kompatibilität
-- Alle Tests bestehen (`pytest -q`)
-- Code folgt bestehenden Mustern
+**DE:** Mitwirkungen sind willkommen. Siehe [CONTRIBUTING.md](CONTRIBUTING.md) für:
+- Lokale Entwicklungsumgebung
+- Branch- und Commit-Konventionen
+- Pull-Request-Prozess
+- Code-Stil und Tests
 
-See docs for detailed contribution guidelines (planned).
+### Weitere Ressourcen
+
+| Dokument | Inhalt |
+|----------|--------|
+| [SECURITY.md](SECURITY.md) | Verantwortungsvolle Meldung von Sicherheitsproblemen |
+| [SUPPORT.md](SUPPORT.md) | Hilfe und Support-Informationen |
+| [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) | Gemeinschaftsrichtlinien |
 
 ---
 
@@ -232,7 +240,7 @@ See docs for detailed contribution guidelines (planned).
 
 ## 📄 License / Lizenz
 
-MIT License — see [LICENSE](LICENSE) for details.  
+MIT License — see [LICENSE](LICENSE) for details.
 MIT License — siehe [LICENSE](LICENSE) für Details.
 
 ---
