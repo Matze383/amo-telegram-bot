@@ -420,7 +420,12 @@ def group_detail_page(chat_id: str):
             ],
         }
 
-    return render_template("group_detail.html", group=group), 200
+    return render_template(
+        "group_detail.html",
+        group=group,
+        topic_form=TopicMetadataForm(),
+        owner_mutation_enabled=current_app.extensions["amo.settings"].webui_owner_telegram_id is not None,
+    ), 200
 
 
 @ui_bp.post("/groups/<chat_id>/roles")
@@ -549,4 +554,4 @@ def update_topic_metadata(chat_id: str, message_thread_id: int):
         except ValueError:
             abort(404, description="topic not found")
 
-    return redirect(url_for("ui.groups_page"), code=302)
+    return redirect(url_for("ui.group_detail_page", chat_id=parsed_chat_id), code=302)

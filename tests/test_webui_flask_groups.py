@@ -117,7 +117,7 @@ def test_groups_lists_seeded_chat_and_topic(tmp_path) -> None:
     assert 'href="/groups/-100123"' in html
 
 
-def test_group_detail_page_renders_group_metadata_and_topics_readonly(tmp_path) -> None:
+def test_group_detail_page_renders_group_metadata_topics_and_metadata_form(tmp_path) -> None:
     db_url = f"sqlite:///{tmp_path / 'groups_detail1.db'}"
     init_db(db_url)
     _seed_chat_topic(db_url, -100401, 201)
@@ -138,6 +138,13 @@ def test_group_detail_page_renders_group_metadata_and_topics_readonly(tmp_path) 
     assert "201" in html
     assert "General" in html
     assert "Back to Groups" in html
+    assert 'action="/groups/-100401/topics/201"' in html
+    assert 'name="display_name"' in html
+    assert 'name="notes"' in html
+    assert 'name="enabled"' in html
+    assert "Topic AI enabled" not in html
+    assert "Topic AI response mode" not in html
+    assert 'name="topic_soul_text"' not in html
 
 
 def test_group_detail_page_unknown_group_returns_404(tmp_path) -> None:
@@ -164,7 +171,7 @@ def test_topic_metadata_update_with_owner_id_persists(tmp_path) -> None:
 
     with app.test_client() as client:
         _login(client, "test-secret")
-        page = client.get("/groups")
+        page = client.get("/groups/-100200")
         token = _extract_csrf_token(page.get_data(as_text=True))
         response = client.post(
             "/groups/-100200/topics/88",
@@ -181,6 +188,7 @@ def test_topic_metadata_update_with_owner_id_persists(tmp_path) -> None:
         )
 
     assert response.status_code == 302
+    assert response.headers["Location"].endswith("/groups/-100200")
 
     sf = create_session_factory(db_url)
     with sf() as s:
@@ -217,7 +225,7 @@ def test_topic_metadata_update_without_owner_id_blocked(tmp_path) -> None:
 
     with app.test_client() as client:
         _login(client, "test-secret")
-        page = client.get("/groups")
+        page = client.get("/groups/-100201")
         token = _extract_csrf_token(page.get_data(as_text=True))
         response = client.post(
             "/groups/-100201/topics/89",
@@ -308,6 +316,7 @@ def test_group_role_set_persists_scoped_to_chat(tmp_path) -> None:
         )
 
     assert response.status_code == 302
+    assert response.headers["Location"].endswith("/groups")
 
     with sf() as s:
         repo = ChatScopedRoleRepository(s)
@@ -538,7 +547,7 @@ def test_topic_metadata_update_missing_topic_returns_404(tmp_path) -> None:
 
     with app.test_client() as client:
         _login(client, "test-secret")
-        page = client.get("/groups")
+        page = client.get("/groups/-100203")
         token = _extract_csrf_token(page.get_data(as_text=True))
         response = client.post(
             "/groups/-100203/topics/999",
@@ -576,9 +585,9 @@ def test_groups_renders_topic_soul_escaped_and_preserves_whitespace(tmp_path) ->
         html = response.get_data(as_text=True)
 
     assert response.status_code == 200
-    assert "Line1" in html
-    assert "Line3" in html
-    assert "&lt;script&gt;alert(1)&lt;/script&gt;" in html
+    assert "Line1" not in html
+    assert "Line3" not in html
+    assert "&lt;script&gt;alert(1)&lt;/script&gt;" not in html
     assert "<script>alert(1)</script>" not in html
 
 
@@ -605,7 +614,7 @@ def test_topic_metadata_toggle_ai_enabled_to_false(tmp_path) -> None:
 
     with app.test_client() as client:
         _login(client, "test-secret")
-        page = client.get("/groups")
+        page = client.get("/groups/-100206")
         token = _extract_csrf_token(page.get_data(as_text=True))
         response = client.post(
             "/groups/-100206/topics/93",
@@ -661,7 +670,7 @@ def test_topic_metadata_invalid_response_mode_rejected_without_db_write(tmp_path
 
     with app.test_client() as client:
         _login(client, "test-secret")
-        page = client.get("/groups")
+        page = client.get("/groups/-100207")
         token = _extract_csrf_token(page.get_data(as_text=True))
         response = client.post(
             "/groups/-100207/topics/94",
@@ -703,7 +712,7 @@ def test_topic_metadata_invalid_response_mode_rejected_without_db_write(tmp_path
         assert cfg.topic_soul_text == "before"
 
 
-def test_groups_topic_ai_controls_render_with_defaults(tmp_path) -> None:
+def test_groups_overview_shows_compact_topic_info_and_detail_link(tmp_path) -> None:
     db_url = f"sqlite:///{tmp_path / 'groups_ai_render.db'}"
     init_db(db_url)
     _seed_chat_topic(db_url, -100208, 95)
@@ -717,9 +726,10 @@ def test_groups_topic_ai_controls_render_with_defaults(tmp_path) -> None:
         html = response.get_data(as_text=True)
 
     assert response.status_code == 200
-    assert "Topic AI enabled" in html
-    assert "Topic AI response mode" in html
-    assert '<option value="mention_or_reply" selected>mention_or_reply</option>' in html
+    assert "Topic AI enabled" not in html
+    assert "Topic AI response mode" not in html
+    assert 'name="topic_soul_text"' not in html
+    assert 'href="/groups/-100208#topic-95-heading"' in html
 
 
 def test_topic_metadata_topic_soul_text_max_length_validation(tmp_path) -> None:
@@ -733,7 +743,7 @@ def test_topic_metadata_topic_soul_text_max_length_validation(tmp_path) -> None:
     too_long = "a" * 4001
     with app.test_client() as client:
         _login(client, "test-secret")
-        page = client.get("/groups")
+        page = client.get("/groups/-100205")
         token = _extract_csrf_token(page.get_data(as_text=True))
         response = client.post(
             "/groups/-100205/topics/92",
