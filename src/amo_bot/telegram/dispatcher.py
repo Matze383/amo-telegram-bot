@@ -405,6 +405,30 @@ class Dispatcher:
             if decision.reason_code not in allowed_reason_codes:
                 return
 
+            # Hard invariant: group/supergroup/forum AI replies require explicit trigger
+            # (mention or reply-to-bot), independent of resolved scope/config/role.
+            is_group_chat = message.chat.type in {"group", "supergroup"}
+            explicit_group_trigger = decision.context.flag_bot_mention or decision.context.flag_reply_to_bot
+            if is_group_chat and not explicit_group_trigger:
+                self._write_ai_audit(
+                    session=session,
+                    actor_user_id=message.from_user.id,
+                    chat_id=message.chat.id,
+                    message_id=message.message_id,
+                    message_thread_id=message.message_thread_id,
+                    event_type="ai_autoreply_denied",
+                    payload={
+                        "reason": "missing_group_trigger",
+                        "router_reason": decision.reason_code.value,
+                        "chat_type": message.chat.type,
+                        "scope_type": decision.context.scope_type,
+                        "flag_bot_mention": decision.context.flag_bot_mention,
+                        "flag_reply_to_bot": decision.context.flag_reply_to_bot,
+                    },
+                )
+                session.commit()
+                return
+
             min_ai_role = PrivateChatPolicyRepository(session).get_policy().min_ai_role
             if decision.context.scope_type == "private_user" and not role_meets_minimum(role, min_ai_role):
                 self._write_ai_audit(
