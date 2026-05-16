@@ -142,8 +142,10 @@ def test_group_detail_page_renders_group_metadata_topics_and_metadata_form(tmp_p
     assert 'name="display_name"' in html
     assert 'name="notes"' in html
     assert 'name="enabled"' in html
-    assert "Topic AI enabled" not in html
-    assert "Topic AI response mode" not in html
+    assert "Topic AI enabled" in html
+    assert "Topic AI response mode" in html
+    assert 'name="ai_enabled"' in html
+    assert 'name="response_mode"' in html
     assert 'name="topic_soul_text"' not in html
 
 
@@ -712,7 +714,7 @@ def test_topic_metadata_invalid_response_mode_rejected_without_db_write(tmp_path
         assert cfg.topic_soul_text == "before"
 
 
-def test_groups_overview_shows_compact_topic_info_and_detail_link(tmp_path) -> None:
+def test_groups_overview_hides_ai_controls_and_keeps_detail_link(tmp_path) -> None:
     db_url = f"sqlite:///{tmp_path / 'groups_ai_render.db'}"
     init_db(db_url)
     _seed_chat_topic(db_url, -100208, 95)
@@ -728,6 +730,8 @@ def test_groups_overview_shows_compact_topic_info_and_detail_link(tmp_path) -> N
     assert response.status_code == 200
     assert "Topic AI enabled" not in html
     assert "Topic AI response mode" not in html
+    assert 'name="ai_enabled"' not in html
+    assert 'name="response_mode"' not in html
     assert 'name="topic_soul_text"' not in html
     assert 'href="/groups/-100208#topic-95-heading"' in html
 

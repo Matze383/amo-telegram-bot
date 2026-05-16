@@ -60,6 +60,19 @@
                 enabled
               </label>
               <br>
+              <label>
+                <input type="checkbox" name="ai_enabled" value="y" {% if topic.ai_enabled %}checked{% endif %}>
+                Topic AI enabled
+              </label>
+              <br>
+              <label>
+                Topic AI response mode
+                <select name="response_mode">
+                  <option value="mention_or_reply" {% if topic.response_mode == 'mention_or_reply' %}selected{% endif %}>mention_or_reply</option>
+                  <option value="command" {% if topic.response_mode == 'command' %}selected{% endif %}>command</option>
+                </select>
+              </label>
+              <br>
               <button type="submit" {% if not owner_mutation_enabled %}disabled{% endif %}>{{ t('action.save') }}</button>
             </form>
           </article>
