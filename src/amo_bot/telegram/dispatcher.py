@@ -96,7 +96,7 @@ class Dispatcher:
             if command is not None:
                 response = self._consent_block_message(chat_type=message.chat.type, blocked_as_unreachable=self._is_user_unreachable(message.from_user.id))
                 if response:
-                    await self.send_text(message.chat.id, response, message.message_thread_id)
+                    await self._send_text(message.chat.id, response, message.message_thread_id)
             return
 
         command_def = self.command_registry.get(command.name)
@@ -115,11 +115,7 @@ class Dispatcher:
                 )
             if plugin_handled:
                 return
-            await self.send_text(
-                message.chat.id,
-                self._unknown_command_message(message=message, command_name=command.name),
-                message.message_thread_id,
-            )
+            await self._send_text(message.chat.id, self._unknown_command_message(message=message, command_name=command.name), message.message_thread_id)
             return
 
         if not self.command_registry.is_allowed(command.name, role):
@@ -185,7 +181,7 @@ class Dispatcher:
                             )
                         )
                         if blocked and isinstance(group_fallback_text, str) and group_fallback_text:
-                            await self.send_text(message.chat.id, group_fallback_text, message.message_thread_id)
+                            await self._send_text(message.chat.id, group_fallback_text, message.message_thread_id)
                         else:
                             raise
                     else:
@@ -196,16 +192,16 @@ class Dispatcher:
                             is_group_like,
                         )
                         if isinstance(group_success_text, str) and group_success_text:
-                            await self.send_text(message.chat.id, group_success_text, message.message_thread_id)
+                            await self._send_text(message.chat.id, group_success_text, message.message_thread_id)
                     return
 
                 if isinstance(reply_markup, dict) and self.send_markup is not None:
                     await self.send_markup(message.chat.id, text, reply_markup, message.message_thread_id)
                 else:
-                    await self.send_text(message.chat.id, text, message.message_thread_id)
+                    await self._send_text(message.chat.id, text, message.message_thread_id)
             return
         if response:
-            await self.send_text(message.chat.id, response, message.message_thread_id)
+            await self._send_text(message.chat.id, response, message.message_thread_id)
 
     async def _handle_callback_query(self, callback_query: Any) -> None:
         if callback_query.from_user.is_bot:
@@ -233,11 +229,7 @@ class Dispatcher:
             return
 
         if callback_query.message is not None:
-            await self.send_text(
-                callback_query.message.chat.id,
-                "Button test ok",
-                callback_query.message.message_thread_id,
-            )
+            await self._send_text(callback_query.message.chat.id, "Button test ok", callback_query.message.message_thread_id)
 
     async def _handle_consent_callback(self, *, callback_query: Any, role: Role, data: str) -> None:
         if self.database_url is None:
@@ -328,10 +320,10 @@ class Dispatcher:
     @staticmethod
     def _consent_block_message(*, chat_type: str | None, blocked_as_unreachable: bool) -> str:
         if chat_type in {"group", "supergroup"}:
-            return "Bitte kläre Consent privat mit dem Bot.\nPlease resolve consent privately with the bot."
+            return "Bitte kläre Consent privat mit dem Bot."
         if blocked_as_unreachable:
-            return "Bitte starte den Bot privat und bestätige mit /accept.\nPlease start the bot in private and confirm with /accept."
-        return "Bitte bestätige zuerst mit /accept oder prüfe /consent.\nPlease confirm first with /accept or check /consent."
+            return "Bitte starte den Bot privat und bestätige mit /accept."
+        return "Bitte bestätige zuerst mit /accept oder prüfe /consent."
 
 
     async def _maybe_handle_ai_autoreply(self, *, message: TelegramMessage, role: Role, bot_username: str | None) -> None:
@@ -423,7 +415,7 @@ class Dispatcher:
         if not response:
             return
 
-        await self.send_text(message.chat.id, response, message.message_thread_id)
+        await self._send_text(message.chat.id, response, message.message_thread_id)
 
         with create_session_factory(self.database_url)() as session:
             self._write_ai_audit(
@@ -436,6 +428,16 @@ class Dispatcher:
                 payload={"router_reason": decision.reason_code.value},
             )
             session.commit()
+
+    async def _send_text(self, chat_id: int, text: str, message_thread_id: int | None) -> None:
+        if message_thread_id is None:
+            await self.send_text(chat_id, text)
+            return
+        try:
+            await self.send_text(chat_id, text, message_thread_id)
+        except TypeError:
+            await self.send_text(chat_id, text)
+
 
     @staticmethod
     def _write_ai_audit(

@@ -11,7 +11,7 @@ class _Recorder:
     def __init__(self) -> None:
         self.calls: list[tuple[str, int, str, int, int]] = []
 
-    async def execute(self, *, actor, invocation) -> None:
+    async def execute(self, *, actor, invocation) -> bool:
         self.calls.append(
             (
                 actor.role.value,
@@ -21,6 +21,7 @@ class _Recorder:
                 invocation.message_id,
             )
         )
+        return True
 
 
 def test_dispatcher_routes_unknown_command_to_plugin_executor() -> None:

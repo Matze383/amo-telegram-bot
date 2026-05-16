@@ -11,13 +11,14 @@ from amo_bot.db.repositories import UserRoleRepository
 from amo_bot.telegram.commands import CommandContext, create_builtin_registry
 
 
-def _ctx(*, command_name: str, user_id: int, chat_id: int, role: Role = Role.NORMAL) -> CommandContext:
+def _ctx(*, command_name: str, user_id: int, chat_id: int, role: Role = Role.NORMAL, locale: str = "de") -> CommandContext:
     return CommandContext(
         chat_id=chat_id,
         user_id=user_id,
         role=role,
         command_name=command_name,
         argument=None,
+        locale=locale,
     )
 
 
@@ -114,8 +115,8 @@ def test_consent_shows_status_private_and_privacy_in_group(tmp_path) -> None:
         assert private_out is not None
         assert "consent status: declined" in private_out
 
-        group_out = asyncio.run(consent_cmd.handler(_ctx(command_name="consent", user_id=1003, chat_id=-1003)))
-        assert group_out == "for privacy, please use /consent in a private chat with me."
+        group_out = asyncio.run(consent_cmd.handler(_ctx(command_name="consent", user_id=1003, chat_id=-1003, locale="en")))
+        assert group_out == "For privacy, please use /consent in a private chat with me."
     finally:
         engine.dispose()
 
