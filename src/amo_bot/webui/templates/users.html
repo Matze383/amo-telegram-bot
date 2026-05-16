@@ -45,7 +45,10 @@
           {% endfor %}
         </select>
       </p>
-      <button type="submit" {% if not owner_mutation_enabled %}disabled{% endif %}>{{ t('action.save') }}</button>
+      <button type="submit" {% if not owner_mutation_enabled %}disabled{% endif %}>Save private thresholds</button>
+      {% if not owner_mutation_enabled %}
+        <p><small>Saving private thresholds is disabled because role mutation is turned off (WEBUI_OWNER_TELEGRAM_ID not set).</small></p>
+      {% endif %}
     </form>
   </section>
 
