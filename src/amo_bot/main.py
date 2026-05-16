@@ -153,6 +153,7 @@ def run(argv: list[str] | None = None) -> None:
         ),
         plugin_command_executor=plugin_command_executor,
         database_url=settings.database_url,
+        ai_service=ai_service,
         owner_notifier=owner_notifier,
     )
 

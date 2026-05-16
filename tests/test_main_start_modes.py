@@ -101,6 +101,30 @@ def test_run_serve_mode_starts_webui_and_runs_polling(monkeypatch, tmp_path) -> 
     assert polling_call == {"created": True, "awaited": True}
 
 
+def test_run_wires_dispatcher_with_non_none_ai_service(monkeypatch, tmp_path) -> None:
+    _set_env(monkeypatch, tmp_path)
+
+    captured: dict[str, object] = {}
+
+    class _DummyDispatcher:
+        def __init__(self, **kwargs) -> None:  # noqa: ANN003
+            captured["ai_service"] = kwargs.get("ai_service")
+
+    async def _fake_run_polling(*args, **kwargs):  # noqa: ANN002,ANN003
+        raise _StopFlow()
+
+    monkeypatch.setattr(main_module, "Dispatcher", _DummyDispatcher)
+    monkeypatch.setattr(main_module, "run_polling", _fake_run_polling)
+
+    try:
+        main_module.run([])
+    except _StopFlow:
+        pass
+
+    assert "ai_service" in captured
+    assert captured["ai_service"] is not None
+
+
 def test_run_wires_topic_aware_send_functions(monkeypatch, tmp_path) -> None:
     _set_env(monkeypatch, tmp_path)
 
