@@ -135,6 +135,8 @@ def test_topic_metadata_update_with_owner_id_persists(tmp_path) -> None:
                 "notes": "Runbook",
                 "topic_soul_text": "Topic Soul v1",
                 "enabled": "",
+                "ai_enabled": "y",
+                "response_mode": "mention_or_reply",
                 "csrf_token": token,
             },
             follow_redirects=False,
@@ -163,6 +165,8 @@ def test_topic_metadata_update_with_owner_id_persists(tmp_path) -> None:
         )
         assert cfg is not None
         assert cfg.topic_soul_text == "Topic Soul v1"
+        assert cfg.ai_enabled is True
+        assert cfg.response_mode == "mention_or_reply"
 
 
 def test_topic_metadata_update_without_owner_id_blocked(tmp_path) -> None:
@@ -538,6 +542,146 @@ def test_groups_renders_topic_soul_escaped_and_preserves_whitespace(tmp_path) ->
     assert "Line3" in html
     assert "&lt;script&gt;alert(1)&lt;/script&gt;" in html
     assert "<script>alert(1)</script>" not in html
+
+
+def test_topic_metadata_toggle_ai_enabled_to_false(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'groups_ai_toggle.db'}"
+    init_db(db_url)
+    _seed_chat_topic(db_url, -100206, 93)
+
+    sf = create_session_factory(db_url)
+    with sf() as s:
+        from amo_bot.db.repositories import TopicAgentMemoryRepository
+
+        TopicAgentMemoryRepository(s).upsert_config(
+            scope_type="topic",
+            chat_id=-100206,
+            topic_id=93,
+            user_id=None,
+            ai_enabled=True,
+            response_mode="command",
+        )
+
+    settings = _make_settings(db_url, owner_id=777)
+    app = create_flask_app(settings=settings)
+
+    with app.test_client() as client:
+        _login(client, "test-secret")
+        page = client.get("/groups")
+        token = _extract_csrf_token(page.get_data(as_text=True))
+        response = client.post(
+            "/groups/-100206/topics/93",
+            data={
+                "display_name": "Ops",
+                "notes": "Runbook",
+                "topic_soul_text": "Soul",
+                "enabled": "y",
+                "response_mode": "mention_or_reply",
+                "csrf_token": token,
+            },
+            follow_redirects=False,
+        )
+
+    assert response.status_code == 302
+
+    with sf() as s:
+        from amo_bot.db.models import TopicAgentConfig
+
+        cfg = s.scalar(
+            select(TopicAgentConfig).where(
+                TopicAgentConfig.scope_type == "topic",
+                TopicAgentConfig.chat_id == -100206,
+                TopicAgentConfig.topic_id == 93,
+            )
+        )
+        assert cfg is not None
+        assert cfg.ai_enabled is False
+        assert cfg.response_mode == "mention_or_reply"
+
+
+def test_topic_metadata_invalid_response_mode_rejected_without_db_write(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'groups_ai_invalid_mode.db'}"
+    init_db(db_url)
+    _seed_chat_topic(db_url, -100207, 94)
+
+    sf = create_session_factory(db_url)
+    with sf() as s:
+        from amo_bot.db.repositories import TopicAgentMemoryRepository
+
+        TopicAgentMemoryRepository(s).upsert_config(
+            scope_type="topic",
+            chat_id=-100207,
+            topic_id=94,
+            user_id=None,
+            ai_enabled=True,
+            response_mode="command",
+            topic_soul_text="before",
+        )
+
+    settings = _make_settings(db_url, owner_id=777)
+    app = create_flask_app(settings=settings)
+
+    with app.test_client() as client:
+        _login(client, "test-secret")
+        page = client.get("/groups")
+        token = _extract_csrf_token(page.get_data(as_text=True))
+        response = client.post(
+            "/groups/-100207/topics/94",
+            data={
+                "display_name": "After",
+                "notes": "After",
+                "topic_soul_text": "after",
+                "enabled": "",
+                "ai_enabled": "y",
+                "response_mode": "invalid_mode",
+                "csrf_token": token,
+            },
+            follow_redirects=False,
+        )
+
+    assert response.status_code == 400
+
+    with sf() as s:
+        topic = s.scalar(
+            select(TelegramTopic).where(TelegramTopic.chat_id == -100207, TelegramTopic.message_thread_id == 94)
+        )
+        assert topic is not None
+        assert topic.display_name is None
+        assert topic.notes is None
+        assert topic.enabled is True
+
+        from amo_bot.db.models import TopicAgentConfig
+
+        cfg = s.scalar(
+            select(TopicAgentConfig).where(
+                TopicAgentConfig.scope_type == "topic",
+                TopicAgentConfig.chat_id == -100207,
+                TopicAgentConfig.topic_id == 94,
+            )
+        )
+        assert cfg is not None
+        assert cfg.ai_enabled is True
+        assert cfg.response_mode == "command"
+        assert cfg.topic_soul_text == "before"
+
+
+def test_groups_topic_ai_controls_render_with_defaults(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'groups_ai_render.db'}"
+    init_db(db_url)
+    _seed_chat_topic(db_url, -100208, 95)
+
+    settings = _make_settings(db_url, owner_id=777)
+    app = create_flask_app(settings=settings)
+
+    with app.test_client() as client:
+        _login(client, "test-secret")
+        response = client.get("/groups")
+        html = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    assert "Topic AI enabled" in html
+    assert "Topic AI response mode" in html
+    assert '<option value="mention_or_reply" selected>mention_or_reply</option>' in html
 
 
 def test_topic_metadata_topic_soul_text_max_length_validation(tmp_path) -> None:

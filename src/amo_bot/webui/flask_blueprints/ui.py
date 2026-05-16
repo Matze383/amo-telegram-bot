@@ -55,6 +55,13 @@ class TopicMetadataForm(FlaskForm):
     notes = TextAreaField("Notes", validators=[Length(max=2000)])
     topic_soul_text = TextAreaField("Topic Soul", validators=[Length(max=4000)])
     enabled = BooleanField("Enabled", default=True)
+    ai_enabled = BooleanField("Topic AI Enabled", default=False)
+    response_mode = SelectField(
+        "Topic AI Response Mode",
+        validators=[DataRequired()],
+        choices=[("mention_or_reply", "mention_or_reply"), ("command", "command")],
+        default="mention_or_reply",
+    )
 
 
 class GroupRoleForm(FlaskForm):
@@ -275,6 +282,8 @@ def groups_page():
                                 )
                                 else None
                             ),
+                            "ai_enabled": cfg.ai_enabled if cfg else False,
+                            "response_mode": cfg.response_mode if cfg and cfg.response_mode else "mention_or_reply",
                         }
                         for topic in topics
                     ],
@@ -385,6 +394,7 @@ def update_topic_metadata(chat_id: str, message_thread_id: int):
     display_name = (form.display_name.data or "").strip() or None
     notes = (form.notes.data or "").strip() or None
     topic_soul_text = (form.topic_soul_text.data or "").strip() or None
+    response_mode = (form.response_mode.data or "").strip() or "mention_or_reply"
 
     session_factory = current_app.extensions["amo.plugin_service"]._session_factory
     with session_factory() as db_session:
@@ -410,8 +420,8 @@ def update_topic_metadata(chat_id: str, message_thread_id: int):
                 chat_id=parsed_chat_id,
                 topic_id=message_thread_id,
                 user_id=None,
-                ai_enabled=existing.ai_enabled if existing else False,
-                response_mode=existing.response_mode if existing else "command",
+                ai_enabled=bool(form.ai_enabled.data),
+                response_mode=response_mode,
                 memory_retention_days=existing.memory_retention_days if existing else 30,
                 tools_enabled=existing.tools_enabled if existing else False,
                 main_soul_text=existing.main_soul_text if existing else None,
