@@ -103,6 +103,12 @@ class Dispatcher:
 
         command_def = self.command_registry.get(command.name)
         if command_def is None:
+            if message.chat.type == "private" and self.database_url is not None:
+                with create_session_factory(self.database_url)() as session:
+                    min_plugin_command_role = PrivateChatPolicyRepository(session).get_policy().min_plugin_command_role
+                if not role_meets_minimum(role, min_plugin_command_role):
+                    return
+
             plugin_handled = False
             if self.plugin_command_executor is not None:
                 plugin_handled = await self.plugin_command_executor.execute(
