@@ -166,7 +166,8 @@ python -m amo_bot.smoke
 
 - [Setup-Anleitung (DE)](docs/SETUP_DE.md)
 - [Setup Guide (EN)](docs/SETUP_EN.md)
-- [Roadmap](docs/ROADMAP.md) (geplant, siehe auch [Release Baseline](docs/release-baseline.md))
+- [Roadmap](ROADMAP.md) – Projekt-Richtung und geplante Features
+- [Release Baseline](docs/release-baseline.md) für Support-Status
 - [Release Notes](docs/) für Versionshistorie
 - [Issue Templates](.github/ISSUE_TEMPLATE/) (geplant)
 
@@ -333,7 +334,8 @@ python -m amo_bot.smoke
 
 - [Setup Guide (EN)](docs/SETUP_EN.md)
 - [Setup-Anleitung (DE)](docs/SETUP_DE.md)
-- [Roadmap](docs/ROADMAP.md) (planned, see also [Release Baseline](docs/release-baseline.md))
+- [Roadmap](ROADMAP.md) – Project direction and planned features
+- [Release Baseline](docs/release-baseline.md) for support status
 - [Release Notes](docs/) for version history
 - [Issue Templates](.github/ISSUE_TEMPLATE/) (planned)
 

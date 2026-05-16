@@ -91,6 +91,7 @@ python main.py
 | [🧪 Beta Test (EN)](docs/BETATEST_EN.md) | Step-by-step testing guide |
 | [📝 Release Notes](docs/) | Changelogs und Versionshistorie |
 | [🚀 Release Baseline](docs/release-baseline.md) | Support-Matrix und Release-Status |
+| [🗺️ Roadmap](ROADMAP.md) | Projekt-Richtung und geplante Features |
 
 > **Hinweis:** Detaillierte Installationsanleitungen für alle Plattformen siehe [SETUP_DE.md](docs/SETUP_DE.md) (Deutsch) oder [SETUP_EN.md](docs/SETUP_EN.md) (Englisch).
 
@@ -182,6 +183,7 @@ python main.py
 | [🧪 Beta-Test (DE)](docs/BETATEST_DE.md) | German testing guide |
 | [📝 Release Notes](docs/) | Changelogs and version history |
 | [🚀 Release Baseline](docs/release-baseline.md) | Support matrix and release status |
+| [🗺️ Roadmap](ROADMAP.md) | Project direction and planned features |
 
 > **Note:** Detailed platform-specific setup instructions see [SETUP_EN.md](docs/SETUP_EN.md) (English) or [SETUP_DE.md](docs/SETUP_DE.md) (German).
 
