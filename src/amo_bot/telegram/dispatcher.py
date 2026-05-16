@@ -120,6 +120,12 @@ class Dispatcher:
             await self._send_text(message.chat.id, self._unknown_command_message(message=message, command_name=command.name), message.message_thread_id)
             return
 
+        if message.chat.type == "private" and self.database_url is not None:
+            with create_session_factory(self.database_url)() as session:
+                min_general_command_role = PrivateChatPolicyRepository(session).get_policy().min_general_command_role
+            if not role_meets_minimum(role, min_general_command_role):
+                return
+
         if not self.command_registry.is_allowed(command.name, role):
             return
 

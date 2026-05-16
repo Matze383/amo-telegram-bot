@@ -753,6 +753,243 @@ def test_dispatcher_sends_unknown_fallback_for_falsey_plugin_result() -> None:
     assert sent == [(101, "Unknown command: /plugincmd. Use /help for available commands.", None)]
 
 
+def test_private_builtin_command_respects_min_general_role_threshold() -> None:
+    from amo_bot.db.init_db import init_db
+    from amo_bot.db.base import create_session_factory
+    from amo_bot.db.repositories import PrivateChatPolicyRepository
+
+    sent: list[tuple[int, str, int | None]] = []
+
+    async def fake_send(chat_id: int, text: str, message_thread_id: int | None = None) -> object:
+        sent.append((chat_id, text, message_thread_id))
+        return {"ok": True}
+
+    db_path = "/tmp/dispatcher_min_general_role.db"
+    db_url = f"sqlite:///{db_path}"
+    init_db(db_url)
+    with create_session_factory(db_url)() as session:
+        PrivateChatPolicyRepository(session).update_policy(
+            min_ai_role="vip",
+            min_general_command_role="vip",
+            min_plugin_command_role="normal",
+        )
+
+    dispatcher = Dispatcher(
+        command_registry=create_builtin_registry(),
+        role_resolver=InMemoryRoleResolver({42: Role.VIP}),
+        send_text=fake_send,
+        bot_username="BotName",
+        database_url=db_url,
+    )
+
+    raw_update = {
+        "update_id": 1701,
+        "message": {
+            "message_id": 91,
+            "from": {"id": 42, "is_bot": False, "first_name": "T", "username": "tester", "language_code": "de"},
+            "chat": {"id": 301, "type": "private"},
+            "text": "/ping",
+        },
+    }
+
+    asyncio.run(dispatcher.handle_raw_update(raw_update))
+
+    assert sent == [(301, "pong", None)]
+
+
+def test_private_builtin_command_below_min_general_role_is_blocked() -> None:
+    from amo_bot.db.init_db import init_db
+    from amo_bot.db.base import create_session_factory
+    from amo_bot.db.repositories import PrivateChatPolicyRepository
+
+    sent: list[tuple[int, str, int | None]] = []
+
+    async def fake_send(chat_id: int, text: str, message_thread_id: int | None = None) -> object:
+        sent.append((chat_id, text, message_thread_id))
+        return {"ok": True}
+
+    db_path = "/tmp/dispatcher_min_general_role_blocked.db"
+    db_url = f"sqlite:///{db_path}"
+    init_db(db_url)
+    with create_session_factory(db_url)() as session:
+        PrivateChatPolicyRepository(session).update_policy(
+            min_ai_role="vip",
+            min_general_command_role="vip",
+            min_plugin_command_role="normal",
+        )
+
+    dispatcher = Dispatcher(
+        command_registry=create_builtin_registry(),
+        role_resolver=InMemoryRoleResolver({42: Role.NORMAL}),
+        send_text=fake_send,
+        bot_username="BotName",
+        database_url=db_url,
+    )
+
+    raw_update = {
+        "update_id": 1702,
+        "message": {
+            "message_id": 92,
+            "from": {"id": 42, "is_bot": False, "first_name": "T", "username": "tester", "language_code": "de"},
+            "chat": {"id": 302, "type": "private"},
+            "text": "/ping",
+        },
+    }
+
+    asyncio.run(dispatcher.handle_raw_update(raw_update))
+
+    assert sent == []
+
+
+def test_private_builtin_command_ignore_role_is_blocked_by_general_threshold() -> None:
+    from amo_bot.db.init_db import init_db
+    from amo_bot.db.base import create_session_factory
+    from amo_bot.db.repositories import PrivateChatPolicyRepository
+
+    sent: list[tuple[int, str, int | None]] = []
+
+    async def fake_send(chat_id: int, text: str, message_thread_id: int | None = None) -> object:
+        sent.append((chat_id, text, message_thread_id))
+        return {"ok": True}
+
+    db_path = "/tmp/dispatcher_min_general_role_ignore.db"
+    db_url = f"sqlite:///{db_path}"
+    init_db(db_url)
+    with create_session_factory(db_url)() as session:
+        PrivateChatPolicyRepository(session).update_policy(
+            min_ai_role="vip",
+            min_general_command_role="normal",
+            min_plugin_command_role="normal",
+        )
+
+    dispatcher = Dispatcher(
+        command_registry=create_builtin_registry(),
+        role_resolver=InMemoryRoleResolver({42: Role.IGNORE}),
+        send_text=fake_send,
+        bot_username="BotName",
+        database_url=db_url,
+    )
+
+    raw_update = {
+        "update_id": 1703,
+        "message": {
+            "message_id": 93,
+            "from": {"id": 42, "is_bot": False, "first_name": "T", "username": "tester", "language_code": "de"},
+            "chat": {"id": 303, "type": "private"},
+            "text": "/ping",
+        },
+    }
+
+    asyncio.run(dispatcher.handle_raw_update(raw_update))
+
+    assert sent == []
+
+
+def test_group_builtin_command_unaffected_by_private_min_general_role_threshold() -> None:
+    from amo_bot.db.init_db import init_db
+    from amo_bot.db.base import create_session_factory
+    from amo_bot.db.repositories import PrivateChatPolicyRepository
+
+    sent: list[tuple[int, str, int | None]] = []
+
+    async def fake_send(chat_id: int, text: str, message_thread_id: int | None = None) -> object:
+        sent.append((chat_id, text, message_thread_id))
+        return {"ok": True}
+
+    db_path = "/tmp/dispatcher_min_general_role_group.db"
+    db_url = f"sqlite:///{db_path}"
+    init_db(db_url)
+    with create_session_factory(db_url)() as session:
+        PrivateChatPolicyRepository(session).update_policy(
+            min_ai_role="vip",
+            min_general_command_role="vip",
+            min_plugin_command_role="normal",
+        )
+
+    dispatcher = Dispatcher(
+        command_registry=create_builtin_registry(),
+        role_resolver=InMemoryRoleResolver({42: Role.NORMAL}),
+        send_text=fake_send,
+        bot_username="BotName",
+        database_url=db_url,
+    )
+
+    raw_update = {
+        "update_id": 1704,
+        "message": {
+            "message_id": 94,
+            "message_thread_id": 872,
+            "from": {"id": 42, "is_bot": False, "first_name": "T", "username": "tester", "language_code": "de"},
+            "chat": {"id": -1003997137641, "type": "supergroup"},
+            "text": "/ping",
+        },
+    }
+
+    asyncio.run(dispatcher.handle_raw_update(raw_update))
+
+    assert sent == [(-1003997137641, "pong", 872)]
+
+
+def test_plugin_commands_unaffected_by_private_min_general_role_threshold() -> None:
+    from amo_bot.db.init_db import init_db
+    from amo_bot.db.base import create_session_factory
+    from amo_bot.db.repositories import PrivateChatPolicyRepository
+
+    sent: list[tuple[int, str, int | None]] = []
+    plugin_calls: list[tuple[str, str | None, int, int, int | None]] = []
+
+    async def fake_send(chat_id: int, text: str, message_thread_id: int | None = None) -> object:
+        sent.append((chat_id, text, message_thread_id))
+        return {"ok": True}
+
+    class _HandledPluginExecutor:
+        async def execute(self, *, actor, invocation):
+            plugin_calls.append(
+                (
+                    invocation.command_name,
+                    invocation.argument,
+                    invocation.chat_id,
+                    invocation.message_id,
+                    invocation.message_thread_id,
+                )
+            )
+            return True
+
+    db_path = "/tmp/dispatcher_min_general_role_plugin.db"
+    db_url = f"sqlite:///{db_path}"
+    init_db(db_url)
+    with create_session_factory(db_url)() as session:
+        PrivateChatPolicyRepository(session).update_policy(
+            min_ai_role="vip",
+            min_general_command_role="vip",
+            min_plugin_command_role="normal",
+        )
+
+    dispatcher = Dispatcher(
+        command_registry=create_builtin_registry(),
+        role_resolver=InMemoryRoleResolver({42: Role.NORMAL}),
+        send_text=fake_send,
+        bot_username="BotName",
+        plugin_command_executor=_HandledPluginExecutor(),
+        database_url=db_url,
+    )
+
+    raw_update = {
+        "update_id": 1705,
+        "message": {
+            "message_id": 95,
+            "from": {"id": 42, "is_bot": False, "first_name": "T", "username": "tester", "language_code": "en"},
+            "chat": {"id": 304, "type": "private"},
+            "text": "/plugincmd arg1",
+        },
+    }
+
+    asyncio.run(dispatcher.handle_raw_update(raw_update))
+
+    assert plugin_calls == [("plugincmd", "arg1", 304, 95, None)]
+    assert sent == []
+
+
 def test_dispatcher_ping_uses_locale_neutral_pong_for_de_and_en() -> None:
     sent: list[tuple[int, str, int | None]] = []
 
