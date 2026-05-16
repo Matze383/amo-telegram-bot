@@ -167,6 +167,70 @@ def test_dynamic_bot_username_is_used_in_identity_prompt(tmp_path) -> None:
     assert "User message:\nTest" in ai.prompts[0]
 
 
+def test_private_scope_enabled_plain_text_triggers_ai_autoreply(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'ai_autoreply_private_scope_enabled.db'}"
+    init_db(db_url)
+    _seed_user(db_url, user_id=2112, role="vip", consent="accepted")
+
+    sf = create_session_factory(db_url)
+    with sf() as session:
+        repo = TopicAgentMemoryRepository(session)
+        repo.upsert_config(scope_type="private_user", user_id=2112, ai_enabled=True)
+
+    ai = FakeAIService(answer="ai-answer")
+    sender = Sender()
+    dispatcher = _mk_dispatcher(db_url, ai, sender)
+
+    asyncio.run(
+        dispatcher.handle_raw_update(
+            _mk_update(uid=2112, chat_id=2112, chat_type="private", text="Test", update_id=11)
+        )
+    )
+
+    assert sender.sent == [(2112, "ai-answer", None)]
+    assert len(ai.prompts) == 1
+    assert "User message:\nTest" in ai.prompts[0]
+
+    with sf() as session:
+        events = session.scalars(select(AuditEvent).where(AuditEvent.event_type == "ai_autoreply_sent")).all()
+        assert len(events) == 1
+        import json
+
+        payload = json.loads(events[0].payload_json)
+        assert payload["router_reason"] == "scope_enabled"
+
+
+def test_topic_scope_enabled_plain_text_without_mention_stays_silent(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'ai_autoreply_topic_scope_enabled_no_mention.db'}"
+    init_db(db_url)
+    _seed_user(
+        db_url,
+        user_id=2113,
+        role="vip",
+        consent="accepted",
+        group_chat_id=-1010,
+        group_role="vip",
+    )
+
+    sf = create_session_factory(db_url)
+    with sf() as session:
+        repo = TopicAgentMemoryRepository(session)
+        repo.upsert_config(scope_type="topic", chat_id=-1010, topic_id=77, ai_enabled=True)
+
+    ai = FakeAIService(answer="ai-answer")
+    sender = Sender()
+    dispatcher = _mk_dispatcher(db_url, ai, sender)
+
+    asyncio.run(
+        dispatcher.handle_raw_update(
+            _mk_update(uid=2113, chat_id=-1010, chat_type="supergroup", text="Test", update_id=12, message_thread_id=77)
+        )
+    )
+
+    assert sender.sent == []
+    assert ai.prompts == []
+
+
 def test_inactive_scopes_stay_silent(tmp_path) -> None:
     db_url = f"sqlite:///{tmp_path / 'ai_autoreply_inactive.db'}"
     init_db(db_url)

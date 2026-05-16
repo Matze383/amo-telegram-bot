@@ -369,10 +369,14 @@ class Dispatcher:
                 reply_to_is_bot=message.reply_to_is_bot,
             )
 
-            if decision.reason_code not in {
+            allowed_reason_codes = {
                 AIRouterReasonCode.MENTION_IN_ACTIVE_SCOPE,
                 AIRouterReasonCode.REPLY_TO_BOT_IN_ACTIVE_SCOPE,
-            }:
+            }
+            if decision.reason_code == AIRouterReasonCode.SCOPE_ENABLED and decision.context.scope_type == "private_user":
+                allowed_reason_codes.add(AIRouterReasonCode.SCOPE_ENABLED)
+
+            if decision.reason_code not in allowed_reason_codes:
                 return
 
             if role not in AUTOREPLY_ALLOWED_ROLES:
