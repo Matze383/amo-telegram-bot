@@ -14,6 +14,8 @@
     <p style="color: #b00020;">{{ error_message }}</p>
   {% endif %}
 
+  <p><strong>Owner is the only global role.</strong> Roles changed here apply to private bot chats. Group/topic permissions are managed in their respective context pages.</p>
+
   {% if users %}
     <table>
       <thead>
@@ -22,8 +24,8 @@
           <th>{{ t('table.username') }}</th>
           <th>{{ t('table.name') }}</th>
           <th>{{ t('table.last_seen') }}</th>
-          <th>{{ t('table.role') }}</th>
-          <th>{{ t('table.change_role') }}</th>
+          <th>Private bot chat role</th>
+          <th>Change private chat role</th>
         </tr>
       </thead>
       <tbody>

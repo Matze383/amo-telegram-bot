@@ -141,7 +141,7 @@ def test_users_lists_auto_discovered_profile_fields(tmp_path) -> None:
     assert "Auto Discovered" in html
 
 
-def test_role_change_with_owner_id_persists(tmp_path) -> None:
+def test_private_chat_role_change_with_owner_id_persists(tmp_path) -> None:
     db_url = f"sqlite:///{tmp_path / 'users4.db'}"
     init_db(db_url)
     _seed_user(db_url, 555, "normal")
@@ -168,7 +168,7 @@ def test_role_change_with_owner_id_persists(tmp_path) -> None:
         assert user.role.name == "admin"
 
 
-def test_role_change_without_owner_id_blocked(tmp_path) -> None:
+def test_private_chat_role_change_without_owner_id_blocked(tmp_path) -> None:
     db_url = f"sqlite:///{tmp_path / 'users5.db'}"
     init_db(db_url)
     _seed_user(db_url, 556, "normal")
@@ -189,7 +189,7 @@ def test_role_change_without_owner_id_blocked(tmp_path) -> None:
     assert response.status_code == 403
 
 
-def test_role_change_invalid_role_blocked(tmp_path) -> None:
+def test_private_chat_role_change_invalid_role_blocked(tmp_path) -> None:
     db_url = f"sqlite:///{tmp_path / 'users6.db'}"
     init_db(db_url)
     _seed_user(db_url, 557, "normal")
@@ -210,7 +210,7 @@ def test_role_change_invalid_role_blocked(tmp_path) -> None:
     assert response.status_code == 400
 
 
-def test_role_change_requires_csrf(tmp_path) -> None:
+def test_private_chat_role_change_requires_csrf(tmp_path) -> None:
     db_url = f"sqlite:///{tmp_path / 'users7.db'}"
     init_db(db_url)
     _seed_user(db_url, 558, "normal")
@@ -227,6 +227,25 @@ def test_role_change_requires_csrf(tmp_path) -> None:
         )
 
     assert response.status_code == 400
+
+
+def test_users_page_uses_private_chat_role_wording_and_scope_note(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'users_wording.db'}"
+    init_db(db_url)
+    _seed_user(db_url, 123, "normal")
+    app = create_flask_app(settings=_make_settings(db_url, owner_id=777))
+
+    with app.test_client() as client:
+        _login(client, "test-secret")
+        response = client.get("/users")
+        assert response.status_code == 200
+        html = response.get_data(as_text=True)
+        assert "Private bot chat role" in html
+        assert "Change private chat role" in html
+        assert "Owner is the only global role." in html
+        assert "Roles changed here apply to private bot chats." in html
+        assert "Group/topic permissions are managed in their respective context pages." in html
+        assert "Change role" not in html
 
 
 def test_users_language_switch_en(tmp_path) -> None:
