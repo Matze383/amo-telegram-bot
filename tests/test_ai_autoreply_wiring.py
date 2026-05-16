@@ -34,7 +34,7 @@ class Sender:
         return {"ok": True}
 
 
-def _mk_update(*, uid: int, chat_id: int, chat_type: str, text: str, update_id: int, message_thread_id: int | None = None, reply_to_is_bot: bool = False) -> dict[str, object]:
+def _mk_update(*, uid: int, chat_id: int, chat_type: str, text: str, update_id: int, message_thread_id: int | None = None, reply_to_is_bot: bool = False, reply_to_message_id: int | None = None) -> dict[str, object]:
     m: dict[str, object] = {
         "message_id": update_id + 100,
         "is_topic_message": message_thread_id is not None,
@@ -52,7 +52,8 @@ def _mk_update(*, uid: int, chat_id: int, chat_type: str, text: str, update_id: 
     if message_thread_id is not None:
         m["message_thread_id"] = message_thread_id
     if reply_to_is_bot:
-        m["reply_to_message"] = {"from": {"id": 999, "is_bot": True, "first_name": "Bot"}}
+        reply_message_id = reply_to_message_id if reply_to_message_id is not None else 999
+        m["reply_to_message"] = {"message_id": reply_message_id, "from": {"id": 999, "is_bot": True, "first_name": "Bot"}}
     return {"update_id": update_id, "message": m}
 
 
@@ -416,6 +417,40 @@ def test_owner_group_topic_plain_text_without_trigger_does_not_send_ai(tmp_path)
     asyncio.run(
         dispatcher.handle_raw_update(
             _mk_update(uid=2300, chat_id=-1300, chat_type="supergroup", text="plain text", update_id=31, message_thread_id=70)
+        )
+    )
+
+    assert sender.sent == []
+    assert ai.prompts == []
+
+
+def test_owner_group_topic_root_context_reply_to_bot_does_not_send_ai(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'ai_autoreply_owner_group_topic_root_context.db'}"
+
+    init_db(db_url)
+    _seed_user(db_url, user_id=2399, role="owner", consent="accepted", group_chat_id=-1399, group_role="owner")
+
+    with create_session_factory(db_url)() as session:
+        repo = TopicAgentMemoryRepository(session)
+        repo.upsert_config(scope_type="topic", chat_id=-1399, topic_id=104, ai_enabled=True)
+        session.commit()
+
+    ai = FakeAIService(answer="ai-answer")
+    sender = Sender()
+    dispatcher = _mk_dispatcher(db_url, ai, sender)
+
+    asyncio.run(
+        dispatcher.handle_raw_update(
+            _mk_update(
+                uid=2399,
+                chat_id=-1399,
+                chat_type="supergroup",
+                text="plain text",
+                update_id=320,
+                message_thread_id=104,
+                reply_to_is_bot=True,
+                reply_to_message_id=104,
+            )
         )
     )
 

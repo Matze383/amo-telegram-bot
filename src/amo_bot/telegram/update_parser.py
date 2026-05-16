@@ -161,6 +161,15 @@ def _parse_message(raw: Any) -> TelegramMessage | None:
     if isinstance(reply_to_message_raw, dict):
         reply_to_user = _parse_user(reply_to_message_raw.get("from"))
         reply_to_is_bot = bool(reply_to_user.is_bot) if reply_to_user is not None else False
+        if reply_to_is_bot and message_thread_id is not None:
+            try:
+                reply_to_message_id = int(reply_to_message_raw.get("message_id"))
+            except (TypeError, ValueError):
+                reply_to_message_id = None
+            # In forum topics Telegram may include the topic-root message in reply_to_message
+            # for ordinary thread messages. Treat that as thread context, not explicit reply.
+            if reply_to_message_id == message_thread_id:
+                reply_to_is_bot = False
 
     return TelegramMessage(
         message_id=message_id,
