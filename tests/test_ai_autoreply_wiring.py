@@ -126,7 +126,45 @@ def test_active_mention_and_reply_send_ai_response_in_active_scopes(tmp_path) ->
     )
 
     assert sender.sent == [(-1001, "ai-answer", 10), (2000, "ai-answer", None)]
-    assert ai.prompts == ["hi @AmoBot", "followup"]
+    assert len(ai.prompts) == 2
+    assert "User message:\nhi" in ai.prompts[0]
+    assert "You are the Telegram topic assistant @AmoBot" in ai.prompts[0]
+    assert "Do not claim to be the underlying model/provider unless explicitly asked." in ai.prompts[0]
+    assert "User message:\nfollowup" in ai.prompts[1]
+
+
+def test_dynamic_bot_username_is_used_in_identity_prompt(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'ai_autoreply_dynamic_botname.db'}"
+    init_db(db_url)
+    _seed_user(db_url, user_id=2111, role="vip", consent="accepted")
+
+    sf = create_session_factory(db_url)
+    with sf() as session:
+        repo = TopicAgentMemoryRepository(session)
+        repo.upsert_config(scope_type="private_user", user_id=2111, ai_enabled=True)
+
+    ai = FakeAIService(answer="ai-answer")
+    sender = Sender()
+    dispatcher = Dispatcher(
+        command_registry=create_builtin_registry(database_url=db_url, ai_service=ai),
+        role_resolver=DBRoleResolver(sf),
+        send_text=sender.send_text,
+        bot_username="SomeDynamicBot",
+        database_url=db_url,
+        ai_service=ai,
+    )
+
+    asyncio.run(
+        dispatcher.handle_raw_update(
+            _mk_update(uid=2111, chat_id=2111, chat_type="private", text="@SomeDynamicBot Test", update_id=3)
+        )
+    )
+
+    assert sender.sent == [(2111, "ai-answer", None)]
+    assert len(ai.prompts) == 1
+    assert "@SomeDynamicBot Test" not in ai.prompts[0]
+    assert "You are the Telegram topic assistant @SomeDynamicBot" in ai.prompts[0]
+    assert "User message:\nTest" in ai.prompts[0]
 
 
 def test_inactive_scopes_stay_silent(tmp_path) -> None:

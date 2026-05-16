@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Protocol
 
@@ -326,6 +327,25 @@ class Dispatcher:
         return "Bitte bestätige zuerst mit /accept oder prüfe /consent."
 
 
+    @staticmethod
+    def _sanitize_prompt_for_autoreply(*, text: str, bot_username: str | None) -> tuple[str, bool]:
+        cleaned = text.strip()
+        if not cleaned:
+            return "", False
+
+        if bot_username is None:
+            return cleaned, False
+
+        normalized = bot_username.strip().lstrip("@")
+        if not normalized:
+            return cleaned, False
+
+        mention_pattern = re.compile(rf"(?<!\w)@{re.escape(normalized)}(?![A-Za-z0-9_])", re.IGNORECASE)
+        without_mention = mention_pattern.sub(" ", cleaned)
+        sanitized = re.sub(r"\s+", " ", without_mention).strip()
+        mention_removed = sanitized != cleaned
+        return (sanitized or cleaned), mention_removed
+
     async def _maybe_handle_ai_autoreply(self, *, message: TelegramMessage, role: Role, bot_username: str | None) -> None:
         if self.ai_service is None or self.database_url is None:
             return
@@ -338,7 +358,7 @@ class Dispatcher:
         with create_session_factory(self.database_url)() as session:
             router = AIRouter(topic_agent_memory_repository=__import__("amo_bot.db.repositories", fromlist=["TopicAgentMemoryRepository"]).TopicAgentMemoryRepository(session))
             topic_id = message.message_thread_id
-            normalized_text = text
+            normalized_text, mention_removed = self._sanitize_prompt_for_autoreply(text=text, bot_username=bot_username)
             decision = router.decide(
                 prompt=text,
                 chat_id=message.chat.id,
@@ -395,8 +415,16 @@ class Dispatcher:
                 session.commit()
                 return
 
+        identity_label = bot_username.strip().lstrip("@") if isinstance(bot_username, str) and bot_username.strip() else "this Telegram bot"
+        identity_instruction = (
+            f"System note: You are the Telegram topic assistant @{identity_label}. "
+            "The message was addressed to this bot; treat own-bot mentions as routing triggers, not user intent. "
+            "Do not claim to be the underlying model/provider unless explicitly asked."
+        )
+        llm_prompt = f"{identity_instruction}\n\nUser message:\n{normalized_text}"
+
         try:
-            response = await self.ai_service.ask(normalized_text)
+            response = await self.ai_service.ask(llm_prompt)
         except Exception:
             logger.exception("ai_autoreply failed: user_id=%s chat_id=%s", message.from_user.id, message.chat.id)
             with create_session_factory(self.database_url)() as session:
@@ -425,7 +453,11 @@ class Dispatcher:
                 message_id=message.message_id,
                 message_thread_id=message.message_thread_id,
                 event_type="ai_autoreply_sent",
-                payload={"router_reason": decision.reason_code.value},
+                payload={
+                    "router_reason": decision.reason_code.value,
+                    "mention_removed": mention_removed,
+                    "bot_identity": identity_label,
+                },
             )
             session.commit()
 
