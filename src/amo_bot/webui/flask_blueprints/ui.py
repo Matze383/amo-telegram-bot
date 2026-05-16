@@ -369,6 +369,60 @@ def groups_page():
     ), 200
 
 
+@ui_bp.get("/groups/<chat_id>")
+@login_required
+def group_detail_page(chat_id: str):
+    try:
+        parsed_chat_id = int(chat_id)
+    except ValueError:
+        abort(404, description="invalid chat id")
+
+    session_factory = current_app.extensions["amo.plugin_service"]._session_factory
+    group: dict[str, Any] | None = None
+    with session_factory() as db_session:
+        repo = ChatTopicRepository(db_session)
+        memory_repo = TopicAgentMemoryRepository(db_session)
+        chat = next((row for row in repo.list_chats() if row.chat_id == parsed_chat_id), None)
+        if chat is None:
+            abort(404, description="group not found")
+
+        topics = repo.list_topics(chat.chat_id)
+        group = {
+            "chat_id": chat.chat_id,
+            "chat_type": chat.chat_type,
+            "title": chat.title,
+            "username": chat.username,
+            "last_seen_at": chat.last_seen_at,
+            "updated_at": chat.updated_at,
+            "topics": [
+                {
+                    "message_thread_id": topic.message_thread_id,
+                    "telegram_topic_name": topic.telegram_topic_name,
+                    "display_name": topic.display_name,
+                    "notes": topic.notes,
+                    "enabled": topic.enabled,
+                    "topic_soul_text": (
+                        cfg.topic_soul_text
+                        if (
+                            cfg := memory_repo.get_config(
+                                scope_type="topic",
+                                chat_id=chat.chat_id,
+                                topic_id=topic.message_thread_id,
+                                user_id=None,
+                            )
+                        )
+                        else None
+                    ),
+                    "ai_enabled": cfg.ai_enabled if cfg else False,
+                    "response_mode": cfg.response_mode if cfg and cfg.response_mode else "mention_or_reply",
+                }
+                for topic in topics
+            ],
+        }
+
+    return render_template("group_detail.html", group=group), 200
+
+
 @ui_bp.post("/groups/<chat_id>/roles")
 @login_required
 def update_group_role(chat_id: str):

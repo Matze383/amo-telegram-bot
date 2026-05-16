@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}Group Detail{% endblock %}
+{% block content %}
+  <h1>Group Detail</h1>
+  <p><a href="{{ url_for('ui.groups_page') }}">Back to Groups</a></p>
+
+  <section style="margin-bottom: 1.5rem;">
+    <h2>{{ group.title or "(ohne Titel)" }}</h2>
+    <ul>
+      <li><strong>chat_id:</strong> {{ group.chat_id }}</li>
+      <li><strong>chat_type:</strong> {{ group.chat_type }}</li>
+      <li><strong>username:</strong> {{ group.username or "-" }}</li>
+      <li><strong>last_seen_at:</strong> {{ group.last_seen_at or "-" }}</li>
+      <li><strong>updated_at:</strong> {{ group.updated_at or "-" }}</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>Topics</h2>
+    {% if group.topics %}
+      <table>
+        <thead>
+          <tr>
+            <th>message_thread_id</th>
+            <th>telegram_topic_name</th>
+            <th>display_name</th>
+            <th>notes</th>
+            <th>enabled</th>
+            <th>topic_soul</th>
+            <th>ai_enabled</th>
+            <th>response_mode</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for topic in group.topics %}
+            <tr>
+              <td>{{ topic.message_thread_id }}</td>
+              <td>{{ topic.telegram_topic_name or "-" }}</td>
+              <td>{{ topic.display_name or "-" }}</td>
+              <td>{{ topic.notes or "-" }}</td>
+              <td>{{ 'yes' if lang == 'en' and topic.enabled else 'no' if lang == 'en' else 'ja' if topic.enabled else 'nein' }}</td>
+              <td><pre style="white-space: pre-wrap; margin: 0;">{{ topic.topic_soul_text or "-" }}</pre></td>
+              <td>{{ 'yes' if lang == 'en' and topic.ai_enabled else 'no' if lang == 'en' else 'ja' if topic.ai_enabled else 'nein' }}</td>
+              <td>{{ topic.response_mode or "mention_or_reply" }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p>Keine Topics vorhanden.</p>
+    {% endif %}
+  </section>
+{% endblock %}

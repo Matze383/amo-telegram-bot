@@ -114,6 +114,44 @@ def test_groups_lists_seeded_chat_and_topic(tmp_path) -> None:
     assert "-100123" in html
     assert "Test Group" in html
     assert "77" in html
+    assert 'href="/groups/-100123"' in html
+
+
+def test_group_detail_page_renders_group_metadata_and_topics_readonly(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'groups_detail1.db'}"
+    init_db(db_url)
+    _seed_chat_topic(db_url, -100401, 201)
+
+    settings = _make_settings(db_url)
+    app = create_flask_app(settings=settings)
+
+    with app.test_client() as client:
+        _login(client, "test-secret")
+        response = client.get("/groups/-100401")
+        html = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    assert "Group Detail" in html
+    assert "Test Group" in html
+    assert "-100401" in html
+    assert "Topics" in html
+    assert "201" in html
+    assert "General" in html
+    assert "Back to Groups" in html
+
+
+def test_group_detail_page_unknown_group_returns_404(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'groups_detail2.db'}"
+    init_db(db_url)
+
+    settings = _make_settings(db_url)
+    app = create_flask_app(settings=settings)
+
+    with app.test_client() as client:
+        _login(client, "test-secret")
+        response = client.get("/groups/-999999")
+
+    assert response.status_code == 404
 
 
 def test_topic_metadata_update_with_owner_id_persists(tmp_path) -> None:
