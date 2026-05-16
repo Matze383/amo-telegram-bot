@@ -15,6 +15,8 @@ from amo_bot.db.models import GROUP_CHAT_TYPES, TopicAgentConfig, User
 from amo_bot.db.repositories import (
     ChatScopedRoleRepository,
     ChatSeenUserRepository,
+    PRIVATE_CHAT_THRESHOLD_ROLES,
+    PrivateChatPolicyRepository,
     ChatTopicRepository,
     TopicAgentMemoryRepository,
     UserRoleRepository,
@@ -44,10 +46,29 @@ def index_redirect():
 
 ALLOWED_ROLES: tuple[str, ...] = tuple(role.value for role in Role)
 ALLOWED_GROUP_ROLES: tuple[str, ...] = tuple(role.value for role in Role if role is not Role.OWNER)
+ALLOWED_PRIVATE_THRESHOLD_ROLES: tuple[str, ...] = tuple(role.value for role in PRIVATE_CHAT_THRESHOLD_ROLES)
 
 
 class UserRoleForm(FlaskForm):
     role = SelectField("Role", validators=[DataRequired()], choices=[(r, r) for r in ALLOWED_ROLES])
+
+
+class PrivateChatPolicyForm(FlaskForm):
+    min_ai_role = SelectField(
+        "Minimum private chat role for AI",
+        validators=[DataRequired()],
+        choices=[(r, r) for r in ALLOWED_PRIVATE_THRESHOLD_ROLES],
+    )
+    min_general_command_role = SelectField(
+        "Minimum private chat role for general commands",
+        validators=[DataRequired()],
+        choices=[(r, r) for r in ALLOWED_PRIVATE_THRESHOLD_ROLES],
+    )
+    min_plugin_command_role = SelectField(
+        "Minimum private chat role for plugin commands",
+        validators=[DataRequired()],
+        choices=[(r, r) for r in ALLOWED_PRIVATE_THRESHOLD_ROLES],
+    )
 
 
 class TopicMetadataForm(FlaskForm):
@@ -154,6 +175,7 @@ def users_page():
     session_factory = current_app.extensions["amo.plugin_service"]._session_factory
     with session_factory() as db_session:
         rows = db_session.query(User).order_by(User.telegram_user_id.asc()).all()
+        policy = PrivateChatPolicyRepository(db_session).get_policy()
         users = [
             {
                 "telegram_user_id": row.telegram_user_id,
@@ -170,10 +192,51 @@ def users_page():
         "users.html",
         users=users,
         roles=ALLOWED_ROLES,
+        private_threshold_roles=ALLOWED_PRIVATE_THRESHOLD_ROLES,
+        private_chat_policy={
+            "min_ai_role": policy.min_ai_role.value,
+            "min_general_command_role": policy.min_general_command_role.value,
+            "min_plugin_command_role": policy.min_plugin_command_role.value,
+        },
         role_form=UserRoleForm(),
+        private_chat_policy_form=PrivateChatPolicyForm(),
         owner_mutation_enabled=settings.webui_owner_telegram_id is not None,
         error_message=request.args.get("error", ""),
     ), 200
+
+
+@ui_bp.post("/users/private-chat-policy")
+@login_required
+def update_private_chat_policy():
+    form = PrivateChatPolicyForm()
+    if not form.validate_on_submit():
+        abort(400, description="invalid private chat policy payload")
+
+    settings: Settings = current_app.extensions["amo.settings"]
+    if settings.webui_owner_telegram_id is None:
+        abort(403, description="WEBUI_OWNER_TELEGRAM_ID not configured; private chat policy mutation is disabled")
+
+    try:
+        min_ai_role = PrivateChatPolicyRepository.validate_threshold_role(form.min_ai_role.data or "")
+        min_general_command_role = PrivateChatPolicyRepository.validate_threshold_role(
+            form.min_general_command_role.data or ""
+        )
+        min_plugin_command_role = PrivateChatPolicyRepository.validate_threshold_role(
+            form.min_plugin_command_role.data or ""
+        )
+    except ValueError:
+        abort(400, description="invalid private chat policy role")
+
+    session_factory = current_app.extensions["amo.plugin_service"]._session_factory
+    with session_factory() as db_session:
+        repo = PrivateChatPolicyRepository(db_session)
+        repo.update_policy(
+            min_ai_role=min_ai_role,
+            min_general_command_role=min_general_command_role,
+            min_plugin_command_role=min_plugin_command_role,
+        )
+
+    return redirect(url_for("ui.users_page"), code=302)
 
 
 @ui_bp.post("/users/<int:telegram_user_id>/role")

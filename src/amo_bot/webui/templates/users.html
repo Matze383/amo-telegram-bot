@@ -16,6 +16,39 @@
 
   <p><strong>Owner is the only global role.</strong> Roles changed here apply to private bot chats. Group/topic permissions are managed in their respective context pages.</p>
 
+  <section>
+    <h2>Private bot chat thresholds</h2>
+    <p>These minimum roles apply to private bot chats only. Owner remains the global special role; group/topic permissions are managed in their respective context pages.</p>
+    <form method="post" action="{{ url_for('ui.update_private_chat_policy') }}">
+      {{ private_chat_policy_form.csrf_token }}
+      <p>
+        <label for="min_ai_role">Minimum private chat role for AI</label>
+        <select id="min_ai_role" name="min_ai_role">
+          {% for role_name in private_threshold_roles %}
+            <option value="{{ role_name }}" {% if role_name == private_chat_policy.min_ai_role %}selected{% endif %}>{{ role_name }}</option>
+          {% endfor %}
+        </select>
+      </p>
+      <p>
+        <label for="min_general_command_role">Minimum private chat role for general commands</label>
+        <select id="min_general_command_role" name="min_general_command_role">
+          {% for role_name in private_threshold_roles %}
+            <option value="{{ role_name }}" {% if role_name == private_chat_policy.min_general_command_role %}selected{% endif %}>{{ role_name }}</option>
+          {% endfor %}
+        </select>
+      </p>
+      <p>
+        <label for="min_plugin_command_role">Minimum private chat role for plugin commands</label>
+        <select id="min_plugin_command_role" name="min_plugin_command_role">
+          {% for role_name in private_threshold_roles %}
+            <option value="{{ role_name }}" {% if role_name == private_chat_policy.min_plugin_command_role %}selected{% endif %}>{{ role_name }}</option>
+          {% endfor %}
+        </select>
+      </p>
+      <button type="submit" {% if not owner_mutation_enabled %}disabled{% endif %}>{{ t('action.save') }}</button>
+    </form>
+  </section>
+
   {% if users %}
     <table>
       <thead>

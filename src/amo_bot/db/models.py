@@ -147,6 +147,20 @@ class WebuiAccessWindow(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 
+class PrivateChatPolicy(Base):
+    __tablename__ = "private_chat_policies"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
+    min_ai_role: Mapped[str] = mapped_column(String(32), nullable=False, default=Role.VIP.value, server_default=Role.VIP.value)
+    min_general_command_role: Mapped[str] = mapped_column(
+        String(32), nullable=False, default=Role.NORMAL.value, server_default=Role.NORMAL.value
+    )
+    min_plugin_command_role: Mapped[str] = mapped_column(
+        String(32), nullable=False, default=Role.NORMAL.value, server_default=Role.NORMAL.value
+    )
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+
 class TelegramTopic(Base):
     __tablename__ = "telegram_topics"
     __table_args__ = (UniqueConstraint("chat_id", "message_thread_id", name="uq_topic_chat_thread"),)

@@ -21,6 +21,7 @@ from amo_bot.db.models import (
     PluginPolicyAllowedGroup,
     PluginPolicyAllowedTopic,
     PluginPolicyOverride,
+    PrivateChatPolicy,
     TelegramChat,
     TelegramTopic,
     TopicAgentConfig,
@@ -78,6 +79,88 @@ class PluginPolicyOverrideSnapshot:
     topics_mode: str
     allowed_group_ids: list[int]
     allowed_topics: list[tuple[int, int]]
+
+
+PRIVATE_CHAT_THRESHOLD_ROLES: tuple[Role, ...] = (Role.OWNER, Role.ADMIN, Role.VIP, Role.NORMAL)
+
+
+@dataclass(slots=True)
+class PrivateChatPolicySnapshot:
+    min_ai_role: Role
+    min_general_command_role: Role
+    min_plugin_command_role: Role
+
+
+class PrivateChatPolicyRepository:
+    DEFAULT_MIN_AI_ROLE = Role.VIP
+    DEFAULT_MIN_GENERAL_COMMAND_ROLE = Role.NORMAL
+    DEFAULT_MIN_PLUGIN_COMMAND_ROLE = Role.NORMAL
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def get_policy(self) -> PrivateChatPolicySnapshot:
+        row = self._session.scalar(select(PrivateChatPolicy).where(PrivateChatPolicy.id == 1))
+        if row is None:
+            return PrivateChatPolicySnapshot(
+                min_ai_role=self.DEFAULT_MIN_AI_ROLE,
+                min_general_command_role=self.DEFAULT_MIN_GENERAL_COMMAND_ROLE,
+                min_plugin_command_role=self.DEFAULT_MIN_PLUGIN_COMMAND_ROLE,
+            )
+
+        return PrivateChatPolicySnapshot(
+            min_ai_role=self._normalize_threshold_role(row.min_ai_role, default=self.DEFAULT_MIN_AI_ROLE),
+            min_general_command_role=self._normalize_threshold_role(
+                row.min_general_command_role,
+                default=self.DEFAULT_MIN_GENERAL_COMMAND_ROLE,
+            ),
+            min_plugin_command_role=self._normalize_threshold_role(
+                row.min_plugin_command_role,
+                default=self.DEFAULT_MIN_PLUGIN_COMMAND_ROLE,
+            ),
+        )
+
+    def update_policy(
+        self,
+        *,
+        min_ai_role: str | Role,
+        min_general_command_role: str | Role,
+        min_plugin_command_role: str | Role,
+    ) -> PrivateChatPolicySnapshot:
+        normalized_ai = self.validate_threshold_role(min_ai_role)
+        normalized_general = self.validate_threshold_role(min_general_command_role)
+        normalized_plugin = self.validate_threshold_role(min_plugin_command_role)
+
+        row = self._session.scalar(select(PrivateChatPolicy).where(PrivateChatPolicy.id == 1))
+        if row is None:
+            row = PrivateChatPolicy(id=1)
+            self._session.add(row)
+
+        row.min_ai_role = normalized_ai.value
+        row.min_general_command_role = normalized_general.value
+        row.min_plugin_command_role = normalized_plugin.value
+        self._session.commit()
+        self._session.refresh(row)
+        return self.get_policy()
+
+    @classmethod
+    def validate_threshold_role(cls, role: str | Role) -> Role:
+        try:
+            normalized = role if isinstance(role, Role) else Role(str(role).strip().lower())
+        except ValueError as exc:
+            raise ValueError("invalid private chat threshold role") from exc
+        if normalized not in PRIVATE_CHAT_THRESHOLD_ROLES:
+            raise ValueError("invalid private chat threshold role")
+        return normalized
+
+    @classmethod
+    def _normalize_threshold_role(cls, value: str | None, *, default: Role) -> Role:
+        if value is None:
+            return default
+        try:
+            return cls.validate_threshold_role(value)
+        except ValueError:
+            return default
 
 
 class PluginPolicyOverrideRepository:

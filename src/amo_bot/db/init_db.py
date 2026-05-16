@@ -3,7 +3,7 @@ from __future__ import annotations
 from sqlalchemy import inspect, select, text
 
 from amo_bot.db.base import Base, create_session_factory
-from amo_bot.db.models import DEFAULT_ROLES, DbRole, UpdateOffset
+from amo_bot.db.models import DEFAULT_ROLES, DbRole, PrivateChatPolicy, UpdateOffset
 
 
 def init_db(database_url: str) -> None:
@@ -76,6 +76,15 @@ def init_db(database_url: str) -> None:
                 created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 CONSTRAINT uq_topic_ai_sessions_scope UNIQUE (scope_type, chat_id, topic_id, user_id)
+            )
+        """,
+        "private_chat_policies": """
+            CREATE TABLE private_chat_policies (
+                id INTEGER NOT NULL PRIMARY KEY,
+                min_ai_role VARCHAR(32) NOT NULL DEFAULT 'vip',
+                min_general_command_role VARCHAR(32) NOT NULL DEFAULT 'normal',
+                min_plugin_command_role VARCHAR(32) NOT NULL DEFAULT 'normal',
+                updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
         """,
     }
@@ -323,5 +332,9 @@ def init_db(database_url: str) -> None:
         offset = session.scalar(select(UpdateOffset).where(UpdateOffset.source == "telegram"))
         if offset is None:
             session.add(UpdateOffset(source="telegram", last_update_id=0))
+
+        private_policy = session.scalar(select(PrivateChatPolicy).where(PrivateChatPolicy.id == 1))
+        if private_policy is None:
+            session.add(PrivateChatPolicy(id=1))
 
         session.commit()

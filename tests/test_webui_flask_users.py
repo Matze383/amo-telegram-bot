@@ -7,8 +7,8 @@ from sqlalchemy import select
 from amo_bot.config.settings import Settings
 from amo_bot.db.base import create_session_factory
 from amo_bot.db.init_db import init_db
-from amo_bot.db.models import User
-from amo_bot.db.repositories import UserRoleRepository
+from amo_bot.db.models import PrivateChatPolicy, User
+from amo_bot.db.repositories import PrivateChatPolicyRepository, UserRoleRepository
 from amo_bot.webui.flask_app import create_flask_app
 
 
@@ -246,6 +246,153 @@ def test_users_page_uses_private_chat_role_wording_and_scope_note(tmp_path) -> N
         assert "Roles changed here apply to private bot chats." in html
         assert "Group/topic permissions are managed in their respective context pages." in html
         assert "Change role" not in html
+
+
+def test_private_chat_policy_defaults_returned_without_row(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'private_policy_defaults.db'}"
+    init_db(db_url)
+    sf = create_session_factory(db_url)
+
+    with sf() as s:
+        row = s.get(PrivateChatPolicy, 1)
+        assert row is not None
+        s.delete(row)
+        s.commit()
+
+    with sf() as s:
+        policy = PrivateChatPolicyRepository(s).get_policy()
+
+    assert policy.min_ai_role.value == "vip"
+    assert policy.min_general_command_role.value == "normal"
+    assert policy.min_plugin_command_role.value == "normal"
+
+
+def test_private_chat_policy_update_persists_and_rejects_ignore(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'private_policy_repo.db'}"
+    init_db(db_url)
+    sf = create_session_factory(db_url)
+
+    with sf() as s:
+        repo = PrivateChatPolicyRepository(s)
+        updated = repo.update_policy(
+            min_ai_role="admin",
+            min_general_command_role="vip",
+            min_plugin_command_role="owner",
+        )
+        assert updated.min_ai_role.value == "admin"
+        assert updated.min_general_command_role.value == "vip"
+        assert updated.min_plugin_command_role.value == "owner"
+
+    with sf() as s:
+        reloaded = PrivateChatPolicyRepository(s).get_policy()
+        assert reloaded.min_ai_role.value == "admin"
+        assert reloaded.min_general_command_role.value == "vip"
+        assert reloaded.min_plugin_command_role.value == "owner"
+
+    with sf() as s:
+        repo = PrivateChatPolicyRepository(s)
+        try:
+            repo.update_policy(
+                min_ai_role="ignore",
+                min_general_command_role="normal",
+                min_plugin_command_role="normal",
+            )
+        except ValueError:
+            pass
+        else:  # pragma: no cover - assertion guard
+            raise AssertionError("ignore must be rejected as private chat threshold role")
+
+        unchanged = repo.get_policy()
+        assert unchanged.min_ai_role.value == "admin"
+        assert unchanged.min_general_command_role.value == "vip"
+        assert unchanged.min_plugin_command_role.value == "owner"
+
+
+def test_users_page_renders_private_chat_policy_controls_and_excludes_ignore(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'users_policy_render.db'}"
+    init_db(db_url)
+    app = create_flask_app(settings=_make_settings(db_url, owner_id=777))
+
+    with app.test_client() as client:
+        _login(client, "test-secret")
+        response = client.get("/users")
+        assert response.status_code == 200
+        html = response.get_data(as_text=True)
+
+    assert "Minimum private chat role for AI" in html
+    assert "Minimum private chat role for general commands" in html
+    assert "Minimum private chat role for plugin commands" in html
+    assert 'name="min_ai_role"' in html
+    assert 'name="min_general_command_role"' in html
+    assert 'name="min_plugin_command_role"' in html
+    policy_form = html.split('action="/users/private-chat-policy"', 1)[1].split("</form>", 1)[0]
+    assert 'value="vip" selected' in policy_form
+    assert policy_form.count('value="normal" selected') == 2
+    assert 'value="ignore"' not in policy_form
+
+
+def test_private_chat_policy_post_updates_thresholds(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'users_policy_post.db'}"
+    init_db(db_url)
+    app = create_flask_app(settings=_make_settings(db_url, owner_id=777))
+
+    with app.test_client() as client:
+        _login(client, "test-secret")
+        page = client.get("/users")
+        token = _extract_csrf_token(page.get_data(as_text=True))
+        response = client.post(
+            "/users/private-chat-policy",
+            data={
+                "min_ai_role": "admin",
+                "min_general_command_role": "vip",
+                "min_plugin_command_role": "owner",
+                "csrf_token": token,
+            },
+            follow_redirects=False,
+        )
+
+    assert response.status_code == 302
+    sf = create_session_factory(db_url)
+    with sf() as s:
+        policy = PrivateChatPolicyRepository(s).get_policy()
+        assert policy.min_ai_role.value == "admin"
+        assert policy.min_general_command_role.value == "vip"
+        assert policy.min_plugin_command_role.value == "owner"
+
+
+def test_private_chat_policy_post_invalid_role_blocked_without_write(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'users_policy_invalid.db'}"
+    init_db(db_url)
+    sf = create_session_factory(db_url)
+    with sf() as s:
+        PrivateChatPolicyRepository(s).update_policy(
+            min_ai_role="admin",
+            min_general_command_role="vip",
+            min_plugin_command_role="owner",
+        )
+    app = create_flask_app(settings=_make_settings(db_url, owner_id=777))
+
+    with app.test_client() as client:
+        _login(client, "test-secret")
+        page = client.get("/users")
+        token = _extract_csrf_token(page.get_data(as_text=True))
+        response = client.post(
+            "/users/private-chat-policy",
+            data={
+                "min_ai_role": "ignore",
+                "min_general_command_role": "normal",
+                "min_plugin_command_role": "normal",
+                "csrf_token": token,
+            },
+            follow_redirects=False,
+        )
+
+    assert response.status_code == 400
+    with sf() as s:
+        policy = PrivateChatPolicyRepository(s).get_policy()
+        assert policy.min_ai_role.value == "admin"
+        assert policy.min_general_command_role.value == "vip"
+        assert policy.min_plugin_command_role.value == "owner"
 
 
 def test_users_language_switch_en(tmp_path) -> None:
