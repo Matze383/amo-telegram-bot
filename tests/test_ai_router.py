@@ -52,8 +52,8 @@ def test_scope_matrix_active_and_inactive(tmp_path) -> None:
     router = AIRouter(topic_agent_memory_repository=repo)
 
     active_topic = router.decide(prompt="x", chat_id=-1001, topic_id=11, user_id=500)
-    assert active_topic.eligible is True
-    assert active_topic.reason_code is AIRouterReasonCode.SCOPE_ENABLED
+    assert active_topic.eligible is False
+    assert active_topic.reason_code is AIRouterReasonCode.DEFAULT_NOOP
 
     active_topic_mention = router.decide(
         prompt="hello @amo_bot",
@@ -194,8 +194,8 @@ def test_soul_assembly_is_deterministic_main_then_topic(tmp_path) -> None:
     router = AIRouter(topic_agent_memory_repository=repo)
     decision = router.decide(prompt="hello", chat_id=-777, topic_id=42, user_id=9)
 
-    assert decision.reason_code is AIRouterReasonCode.SCOPE_ENABLED
-    assert decision.context.assembled_soul_text == "Main Soul\n\nTopic Soul"
+    assert decision.reason_code is AIRouterReasonCode.DEFAULT_NOOP
+    assert decision.context.assembled_soul_text == ""
 
 
 def test_soul_assembly_handles_missing_topic_safely(tmp_path) -> None:
@@ -212,8 +212,8 @@ def test_soul_assembly_handles_missing_topic_safely(tmp_path) -> None:
     router = AIRouter(topic_agent_memory_repository=repo)
     decision = router.decide(prompt="hello", chat_id=-888, topic_id=55, user_id=11)
 
-    assert decision.reason_code is AIRouterReasonCode.SCOPE_ENABLED
-    assert decision.context.assembled_soul_text == "Only Main"
+    assert decision.reason_code is AIRouterReasonCode.DEFAULT_NOOP
+    assert decision.context.assembled_soul_text == ""
 
 
 def test_soul_assembly_applies_limit_and_leakage_guard(tmp_path) -> None:
@@ -231,10 +231,8 @@ def test_soul_assembly_applies_limit_and_leakage_guard(tmp_path) -> None:
     router = AIRouter(topic_agent_memory_repository=repo)
     decision = router.decide(prompt="hello", chat_id=-999, topic_id=66, user_id=13)
 
-    assert decision.reason_code is AIRouterReasonCode.SCOPE_ENABLED
-    assert len(decision.context.assembled_soul_text) == AIRouter._MAX_SOUL_CHARS
-    assert "system prompt" not in decision.context.assembled_soul_text.casefold()
-    assert "/etc/" not in decision.context.assembled_soul_text.casefold()
+    assert decision.reason_code is AIRouterReasonCode.DEFAULT_NOOP
+    assert decision.context.assembled_soul_text == ""
 
 
 def test_context_dto_v1_defaults_without_repo() -> None:
@@ -335,8 +333,8 @@ def test_daily_memory_injected_for_current_scope_day(tmp_path) -> None:
     router = AIRouter(topic_agent_memory_repository=repo)
     decision = router.decide(prompt="hello", chat_id=-2001, topic_id=41, user_id=10)
 
-    assert decision.reason_code is AIRouterReasonCode.SCOPE_ENABLED
-    assert decision.context.daily_memory_text == "Daily focus: ship safely."
+    assert decision.reason_code is AIRouterReasonCode.DEFAULT_NOOP
+    assert decision.context.daily_memory_text == ""
     assert decision.context.long_memory_text == ""
 
 
@@ -442,8 +440,8 @@ def test_long_memory_injected_active_only_deterministic_order(tmp_path) -> None:
     router = AIRouter(topic_agent_memory_repository=repo)
     decision = router.decide(prompt="hello", chat_id=-3001, topic_id=44, user_id=10)
 
-    assert decision.reason_code is AIRouterReasonCode.SCOPE_ENABLED
-    assert decision.context.long_memory_text == "First active fact\nSecond active fact"
+    assert decision.reason_code is AIRouterReasonCode.DEFAULT_NOOP
+    assert decision.context.long_memory_text == ""
     assert str(old.id) not in decision.context.long_memory_text
 
 

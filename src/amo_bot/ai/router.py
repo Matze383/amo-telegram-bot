@@ -173,6 +173,10 @@ class AIRouter:
                 ),
             )
 
+        scope_type = str(scope["scope_type"])
+        if scope_type != "private_user":
+            return AIRouterDecision(context=base_context)
+
         reason_code = AIRouterReasonCode.CONTEXT_GUARD_FALLBACK if context_error else AIRouterReasonCode.SCOPE_ENABLED
         return AIRouterDecision(
             passthrough=True,
