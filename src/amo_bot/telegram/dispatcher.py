@@ -386,7 +386,11 @@ class Dispatcher:
                 AIRouterReasonCode.MENTION_IN_ACTIVE_SCOPE,
                 AIRouterReasonCode.REPLY_TO_BOT_IN_ACTIVE_SCOPE,
             }
-            if decision.reason_code == AIRouterReasonCode.SCOPE_ENABLED and decision.context.scope_type == "private_user":
+            if (
+                decision.reason_code == AIRouterReasonCode.SCOPE_ENABLED
+                and decision.context.scope_type == "private_user"
+                and message.chat.type == "private"
+            ):
                 allowed_reason_codes.add(AIRouterReasonCode.SCOPE_ENABLED)
 
             # Context fallback is only safe when it came from a true reply trigger.

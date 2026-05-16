@@ -398,6 +398,89 @@ def test_group_scope_context_fallback_reply_to_bot_still_sends(tmp_path) -> None
     assert len(ai.prompts) == 1
 
 
+def test_owner_group_topic_plain_text_without_trigger_does_not_send_ai(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'ai_autoreply_owner_group_plain_no_trigger.db'}"
+
+    init_db(db_url)
+    _seed_user(db_url, user_id=2300, role="owner", consent="accepted", group_chat_id=-1300, group_role="owner")
+
+    with create_session_factory(db_url)() as session:
+        repo = TopicAgentMemoryRepository(session)
+        repo.upsert_config(scope_type="topic", chat_id=-1300, topic_id=70, ai_enabled=True)
+        session.commit()
+
+    ai = FakeAIService(answer="ai-answer")
+    sender = Sender()
+    dispatcher = _mk_dispatcher(db_url, ai, sender)
+
+    asyncio.run(
+        dispatcher.handle_raw_update(
+            _mk_update(uid=2300, chat_id=-1300, chat_type="supergroup", text="plain text", update_id=31, message_thread_id=70)
+        )
+    )
+
+    assert sender.sent == []
+    assert ai.prompts == []
+
+
+def test_owner_group_topic_mention_allows_ai(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'ai_autoreply_owner_group_mention.db'}"
+
+    init_db(db_url)
+    _seed_user(db_url, user_id=2301, role="owner", consent="accepted", group_chat_id=-1301, group_role="owner")
+
+    with create_session_factory(db_url)() as session:
+        repo = TopicAgentMemoryRepository(session)
+        repo.upsert_config(scope_type="topic", chat_id=-1301, topic_id=71, ai_enabled=True)
+        session.commit()
+
+    ai = FakeAIService(answer="ai-answer")
+    sender = Sender()
+    dispatcher = _mk_dispatcher(db_url, ai, sender)
+
+    asyncio.run(
+        dispatcher.handle_raw_update(
+            _mk_update(uid=2301, chat_id=-1301, chat_type="supergroup", text="hi @AmoBot", update_id=32, message_thread_id=71)
+        )
+    )
+
+    assert sender.sent == [(-1301, "ai-answer", 71)]
+    assert len(ai.prompts) == 1
+
+
+def test_owner_group_topic_reply_to_bot_allows_ai(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'ai_autoreply_owner_group_reply_to_bot.db'}"
+
+    init_db(db_url)
+    _seed_user(db_url, user_id=2302, role="owner", consent="accepted", group_chat_id=-1302, group_role="owner")
+
+    with create_session_factory(db_url)() as session:
+        repo = TopicAgentMemoryRepository(session)
+        repo.upsert_config(scope_type="topic", chat_id=-1302, topic_id=72, ai_enabled=True)
+        session.commit()
+
+    ai = FakeAIService(answer="ai-answer")
+    sender = Sender()
+    dispatcher = _mk_dispatcher(db_url, ai, sender)
+
+    asyncio.run(
+        dispatcher.handle_raw_update(
+            _mk_update(
+                uid=2302,
+                chat_id=-1302,
+                chat_type="supergroup",
+                text="reply path",
+                update_id=33,
+                message_thread_id=72,
+                reply_to_is_bot=True,
+            )
+        )
+    )
+
+    assert sender.sent == [(-1302, "ai-answer", 72)]
+    assert len(ai.prompts) == 1
+
+
 def test_group_scope_unaffected_by_private_min_ai_role(tmp_path) -> None:
     db_url = f"sqlite:///{tmp_path / 'ai_autoreply_group_unaffected.db'}"
     init_db(db_url)
