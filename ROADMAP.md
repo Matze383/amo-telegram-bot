@@ -60,7 +60,7 @@ Mittel- bis langfristige Ziele (3–6+ Monate):
 
 #### Fehler Melden
 
-1. Prüfe [bestehende Issues](https://github.com/MatzeCode/AMO-telegram-bot/issues) auf Duplikate
+1. Prüfe [bestehende Issues](https://github.com/Matze383/amo-telegram-bot/issues) auf Duplikate
 2. Erstelle einen neuen Bug-Report mit dem Template
 3. Beschreibe das Problem, Reproduktionsschritte, erwartetes vs. tatsächliches Verhalten
 4. Füge Systeminformationen bei (OS, Python-Version, Bot-Version)
@@ -69,7 +69,7 @@ Mittel- bis langfristige Ziele (3–6+ Monate):
 
 #### Features Vorschlagen
 
-1. Prüfe [bestehende Requests](https://github.com/MatzeCode/AMO-telegram-bot/issues) auf Duplikate
+1. Prüfe [bestehende Requests](https://github.com/Matze383/amo-telegram-bot/issues) auf Duplikate
 2. Erstelle einen neuen Feature-Request mit dem Template
 3. Beschreibe das Problem, den gewünschten Nutzen, mögliche Alternativen
 4. Markiere Scope-Praferenz (Bot, WebUI, KI, Plugin-System)
@@ -131,7 +131,7 @@ Medium- to long-term goals (3–6+ months):
 
 #### Reporting Bugs
 
-1. Check [existing issues](https://github.com/MatzeCode/AMO-telegram-bot/issues) for duplicates
+1. Check [existing issues](https://github.com/Matze383/amo-telegram-bot/issues) for duplicates
 2. Create a new bug report using the template
 3. Describe the problem, reproduction steps, expected vs. actual behavior
 4. Include system information (OS, Python version, bot version)
@@ -140,7 +140,7 @@ Medium- to long-term goals (3–6+ months):
 
 #### Requesting Features
 
-1. Check [existing requests](https://github.com/MatzeCode/AMO-telegram-bot/issues) for duplicates
+1. Check [existing requests](https://github.com/Matze383/amo-telegram-bot/issues) for duplicates
 2. Create a new feature request using the template
 3. Describe the problem, desired benefit, possible alternatives
 4. Mark scope preference (Bot, WebUI, AI, Plugin System)
