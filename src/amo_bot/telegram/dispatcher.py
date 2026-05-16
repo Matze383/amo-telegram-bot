@@ -8,9 +8,10 @@ from typing import Any, Awaitable, Callable, Protocol
 
 from amo_bot.ai.router import AIRouter, AIRouterReasonCode
 from amo_bot.auth.permissions import can_use_bot
-from amo_bot.auth.roles import Role
+from amo_bot.auth.roles import Role, role_meets_minimum
 from amo_bot.consent import CONSENT_UNREACHABLE, ConsentService
 from amo_bot.db.base import create_session_factory
+from amo_bot.db.repositories import PrivateChatPolicyRepository
 from amo_bot.db.models import AuditEvent, User
 from amo_bot.plugins.command_runtime import CommandActor, CommandInvocation, PluginCommandExecutor
 from amo_bot.telegram.commands import CommandContext, CommandRegistry, RoleResolver, resolve_locale
@@ -379,7 +380,26 @@ class Dispatcher:
             if decision.reason_code not in allowed_reason_codes:
                 return
 
-            if role not in AUTOREPLY_ALLOWED_ROLES:
+            min_ai_role = PrivateChatPolicyRepository(session).get_policy().min_ai_role
+            if decision.context.scope_type == "private_user" and not role_meets_minimum(role, min_ai_role):
+                self._write_ai_audit(
+                    session=session,
+                    actor_user_id=message.from_user.id,
+                    chat_id=message.chat.id,
+                    message_id=message.message_id,
+                    message_thread_id=message.message_thread_id,
+                    event_type="ai_autoreply_denied",
+                    payload={
+                        "reason": "role_denied",
+                        "router_reason": decision.reason_code.value,
+                        "role": role.value,
+                        "required_role": min_ai_role.value,
+                    },
+                )
+                session.commit()
+                return
+
+            if decision.context.scope_type != "private_user" and role not in AUTOREPLY_ALLOWED_ROLES:
                 self._write_ai_audit(
                     session=session,
                     actor_user_id=message.from_user.id,

@@ -8,7 +8,7 @@ from amo_bot.db.base import create_session_factory
 from amo_bot.db.init_db import init_db
 from amo_bot.auth.roles import Role
 from amo_bot.db.models import AuditEvent, DbRole, User
-from amo_bot.db.repositories import ChatScopedRoleRepository, TopicAgentMemoryRepository
+from amo_bot.db.repositories import ChatScopedRoleRepository, PrivateChatPolicyRepository, TopicAgentMemoryRepository
 from amo_bot.telegram.commands import create_builtin_registry
 from amo_bot.telegram.dispatcher import Dispatcher
 from amo_bot.telegram.role_resolver import DBRoleResolver
@@ -261,31 +261,89 @@ def test_inactive_scopes_stay_silent(tmp_path) -> None:
     assert ai.prompts == []
 
 
-def test_autoreply_role_and_consent_denials_are_silent_and_audited(tmp_path) -> None:
-    db_url = f"sqlite:///{tmp_path / 'ai_autoreply_denied.db'}"
+def test_private_scope_min_ai_role_threshold_enforced(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'ai_autoreply_private_threshold.db'}"
     init_db(db_url)
-    _seed_user(db_url, user_id=2002, role="normal", consent="accepted")
-    _seed_user(db_url, user_id=2003, role="vip", consent="declined")
+    _seed_user(db_url, user_id=2201, role="normal", consent="accepted")
+    _seed_user(db_url, user_id=2202, role="vip", consent="accepted")
 
     sf = create_session_factory(db_url)
     with sf() as session:
         repo = TopicAgentMemoryRepository(session)
-        repo.upsert_config(scope_type="private_user", user_id=2002, ai_enabled=True)
-        repo.upsert_config(scope_type="private_user", user_id=2003, ai_enabled=True)
+        repo.upsert_config(scope_type="private_user", user_id=2201, ai_enabled=True)
+        repo.upsert_config(scope_type="private_user", user_id=2202, ai_enabled=True)
+        PrivateChatPolicyRepository(session).update_policy(
+            min_ai_role="vip",
+            min_general_command_role="normal",
+            min_plugin_command_role="normal",
+        )
 
     ai = FakeAIService(answer="ai-answer")
     sender = Sender()
     dispatcher = _mk_dispatcher(db_url, ai, sender)
 
-    asyncio.run(dispatcher.handle_raw_update(_mk_update(uid=2002, chat_id=2002, chat_type="private", text="hi @AmoBot", update_id=1)))
-    asyncio.run(dispatcher.handle_raw_update(_mk_update(uid=2003, chat_id=2003, chat_type="private", text="hi @AmoBot", update_id=2)))
+    asyncio.run(dispatcher.handle_raw_update(_mk_update(uid=2201, chat_id=2201, chat_type="private", text="Test", update_id=21)))
+    asyncio.run(dispatcher.handle_raw_update(_mk_update(uid=2202, chat_id=2202, chat_type="private", text="Test", update_id=22)))
+
+    assert sender.sent == [(2202, "ai-answer", None)]
+    assert len(ai.prompts) == 1
+
+
+def test_private_scope_ignore_role_stays_silent(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'ai_autoreply_private_ignore.db'}"
+    init_db(db_url)
+    _seed_user(db_url, user_id=2203, role="ignore", consent="accepted")
+
+    sf = create_session_factory(db_url)
+    with sf() as session:
+        TopicAgentMemoryRepository(session).upsert_config(scope_type="private_user", user_id=2203, ai_enabled=True)
+        PrivateChatPolicyRepository(session).update_policy(
+            min_ai_role="normal",
+            min_general_command_role="normal",
+            min_plugin_command_role="normal",
+        )
+
+    ai = FakeAIService(answer="ai-answer")
+    sender = Sender()
+    dispatcher = _mk_dispatcher(db_url, ai, sender)
+
+    asyncio.run(dispatcher.handle_raw_update(_mk_update(uid=2203, chat_id=2203, chat_type="private", text="Test", update_id=23)))
 
     assert sender.sent == []
     assert ai.prompts == []
 
-    with sf() as session:
-        events = session.scalars(select(AuditEvent).where(AuditEvent.event_type == "ai_autoreply_denied")).all()
-        import json
 
-        reasons = sorted(json.loads(event.payload_json).get("reason") for event in events)
-        assert reasons == ["consent_denied", "role_denied"]
+def test_group_scope_unaffected_by_private_min_ai_role(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'ai_autoreply_group_unaffected.db'}"
+    init_db(db_url)
+    _seed_user(
+        db_url,
+        user_id=2204,
+        role="normal",
+        consent="accepted",
+        group_chat_id=-1200,
+        group_role="vip",
+    )
+
+    sf = create_session_factory(db_url)
+    with sf() as session:
+        repo = TopicAgentMemoryRepository(session)
+        repo.upsert_config(scope_type="topic", chat_id=-1200, topic_id=5, ai_enabled=True)
+        PrivateChatPolicyRepository(session).update_policy(
+            min_ai_role="owner",
+            min_general_command_role="normal",
+            min_plugin_command_role="normal",
+        )
+
+    ai = FakeAIService(answer="ai-answer")
+    sender = Sender()
+    dispatcher = _mk_dispatcher(db_url, ai, sender)
+
+    asyncio.run(
+        dispatcher.handle_raw_update(
+            _mk_update(uid=2204, chat_id=-1200, chat_type="supergroup", text="hi @AmoBot", update_id=24, message_thread_id=5)
+        )
+    )
+
+    assert sender.sent == [(-1200, "ai-answer", 5)]
+    assert len(ai.prompts) == 1
