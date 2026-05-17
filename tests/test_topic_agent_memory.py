@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, timezone
 
-from sqlalchemy import create_engine, inspect
+from sqlalchemy import create_engine, inspect, update
 from sqlalchemy.orm import Session
 
 from amo_bot.db.init_db import init_db
@@ -237,6 +237,48 @@ def test_recent_messages_limit_and_ordering_newest_last() -> None:
 
         rows = repo.list_recent(scope_type="group_chat", chat_id=-9100, limit=3)
         assert [r.message_text for r in rows] == ["m2", "m3", "m4"]
+
+
+def test_recent_messages_ttl_filter_excludes_old_rows() -> None:
+    engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
+    Base.metadata.create_all(engine)
+
+    with Session(engine, future=True) as session:
+        repo = TopicAgentMemoryRepository(session)
+
+        old_row = repo.append_message(scope_type="private_user", user_id=2020, message_text="old")
+        recent_row = repo.append_message(scope_type="private_user", user_id=2020, message_text="recent")
+
+        session.execute(
+            update(Base.metadata.tables["topic_recent_messages"])
+            .where(Base.metadata.tables["topic_recent_messages"].c.id == old_row.id)
+            .values(created_at=datetime(2000, 1, 1))
+        )
+        session.execute(
+            update(Base.metadata.tables["topic_recent_messages"])
+            .where(Base.metadata.tables["topic_recent_messages"].c.id == recent_row.id)
+            .values(created_at=datetime.now(timezone.utc).replace(tzinfo=None))
+        )
+        session.commit()
+
+        rows = repo.list_recent(scope_type="private_user", user_id=2020, limit=10, max_age_seconds=60 * 60 * 24 * 14)
+        assert [r.message_text for r in rows] == ["recent"]
+
+
+def test_recent_messages_retention_keeps_latest_50_per_scope() -> None:
+    engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
+    Base.metadata.create_all(engine)
+
+    with Session(engine, future=True) as session:
+        repo = TopicAgentMemoryRepository(session)
+
+        for i in range(60):
+            repo.append_message(scope_type="group_chat", chat_id=-5050, message_text=f"m{i:02d}")
+
+        rows = repo.list_recent(scope_type="group_chat", chat_id=-5050, limit=1000)
+        assert len(rows) == 50
+        assert rows[0].message_text == "m10"
+        assert rows[-1].message_text == "m59"
 
 
 def test_recent_messages_null_leak_prevention_between_topic_and_group() -> None:

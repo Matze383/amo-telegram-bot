@@ -54,6 +54,7 @@ class AIRouter:
 
     _MAX_SOUL_CHARS = 2000
     _RECENT_WINDOW_MAX_MESSAGES = 12
+    _RECENT_WINDOW_MAX_AGE_SECONDS = 60 * 60 * 24 * 14
     _SUSPICIOUS_SOUL_MARKERS = (
         "system prompt",
         "system message",
@@ -438,6 +439,7 @@ class AIRouter:
                 topic_id=topic_id,
                 user_id=user_id,
                 limit=self._RECENT_WINDOW_MAX_MESSAGES,
+                max_age_seconds=self._RECENT_WINDOW_MAX_AGE_SECONDS,
             )
             if not rows:
                 return "", ""

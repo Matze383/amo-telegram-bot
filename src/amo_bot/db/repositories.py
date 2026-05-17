@@ -1215,6 +1215,7 @@ class TopicRecentMessageRecord:
     topic_id: int | None
     user_id: int | None
     message_text: str
+    created_at: datetime | None
 
 
 class TopicAgentMemoryRepository:
@@ -1558,6 +1559,8 @@ class TopicAgentMemoryRepository:
             message_text=message_text,
         )
         self._session.add(row)
+        self._session.flush()
+        self._trim_recent_scope(scope_type=scope_type, chat_id=chat_id, topic_id=topic_id, user_id=user_id)
         self._session.commit()
         self._session.refresh(row)
         return self._to_recent_record(row)
@@ -1570,18 +1573,22 @@ class TopicAgentMemoryRepository:
         topic_id: int | None = None,
         user_id: int | None = None,
         limit: int = 20,
+        max_age_seconds: int | None = None,
     ) -> list[TopicRecentMessageRecord]:
         safe_limit = max(1, min(limit, 1000))
+        query = select(TopicRecentMessage).where(
+            TopicRecentMessage.scope_type == scope_type,
+            TopicRecentMessage.chat_id == chat_id,
+            TopicRecentMessage.topic_id == topic_id,
+            TopicRecentMessage.user_id == user_id,
+        )
+        if max_age_seconds is not None:
+            safe_age = max(1, max_age_seconds)
+            cutoff = datetime.now(timezone.utc) - timedelta(seconds=safe_age)
+            query = query.where(TopicRecentMessage.created_at >= cutoff)
+
         rows = self._session.scalars(
-            select(TopicRecentMessage)
-            .where(
-                TopicRecentMessage.scope_type == scope_type,
-                TopicRecentMessage.chat_id == chat_id,
-                TopicRecentMessage.topic_id == topic_id,
-                TopicRecentMessage.user_id == user_id,
-            )
-            .order_by(TopicRecentMessage.id.desc())
-            .limit(safe_limit)
+            query.order_by(TopicRecentMessage.id.desc()).limit(safe_limit)
         ).all()
         rows = list(reversed(rows))
         return [self._to_recent_record(row) for row in rows]
@@ -1655,4 +1662,30 @@ class TopicAgentMemoryRepository:
             topic_id=row.topic_id,
             user_id=row.user_id,
             message_text=row.message_text,
+            created_at=row.created_at,
         )
+
+    def _trim_recent_scope(
+        self,
+        *,
+        scope_type: str,
+        chat_id: int | None,
+        topic_id: int | None,
+        user_id: int | None,
+    ) -> None:
+        max_messages_per_scope = 50
+        stale_rows = self._session.scalars(
+            select(TopicRecentMessage.id)
+            .where(
+                TopicRecentMessage.scope_type == scope_type,
+                TopicRecentMessage.chat_id == chat_id,
+                TopicRecentMessage.topic_id == topic_id,
+                TopicRecentMessage.user_id == user_id,
+            )
+            .order_by(TopicRecentMessage.id.desc())
+            .offset(max_messages_per_scope)
+        ).all()
+        if stale_rows:
+            self._session.query(TopicRecentMessage).filter(TopicRecentMessage.id.in_(stale_rows)).delete(
+                synchronize_session=False
+            )
