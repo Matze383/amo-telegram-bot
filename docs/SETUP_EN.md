@@ -693,6 +693,89 @@ This is a transparency/security feature to help owners understand which plugins 
 
 ---
 
+## Image Analysis Coreplugin (IMG-B4..IMG-B7)
+
+The `image_analyze` coreplugin provides a secure image analysis interface for AI and user plugins.
+
+### Security Model
+
+**Default-off:**
+- Image analysis is disabled by default
+- Must be explicitly enabled via settings
+- No automatic image analysis without user trigger
+
+**Usage Policy:**
+- `consent_required` (default: true) — Users must have granted consent
+- `min_role` (default: admin) — Minimum role for image analysis
+- Supported roles: `owner` > `admin` > `vip` > `normal` > `ignore`
+
+**Input Validation:**
+- `image_ref` required and non-empty
+- `prompt` optional, max 512 characters
+- `locale` optional, max 16 characters, letters and `-`/`_` only
+
+**Deterministic Reason Codes:**
+- `not_enabled` — Image analysis is disabled
+- `consent_required` — User has not granted consent
+- `role_forbidden` — User role insufficient
+- `network_not_allowed` — Network access not allowed
+- `provider_not_allowed` — Vision provider not configured/allowed
+- `not_configured` — Image analysis not configured (stub behavior)
+- `invalid_image_ref` — Invalid image reference
+- `invalid_prompt` — Prompt too long or invalid
+- `invalid_locale` — Invalid locale format
+
+**Scope Isolation:**
+- Images are processed scope-specific
+- No cross-scope image sharing
+- Audit events contain metadata only, no image content
+
+### Telegram Integration
+
+**Image Attachment Detection:**
+- `photo` and `document` with image MIME types are recognized as attachments
+- Metadata only: `file_id`, `file_unique_id`, dimensions, file size
+- No automatic download without explicit trigger
+
+**Explicit Triggers:**
+- `/analyze_image` — Analyzes an image in the current context
+- Reply-to-image — Reply to an image with bot mention
+
+**Attachment Context:**
+- Plugin commands receive secure attachment context
+- `media_ref` contains only: `reason_code`, `mime_type`, `bytes_stored`
+- No raw image data or file paths in plugin context
+
+**Error Handling:**
+- `missing_image` — No image found in context
+- `invalid_type` — Attachment is not a supported image format
+- `oversize` — Image exceeds maximum file size
+- `invalid_image` — Image validation failed
+
+### MediaStore Limits
+
+**Download Policy:**
+- MIME type whitelist: `image/jpeg`, `image/png`, `image/webp`, `image/gif`
+- Maximum file size: Configurable (default: 10 MB)
+- Timeout: Configurable (default: 30 seconds)
+- Temporary storage with TTL cleanup
+
+**Security Boundaries:**
+- No raw image data in logs or audit events
+- No persistent storage without explicit configuration
+- Automatic cleanup after processing
+
+### WebUI Status (Read-Only)
+
+The WebUI displays the image analysis status:
+- **Enabled:** `true`/`false` — Is image analysis enabled?
+- **Min Role:** Current minimum role requirement
+- **Consent Required:** Is consent required?
+
+**Note:** Configuration is done via settings/policy, not directly through WebUI toggles.
+
+---
+
 ## SQL Capability Templates (CP-H1)
 
 The SQL coreplugin provides a **template-only, read-only** SQL execution interface for AI and user plugins. Raw SQL is never executed directly.

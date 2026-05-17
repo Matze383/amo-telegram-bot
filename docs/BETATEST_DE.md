@@ -667,6 +667,44 @@ Das Dashboard enthält einen **KI Memory**-Bereich zum Einsehen und Verwalten vo
 
 ---
 
+### Image Analysis Coreplugin (IMG-B4..IMG-B7)
+
+Das Bildanalyse-Coreplugin bietet eine sichere, default-off Bildanalyse für KI und Plugins.
+
+**Status:** Stub-Implementierung (kein echter Vision-Provider)
+- Bildanalyse ist standardmäßig deaktiviert
+- Alle Anfragen werden mit `image analysis not configured` abgelehnt
+- Policy- und Consent-Prüfungen werden trotzdem durchgeführt
+
+**Voraussetzungen:**
+- `vip`, `admin` oder `owner` Rolle
+- Consent erteilt (`/accept`)
+
+**Telegram-Test:**
+
+1. **Ohne Bild (sollte fehlschlagen):**
+   - Sende: `/analyze_image` ohne Bild
+   - Erwartet: Fehlermeldung oder Hinweis, dass kein Bild gefunden wurde
+
+2. **Mit Bild als Anhang:**
+   - Lade ein Bild hoch mit `/analyze_image` als Caption
+   - Erwartet: "image analysis not configured" (Stub-Verhalten)
+
+3. **Als Antwort auf Bild:**
+   - Antworte auf ein Bild im Chat mit `/analyze_image`
+   - Erwartet: "image analysis not configured" (Stub-Verhalten)
+
+**Hinweis:** Das Feature ist ein Security-Stub. Die Policy-Prüfung (Rolle, Consent) funktioniert, aber die eigentliche Bildanalyse ist nicht konfiguriert.
+
+**Sicherheits-Checkliste:**
+- [ ] Bildanalyse ist default-off (keine automatische Aktivierung)
+- [ ] Mindestrolle wird geprüft
+- [ ] Consent wird geprüft
+- [ ] Keine Rohbilddaten in Logs/Audit-Events
+- [ ] Attachment-Kontext enthält nur Metadaten
+
+---
+
 ### Zukünftige Features (Noch nicht implementiert)
 
 Folgende Features sind für zukünftige Releases geplant und im aktuellen Beta **nicht verfügbar**:
@@ -768,6 +806,7 @@ Nutze diese Checkliste für deinen Test:
 - [ ] WebUI Topic Soul Editor (nur Owner, in Groups): OK / Nicht getestet
 - [ ] WebUI KI Memory Controls (redacted Daily, Long-Memory-Deaktivierung): OK / Nicht getestet
 - [ ] CP-G2 Memory Privacy: Scope-Isolation, Default-Deny-Policy, redigierte Ausgaben verifiziert: OK / Nicht getestet
+- [ ] Image Analysis Coreplugin (default-off, Stub-Verhalten): OK / Nicht getestet
 - [ ] Security Headers vorhanden (Browser-Dev-Tools prüfen): OK
 
 **Notizen:**

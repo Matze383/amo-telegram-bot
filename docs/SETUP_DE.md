@@ -693,6 +693,89 @@ Dies ist ein Transparenz-/Sicherheitsfeature, das Ownern hilft zu verstehen, wel
 
 ---
 
+## Image Analysis Coreplugin (IMG-B4..IMG-B7)
+
+Das `image_analyze`-Coreplugin bietet eine sichere Bildanalyse-Schnittstelle für KI und User-Plugins.
+
+### Sicherheitsmodell
+
+**Default-off:**
+- Bildanalyse ist standardmäßig deaktiviert
+- Muss explizit via Settings aktiviert werden
+- Keine automatische Bildanalyse ohne Nutzer-Trigger
+
+**Nutzungs-Policy:**
+- `consent_required` (Standard: true) — Nutzer müssen Consent erteilt haben
+- `min_role` (Standard: admin) — Mindestrolle für Bildanalyse
+- Unterstützte Rollen: `owner` > `admin` > `vip` > `normal` > `ignore`
+
+**Eingabevalidierung:**
+- `image_ref` erforderlich und nicht-leer
+- `prompt` optional, maximal 512 Zeichen
+- `locale` optional, maximal 16 Zeichen, nur Buchstaben und `-`/`_`
+
+**Deterministische Reason Codes:**
+- `not_enabled` — Bildanalyse ist deaktiviert
+- `consent_required` — Nutzer hat keinen Consent erteilt
+- `role_forbidden` — Nutzerrolle unzureichend
+- `network_not_allowed` — Netzwerk-Zugriff nicht erlaubt
+- `provider_not_allowed` — Vision-Provider nicht konfiguriert/erlaubt
+- `not_configured` — Bildanalyse nicht konfiguriert (Stub-Verhalten)
+- `invalid_image_ref` — Ungültige Bildreferenz
+- `invalid_prompt` — Prompt zu lang oder ungültig
+- `invalid_locale` — Ungültiges Locale-Format
+
+**Scope-Isolierung:**
+- Bilder werden scope-spezifisch verarbeitet
+- Keine Cross-Scope-Bildweitergabe
+- Audit-Events enthalten nur Metadaten, keine Bildinhalte
+
+### Telegram-Integration
+
+**Bildanhang-Erkennung:**
+- `photo` und `document` mit Bild-MIME-Types werden als Anhänge erkannt
+- Metadaten nur: `file_id`, `file_unique_id`, Dimensionen, Dateigröße
+- Kein automatischer Download ohne expliziten Trigger
+
+**Explizite Trigger:**
+- `/analyze_image` — Analysiert ein Bild im aktuellen Kontext
+- Reply-to-image — Antwort auf ein Bild mit Bot-Erwähnung
+
+**Attachment-Kontext:**
+- Plugin-Commands erhalten sicheren Attachment-Kontext
+- `media_ref` enthält nur: `reason_code`, `mime_type`, `bytes_stored`
+- Keine Rohbilddaten oder Dateipfade im Plugin-Kontext
+
+**Fehlerbehandlung:**
+- `missing_image` — Kein Bild im Kontext gefunden
+- `invalid_type` — Anhang ist kein unterstütztes Bildformat
+- `oversize` — Bild überschreitet maximale Dateigröße
+- `invalid_image` — Bildvalidierung fehlgeschlagen
+
+### MediaStore-Limits
+
+**Download-Policy:**
+- MIME-Type-Whitelist: `image/jpeg`, `image/png`, `image/webp`, `image/gif`
+- Maximale Dateigröße: Konfigurierbar (Standard: 10 MB)
+- Timeout: Konfigurierbar (Standard: 30 Sekunden)
+- Temporäre Speicherung mit TTL-Cleanup
+
+**Sicherheitsgrenzen:**
+- Keine Rohbilddaten in Logs oder Audit-Events
+- Keine persistente Speicherung ohne explizite Konfiguration
+- Automatische Cleanup nach Verarbeitung
+
+### WebUI-Status (Read-Only)
+
+Das WebUI zeigt den Bildanalyse-Status an:
+- **Enabled:** `true`/`false` — Ist die Bildanalyse aktiviert?
+- **Min Role:** Aktuelle Mindestrolle
+- **Consent Required:** Ist Consent erforderlich?
+
+**Hinweis:** Die Konfiguration erfolgt über Settings/Policy, nicht direkt über WebUI-Toggles.
+
+---
+
 ## SQL-Capability-Templates (CP-H1)
 
 Das SQL-Coreplugin bietet eine **Template-basierte, nur-Lesen** SQL-Ausführungsschnittstelle für KI und User-Plugins. Raw-SQL wird niemals direkt ausgeführt.

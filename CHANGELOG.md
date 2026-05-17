@@ -25,6 +25,7 @@ Dies ist der erste öffentliche Release-Kandidat des AMO Telegram Bot. Die Softw
 - **KI-Integration:** `/ask`-Befehl, Auto-Antworten und Memory-System (Daily + Long Memory) über Ollama
 - **Topic-Agent-System:** Konfigurierbares KI-Verhalten pro Topic mit Memory-Kuratierung (KI-A bis KI-F4 abgeschlossen)
 - **Core Plugins:** Policy-gesteuerte KI-Fähigkeiten für RSS-Feeds, Websuche, Webscraping, API-Integration, Context-Window-Builder, Memory-Management, SQL-Lesezugriff (Templates/Views) und Selbstverbesserungs-Vorschläge (CP-I1 und CP-Z1 abgeschlossen)
+- **Image Analysis Coreplugin:** Sichere Bildanalyse-Schnittstelle (IMG-B4..IMG-B7) – default-off, Stub-Implementierung mit Policy/Consent-Checks
 - **Dokumentation:** Bilinguale README, Setup-Guides und Beta-Test-Anleitungen
 
 #### Bekannte Einschränkungen
@@ -57,6 +58,7 @@ This is the first public release candidate of the AMO Telegram Bot. The software
 - **AI Integration:** `/ask` command, auto-replies, and memory system (Daily + Long Memory) via Ollama
 - **Topic Agent System:** Configurable per-topic AI behavior with memory curation (KI-A to KI-F4 complete)
 - **Core Plugins:** Policy-controlled AI capabilities for RSS feeds, web search, web scraping, API integration, context window builder, memory management, SQL read-only access (templates/views), and self-improvement proposals (CP-I1 and CP-Z1 complete)
+- **Image Analysis Coreplugin:** Secure image analysis interface (IMG-B4..IMG-B7) — default-off, stub implementation with policy/consent checks
 - **Documentation:** Bilingual README, setup guides, and beta test instructions
 
 #### Known Limitations

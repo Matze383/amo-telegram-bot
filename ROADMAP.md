@@ -36,6 +36,7 @@ Kurzfristige Ziele (1–3 Monate):
 | Feature | Status | Beschreibung |
 |---------|--------|--------------|
 | **Core Plugins (KI-Fähigkeiten)** | ✅ Abgeschlossen (CP-Z1) | RSS-Feeds, Websuche, Webscraping als policy-gesteuerte KI-Fähigkeiten |
+| **Image Analysis Coreplugin** | ✅ Abgeschlossen (IMG-B7) | Sichere Bildanalyse-Schnittstelle (default-off, Stub-Implementierung) |
 | **API-Integration** | 🔄 In Planung | Konfigurierbare API-Aufrufe für erlaubte Endpoints |
 | **Speicher-Verwaltung** | 📋 Geplant | Erweiterte Memory-Operationen mit Scope-Isolation |
 | **WebUI-Verbesserungen** | 📋 Geplant | Bessere Übersicht, Filter, Export-Optionen |
@@ -107,6 +108,7 @@ Short-term goals (1–3 months):
 | Feature | Status | Description |
 |---------|--------|-------------|
 | **Core Plugins (AI Capabilities)** | ✅ Complete (CP-Z1) | RSS feeds, web search, web scraping as policy-controlled AI capabilities |
+| **Image Analysis Coreplugin** | ✅ Complete (IMG-B7) | Secure image analysis interface (default-off, stub implementation) |
 | **API Integration** | 🔄 In Planning | Configurable API calls for allowed endpoints |
 | **Memory Management** | 📋 Planned | Advanced memory operations with scope isolation |
 | **WebUI Improvements** | 📋 Planned | Better overview, filters, export options |
@@ -161,7 +163,7 @@ Medium- to long-term goals (3–6+ months):
 
 ## 📅 Letzte Aktualisierung / Last Updated
 
-2026-05-16
+2026-05-17
 
 ---
 

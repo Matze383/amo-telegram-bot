@@ -667,6 +667,44 @@ The Dashboard includes a **KI Memory** section for inspecting and managing AI me
 
 ---
 
+### Image Analysis Coreplugin (IMG-B4..IMG-B7)
+
+The image analysis coreplugin provides secure, default-off image analysis for AI and plugins.
+
+**Status:** Stub implementation (no real vision provider)
+- Image analysis is disabled by default
+- All requests are denied with `image analysis not configured`
+- Policy and consent checks are still performed
+
+**Prerequisites:**
+- `vip`, `admin` or `owner` role
+- Consent granted (`/accept`)
+
+**Telegram Test:**
+
+1. **Without image (should fail):**
+   - Send: `/analyze_image` without an image
+   - Expected: Error message or notice that no image was found
+
+2. **With image attachment:**
+   - Upload an image with `/analyze_image` as caption
+   - Expected: "image analysis not configured" (stub behavior)
+
+3. **As reply to image:**
+   - Reply to an image in chat with `/analyze_image`
+   - Expected: "image analysis not configured" (stub behavior)
+
+**Note:** This feature is a security stub. The policy check (role, consent) works, but actual image analysis is not configured.
+
+**Security Checklist:**
+- [ ] Image analysis is default-off (no automatic activation)
+- [ ] Minimum role is checked
+- [ ] Consent is checked
+- [ ] No raw image data in logs/audit events
+- [ ] Attachment context contains metadata only
+
+---
+
 ### Future Features (Not Yet Implemented)
 
 The following features are planned for future releases and are **not available** in the current beta:
@@ -768,6 +806,7 @@ Use this checklist for your test:
 - [ ] WebUI Topic Soul Editor (owner-only, in Groups): OK / Not tested
 - [ ] WebUI KI Memory Controls (redacted daily, long memory deactivate): OK / Not tested
 - [ ] CP-G2 Memory Privacy: Scope isolation, default-deny policy, redacted outputs verified: OK / Not tested
+- [ ] Image Analysis Coreplugin (default-off, stub behavior): OK / Not tested
 - [ ] Security headers present (check browser dev tools): OK
 
 **Notes:**
