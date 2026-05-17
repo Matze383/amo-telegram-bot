@@ -1171,6 +1171,7 @@ class TopicAgentConfigRecord:
     main_soul_text: str | None
     topic_soul_text: str | None
     topic_soul_owner_only_edit: bool
+    recent_context_window_size: int
 
 
 @dataclass(slots=True)
@@ -1236,6 +1237,7 @@ class TopicAgentMemoryRepository:
         main_soul_text: str | None = None,
         topic_soul_text: str | None = None,
         topic_soul_owner_only_edit: bool = True,
+        recent_context_window_size: int = 0,
     ) -> TopicAgentConfigRecord:
         row = self._session.scalar(
             select(TopicAgentConfig).where(
@@ -1261,6 +1263,7 @@ class TopicAgentMemoryRepository:
         row.main_soul_text = main_soul_text
         row.topic_soul_text = topic_soul_text
         row.topic_soul_owner_only_edit = topic_soul_owner_only_edit
+        row.recent_context_window_size = max(0, min(recent_context_window_size, 50))
         self._session.commit()
         self._session.refresh(row)
         return self._to_config_record(row)
@@ -1607,6 +1610,7 @@ class TopicAgentMemoryRepository:
             main_soul_text=row.main_soul_text,
             topic_soul_text=row.topic_soul_text,
             topic_soul_owner_only_edit=row.topic_soul_owner_only_edit,
+            recent_context_window_size=max(0, min(int(getattr(row, "recent_context_window_size", 0) or 0), 50)),
         )
 
     @staticmethod

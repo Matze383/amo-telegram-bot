@@ -107,6 +107,7 @@ def test_topic_memory_repository_config_daily_long_and_session_scopes() -> None:
         assert topic_cfg.memory_retention_days == 30
         assert topic_cfg.tools_enabled is False
         assert topic_cfg.topic_soul_owner_only_edit is True
+        assert topic_cfg.recent_context_window_size == 0
 
         private_cfg = repo.upsert_config(scope_type="private_user", user_id=42)
         assert private_cfg.ai_enabled is False
@@ -122,10 +123,12 @@ def test_topic_memory_repository_config_daily_long_and_session_scopes() -> None:
             tools_enabled=False,
             topic_soul_text="topic soul",
             topic_soul_owner_only_edit=True,
+            recent_context_window_size=9,
         )
         assert updated_topic_cfg.ai_enabled is True
         assert updated_topic_cfg.memory_retention_days == 14
         assert updated_topic_cfg.topic_soul_text == "topic soul"
+        assert updated_topic_cfg.recent_context_window_size == 9
 
         fetched_topic_cfg = repo.get_config(scope_type="topic", chat_id=-100123, topic_id=777)
         assert fetched_topic_cfg is not None
@@ -341,3 +344,17 @@ def test_topic_long_memory_promotion_candidate_lifecycle_and_scope_isolation() -
 
         assert repo.mark_long_memory_candidate(memory_id=999999) is False
         assert repo.clear_long_memory_candidate(memory_id=999999) is False
+
+
+def test_recent_context_window_size_bounds_to_safe_range() -> None:
+    engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
+    Base.metadata.create_all(engine)
+
+    with Session(engine, future=True) as session:
+        repo = TopicAgentMemoryRepository(session)
+
+        low = repo.upsert_config(scope_type="private_user", user_id=1, recent_context_window_size=-5)
+        assert low.recent_context_window_size == 0
+
+        high = repo.upsert_config(scope_type="private_user", user_id=1, recent_context_window_size=999)
+        assert high.recent_context_window_size == 50

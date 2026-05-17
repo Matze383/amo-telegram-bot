@@ -53,7 +53,8 @@ class AIRouter:
     """Minimal router seam for KI scope gating logic."""
 
     _MAX_SOUL_CHARS = 2000
-    _RECENT_WINDOW_MAX_MESSAGES = 12
+    _RECENT_WINDOW_DEFAULT_MESSAGES = 0
+    _RECENT_WINDOW_MAX_MESSAGES = 50
     _RECENT_WINDOW_MAX_AGE_SECONDS = 60 * 60 * 24 * 14
     _SUSPICIOUS_SOUL_MARKERS = (
         "system prompt",
@@ -164,11 +165,13 @@ class AIRouter:
             topic_id=scope["topic_id"] if isinstance(scope["topic_id"], int) else None,
             user_id=scope["user_id"] if isinstance(scope["user_id"], int) else None,
         )
+        recent_window_size = max(0, min(int(getattr(config, "recent_context_window_size", self._RECENT_WINDOW_DEFAULT_MESSAGES) or 0), self._RECENT_WINDOW_MAX_MESSAGES))
         recent_messages_text, recent_error = self._read_recent_messages_text(
             scope_type=scope["scope_type"],
             chat_id=scope["chat_id"] if isinstance(scope["chat_id"], int) else None,
             topic_id=scope["topic_id"] if isinstance(scope["topic_id"], int) else None,
             user_id=scope["user_id"] if isinstance(scope["user_id"], int) else None,
+            limit=recent_window_size,
         )
         context_error = ",".join(part for part in (daily_error, long_error, recent_error) if part)
 
@@ -427,18 +430,23 @@ class AIRouter:
         chat_id: int | None,
         topic_id: int | None,
         user_id: int | None,
+        limit: int,
     ) -> tuple[str, str]:
         repo = self._topic_agent_memory_repository
         if repo is None:
             return "", ""
 
         try:
+            safe_limit = max(0, min(limit, self._RECENT_WINDOW_MAX_MESSAGES))
+            if safe_limit == 0:
+                return "", ""
+
             rows = repo.list_recent(
                 scope_type=scope_type,
                 chat_id=chat_id,
                 topic_id=topic_id,
                 user_id=user_id,
-                limit=self._RECENT_WINDOW_MAX_MESSAGES,
+                limit=safe_limit,
                 max_age_seconds=self._RECENT_WINDOW_MAX_AGE_SECONDS,
             )
             if not rows:

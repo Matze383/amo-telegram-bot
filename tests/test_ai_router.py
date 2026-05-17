@@ -506,6 +506,7 @@ class _RaisingMemoryRepo:
             ai_enabled = True
             main_soul_text = None
             topic_soul_text = None
+            recent_context_window_size = 1
 
         return _Cfg()
 
@@ -600,7 +601,7 @@ def test_context_guard_fallback_redacts_sensitive_exception_payloads() -> None:
 
 def test_recent_messages_scope_ordering_truncation_and_redaction(tmp_path) -> None:
     repo = _mk_repo(tmp_path)
-    repo.upsert_config(scope_type="private_user", user_id=9010, ai_enabled=True)
+    repo.upsert_config(scope_type="private_user", user_id=9010, ai_enabled=True, recent_context_window_size=12)
     repo.upsert_config(scope_type="private_user", user_id=9011, ai_enabled=True)
 
     for i in range(20):
@@ -627,7 +628,7 @@ def test_recent_messages_scope_ordering_truncation_and_redaction(tmp_path) -> No
 
 def test_recent_messages_redacts_jwt_hex_base64_email_phone_and_passwordish(tmp_path) -> None:
     repo = _mk_repo(tmp_path)
-    repo.upsert_config(scope_type="private_user", user_id=9910, ai_enabled=True)
+    repo.upsert_config(scope_type="private_user", user_id=9910, ai_enabled=True, recent_context_window_size=12)
 
     jwt_like = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.abcdefghijklmno1234567890ABCDE.pqrstuvwxyzABCDE1234567890"
     long_hex = "a" * 64
@@ -674,7 +675,7 @@ def test_group_topic_plain_without_trigger_keeps_no_trigger_behavior_with_recent
 
 def test_recent_messages_truncated_to_max_chars(tmp_path) -> None:
     repo = _mk_repo(tmp_path)
-    repo.upsert_config(scope_type="private_user", user_id=9901, ai_enabled=True)
+    repo.upsert_config(scope_type="private_user", user_id=9901, ai_enabled=True, recent_context_window_size=1)
     big = ("hello " * (AIRouter._MAX_SOUL_CHARS // 6 + 200)).strip()
     repo.append_message(scope_type="private_user", user_id=9901, message_text=big)
 
@@ -682,3 +683,50 @@ def test_recent_messages_truncated_to_max_chars(tmp_path) -> None:
     decision = router.decide(prompt="plain", chat_id=9901, user_id=9901)
 
     assert len(decision.context.recent_messages_text) == AIRouter._MAX_SOUL_CHARS
+
+
+def test_private_scope_recent_context_disabled_by_default_even_when_messages_exist(tmp_path) -> None:
+    repo = _mk_repo(tmp_path)
+    repo.upsert_config(scope_type="private_user", user_id=42, ai_enabled=True)
+    repo.append_message(scope_type="private_user", user_id=42, message_text="should stay off")
+
+    router = AIRouter(topic_agent_memory_repository=repo)
+    decision = router.decide(prompt="hello", chat_id=42, user_id=42, chat_type="private")
+
+    assert decision.eligible is True
+    assert decision.context.recent_messages_text == ""
+
+
+def test_recent_context_window_size_applies_per_scope(tmp_path) -> None:
+    repo = _mk_repo(tmp_path)
+    repo.upsert_config(scope_type="private_user", user_id=42, ai_enabled=True, recent_context_window_size=2)
+    repo.upsert_config(scope_type="topic", chat_id=-100, topic_id=9, ai_enabled=True, recent_context_window_size=1)
+    repo.append_message(scope_type="private_user", user_id=42, message_text="p1")
+    repo.append_message(scope_type="private_user", user_id=42, message_text="p2")
+    repo.append_message(scope_type="private_user", user_id=42, message_text="p3")
+    repo.append_message(scope_type="topic", chat_id=-100, topic_id=9, message_text="t1")
+    repo.append_message(scope_type="topic", chat_id=-100, topic_id=9, message_text="t2")
+
+    router = AIRouter(topic_agent_memory_repository=repo)
+
+    private_decision = router.decide(prompt="hello", chat_id=42, user_id=42, chat_type="private")
+    assert private_decision.context.recent_messages_text == "p2\np3"
+
+    topic_decision = router.decide(prompt="@bot hi", chat_id=-100, topic_id=9, user_id=42, chat_type="supergroup", bot_username="bot")
+    assert topic_decision.context.recent_messages_text == "t2"
+
+
+def test_recent_context_window_does_not_cross_scope_boundaries(tmp_path) -> None:
+    repo = _mk_repo(tmp_path)
+    repo.upsert_config(scope_type="private_user", user_id=42, ai_enabled=True, recent_context_window_size=5)
+    repo.upsert_config(scope_type="topic", chat_id=-100, topic_id=9, ai_enabled=True, recent_context_window_size=5)
+    repo.append_message(scope_type="private_user", user_id=42, message_text="private-msg")
+    repo.append_message(scope_type="topic", chat_id=-100, topic_id=9, message_text="topic-msg")
+
+    router = AIRouter(topic_agent_memory_repository=repo)
+
+    private_decision = router.decide(prompt="hello", chat_id=42, user_id=42, chat_type="private")
+    topic_decision = router.decide(prompt="@bot hi", chat_id=-100, topic_id=9, user_id=42, chat_type="supergroup", bot_username="bot")
+
+    assert private_decision.context.recent_messages_text == "private-msg"
+    assert topic_decision.context.recent_messages_text == "topic-msg"
