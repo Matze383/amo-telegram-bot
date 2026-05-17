@@ -49,6 +49,9 @@ class TelegramMessage:
     message_thread_id: int | None = None
     telegram_topic_name: str | None = None
     reply_to_is_bot: bool = False
+    reply_to_user_id: int | None = None
+    reply_to_username: str | None = None
+    reply_to_user_is_bot: bool = False
     attachments: tuple[TelegramAttachment, ...] = ()
 
     def parse_command(self, bot_username: str | None = None) -> CommandMatch | None:
@@ -244,9 +247,16 @@ def _parse_message(raw: Any) -> TelegramMessage | None:
         telegram_topic_name = _extract_topic_name(reply_to_message_raw)
 
     reply_to_is_bot = False
+    reply_to_user_id: int | None = None
+    reply_to_username: str | None = None
+    reply_to_user_is_bot = False
     if isinstance(reply_to_message_raw, dict):
         reply_to_user = _parse_user(reply_to_message_raw.get("from"))
-        reply_to_is_bot = bool(reply_to_user.is_bot) if reply_to_user is not None else False
+        if reply_to_user is not None:
+            reply_to_user_id = reply_to_user.id
+            reply_to_username = reply_to_user.username
+            reply_to_user_is_bot = bool(reply_to_user.is_bot)
+            reply_to_is_bot = reply_to_user_is_bot
         if reply_to_is_bot and message_thread_id is not None:
             try:
                 reply_to_message_id = int(reply_to_message_raw.get("message_id"))
@@ -265,6 +275,9 @@ def _parse_message(raw: Any) -> TelegramMessage | None:
         message_thread_id=message_thread_id,
         telegram_topic_name=telegram_topic_name,
         reply_to_is_bot=reply_to_is_bot,
+        reply_to_user_id=reply_to_user_id,
+        reply_to_username=reply_to_username,
+        reply_to_user_is_bot=reply_to_user_is_bot,
         attachments=_parse_attachments(raw),
     )
 

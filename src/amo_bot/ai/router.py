@@ -36,6 +36,7 @@ class AIRouterContextV1:
     assembled_soul_text: str = ""
     daily_memory_text: str = ""
     long_memory_text: str = ""
+    recent_messages_text: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,6 +53,7 @@ class AIRouter:
     """Minimal router seam for KI scope gating logic."""
 
     _MAX_SOUL_CHARS = 2000
+    _RECENT_WINDOW_MAX_MESSAGES = 12
     _SUSPICIOUS_SOUL_MARKERS = (
         "system prompt",
         "system message",
@@ -61,6 +63,27 @@ class AIRouter:
         "proc/",
         "BEGIN RSA PRIVATE KEY",
         "OPENCLAW",
+    )
+    _SENSITIVE_RECENT_MARKERS = (
+        "system prompt",
+        "system message",
+        "internal prompt",
+        "internal planning",
+        "chain of thought",
+        "private memory",
+        "db dump",
+        "sqlite",
+        "postgres://",
+        "mysql://",
+        "api_key",
+        "token=",
+        "authorization:",
+        "bearer ",
+        "BEGIN RSA PRIVATE KEY",
+        "BEGIN OPENSSH PRIVATE KEY",
+        "OPENCLAW",
+        "/home/",
+        "C:\\",
     )
 
     def __init__(self, *, topic_agent_memory_repository: TopicAgentMemoryRepository | None = None) -> None:
@@ -84,6 +107,7 @@ class AIRouter:
         assembled_soul_text = ""
         daily_memory_text = ""
         long_memory_text = ""
+        recent_messages_text = ""
         base_context = self._build_context(
             scope=scope,
             user_id=user_id,
@@ -95,6 +119,7 @@ class AIRouter:
             assembled_soul_text=assembled_soul_text,
             daily_memory_text=daily_memory_text,
             long_memory_text=long_memory_text,
+            recent_messages_text=recent_messages_text,
         )
 
         repo = self._topic_agent_memory_repository
@@ -129,7 +154,13 @@ class AIRouter:
             topic_id=scope["topic_id"] if isinstance(scope["topic_id"], int) else None,
             user_id=scope["user_id"] if isinstance(scope["user_id"], int) else None,
         )
-        context_error = ",".join(part for part in (daily_error, long_error) if part)
+        recent_messages_text, recent_error = self._read_recent_messages_text(
+            scope_type=scope["scope_type"],
+            chat_id=scope["chat_id"] if isinstance(scope["chat_id"], int) else None,
+            topic_id=scope["topic_id"] if isinstance(scope["topic_id"], int) else None,
+            user_id=scope["user_id"] if isinstance(scope["user_id"], int) else None,
+        )
+        context_error = ",".join(part for part in (daily_error, long_error, recent_error) if part)
 
         if self._has_bot_mention(prompt=safe_prompt, bot_username=bot_username):
             reason_code = AIRouterReasonCode.CONTEXT_GUARD_FALLBACK if context_error else AIRouterReasonCode.MENTION_IN_ACTIVE_SCOPE
@@ -148,6 +179,7 @@ class AIRouter:
                     assembled_soul_text=assembled_soul_text,
                     daily_memory_text=daily_memory_text,
                     long_memory_text=long_memory_text,
+                    recent_messages_text=recent_messages_text,
                     context_error=context_error,
                 ),
             )
@@ -169,6 +201,7 @@ class AIRouter:
                     assembled_soul_text=assembled_soul_text,
                     daily_memory_text=daily_memory_text,
                     long_memory_text=long_memory_text,
+                    recent_messages_text=recent_messages_text,
                     context_error=context_error,
                 ),
             )
@@ -193,6 +226,7 @@ class AIRouter:
                 assembled_soul_text=assembled_soul_text,
                 daily_memory_text=daily_memory_text,
                 long_memory_text=long_memory_text,
+                recent_messages_text=recent_messages_text,
                 context_error=context_error,
             ),
         )
@@ -210,6 +244,7 @@ class AIRouter:
         assembled_soul_text: str,
         daily_memory_text: str,
         long_memory_text: str,
+        recent_messages_text: str,
         context_error: str = "",
     ) -> AIRouterContextV1:
         if scope is None:
@@ -224,6 +259,7 @@ class AIRouter:
                 assembled_soul_text=assembled_soul_text,
                 daily_memory_text=daily_memory_text,
                 long_memory_text=long_memory_text,
+                recent_messages_text=recent_messages_text,
             )
 
         return AIRouterContextV1(
@@ -241,6 +277,7 @@ class AIRouter:
             assembled_soul_text=assembled_soul_text,
             daily_memory_text=daily_memory_text,
             long_memory_text=long_memory_text,
+            recent_messages_text=recent_messages_text,
         )
 
     @staticmethod
@@ -348,6 +385,57 @@ class AIRouter:
             return joined[: self._MAX_SOUL_CHARS].rstrip(), ""
         except Exception:
             return "", "long_memory_error"
+
+
+    def _sanitize_recent_message(self, value: str | None) -> str:
+        if not value:
+            return ""
+
+        normalized = re.sub(r"\s+", " ", value).strip()
+        if not normalized:
+            return ""
+
+        lower = normalized.casefold()
+        normalized = re.sub(r"(?:api[_-]?key|token|secret|password)\s*[:=]\s*\S+", "[redacted:secret]", normalized, flags=re.IGNORECASE)
+        normalized = re.sub(r"(?:/home/\S+|[A-Za-z]:\\\S+)", "[redacted:path]", normalized)
+
+        lower = normalized.casefold()
+        for marker in self._SENSITIVE_RECENT_MARKERS:
+            if marker.casefold() in lower:
+                return "[redacted:filtered]"
+
+        return normalized.strip()
+
+    def _read_recent_messages_text(
+        self,
+        *,
+        scope_type: str,
+        chat_id: int | None,
+        topic_id: int | None,
+        user_id: int | None,
+    ) -> tuple[str, str]:
+        repo = self._topic_agent_memory_repository
+        if repo is None:
+            return "", ""
+
+        try:
+            rows = repo.list_recent(
+                scope_type=scope_type,
+                chat_id=chat_id,
+                topic_id=topic_id,
+                user_id=user_id,
+                limit=self._RECENT_WINDOW_MAX_MESSAGES,
+            )
+            if not rows:
+                return "", ""
+
+            parts = [self._sanitize_recent_message(row.message_text) for row in rows]
+            joined = "\n".join(part for part in parts if part)
+            if not joined:
+                return "", ""
+            return joined[: self._MAX_SOUL_CHARS].rstrip(), ""
+        except Exception:
+            return "", "recent_messages_error"
 
     @staticmethod
     def _has_bot_mention(*, prompt: str, bot_username: str | None) -> bool:

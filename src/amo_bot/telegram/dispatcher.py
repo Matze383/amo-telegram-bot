@@ -360,6 +360,22 @@ class Dispatcher:
         mention_removed = sanitized != cleaned
         return (sanitized or cleaned), mention_removed
 
+    @staticmethod
+    def _is_reply_to_current_bot(*, message: TelegramMessage, bot_username: str | None) -> bool:
+        if not message.reply_to_is_bot:
+            return False
+        if not message.reply_to_user_is_bot:
+            return False
+        if not bot_username:
+            return False
+
+        configured = bot_username.strip().lstrip("@").casefold()
+        if not configured:
+            return False
+
+        reply_username = (message.reply_to_username or "").strip().lstrip("@").casefold()
+        return bool(reply_username) and reply_username == configured
+
     async def _maybe_handle_ai_autoreply(self, *, message: TelegramMessage, role: Role, bot_username: str | None) -> None:
         if self.ai_service is None or self.database_url is None:
             return
@@ -380,7 +396,7 @@ class Dispatcher:
                 user_id=message.from_user.id,
                 chat_type=message.chat.type,
                 bot_username=bot_username,
-                reply_to_is_bot=message.reply_to_is_bot,
+                reply_to_is_bot=self._is_reply_to_current_bot(message=message, bot_username=bot_username),
             )
 
             allowed_reason_codes = {

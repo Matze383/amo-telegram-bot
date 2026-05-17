@@ -551,6 +551,7 @@ def test_scope_trigger_matrix_documents_current_behavior_for_recent_context(tmp_
     # Current contract: context payload for topic scope is not exposed unless trigger path is taken.
     assert topic_without_trigger.context.daily_memory_text == ""
     assert topic_without_trigger.context.long_memory_text == ""
+    assert topic_without_trigger.context.recent_messages_text == ""
 
     topic_with_mention = router.decide(
         prompt="hi @amo_bot",
@@ -563,12 +564,14 @@ def test_scope_trigger_matrix_documents_current_behavior_for_recent_context(tmp_
     assert topic_with_mention.eligible is True
     assert topic_with_mention.context.daily_memory_text == "topic recent synthetic"
     assert topic_with_mention.context.long_memory_text == "topic long synthetic"
+    assert topic_with_mention.context.recent_messages_text == ""
 
     private_scope = router.decide(prompt="plain", chat_id=6101, user_id=6101)
     assert private_scope.reason_code is AIRouterReasonCode.SCOPE_ENABLED
     assert private_scope.eligible is True
     assert private_scope.context.daily_memory_text == "private recent synthetic"
     assert private_scope.context.long_memory_text == "private long synthetic"
+    assert private_scope.context.recent_messages_text == ""
 def test_context_guard_fallback_handles_memory_exceptions() -> None:
     router = AIRouter(topic_agent_memory_repository=_RaisingMemoryRepo())
     decision = router.decide(prompt="hello @amo_bot", chat_id=123, user_id=123, bot_username="amo_bot")
@@ -576,7 +579,7 @@ def test_context_guard_fallback_handles_memory_exceptions() -> None:
     assert decision.eligible is True
     assert decision.reason_code is AIRouterReasonCode.CONTEXT_GUARD_FALLBACK
     assert decision.context.route_reason is AIRouterReasonCode.CONTEXT_GUARD_FALLBACK
-    assert decision.context.context_error == "daily_memory_error,long_memory_error"
+    assert decision.context.context_error == "daily_memory_error,long_memory_error,recent_messages_error"
     assert decision.context.daily_memory_text == ""
     assert decision.context.long_memory_text == ""
 
@@ -590,6 +593,58 @@ def test_context_guard_fallback_redacts_sensitive_exception_payloads() -> None:
     decision = router.decide(prompt="hello", chat_id=456, user_id=456)
 
     assert decision.reason_code is AIRouterReasonCode.CONTEXT_GUARD_FALLBACK
-    assert decision.context.context_error == "daily_memory_error,long_memory_error"
+    assert decision.context.context_error == "daily_memory_error,long_memory_error,recent_messages_error"
     assert "abc123" not in str(decision.context)
     assert "hunter2" not in str(decision.context)
+
+
+def test_recent_messages_scope_ordering_truncation_and_redaction(tmp_path) -> None:
+    repo = _mk_repo(tmp_path)
+    repo.upsert_config(scope_type="private_user", user_id=9010, ai_enabled=True)
+    repo.upsert_config(scope_type="private_user", user_id=9011, ai_enabled=True)
+
+    for i in range(20):
+        repo.append_message(scope_type="private_user", user_id=9010, message_text=f"m{i:02d}")
+
+    repo.append_message(scope_type="private_user", user_id=9010, message_text="token=abc123")
+    repo.append_message(scope_type="private_user", user_id=9010, message_text="path /home/user/secret.txt")
+    repo.append_message(scope_type="private_user", user_id=9010, message_text="internal planning notes")
+    repo.append_message(scope_type="private_user", user_id=9011, message_text="other-scope")
+
+    router = AIRouter(topic_agent_memory_repository=repo)
+    decision = router.decide(prompt="plain", chat_id=9010, user_id=9010)
+
+    assert decision.reason_code is AIRouterReasonCode.SCOPE_ENABLED
+    lines = decision.context.recent_messages_text.splitlines()
+    assert len(lines) <= AIRouter._RECENT_WINDOW_MAX_MESSAGES
+    assert lines[0] == "m11"
+    assert lines[8] == "m19"
+    assert lines[9] == "[redacted:secret]"
+    assert lines[10] == "path [redacted:path]"
+    assert lines[11] == "[redacted:filtered]"
+    assert "other-scope" not in decision.context.recent_messages_text
+
+
+def test_group_topic_plain_without_trigger_keeps_no_trigger_behavior_with_recent_context(tmp_path) -> None:
+    repo = _mk_repo(tmp_path)
+    repo.upsert_config(scope_type="topic", chat_id=-7777, topic_id=77, ai_enabled=True)
+    repo.append_message(scope_type="topic", chat_id=-7777, topic_id=77, message_text="topic-msg")
+
+    router = AIRouter(topic_agent_memory_repository=repo)
+    decision = router.decide(prompt="plain", chat_id=-7777, topic_id=77, user_id=55)
+
+    assert decision.eligible is False
+    assert decision.reason_code is AIRouterReasonCode.DEFAULT_NOOP
+    assert decision.context.recent_messages_text == ""
+
+
+def test_recent_messages_truncated_to_max_chars(tmp_path) -> None:
+    repo = _mk_repo(tmp_path)
+    repo.upsert_config(scope_type="private_user", user_id=9901, ai_enabled=True)
+    big = "X" * (AIRouter._MAX_SOUL_CHARS + 500)
+    repo.append_message(scope_type="private_user", user_id=9901, message_text=big)
+
+    router = AIRouter(topic_agent_memory_repository=repo)
+    decision = router.decide(prompt="plain", chat_id=9901, user_id=9901)
+
+    assert len(decision.context.recent_messages_text) == AIRouter._MAX_SOUL_CHARS

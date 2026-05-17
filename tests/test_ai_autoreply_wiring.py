@@ -34,7 +34,7 @@ class Sender:
         return {"ok": True}
 
 
-def _mk_update(*, uid: int, chat_id: int, chat_type: str, text: str, update_id: int, message_thread_id: int | None = None, reply_to_is_bot: bool = False, reply_to_message_id: int | None = None) -> dict[str, object]:
+def _mk_update(*, uid: int, chat_id: int, chat_type: str, text: str, update_id: int, message_thread_id: int | None = None, reply_to_is_bot: bool = False, reply_to_message_id: int | None = None, reply_to_bot_username: str = "AmoBot") -> dict[str, object]:
     m: dict[str, object] = {
         "message_id": update_id + 100,
         "is_topic_message": message_thread_id is not None,
@@ -53,7 +53,15 @@ def _mk_update(*, uid: int, chat_id: int, chat_type: str, text: str, update_id: 
         m["message_thread_id"] = message_thread_id
     if reply_to_is_bot:
         reply_message_id = reply_to_message_id if reply_to_message_id is not None else 999
-        m["reply_to_message"] = {"message_id": reply_message_id, "from": {"id": 999, "is_bot": True, "first_name": "Bot"}}
+        m["reply_to_message"] = {
+            "message_id": reply_message_id,
+            "from": {
+                "id": 999,
+                "is_bot": True,
+                "first_name": "Bot",
+                "username": reply_to_bot_username,
+            },
+        }
     return {"update_id": update_id, "message": m}
 
 
@@ -353,7 +361,7 @@ def test_group_scope_context_fallback_without_trigger_stays_silent(tmp_path) -> 
     assert ai.prompts == []
 
 
-def test_group_scope_context_fallback_reply_to_bot_still_sends(tmp_path) -> None:
+def test_group_scope_context_fallback_reply_to_current_bot_still_sends(tmp_path) -> None:
     db_url = f"sqlite:///{tmp_path / 'ai_autoreply_group_fallback_reply_to_bot.db'}"
     init_db(db_url)
     _seed_user(
@@ -483,7 +491,7 @@ def test_owner_group_topic_mention_allows_ai(tmp_path) -> None:
     assert len(ai.prompts) == 1
 
 
-def test_owner_group_topic_reply_to_bot_allows_ai(tmp_path) -> None:
+def test_owner_group_topic_reply_to_current_bot_allows_ai(tmp_path) -> None:
     db_url = f"sqlite:///{tmp_path / 'ai_autoreply_owner_group_reply_to_bot.db'}"
 
     init_db(db_url)
@@ -514,6 +522,46 @@ def test_owner_group_topic_reply_to_bot_allows_ai(tmp_path) -> None:
 
     assert sender.sent == [(-1302, "ai-answer", 72)]
     assert len(ai.prompts) == 1
+
+
+def test_group_scope_reply_to_other_bot_does_not_trigger_ai(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'ai_autoreply_group_reply_other_bot.db'}"
+    init_db(db_url)
+    _seed_user(
+        db_url,
+        user_id=2303,
+        role="owner",
+        consent="accepted",
+        group_chat_id=-1303,
+        group_role="owner",
+    )
+
+    sf = create_session_factory(db_url)
+    with sf() as session:
+        repo = TopicAgentMemoryRepository(session)
+        repo.upsert_config(scope_type="topic", chat_id=-1303, topic_id=73, ai_enabled=True)
+
+    ai = FakeAIService(answer="ai-answer")
+    sender = Sender()
+    dispatcher = _mk_dispatcher(db_url, ai, sender)
+
+    asyncio.run(
+        dispatcher.handle_raw_update(
+            _mk_update(
+                uid=2303,
+                chat_id=-1303,
+                chat_type="supergroup",
+                text="reply path",
+                update_id=34,
+                message_thread_id=73,
+                reply_to_is_bot=True,
+                reply_to_bot_username="OtherBot",
+            )
+        )
+    )
+
+    assert sender.sent == []
+    assert ai.prompts == []
 
 
 def test_group_scope_unaffected_by_private_min_ai_role(tmp_path) -> None:

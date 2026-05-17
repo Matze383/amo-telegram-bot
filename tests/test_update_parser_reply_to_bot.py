@@ -13,11 +13,11 @@ def _mk_base_update() -> dict[str, object]:
     }
 
 
-def test_parse_reply_to_bot_sets_flag_true() -> None:
+def test_parse_reply_to_bot_sets_flag_true_and_captures_identity() -> None:
     raw = _mk_base_update()
     raw["message"]["reply_to_message"] = {  # type: ignore[index]
         "message_id": 9,
-        "from": {"id": 99, "is_bot": True, "first_name": "Bot"},
+        "from": {"id": 99, "is_bot": True, "first_name": "Bot", "username": "AmoBot"},
         "chat": {"id": -1001, "type": "supergroup", "title": "G"},
         "text": "bot msg",
     }
@@ -26,6 +26,9 @@ def test_parse_reply_to_bot_sets_flag_true() -> None:
     assert update is not None
     assert update.message is not None
     assert update.message.reply_to_is_bot is True
+    assert update.message.reply_to_user_is_bot is True
+    assert update.message.reply_to_user_id == 99
+    assert update.message.reply_to_username == "AmoBot"
 
 
 def test_parse_reply_to_other_sets_flag_false() -> None:
@@ -41,6 +44,9 @@ def test_parse_reply_to_other_sets_flag_false() -> None:
     assert update is not None
     assert update.message is not None
     assert update.message.reply_to_is_bot is False
+    assert update.message.reply_to_user_is_bot is False
+    assert update.message.reply_to_user_id == 77
+    assert update.message.reply_to_username is None
 
 
 def test_parse_forum_topic_root_context_reply_to_bot_sets_flag_false() -> None:
