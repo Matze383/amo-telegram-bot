@@ -119,6 +119,7 @@ class Dispatcher:
                         chat_id=message.chat.id,
                         message_id=message.message_id,
                         message_thread_id=message.message_thread_id,
+                        attachments=message.attachments,
                     ),
                 )
             if plugin_handled:

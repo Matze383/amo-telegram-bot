@@ -7,7 +7,7 @@ import json
 import logging
 import time
 import uuid
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
@@ -18,6 +18,8 @@ from amo_bot.db.models import AuditEvent
 from amo_bot.db.repositories import PluginPolicyOverrideRepository, PluginRepository
 from amo_bot.plugins.loader import PluginLoader
 from amo_bot.plugins.manifest import PluginManifest
+from amo_bot.telegram.image_media_store import TelegramImageMediaStore
+from amo_bot.telegram.update_parser import TelegramAttachment
 from amo_bot.plugins.policy_overrides import evaluate_effective_policy, resolve_effective_policy
 
 logger = logging.getLogger(__name__)
@@ -39,6 +41,7 @@ class CommandInvocation:
     chat_id: int
     message_id: int
     message_thread_id: int | None = None
+    attachments: tuple[TelegramAttachment, ...] = ()
 
 
 @dataclass(slots=True, frozen=True)
@@ -53,6 +56,7 @@ class PluginCommandContext:
     role: Role
     command_name: str
     argument: str | None
+    attachments: tuple[dict[str, Any], ...] = ()
 
 
 class PluginCapabilityError(RuntimeError):
@@ -103,12 +107,16 @@ class PluginCommandExecutor:
         send_message: SendMessageFn,
         reply: ReplyFn,
         timeout_seconds: float = 2.0,
+        image_media_store: TelegramImageMediaStore | None = None,
+        enable_image_attachments: bool = False,
     ) -> None:
         self._loader = loader
         self._session_factory = session_factory
         self._send_message = send_message
         self._reply = reply
         self._timeout_seconds = timeout_seconds
+        self._image_media_store = image_media_store
+        self._enable_image_attachments = enable_image_attachments
 
     async def execute(self, *, actor: CommandActor, invocation: CommandInvocation) -> None:
         manifest = self._find_manifest_for_command(invocation.command_name)
@@ -175,6 +183,7 @@ class PluginCommandExecutor:
             role=actor.role,
             command_name=invocation.command_name,
             argument=invocation.argument,
+            attachments=await self._build_attachment_context(invocation=invocation),
         )
 
         self._write_audit(
@@ -233,6 +242,38 @@ class PluginCommandExecutor:
                 "duration_ms": duration_ms,
             },
         )
+
+
+    async def _build_attachment_context(self, *, invocation: CommandInvocation) -> tuple[dict[str, Any], ...]:
+        if not self._enable_image_attachments or not invocation.attachments:
+            return ()
+
+        contexts: list[dict[str, Any]] = []
+        for attachment in invocation.attachments:
+            if attachment.type_hint not in {"image", "image_document"}:
+                continue
+            context: dict[str, Any] = {
+                "source_kind": attachment.source_kind,
+                "type_hint": attachment.type_hint,
+                "file_id": attachment.file_id,
+                "file_unique_id": attachment.file_unique_id,
+                "width": attachment.width,
+                "height": attachment.height,
+                "size": attachment.size,
+            }
+            if self._image_media_store is not None:
+                try:
+                    media_result = await self._image_media_store.download_image(attachment=attachment)
+                except Exception:
+                    media_result = None
+                if media_result is not None and media_result.ok:
+                    context["media_ref"] = {
+                        "reason_code": media_result.reason_code,
+                        "mime_type": media_result.mime_type,
+                        "bytes_stored": media_result.bytes_stored,
+                    }
+            contexts.append(context)
+        return tuple(contexts)
 
     def _normalize_command(self, command: str) -> str:
         normalized = command.strip().casefold()
