@@ -203,6 +203,59 @@ def test_topic_memory_repository_config_daily_long_and_session_scopes() -> None:
         assert fetched_session.session_payload == {"context": ["hello"]}
 
 
+def test_recent_messages_scope_isolation_matrix_private_topic_group() -> None:
+    engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
+    Base.metadata.create_all(engine)
+
+    with Session(engine, future=True) as session:
+        repo = TopicAgentMemoryRepository(session)
+
+        repo.append_message(scope_type="private_user", user_id=1001, message_text="private one")
+        repo.append_message(scope_type="topic", chat_id=-2001, topic_id=99, message_text="topic one")
+        repo.append_message(scope_type="group_chat", chat_id=-3001, message_text="group one")
+
+        private_rows = repo.list_recent(scope_type="private_user", user_id=1001, limit=10)
+        topic_rows = repo.list_recent(scope_type="topic", chat_id=-2001, topic_id=99, limit=10)
+        group_rows = repo.list_recent(scope_type="group_chat", chat_id=-3001, limit=10)
+
+        assert [r.message_text for r in private_rows] == ["private one"]
+        assert [r.message_text for r in topic_rows] == ["topic one"]
+        assert [r.message_text for r in group_rows] == ["group one"]
+
+
+def test_recent_messages_limit_and_ordering_newest_last() -> None:
+    engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
+    Base.metadata.create_all(engine)
+
+    with Session(engine, future=True) as session:
+        repo = TopicAgentMemoryRepository(session)
+
+        repo.append_message(scope_type="group_chat", chat_id=-9100, message_text="m1")
+        repo.append_message(scope_type="group_chat", chat_id=-9100, message_text="m2")
+        repo.append_message(scope_type="group_chat", chat_id=-9100, message_text="m3")
+        repo.append_message(scope_type="group_chat", chat_id=-9100, message_text="m4")
+
+        rows = repo.list_recent(scope_type="group_chat", chat_id=-9100, limit=3)
+        assert [r.message_text for r in rows] == ["m2", "m3", "m4"]
+
+
+def test_recent_messages_null_leak_prevention_between_topic_and_group() -> None:
+    engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
+    Base.metadata.create_all(engine)
+
+    with Session(engine, future=True) as session:
+        repo = TopicAgentMemoryRepository(session)
+
+        repo.append_message(scope_type="topic", chat_id=-111, topic_id=7, message_text="topic scoped")
+        repo.append_message(scope_type="group_chat", chat_id=-111, message_text="group scoped")
+
+        topic_rows = repo.list_recent(scope_type="topic", chat_id=-111, topic_id=7, limit=10)
+        group_rows = repo.list_recent(scope_type="group_chat", chat_id=-111, limit=10)
+
+        assert [r.message_text for r in topic_rows] == ["topic scoped"]
+        assert [r.message_text for r in group_rows] == ["group scoped"]
+
+
 def test_topic_long_memory_promotion_candidate_lifecycle_and_scope_isolation() -> None:
     engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
     Base.metadata.create_all(engine)

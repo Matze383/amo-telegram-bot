@@ -298,3 +298,19 @@ class TopicAiSession(Base):
     __table_args__ = (
         UniqueConstraint("scope_type", "chat_id", "topic_id", "user_id", name="uq_topic_ai_sessions_scope"),
     )
+
+
+class TopicRecentMessage(Base):
+    __tablename__ = "topic_recent_messages"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    scope_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    chat_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    topic_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    user_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    message_text: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("id", name="uq_topic_recent_messages_id"),
+    )

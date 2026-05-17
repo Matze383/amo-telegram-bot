@@ -28,6 +28,7 @@ from amo_bot.db.models import (
     TopicAiSession,
     TopicDailyMemory,
     TopicLongMemory,
+    TopicRecentMessage,
     User,
 )
 
@@ -1206,6 +1207,16 @@ class TopicAiSessionRecord:
     session_payload: dict[str, object]
 
 
+@dataclass(slots=True)
+class TopicRecentMessageRecord:
+    id: int
+    scope_type: str
+    chat_id: int | None
+    topic_id: int | None
+    user_id: int | None
+    message_text: str
+
+
 class TopicAgentMemoryRepository:
     def __init__(self, session: Session) -> None:
         self._session = session
@@ -1530,6 +1541,51 @@ class TopicAgentMemoryRepository:
             return None
         return self._to_session_record(row)
 
+    def append_message(
+        self,
+        *,
+        scope_type: str,
+        message_text: str,
+        chat_id: int | None = None,
+        topic_id: int | None = None,
+        user_id: int | None = None,
+    ) -> TopicRecentMessageRecord:
+        row = TopicRecentMessage(
+            scope_type=scope_type,
+            chat_id=chat_id,
+            topic_id=topic_id,
+            user_id=user_id,
+            message_text=message_text,
+        )
+        self._session.add(row)
+        self._session.commit()
+        self._session.refresh(row)
+        return self._to_recent_record(row)
+
+    def list_recent(
+        self,
+        *,
+        scope_type: str,
+        chat_id: int | None = None,
+        topic_id: int | None = None,
+        user_id: int | None = None,
+        limit: int = 20,
+    ) -> list[TopicRecentMessageRecord]:
+        safe_limit = max(1, min(limit, 1000))
+        rows = self._session.scalars(
+            select(TopicRecentMessage)
+            .where(
+                TopicRecentMessage.scope_type == scope_type,
+                TopicRecentMessage.chat_id == chat_id,
+                TopicRecentMessage.topic_id == topic_id,
+                TopicRecentMessage.user_id == user_id,
+            )
+            .order_by(TopicRecentMessage.id.desc())
+            .limit(safe_limit)
+        ).all()
+        rows = list(reversed(rows))
+        return [self._to_recent_record(row) for row in rows]
+
     @staticmethod
     def _to_config_record(row: TopicAgentConfig) -> TopicAgentConfigRecord:
         return TopicAgentConfigRecord(
@@ -1588,4 +1644,15 @@ class TopicAgentMemoryRepository:
             topic_id=row.topic_id,
             user_id=row.user_id,
             session_payload=payload,
+        )
+
+    @staticmethod
+    def _to_recent_record(row: TopicRecentMessage) -> TopicRecentMessageRecord:
+        return TopicRecentMessageRecord(
+            id=row.id,
+            scope_type=row.scope_type,
+            chat_id=row.chat_id,
+            topic_id=row.topic_id,
+            user_id=row.user_id,
+            message_text=row.message_text,
         )
