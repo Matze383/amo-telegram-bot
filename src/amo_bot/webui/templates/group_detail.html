@@ -45,34 +45,49 @@
 
             <form method="post" action="{{ url_for('ui.update_topic_metadata', chat_id=group.chat_id, message_thread_id=topic.message_thread_id) }}">
               {{ topic_form.csrf_token }}
-              <label>
-                display_name
-                <input type="text" name="display_name" value="{{ topic.display_name or '' }}" maxlength="255" placeholder="Display Name">
-              </label>
-              <br>
-              <label>
-                notes
-                <textarea name="notes" rows="3" cols="40" maxlength="2000" placeholder="Notes">{{ topic.notes or '' }}</textarea>
-              </label>
-              <br>
-              <label>
-                <input type="checkbox" name="enabled" value="y" {% if topic.enabled %}checked{% endif %}>
-                enabled
-              </label>
-              <br>
-              <label>
-                <input type="checkbox" name="ai_enabled" value="y" {% if topic.ai_enabled %}checked{% endif %}>
-                Topic AI enabled
-              </label>
-              <br>
-              <label>
-                Topic AI response mode
-                <select name="response_mode">
-                  <option value="mention_or_reply" {% if topic.response_mode == 'mention_or_reply' %}selected{% endif %}>mention_or_reply</option>
-                  <option value="command" {% if topic.response_mode == 'command' %}selected{% endif %}>command</option>
-                </select>
-              </label>
-              <br>
+              <section aria-labelledby="topic-{{ topic.message_thread_id }}-basic-heading" style="margin-bottom: 1rem;">
+                <h4 id="topic-{{ topic.message_thread_id }}-basic-heading" style="margin: 0 0 0.5rem 0;">Basic metadata</h4>
+                <label>
+                  display_name
+                  <input type="text" name="display_name" value="{{ topic.display_name or '' }}" maxlength="255" placeholder="Display Name">
+                </label>
+                <br>
+                <label>
+                  notes
+                  <textarea name="notes" rows="3" cols="40" maxlength="2000" placeholder="Notes">{{ topic.notes or '' }}</textarea>
+                </label>
+                <br>
+                <label>
+                  <input type="checkbox" name="enabled" value="y" {% if topic.enabled %}checked{% endif %}>
+                  enabled
+                </label>
+              </section>
+
+              <section aria-labelledby="topic-{{ topic.message_thread_id }}-soul-heading" style="margin-bottom: 1rem; border-top: 1px solid #eee; padding-top: 0.75rem;">
+                <h4 id="topic-{{ topic.message_thread_id }}-soul-heading" style="margin: 0 0 0.5rem 0;">Topic Soul</h4>
+                <p style="margin: 0 0 0.5rem 0;"><small>Owner-only mutation. Escaping is enforced on render.</small></p>
+                <label>
+                  topic_soul_text
+                  <textarea name="topic_soul_text" rows="5" cols="60" maxlength="4000" placeholder="Topic Soul text">{{ topic.topic_soul_text or '' }}</textarea>
+                </label>
+              </section>
+
+              <section aria-labelledby="topic-{{ topic.message_thread_id }}-advanced-heading" style="margin-bottom: 1rem; border-top: 1px solid #eee; padding-top: 0.75rem;">
+                <h4 id="topic-{{ topic.message_thread_id }}-advanced-heading" style="margin: 0 0 0.5rem 0;">Advanced</h4>
+                <label>
+                  <input type="checkbox" name="ai_enabled" value="y" {% if topic.ai_enabled %}checked{% endif %}>
+                  Topic AI enabled
+                </label>
+                <br>
+                <label>
+                  Topic AI response mode
+                  <select name="response_mode">
+                    <option value="mention_or_reply" {% if topic.response_mode == 'mention_or_reply' %}selected{% endif %}>mention_or_reply</option>
+                    <option value="command" {% if topic.response_mode == 'command' %}selected{% endif %}>command</option>
+                  </select>
+                </label>
+              </section>
+
               <button type="submit" {% if not owner_mutation_enabled %}disabled{% endif %}>{{ t('action.save') }}</button>
             </form>
           </article>

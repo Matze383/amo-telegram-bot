@@ -146,7 +146,12 @@ def test_group_detail_page_renders_group_metadata_topics_and_metadata_form(tmp_p
     assert "Topic AI response mode" in html
     assert 'name="ai_enabled"' in html
     assert 'name="response_mode"' in html
-    assert 'name="topic_soul_text"' not in html
+    assert 'name="topic_soul_text"' in html
+    assert "Basic metadata" in html
+    assert "Topic Soul" in html
+    assert "Advanced" in html
+    assert "Owner-only mutation. Escaping is enforced on render." in html
+    assert 'maxlength="4000"' in html
 
 
 def test_group_detail_page_unknown_group_returns_404(tmp_path) -> None:
