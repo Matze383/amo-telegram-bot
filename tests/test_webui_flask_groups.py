@@ -117,6 +117,42 @@ def test_groups_lists_seeded_chat_and_topic(tmp_path) -> None:
     assert 'href="/groups/-100123"' in html
 
 
+
+def test_groups_topic_overview_declutter_keeps_roles_section_and_role_form_action(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'groups_declutter_roles_guard.db'}"
+    init_db(db_url)
+
+    _seed_chat_topic(db_url, -1004010, 401)
+    _seed_user(db_url, 7401)
+
+    sf = create_session_factory(db_url)
+    with sf() as s:
+        ChatSeenUserRepository(s).mark_seen(chat_id=-1004010, telegram_user_id=7401)
+
+    settings = _make_settings(db_url, owner_id=777)
+    app = create_flask_app(settings=settings)
+
+    with app.test_client() as client:
+        _login(client, "test-secret")
+        response = client.get("/groups")
+        html = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+
+    # B6 guard: overview only, no inline topic edit forms on /groups
+    assert 'action="/groups/-1004010/topics/401"' not in html
+    assert 'name="display_name"' not in html
+    assert 'name="notes"' not in html
+
+    # B6 guard: clear details entry remains
+    assert 'href="/groups/-1004010"' in html
+
+    # QA guard: roles area is still separate and workflow entry remains functional
+    assert "Gruppenrollen" in html
+    assert 'action="/groups/-1004010/roles"' in html
+    assert 'name="telegram_user_id"' in html
+    assert 'name="role"' in html
+
 def test_group_detail_page_renders_group_metadata_topics_and_metadata_form(tmp_path) -> None:
     db_url = f"sqlite:///{tmp_path / 'groups_detail1.db'}"
     init_db(db_url)

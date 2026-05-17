@@ -72,13 +72,12 @@
         {% endif %}
 
         {% if group.topics %}
+          <p><strong>Topics:</strong> {{ group.topics|length }}</p>
           <table>
             <thead>
               <tr>
                 <th>message_thread_id</th>
                 <th>telegram_topic_name</th>
-                <th>display_name</th>
-                <th>{{ t('table.notes') }}</th>
                 <th>{{ t('table.enabled') }}</th>
                 <th>{{ t('table.action') }}</th>
               </tr>
@@ -88,8 +87,6 @@
                 <tr>
                   <td>{{ topic.message_thread_id }}</td>
                   <td>{{ topic.telegram_topic_name or "-" }}</td>
-                  <td>{{ topic.display_name or "-" }}</td>
-                  <td>{{ topic.notes or "-" }}</td>
                   <td>{{ 'yes' if lang == 'en' and topic.enabled else 'no' if lang == 'en' else 'ja' if topic.enabled else 'nein' }}</td>
                   <td><a href="{{ url_for('ui.group_detail_page', chat_id=group.chat_id) }}#topic-{{ topic.message_thread_id }}-heading">Details</a></td>
                 </tr>
