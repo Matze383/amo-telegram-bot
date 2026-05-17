@@ -5,6 +5,17 @@ from typing import Any
 
 
 @dataclass(slots=True)
+class TelegramAttachment:
+    source_kind: str
+    type_hint: str
+    file_id: str
+    file_unique_id: str | None = None
+    width: int | None = None
+    height: int | None = None
+    size: int | None = None
+
+
+@dataclass(slots=True)
 class TelegramUser:
     id: int
     is_bot: bool
@@ -38,6 +49,7 @@ class TelegramMessage:
     message_thread_id: int | None = None
     telegram_topic_name: str | None = None
     reply_to_is_bot: bool = False
+    attachments: tuple[TelegramAttachment, ...] = ()
 
     def parse_command(self, bot_username: str | None = None) -> CommandMatch | None:
         raw = self.text.strip()
@@ -112,6 +124,80 @@ def _parse_chat(raw: Any) -> TelegramChat | None:
         return None
 
 
+def _safe_int(raw: Any) -> int | None:
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def _parse_attachments(raw: Any) -> tuple[TelegramAttachment, ...]:
+    if not isinstance(raw, dict):
+        return ()
+
+    attachments: list[TelegramAttachment] = []
+
+    photo_raw = raw.get("photo")
+    if isinstance(photo_raw, list):
+        best_photo: dict[str, Any] | None = None
+        best_area = -1
+        for item in photo_raw:
+            if not isinstance(item, dict):
+                continue
+            file_id_raw = item.get("file_id")
+            if not isinstance(file_id_raw, str) or not file_id_raw:
+                continue
+            width = _safe_int(item.get("width"))
+            height = _safe_int(item.get("height"))
+            area = (width or 0) * (height or 0)
+            if best_photo is None or area >= best_area:
+                best_photo = item
+                best_area = area
+        if isinstance(best_photo, dict):
+            file_id = best_photo.get("file_id")
+            if isinstance(file_id, str) and file_id:
+                attachments.append(
+                    TelegramAttachment(
+                        source_kind="photo",
+                        type_hint="image",
+                        file_id=file_id,
+                        file_unique_id=(
+                            str(best_photo.get("file_unique_id"))
+                            if best_photo.get("file_unique_id") is not None
+                            else None
+                        ),
+                        width=_safe_int(best_photo.get("width")),
+                        height=_safe_int(best_photo.get("height")),
+                        size=_safe_int(best_photo.get("file_size")),
+                    )
+                )
+
+    document_raw = raw.get("document")
+    if isinstance(document_raw, dict):
+        mime_type_raw = document_raw.get("mime_type")
+        mime_type = mime_type_raw.strip().casefold() if isinstance(mime_type_raw, str) else ""
+        if mime_type.startswith("image/"):
+            file_id = document_raw.get("file_id")
+            if isinstance(file_id, str) and file_id:
+                attachments.append(
+                    TelegramAttachment(
+                        source_kind="document",
+                        type_hint="image_document",
+                        file_id=file_id,
+                        file_unique_id=(
+                            str(document_raw.get("file_unique_id"))
+                            if document_raw.get("file_unique_id") is not None
+                            else None
+                        ),
+                        width=_safe_int(document_raw.get("width")),
+                        height=_safe_int(document_raw.get("height")),
+                        size=_safe_int(document_raw.get("file_size")),
+                    )
+                )
+
+    return tuple(attachments)
+
+
 def _parse_message(raw: Any) -> TelegramMessage | None:
     if not isinstance(raw, dict):
         return None
@@ -179,6 +265,7 @@ def _parse_message(raw: Any) -> TelegramMessage | None:
         message_thread_id=message_thread_id,
         telegram_topic_name=telegram_topic_name,
         reply_to_is_bot=reply_to_is_bot,
+        attachments=_parse_attachments(raw),
     )
 
 
