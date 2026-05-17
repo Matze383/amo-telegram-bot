@@ -87,6 +87,21 @@ def test_build_attachment_context_only_safe_fields_without_media_ref() -> None:
     assert "media_ref" not in result[0]
 
 
+def test_resolve_reply_to_image_requires_explicit_analyze_image_trigger() -> None:
+    executor = _mk_executor(enable_image_attachments=True)
+    invocation = CommandInvocation(
+        command_name="plug",
+        argument=None,
+        chat_id=1,
+        message_id=2,
+        message_thread_id=None,
+        attachments=_mk_invocation().attachments,
+    )
+    attachments = asyncio.run(executor._build_attachment_context(invocation=invocation))
+
+    assert executor._resolve_reply_to_image(invocation=invocation, attachments=attachments) is None
+
+
 class _MediaResult:
     def __init__(self, ok: bool, reason_code: str = "ok") -> None:
         self.ok = ok
@@ -128,3 +143,86 @@ def test_build_attachment_context_isolates_media_errors() -> None:
     assert len(result) == 2
     assert "media_ref" not in result[0]
     assert "media_ref" not in result[1]
+
+
+class _MediaResultDenyType:
+    ok = False
+    reason_code = "deny_mime"
+    mime_type = None
+    bytes_stored = 0
+
+
+class _MediaResultDenyOversize:
+    ok = False
+    reason_code = "deny_stream_size"
+    mime_type = None
+    bytes_stored = 0
+
+
+class _MediaStoreDenyType:
+    async def download_image(self, *, attachment: TelegramAttachment):
+        return _MediaResultDenyType()
+
+
+class _MediaStoreDenyOversize:
+    async def download_image(self, *, attachment: TelegramAttachment):
+        return _MediaResultDenyOversize()
+
+
+def test_resolve_reply_to_image_reports_missing_image() -> None:
+    executor = _mk_executor(enable_image_attachments=True)
+    invocation = CommandInvocation(
+        command_name="analyze_image",
+        argument=None,
+        chat_id=1,
+        message_id=2,
+        message_thread_id=None,
+        attachments=(),
+    )
+    assert executor._resolve_reply_to_image(invocation=invocation, attachments=()) == {
+        "ok": False,
+        "reason_code": "missing_image",
+    }
+
+
+def test_resolve_reply_to_image_reports_invalid_type() -> None:
+    executor = _mk_executor(enable_image_attachments=True)
+    executor._image_media_store = _MediaStoreDenyType()
+    invocation = _mk_invocation()
+    attachments = asyncio.run(executor._build_attachment_context(invocation=invocation))
+
+    result = executor._resolve_reply_to_image(invocation=invocation, attachments=attachments)
+    assert result == {
+        "ok": False,
+        "reason_code": "invalid_type",
+    }
+
+
+def test_resolve_reply_to_image_reports_oversize() -> None:
+    executor = _mk_executor(enable_image_attachments=True)
+    executor._image_media_store = _MediaStoreDenyOversize()
+    invocation = _mk_invocation()
+    attachments = asyncio.run(executor._build_attachment_context(invocation=invocation))
+
+    result = executor._resolve_reply_to_image(invocation=invocation, attachments=attachments)
+    assert result == {
+        "ok": False,
+        "reason_code": "oversize",
+    }
+
+
+def test_resolve_reply_to_image_returns_safe_media_ref_payload() -> None:
+    executor = _mk_executor(enable_image_attachments=True)
+    executor._image_media_store = _MediaStoreOk()
+    invocation = _mk_invocation()
+    attachments = asyncio.run(executor._build_attachment_context(invocation=invocation))
+
+    result = executor._resolve_reply_to_image(invocation=invocation, attachments=attachments)
+    assert result is not None
+    assert result["ok"] is True
+    assert result["type_hint"] == "image"
+    assert result["media_ref"] == {
+        "reason_code": "ok",
+        "mime_type": "image/png",
+        "bytes_stored": 99,
+    }

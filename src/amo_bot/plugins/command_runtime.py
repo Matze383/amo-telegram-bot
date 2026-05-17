@@ -57,6 +57,7 @@ class PluginCommandContext:
     command_name: str
     argument: str | None
     attachments: tuple[dict[str, Any], ...] = ()
+    reply_to_image: dict[str, Any] | None = None
 
 
 class PluginCapabilityError(RuntimeError):
@@ -172,6 +173,9 @@ class PluginCommandExecutor:
             )
             return
 
+        attachment_context = await self._build_attachment_context(invocation=invocation)
+        reply_to_image = self._resolve_reply_to_image(invocation=invocation, attachments=attachment_context)
+
         context = PluginCommandContext(
             plugin_id=manifest.name,
             run_id=run_id,
@@ -183,7 +187,8 @@ class PluginCommandExecutor:
             role=actor.role,
             command_name=invocation.command_name,
             argument=invocation.argument,
-            attachments=await self._build_attachment_context(invocation=invocation),
+            attachments=attachment_context,
+            reply_to_image=reply_to_image,
         )
 
         self._write_audit(
@@ -261,6 +266,9 @@ class PluginCommandExecutor:
                 "height": attachment.height,
                 "size": attachment.size,
             }
+            mime_type = getattr(attachment, "mime_type", None)
+            if isinstance(mime_type, str) and mime_type:
+                context["mime_type"] = mime_type
             if self._image_media_store is not None:
                 try:
                     media_result = await self._image_media_store.download_image(attachment=attachment)
@@ -272,8 +280,50 @@ class PluginCommandExecutor:
                         "mime_type": media_result.mime_type,
                         "bytes_stored": media_result.bytes_stored,
                     }
+                elif media_result is not None:
+                    context["download_reason_code"] = media_result.reason_code
+                    if media_result.reason_code in {"deny_attachment_size", "deny_file_size", "deny_stream_size"}:
+                        context["size_limit_exceeded"] = True
             contexts.append(context)
         return tuple(contexts)
+
+    def _resolve_reply_to_image(
+        self,
+        *,
+        invocation: CommandInvocation,
+        attachments: tuple[dict[str, Any], ...],
+    ) -> dict[str, Any] | None:
+        if self._normalize_command(invocation.command_name) != "analyze_image":
+            return None
+        if not attachments:
+            return {
+                "ok": False,
+                "reason_code": "missing_image",
+            }
+        first = attachments[0]
+        media_ref = first.get("media_ref") if isinstance(first, dict) else None
+        if isinstance(media_ref, dict):
+            return {
+                "ok": True,
+                "media_ref": media_ref,
+                "type_hint": first.get("type_hint"),
+                "width": first.get("width"),
+                "height": first.get("height"),
+                "size": first.get("size"),
+            }
+
+        reason_code = "invalid_image"
+        if isinstance(first, dict):
+            if first.get("size_limit_exceeded") is True:
+                reason_code = "oversize"
+            elif first.get("download_reason_code") == "deny_mime":
+                reason_code = "invalid_type"
+            elif isinstance(first.get("mime_type"), str) and first.get("mime_type"):
+                reason_code = "invalid_type"
+        return {
+            "ok": False,
+            "reason_code": reason_code,
+        }
 
     def _normalize_command(self, command: str) -> str:
         normalized = command.strip().casefold()
