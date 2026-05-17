@@ -244,6 +244,19 @@ from .websearch_coreplugin import (
 )
 
 
+
+from .image_analyze_coreplugin_cp_b4 import (
+    ImageAnalyzeExecutionResult,
+    ImageAnalyzeInputValidationResult,
+    ImageAnalyzeManifest,
+    ImageAnalyzePolicyContext,
+    ImageAnalyzeRequest,
+    ImageAnalyzeSettings,
+    execute_image_analyze_stub,
+    get_image_analyze_manifest,
+    validate_image_analyze_input,
+)
+
 from .webscraping_coreplugin import (
     WebscrapingExecutionResult,
     WebscrapingInput,
