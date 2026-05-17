@@ -173,7 +173,7 @@ def test_dispatcher_handles_test_command_in_forum_supergroup_by_sending_private_
         "message": {
             "message_id": 12,
             "message_thread_id": 872,
-            "from": {"id": 900000001, "is_bot": False, "first_name": "Matze", "username": "tester"},
+            "from": {"id": 900000001, "is_bot": False, "first_name": "Example User", "username": "example_user"},
             "chat": {"id": -1003997137641, "type": "supergroup"},
             "text": "/test",
         },
