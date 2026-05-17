@@ -331,12 +331,12 @@ The bot can auto-respond via AI when mentioned or replied to in **active scopes*
 ### Group Role Management via WebUI
 
 1. Open http://127.0.0.1:8080 and log in
-2. Go to "Groups" page – shows all groups/supergroups
-3. Select a group – users with current role are displayed
+2. Go to "Groups" page – shows all groups/supergroups with topic count
+3. Click **"Details"** on a group – users with current role are displayed
 4. Change role: `admin`, `vip`, `normal`, `ignore`
 
 **Important:**
-- `owner` cannot be set as a group role (only via `.env`)
+- `owner` cannot be assigned as a group role (only via `.env`)
 - `normal` removes the group-scoped entry → fallback to `normal`
 - Roles are group-scoped, not global
 - Mutation protection: Login + CSRF token + Owner gate required
@@ -549,7 +549,7 @@ The bot automatically sends a private consent prompt to users who are in "pendin
 
 ### WebUI: Topic Soul Editor (KI-F2)
 
-The Groups page includes a **Topic Soul Editor** for configuring topic-specific AI behavior instructions.
+The group detail page includes a **Topic Soul Editor** for configuring topic-specific AI behavior instructions.
 
 **Prerequisites:**
 - `WEBUI_OWNER_TELEGRAM_ID` must be set in `.env`
@@ -557,19 +557,19 @@ The Groups page includes a **Topic Soul Editor** for configuring topic-specific 
 
 **Test Steps:**
 
-1. **Navigate to Groups page:**
+1. **Navigate to group detail page:**
    - Open http://127.0.0.1:8080 and log in
    - Go to "Groups" page
-   - Expected: Groups with topics are listed
+   - Click **"Details"** on a group with topics
+   - Expected: Group detail page with topic section is displayed
 
 2. **View Topic Soul:**
-   - Find a group with topics in the topics table
-   - Look at the "topic_soul" column
+   - Find the topic section on the detail page
+   - Look at the "Topic Soul" field
    - Expected: Shows current soul text or "-" if not set
    - Note: Content is HTML-escaped (safe rendering)
 
 3. **Edit as Owner:**
-   - Locate a topic row with the edit form
    - Enter text in "Topic Soul" textarea (max 4000 chars)
    - Enter optional Display Name and Notes
    - Toggle "enabled" checkbox if needed
@@ -577,7 +577,7 @@ The Groups page includes a **Topic Soul Editor** for configuring topic-specific 
    - Expected: Page reloads, changes persisted
 
 4. **Verify persistence:**
-   - Reload the Groups page
+   - Reload the detail page
    - Expected: Edited values are displayed
 
 5. **Verify HTML escaping:**
@@ -596,7 +596,8 @@ The Groups page includes a **Topic Soul Editor** for configuring topic-specific 
    - Expected: Form validation rejects or truncates
 
 **Checklist:**
-- [ ] Groups page shows topics with Topic Soul column
+- [ ] Groups page shows groups with Details links
+- [ ] Group detail page shows topics with Topic Soul form
 - [ ] Topic Soul textarea accepts input (max 4000 chars)
 - [ ] Display Name and Notes can be edited
 - [ ] Enabled checkbox works

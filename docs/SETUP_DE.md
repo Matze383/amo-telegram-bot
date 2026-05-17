@@ -486,9 +486,9 @@ Dies ist eine **read-only** Ansicht. Das Bearbeiten von AI-Status und Response M
 
 ## WebUI: Topic Soul Editor (nur Owner)
 
-Die WebUI Groups-Seite ermöglicht dem Owner das Bearbeiten von Topic-spezifischem **Soul-Text**:
+Die WebUI ermöglicht dem Owner auf der Gruppendetailseite das Bearbeiten von Topic-spezifischem **Soul-Text**:
 
-- **Ort:** Groups → Topics-Tabelle → "Topic Soul"-Spalte
+- **Ort:** Groups → Details-Link → Gruppendetailseite → Topic-Abschnitt
 - **Bearbeitbare Felder:**
   - Display Name (optional)
   - Notes (optional)
@@ -501,7 +501,6 @@ Die WebUI Groups-Seite ermöglicht dem Owner das Bearbeiten von Topic-spezifisch
 - **Verhalten:**
   - Änderungen wirken sofort (kein Neustart erforderlich)
   - Leerer Topic Soul entfernt den benutzerdefinierten Soul-Text
-  - Wird inline in der Topics-Tabelle mit Live-Vorschau angezeigt
 
 **Hinweis:** Nicht-Owner können den Topic Soul ansehen, aber nicht bearbeiten. Der Speichern-Button ist deaktiviert, wenn `WEBUI_OWNER_TELEGRAM_ID` nicht konfiguriert ist.
 
@@ -636,15 +635,27 @@ WEBUI_PUBLIC_MODE=true
 
 ---
 
-## WebUI: Gruppenrollenverwaltung
+## WebUI: Gruppenverwaltung
 
-Nach dem Login unter "Groups" können Gruppenrollen verwaltet werden:
+Nach dem Login unter "Groups" findest du die Gruppenübersicht. Diese zeigt eine kompakte Status-Liste aller Gruppen mit Topic-Anzahl und Details-Link.
 
-- Nutzer und deren aktuelle Rolle anzeigen
-- Rollen setzen: `admin`, `vip`, `normal`, `ignore`
-- `owner` kann nicht als Gruppenrolle vergeben werden (nur via `.env`)
-- `normal` löscht den gruppen-spezifischen Eintrag → Fallback auf `normal`
-- Rollen sind gruppen-spezifisch, nicht global gültig
+### Übersicht /groups
+
+- Liste aller Gruppen/Supergruppen
+- Topic-Anzahl pro Gruppe
+- **"Details"-Link** pro Gruppe zur Bearbeitung
+
+### Gruppendetail-Seite /groups/<chat_id>
+
+Über den Details-Link gelangst du zur Detailseite einer Gruppe. Dort befinden sich alle Bearbeitungsfunktionen:
+
+- **Gruppenrollen:** Nutzer und deren aktuelle Rolle anzeigen; Rollen setzen: `admin`, `vip`, `normal`, `ignore`
+  - `owner` kann nicht als Gruppenrolle vergeben werden (nur via `.env`)
+  - `normal` löscht den gruppen-spezifischen Eintrag → Fallback auf `normal`
+  - Rollen sind gruppen-spezifisch, nicht global gültig
+- **Topic-Metadata:** Display Name, Notes, Enabled-Status
+- **Topic Soul:** Themen-spezifische KI-Verhaltensanweisungen (nur Owner)
+- **KI-Controls:** AI-Status und Response Mode pro Topic
 
 **Hinweis zur Nutzerliste:** Die WebUI zeigt pro Gruppe nur Nutzer an, die der Bot in dieser Gruppe gesehen hat. Bereits zugewiesene Rollen bleiben sichtbar und werden mit `[zugewiesen/nicht gesehen]` markiert, falls der Nutzer noch nicht in der Gruppe aktiv war.
 

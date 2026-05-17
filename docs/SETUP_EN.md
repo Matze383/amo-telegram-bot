@@ -486,9 +486,9 @@ This is a **read-only** view. Editing AI status and response mode via WebUI requ
 
 ## WebUI: Topic Soul Editor (Owner-Only)
 
-The WebUI Groups page allows the owner to edit topic-specific **Soul text**:
+The WebUI allows the owner to edit topic-specific **Soul text** on the group detail page:
 
-- **Location:** Groups → Topics table → "Topic Soul" column
+- **Location:** Groups → Details link → Group detail page → Topic section
 - **Editable fields:**
   - Display Name (optional)
   - Notes (optional)
@@ -501,7 +501,6 @@ The WebUI Groups page allows the owner to edit topic-specific **Soul text**:
 - **Behavior:**
   - Changes take effect immediately (no restart required)
   - Empty Topic Soul removes the custom soul text
-  - Displayed inline in the topics table with live preview
 
 **Note:** Non-owners can view the Topic Soul but cannot edit it. The save button is disabled when `WEBUI_OWNER_TELEGRAM_ID` is not configured.
 
@@ -636,15 +635,27 @@ WEBUI_PUBLIC_MODE=true
 
 ---
 
-## WebUI: Group Role Management
+## WebUI: Group Management
 
-After logging in, group roles can be managed under "Groups":
+After logging in, the "Groups" page shows a compact status overview of all groups with topic count and details links.
 
-- View users and their current roles
-- Set roles: `admin`, `vip`, `normal`, `ignore`
-- `owner` cannot be assigned as a group role (only via `.env`)
-- `normal` removes the group-scoped entry → fallback to `normal`
-- Roles are group-scoped, not global
+### Overview /groups
+
+- List of all groups/supergroups
+- Topic count per group
+- **"Details" link** per group for editing
+
+### Group Detail Page /groups/<chat_id>
+
+Via the Details link you access a group's detail page. All editing functions are located there:
+
+- **Group roles:** View users and their current roles; set roles: `admin`, `vip`, `normal`, `ignore`
+  - `owner` cannot be assigned as a group role (only via `.env`)
+  - `normal` removes the group-scoped entry → fallback to `normal`
+  - Roles are group-scoped, not global
+- **Topic metadata:** Display Name, Notes, Enabled status
+- **Topic soul:** Topic-specific AI behavior instructions (owner-only)
+- **AI controls:** AI status and response mode per topic
 
 **Note on user list:** The WebUI only shows users the bot has seen in that group. Existing role assignments remain visible and are marked `[assigned/not seen]` if the user has not yet been active in the group.
 

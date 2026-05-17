@@ -331,8 +331,8 @@ Der Bot kann bei Erwähnung oder als Antwort in **aktiven Scopes** (Themen oder 
 ### Gruppenrollenverwaltung über WebUI
 
 1. Öffne http://127.0.0.1:8080 im Browser und melde dich an
-2. Gehe zur Seite "Groups" – zeigt alle Gruppen/Supergruppen
-3. Wähle eine Gruppe aus – Nutzer mit aktueller Rolle werden angezeigt
+2. Gehe zur Seite "Groups" – zeigt alle Gruppen/Supergruppen mit Topic-Anzahl
+3. Klicke bei einer Gruppe auf **"Details"** – Nutzer mit aktueller Rolle werden angezeigt
 4. Rolle ändern: `admin`, `vip`, `normal`, `ignore`
 
 **Wichtig:**
@@ -549,7 +549,7 @@ Der Bot sendet automatisch einen privaten Consent-Hinweis an Nutzer mit dem Stat
 
 ### WebUI: Topic Soul Editor (KI-F2)
 
-Die Groups-Seite enthält einen **Topic Soul Editor** zur Konfiguration von Themen-spezifischen KI-Verhaltensanweisungen.
+Die Gruppendetailseite enthält einen **Topic Soul Editor** zur Konfiguration von Themen-spezifischen KI-Verhaltensanweisungen.
 
 **Voraussetzungen:**
 - `WEBUI_OWNER_TELEGRAM_ID` muss in `.env` gesetzt sein
@@ -557,19 +557,19 @@ Die Groups-Seite enthält einen **Topic Soul Editor** zur Konfiguration von Them
 
 **Test-Schritte:**
 
-1. **Zur Groups-Seite navigieren:**
+1. **Zur Gruppendetailseite navigieren:**
    - http://127.0.0.1:8080 öffnen und einloggen
    - Zur Seite "Groups" gehen
-   - Erwartet: Gruppen mit Topics werden aufgelistet
+   - Auf **"Details"** bei einer Gruppe mit Topics klicken
+   - Erwartet: Gruppendetailseite mit Topic-Abschnitt wird angezeigt
 
 2. **Topic Soul ansehen:**
-   - Gruppe mit Topics in der Topics-Tabelle finden
-   - Spalte "topic_soul" ansehen
+   - Topic-Abschnitt auf der Detailseite finden
+   - "Topic Soul"-Feld ansehen
    - Erwartet: Zeigt aktuellen Soul-Text oder "-" falls nicht gesetzt
    - Hinweis: Inhalt ist HTML-escaped (sichere Darstellung)
 
 3. **Als Owner bearbeiten:**
-   - Topic-Zeile mit Bearbeitungsformular lokalisieren
    - Text in "Topic Soul"-Textarea eingeben (max 4000 Zeichen)
    - Optional Display Name und Notes eingeben
    - "enabled"-Checkbox bei Bedarf toggeln
@@ -577,7 +577,7 @@ Die Groups-Seite enthält einen **Topic Soul Editor** zur Konfiguration von Them
    - Erwartet: Seite lädt neu, Änderungen persistiert
 
 4. **Persistenz prüfen:**
-   - Groups-Seite neu laden
+   - Detailseite neu laden
    - Erwartet: Bearbeitete Werte werden angezeigt
 
 5. **HTML-Escaping prüfen:**
@@ -596,7 +596,8 @@ Die Groups-Seite enthält einen **Topic Soul Editor** zur Konfiguration von Them
    - Erwartet: Formularvalidierung lehnt ab oder kürzt
 
 **Checkliste:**
-- [ ] Groups-Seite zeigt Topics mit Topic Soul-Spalte
+- [ ] Groups-Seite zeigt Gruppen mit Details-Link
+- [ ] Gruppendetailseite zeigt Topics mit Topic Soul-Formular
 - [ ] Topic Soul-Textarea akzeptiert Eingabe (max 4000 Zeichen)
 - [ ] Display Name und Notes können bearbeitet werden
 - [ ] Enabled-Checkbox funktioniert
