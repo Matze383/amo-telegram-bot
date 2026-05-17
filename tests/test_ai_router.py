@@ -516,6 +516,59 @@ class _RaisingMemoryRepo:
         raise RuntimeError("long boom")
 
 
+
+
+def test_scope_trigger_matrix_documents_current_behavior_for_recent_context(tmp_path) -> None:
+    repo = _mk_repo(tmp_path)
+    repo.upsert_config(scope_type="topic", chat_id=-6100, topic_id=61, ai_enabled=True)
+    repo.upsert_config(scope_type="private_user", user_id=6101, ai_enabled=True)
+
+    today = datetime.now(UTC).date().isoformat()
+    repo.upsert_daily_memory(
+        scope_type="topic",
+        chat_id=-6100,
+        topic_id=61,
+        memory_date=today,
+        summary_text="topic recent synthetic",
+        tokens_estimate=5,
+    )
+    repo.create_long_memory(scope_type="topic", chat_id=-6100, topic_id=61, fact_text="topic long synthetic")
+
+    repo.upsert_daily_memory(
+        scope_type="private_user",
+        user_id=6101,
+        memory_date=today,
+        summary_text="private recent synthetic",
+        tokens_estimate=5,
+    )
+    repo.create_long_memory(scope_type="private_user", user_id=6101, fact_text="private long synthetic")
+
+    router = AIRouter(topic_agent_memory_repository=repo)
+
+    topic_without_trigger = router.decide(prompt="plain", chat_id=-6100, topic_id=61, user_id=71)
+    assert topic_without_trigger.reason_code is AIRouterReasonCode.DEFAULT_NOOP
+    assert topic_without_trigger.eligible is False
+    # Current contract: context payload for topic scope is not exposed unless trigger path is taken.
+    assert topic_without_trigger.context.daily_memory_text == ""
+    assert topic_without_trigger.context.long_memory_text == ""
+
+    topic_with_mention = router.decide(
+        prompt="hi @amo_bot",
+        chat_id=-6100,
+        topic_id=61,
+        user_id=71,
+        bot_username="amo_bot",
+    )
+    assert topic_with_mention.reason_code is AIRouterReasonCode.MENTION_IN_ACTIVE_SCOPE
+    assert topic_with_mention.eligible is True
+    assert topic_with_mention.context.daily_memory_text == "topic recent synthetic"
+    assert topic_with_mention.context.long_memory_text == "topic long synthetic"
+
+    private_scope = router.decide(prompt="plain", chat_id=6101, user_id=6101)
+    assert private_scope.reason_code is AIRouterReasonCode.SCOPE_ENABLED
+    assert private_scope.eligible is True
+    assert private_scope.context.daily_memory_text == "private recent synthetic"
+    assert private_scope.context.long_memory_text == "private long synthetic"
 def test_context_guard_fallback_handles_memory_exceptions() -> None:
     router = AIRouter(topic_agent_memory_repository=_RaisingMemoryRepo())
     decision = router.decide(prompt="hello @amo_bot", chat_id=123, user_id=123, bot_username="amo_bot")
