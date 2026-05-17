@@ -625,6 +625,40 @@ def test_recent_messages_scope_ordering_truncation_and_redaction(tmp_path) -> No
     assert "other-scope" not in decision.context.recent_messages_text
 
 
+def test_recent_messages_redacts_jwt_hex_base64_email_phone_and_passwordish(tmp_path) -> None:
+    repo = _mk_repo(tmp_path)
+    repo.upsert_config(scope_type="private_user", user_id=9910, ai_enabled=True)
+
+    jwt_like = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.abcdefghijklmno1234567890ABCDE.pqrstuvwxyzABCDE1234567890"
+    long_hex = "a" * 64
+    long_base64 = "QWxhZGRpbjpPcGVuU2VzYW1lQWxhZGRpbjpPcGVuU2VzYW1lQWxhZGRpbjpPcGVuU2VzYW1l"
+
+    repo.append_message(scope_type="private_user", user_id=9910, message_text=f"session {jwt_like}")
+    repo.append_message(scope_type="private_user", user_id=9910, message_text=f"digest {long_hex}")
+    repo.append_message(scope_type="private_user", user_id=9910, message_text=f"blob {long_base64}")
+    repo.append_message(scope_type="private_user", user_id=9910, message_text="reach me at qa.user@example.test")
+    repo.append_message(scope_type="private_user", user_id=9910, message_text="call +49 170 1234567 please")
+    repo.append_message(scope_type="private_user", user_id=9910, message_text="password: super-secret-value")
+
+    router = AIRouter(topic_agent_memory_repository=repo)
+    decision = router.decide(prompt="plain", chat_id=9910, user_id=9910)
+
+    text = decision.context.recent_messages_text
+    assert "[redacted:jwt]" in text
+    assert "[redacted:hex]" in text
+    assert "[redacted:base64]" in text
+    assert "[redacted:email]" in text
+    assert "[redacted:phone]" in text
+    assert "[redacted:secret]" in text
+
+    assert jwt_like not in text
+    assert long_hex not in text
+    assert long_base64 not in text
+    assert "qa.user@example.test" not in text
+    assert "+49 170 1234567" not in text
+    assert "super-secret-value" not in text
+
+
 def test_group_topic_plain_without_trigger_keeps_no_trigger_behavior_with_recent_context(tmp_path) -> None:
     repo = _mk_repo(tmp_path)
     repo.upsert_config(scope_type="topic", chat_id=-7777, topic_id=77, ai_enabled=True)
@@ -641,7 +675,7 @@ def test_group_topic_plain_without_trigger_keeps_no_trigger_behavior_with_recent
 def test_recent_messages_truncated_to_max_chars(tmp_path) -> None:
     repo = _mk_repo(tmp_path)
     repo.upsert_config(scope_type="private_user", user_id=9901, ai_enabled=True)
-    big = "X" * (AIRouter._MAX_SOUL_CHARS + 500)
+    big = ("hello " * (AIRouter._MAX_SOUL_CHARS // 6 + 200)).strip()
     repo.append_message(scope_type="private_user", user_id=9901, message_text=big)
 
     router = AIRouter(topic_agent_memory_repository=repo)

@@ -85,6 +85,15 @@ class AIRouter:
         "/home/",
         "C:\\",
     )
+    _SECRET_ASSIGNMENT_RE = re.compile(
+        r"\b(?:api[_-]?key|token|secret|password|passwd|pwd|auth(?:orization)?|access[_-]?token|refresh[_-]?token)\b\s*[:=]\s*\S+",
+        re.IGNORECASE,
+    )
+    _JWT_LIKE_RE = re.compile(r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b")
+    _HEX_SECRET_RE = re.compile(r"\b[a-f0-9]{32,}\b", re.IGNORECASE)
+    _BASE64_SECRET_RE = re.compile(r"\b(?:[A-Za-z0-9+/]{40,}={0,2}|[A-Za-z0-9_-]{40,})\b")
+    _EMAIL_RE = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
+    _PHONE_RE = re.compile(r"(?<!\w)(?:\+?\d[\d\s().-]{8,}\d)(?!\w)")
 
     def __init__(self, *, topic_agent_memory_repository: TopicAgentMemoryRepository | None = None) -> None:
         self._topic_agent_memory_repository = topic_agent_memory_repository
@@ -395,9 +404,13 @@ class AIRouter:
         if not normalized:
             return ""
 
-        lower = normalized.casefold()
-        normalized = re.sub(r"(?:api[_-]?key|token|secret|password)\s*[:=]\s*\S+", "[redacted:secret]", normalized, flags=re.IGNORECASE)
+        normalized = self._SECRET_ASSIGNMENT_RE.sub("[redacted:secret]", normalized)
         normalized = re.sub(r"(?:/home/\S+|[A-Za-z]:\\\S+)", "[redacted:path]", normalized)
+        normalized = self._JWT_LIKE_RE.sub("[redacted:jwt]", normalized)
+        normalized = self._HEX_SECRET_RE.sub("[redacted:hex]", normalized)
+        normalized = self._BASE64_SECRET_RE.sub("[redacted:base64]", normalized)
+        normalized = self._EMAIL_RE.sub("[redacted:email]", normalized)
+        normalized = self._PHONE_RE.sub("[redacted:phone]", normalized)
 
         lower = normalized.casefold()
         for marker in self._SENSITIVE_RECENT_MARKERS:
