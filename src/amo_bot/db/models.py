@@ -239,7 +239,7 @@ class TopicAgentConfig(Base):
     main_soul_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     topic_soul_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     topic_soul_owner_only_edit: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="1")
-    recent_context_window_size: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    recent_context_window_size: Mapped[int] = mapped_column(Integer, nullable=False, default=20, server_default="20")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
 

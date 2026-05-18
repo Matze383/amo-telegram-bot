@@ -107,7 +107,7 @@ def test_topic_memory_repository_config_daily_long_and_session_scopes() -> None:
         assert topic_cfg.memory_retention_days == 30
         assert topic_cfg.tools_enabled is False
         assert topic_cfg.topic_soul_owner_only_edit is True
-        assert topic_cfg.recent_context_window_size == 0
+        assert topic_cfg.recent_context_window_size == 20
 
         private_cfg = repo.upsert_config(scope_type="private_user", user_id=42)
         assert private_cfg.ai_enabled is False

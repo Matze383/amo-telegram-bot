@@ -685,16 +685,16 @@ def test_recent_messages_truncated_to_max_chars(tmp_path) -> None:
     assert len(decision.context.recent_messages_text) == AIRouter._MAX_SOUL_CHARS
 
 
-def test_private_scope_recent_context_disabled_by_default_even_when_messages_exist(tmp_path) -> None:
+def test_private_scope_recent_context_enabled_by_default_when_messages_exist(tmp_path) -> None:
     repo = _mk_repo(tmp_path)
     repo.upsert_config(scope_type="private_user", user_id=42, ai_enabled=True)
-    repo.append_message(scope_type="private_user", user_id=42, message_text="should stay off")
+    repo.append_message(scope_type="private_user", user_id=42, message_text="is included")
 
     router = AIRouter(topic_agent_memory_repository=repo)
     decision = router.decide(prompt="hello", chat_id=42, user_id=42, chat_type="private")
 
     assert decision.eligible is True
-    assert decision.context.recent_messages_text == ""
+    assert decision.context.recent_messages_text == "is included"
 
 
 def test_recent_context_window_size_applies_per_scope(tmp_path) -> None:

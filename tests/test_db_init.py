@@ -105,4 +105,50 @@ def test_init_db_migrates_topic_agent_configs_adds_recent_context_window_size(tm
             {"scope_type": "private_user", "user_id": 777},
         ).first()
     assert row is not None
-    assert row[0] == 0
+    assert row[0] == 20
+
+
+def test_init_db_migrates_legacy_recent_context_window_size_zero_to_default(tmp_path) -> None:
+    db_path = tmp_path / "legacy_topic_cfg_zero.sqlite"
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        """
+        CREATE TABLE topic_agent_configs (
+            id INTEGER NOT NULL PRIMARY KEY,
+            scope_type VARCHAR(32) NOT NULL,
+            chat_id BIGINT,
+            topic_id BIGINT,
+            user_id BIGINT,
+            ai_enabled BOOLEAN NOT NULL DEFAULT 0,
+            response_mode VARCHAR(32) NOT NULL DEFAULT 'command',
+            memory_retention_days INTEGER NOT NULL DEFAULT 30,
+            tools_enabled BOOLEAN NOT NULL DEFAULT 0,
+            recent_context_window_size INTEGER NOT NULL DEFAULT 0,
+            main_soul_text TEXT,
+            topic_soul_text TEXT,
+            topic_soul_owner_only_edit BOOLEAN NOT NULL DEFAULT 1,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            CONSTRAINT uq_topic_agent_configs_scope UNIQUE (scope_type, chat_id, topic_id, user_id)
+        )
+        """
+    )
+    conn.execute(
+        "INSERT INTO topic_agent_configs (scope_type, user_id, recent_context_window_size) VALUES (?, ?, ?)",
+        ("private_user", 778, 0),
+    )
+    conn.commit()
+    conn.close()
+
+    init_db(f"sqlite:///{db_path}")
+
+    engine = create_engine(f"sqlite:///{db_path}")
+    with engine.connect() as connection:
+        row = connection.execute(
+            text(
+                "SELECT recent_context_window_size FROM topic_agent_configs WHERE scope_type = :scope_type AND user_id = :user_id"
+            ),
+            {"scope_type": "private_user", "user_id": 778},
+        ).first()
+    assert row is not None
+    assert row[0] == 20

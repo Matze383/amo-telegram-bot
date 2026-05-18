@@ -26,7 +26,7 @@ def init_db(database_url: str) -> None:
                 response_mode VARCHAR(32) NOT NULL DEFAULT 'command',
                 memory_retention_days INTEGER NOT NULL DEFAULT 30,
                 tools_enabled BOOLEAN NOT NULL DEFAULT 0,
-                recent_context_window_size INTEGER NOT NULL DEFAULT 0,
+                recent_context_window_size INTEGER NOT NULL DEFAULT 20,
                 main_soul_text TEXT,
                 topic_soul_text TEXT,
                 topic_soul_owner_only_edit BOOLEAN NOT NULL DEFAULT 1,
@@ -93,7 +93,7 @@ def init_db(database_url: str) -> None:
     table_column_migrations: dict[str, dict[str, str]] = {
         "topic_agent_configs": {
             "main_soul_text": "ALTER TABLE topic_agent_configs ADD COLUMN main_soul_text TEXT",
-            "recent_context_window_size": "ALTER TABLE topic_agent_configs ADD COLUMN recent_context_window_size INTEGER NOT NULL DEFAULT 0",
+            "recent_context_window_size": "ALTER TABLE topic_agent_configs ADD COLUMN recent_context_window_size INTEGER NOT NULL DEFAULT 20",
         },
         "topic_long_memories": {
             "promotion_status": "ALTER TABLE topic_long_memories ADD COLUMN promotion_status VARCHAR(16) NOT NULL DEFAULT 'none'",
@@ -306,24 +306,40 @@ def init_db(database_url: str) -> None:
                     connection.execute(text(ddl))
 
         if "users" in existing_tables:
-            connection.execute(
-                text(
-                    """
-                    UPDATE users
-                    SET consent_status = 'accepted'
-                    WHERE consent_status IS NULL OR TRIM(consent_status) = ''
-                    """
+            existing_columns = {column["name"] for column in inspector.get_columns("users")}
+            if "consent_status" in existing_columns:
+                connection.execute(
+                    text(
+                        """
+                        UPDATE users
+                        SET consent_status = 'accepted'
+                        WHERE consent_status IS NULL OR TRIM(consent_status) = ''
+                        """
+                    )
                 )
-            )
-            connection.execute(
-                text(
-                    """
-                    UPDATE users
-                    SET consent_prompt_count = 0
-                    WHERE consent_prompt_count IS NULL
-                    """
+            if "consent_prompt_count" in existing_columns:
+                connection.execute(
+                    text(
+                        """
+                        UPDATE users
+                        SET consent_prompt_count = 0
+                        WHERE consent_prompt_count IS NULL
+                        """
+                    )
                 )
-            )
+
+        if "topic_agent_configs" in existing_tables:
+            existing_columns = {column["name"] for column in inspector.get_columns("topic_agent_configs")}
+            if "recent_context_window_size" in existing_columns:
+                connection.execute(
+                    text(
+                        """
+                        UPDATE topic_agent_configs
+                        SET recent_context_window_size = 20
+                        WHERE recent_context_window_size = 0
+                        """
+                    )
+                )
 
     with session_factory() as session:
         for role, prio in DEFAULT_ROLES:

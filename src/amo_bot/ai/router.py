@@ -53,7 +53,7 @@ class AIRouter:
     """Minimal router seam for KI scope gating logic."""
 
     _MAX_SOUL_CHARS = 2000
-    _RECENT_WINDOW_DEFAULT_MESSAGES = 0
+    _RECENT_WINDOW_DEFAULT_MESSAGES = 20
     _RECENT_WINDOW_MAX_MESSAGES = 50
     _RECENT_WINDOW_MAX_AGE_SECONDS = 60 * 60 * 24 * 14
     _SUSPICIOUS_SOUL_MARKERS = (
