@@ -206,6 +206,26 @@ def test_topic_memory_repository_config_daily_long_and_session_scopes() -> None:
         assert fetched_session.session_payload == {"context": ["hello"]}
 
 
+def test_add_message_does_not_commit_and_append_message_commits() -> None:
+    engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
+    Base.metadata.create_all(engine)
+
+    with Session(engine, future=True) as session:
+        repo = TopicAgentMemoryRepository(session)
+
+        repo.add_message(scope_type="group_chat", chat_id=-8000, message_text="pending")
+        session.rollback()
+
+        rows_after_rollback = repo.list_recent(scope_type="group_chat", chat_id=-8000, limit=10)
+        assert rows_after_rollback == []
+
+        repo.append_message(scope_type="group_chat", chat_id=-8000, message_text="committed")
+        session.rollback()
+
+        rows_after_append = repo.list_recent(scope_type="group_chat", chat_id=-8000, limit=10)
+        assert [r.message_text for r in rows_after_append] == ["committed"]
+
+
 def test_recent_messages_scope_isolation_matrix_private_topic_group() -> None:
     engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
     Base.metadata.create_all(engine)

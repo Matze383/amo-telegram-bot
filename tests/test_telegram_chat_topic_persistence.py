@@ -9,11 +9,31 @@ from amo_bot.db.models import User
 from amo_bot.auth.roles import Role
 from amo_bot.db.base import create_session_factory
 from amo_bot.db.init_db import init_db
-from amo_bot.db.models import TelegramChat, TelegramTopic
+from amo_bot.db.models import TelegramChat, TelegramTopic, TopicRecentMessage
 from amo_bot.telegram.commands import create_builtin_registry
 from amo_bot.telegram.dispatcher import Dispatcher
 from amo_bot.telegram.role_resolver import InMemoryRoleResolver
 from amo_bot.telegram.chat_topic_persistence import ChatTopicPersistenceService
+
+
+def _recent_messages_for_scope(
+    db_url: str,
+    *,
+    scope_type: str,
+    chat_id: int | None = None,
+    topic_id: int | None = None,
+    user_id: int | None = None,
+) -> list[TopicRecentMessage]:
+    sf = create_session_factory(db_url)
+    with sf() as session:
+        return session.scalars(
+            select(TopicRecentMessage).where(
+                TopicRecentMessage.scope_type == scope_type,
+                TopicRecentMessage.chat_id == chat_id,
+                TopicRecentMessage.topic_id == topic_id,
+                TopicRecentMessage.user_id == user_id,
+            )
+        ).all()
 
 
 def _mk_update(
@@ -944,6 +964,167 @@ def test_new_user_dm_success_notifies_owner_about_prompt_delivery(tmp_path) -> N
 
     prompt_notifies = [text for _, text in sent_owner if "Policy-DM erfolgreich gesendet" in text]
     assert len(prompt_notifies) == 1
+
+
+def test_topic_text_without_mention_or_reply_persists_recent_and_sends_no_ai_response(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'persist_recent_topic_no_trigger.db'}"
+    init_db(db_url)
+    sent_group_text: list[tuple[int, str, int | None]] = []
+    dispatcher = _build_dispatcher(db_url, sent_group_text=sent_group_text)
+
+    asyncio.run(
+        dispatcher.handle_raw_update(
+            _mk_update(
+                update_id=200,
+                user_id=9001,
+                chat_id=-12001,
+                chat_type="supergroup",
+                title="Forum",
+                message_thread_id=501,
+                text="ein normaler text",
+            )
+        )
+    )
+
+    recent = _recent_messages_for_scope(db_url, scope_type="topic", chat_id=-12001, topic_id=501)
+    assert len(recent) == 1
+    assert recent[0].message_text == "ein normaler text"
+    ai_replies = [m for m in sent_group_text if m[1] != "Bitte kläre Consent privat mit dem Bot."]
+    assert ai_replies == []
+
+
+def test_owner_topic_text_without_mention_or_reply_persists_and_sends_no_ai_response(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'persist_recent_topic_owner_no_trigger.db'}"
+    init_db(db_url)
+    sent_group_text: list[tuple[int, str, int | None]] = []
+    dispatcher = _build_dispatcher(db_url, sent_group_text=sent_group_text)
+
+    sf = create_session_factory(db_url)
+    with sf() as session:
+        from amo_bot.db.repositories import UserRoleRepository
+
+        UserRoleRepository(session).set_user_role(actor_telegram_user_id=1, target_telegram_user_id=42, role=Role.OWNER)
+
+    asyncio.run(
+        dispatcher.handle_raw_update(
+            _mk_update(
+                update_id=201,
+                user_id=42,
+                chat_id=-12002,
+                chat_type="supergroup",
+                title="Forum",
+                message_thread_id=502,
+                text="owner text",
+            )
+        )
+    )
+
+    recent = _recent_messages_for_scope(db_url, scope_type="topic", chat_id=-12002, topic_id=502)
+    assert len(recent) == 1
+    assert recent[0].message_text == "owner text"
+    ai_replies = [m for m in sent_group_text if m[1] != "Bitte kläre Consent privat mit dem Bot."]
+    assert ai_replies == []
+
+
+def test_mention_or_true_reply_triggers_and_persists_recent(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'persist_recent_triggered.db'}"
+    init_db(db_url)
+    dispatcher = _build_dispatcher(db_url, bot_username="AmoBot")
+
+    mention_update = _mk_update(
+        update_id=202,
+        user_id=9101,
+        chat_id=-12003,
+        chat_type="supergroup",
+        title="Forum",
+        message_thread_id=503,
+        text="@AmoBot sag hallo",
+    )
+    reply_update = _mk_update(
+        update_id=203,
+        user_id=9101,
+        chat_id=-12003,
+        chat_type="supergroup",
+        title="Forum",
+        message_thread_id=503,
+        text="antwort bitte",
+    )
+    reply_message = reply_update["message"]
+    assert isinstance(reply_message, dict)
+    reply_message["reply_to_message"] = {"message_id": 999, "from": {"id": 777, "is_bot": True, "username": "AmoBot", "first_name": "Amo"}}
+
+    asyncio.run(dispatcher.handle_raw_update(mention_update))
+    asyncio.run(dispatcher.handle_raw_update(reply_update))
+
+    recent = _recent_messages_for_scope(db_url, scope_type="topic", chat_id=-12003, topic_id=503)
+    texts = [row.message_text for row in recent]
+    assert "@AmoBot sag hallo" in texts
+    assert "antwort bitte" in texts
+
+
+def test_recent_scope_isolated_between_two_topics_and_group_root_and_command_skipped(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'persist_recent_scope_isolation.db'}"
+    init_db(db_url)
+    dispatcher = _build_dispatcher(db_url)
+
+    asyncio.run(
+        dispatcher.handle_raw_update(
+            _mk_update(
+                update_id=204,
+                user_id=9201,
+                chat_id=-12004,
+                chat_type="supergroup",
+                title="Forum",
+                message_thread_id=601,
+                text="topic eins",
+            )
+        )
+    )
+    asyncio.run(
+        dispatcher.handle_raw_update(
+            _mk_update(
+                update_id=205,
+                user_id=9202,
+                chat_id=-12004,
+                chat_type="supergroup",
+                title="Forum",
+                message_thread_id=602,
+                text="topic zwei",
+            )
+        )
+    )
+    asyncio.run(
+        dispatcher.handle_raw_update(
+            _mk_update(
+                update_id=206,
+                user_id=9203,
+                chat_id=-12004,
+                chat_type="supergroup",
+                title="Forum",
+                text="group root",
+            )
+        )
+    )
+    asyncio.run(
+        dispatcher.handle_raw_update(
+            _mk_update(
+                update_id=207,
+                user_id=9203,
+                chat_id=-12004,
+                chat_type="supergroup",
+                title="Forum",
+                text="/ping",
+            )
+        )
+    )
+
+    recent_topic_1 = _recent_messages_for_scope(db_url, scope_type="topic", chat_id=-12004, topic_id=601)
+    recent_topic_2 = _recent_messages_for_scope(db_url, scope_type="topic", chat_id=-12004, topic_id=602)
+    recent_group = _recent_messages_for_scope(db_url, scope_type="group_chat", chat_id=-12004, topic_id=None)
+
+    assert [row.message_text for row in recent_topic_1] == ["topic eins"]
+    assert [row.message_text for row in recent_topic_2] == ["topic zwei"]
+    assert [row.message_text for row in recent_group] == ["group root"]
 
 
 def test_unreachable_dm_group_fallback_notifies_owner_when_fallback_sent(tmp_path) -> None:

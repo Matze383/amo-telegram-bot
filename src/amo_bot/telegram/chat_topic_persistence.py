@@ -6,7 +6,7 @@ from sqlalchemy.orm import sessionmaker
 
 from amo_bot.consent.prompt_service import ConsentPromptService
 from amo_bot.db.models import GROUP_CHAT_TYPES
-from amo_bot.db.repositories import ChatSeenUserRepository, ChatTopicRepository, UserRoleRepository
+from amo_bot.db.repositories import ChatSeenUserRepository, ChatTopicRepository, TopicAgentMemoryRepository, UserRoleRepository
 from amo_bot.telegram.owner_notify import OwnerNotifier
 from amo_bot.telegram.update_parser import TelegramMessage
 
@@ -61,6 +61,27 @@ class ChatTopicPersistenceService:
                     message_thread_id=message.message_thread_id,
                     telegram_topic_name=message.telegram_topic_name,
                 )
+
+            text = (message.text or "").strip()
+            if text and not text.startswith("/"):
+                scope: tuple[str, int | None, int | None, int | None] | None = None
+                if message.chat.type in GROUP_CHAT_TYPES:
+                    if message.message_thread_id is not None:
+                        scope = ("topic", message.chat.id, message.message_thread_id, None)
+                    else:
+                        scope = ("group_chat", message.chat.id, None, None)
+                elif message.chat.type == "private":
+                    scope = ("private_user", None, None, message.from_user.id)
+
+                if scope is not None:
+                    scope_type, chat_id, topic_id, user_id = scope
+                    TopicAgentMemoryRepository(session).add_message(
+                        scope_type=scope_type,
+                        chat_id=chat_id,
+                        topic_id=topic_id,
+                        user_id=user_id,
+                        message_text=text,
+                    )
 
             if existing_user is None and self._owner_notifier is not None:
                 await self._owner_notifier.notify_new_user_discovered(user=user, message=message)

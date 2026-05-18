@@ -1545,7 +1545,7 @@ class TopicAgentMemoryRepository:
             return None
         return self._to_session_record(row)
 
-    def append_message(
+    def add_message(
         self,
         *,
         scope_type: str,
@@ -1564,9 +1564,26 @@ class TopicAgentMemoryRepository:
         self._session.add(row)
         self._session.flush()
         self._trim_recent_scope(scope_type=scope_type, chat_id=chat_id, topic_id=topic_id, user_id=user_id)
-        self._session.commit()
-        self._session.refresh(row)
         return self._to_recent_record(row)
+
+    def append_message(
+        self,
+        *,
+        scope_type: str,
+        message_text: str,
+        chat_id: int | None = None,
+        topic_id: int | None = None,
+        user_id: int | None = None,
+    ) -> TopicRecentMessageRecord:
+        record = self.add_message(
+            scope_type=scope_type,
+            message_text=message_text,
+            chat_id=chat_id,
+            topic_id=topic_id,
+            user_id=user_id,
+        )
+        self._session.commit()
+        return record
 
     def list_recent(
         self,
