@@ -6,6 +6,31 @@ import re
 from typing import Any, Protocol
 
 
+@dataclass(frozen=True, slots=True)
+class KICapabilityDecision:
+    allowed: bool
+    reason_code: str
+
+
+class KIMinimalCapabilityGate:
+    """Minimal KI direct capability gate for SEC-B5 hard-deny policy."""
+
+    _ALLOWED_DIRECT_CAPABILITIES = {"respond", "analyze_image", "suggest_memory"}
+    _HIGH_RISK_DENIED_CAPABILITIES = {"network", "git", "shell", "secrets"}
+
+    def evaluate_direct_capability_request(self, capability: str) -> KICapabilityDecision:
+        normalized = capability.strip().lower() if isinstance(capability, str) else ""
+
+        if normalized in self._ALLOWED_DIRECT_CAPABILITIES:
+            return KICapabilityDecision(allowed=True, reason_code="ki_capability_allowed")
+
+        if normalized in self._HIGH_RISK_DENIED_CAPABILITIES:
+            return KICapabilityDecision(allowed=False, reason_code="ki_capability_denied")
+
+        # Default deny for unknown/risky direct KI capabilities.
+        return KICapabilityDecision(allowed=False, reason_code="ki_capability_denied")
+
+
 _SAFE_FALLBACK = "I can't execute that request in this context."
 _SAFE_REASON_RE = re.compile(r"^[a-z0-9_]{1,48}$")
 _SECRET_KEY_RE = re.compile(
@@ -218,6 +243,8 @@ class KIPluginPolicyGate:
         if isinstance(value, str):
             clipped = value[: self._max_result_chars]
             if _BASE64_RE.search(clipped) or _HEX_RE.search(clipped):
+                return "[redacted]"
+            if len(clipped) >= 24 and re.fullmatch(r"[A-Za-z0-9_\-./+=]+", clipped):
                 return "[redacted]"
             return clipped
         return value
