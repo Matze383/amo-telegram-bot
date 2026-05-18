@@ -20,6 +20,7 @@ from amo_bot.telegram.update_parser import TelegramMessage, parse_update
 
 
 AUTOREPLY_ALLOWED_ROLES: set[Role] = {Role.OWNER, Role.ADMIN, Role.VIP}
+AI_AUTOREPLY_ERROR_FALLBACK_TEXT = "Ich konnte gerade keine KI-Antwort erzeugen. Bitte versuch es gleich nochmal."
 
 SendTextFn = Callable[[int, str, int | None], Awaitable[object]]
 SendMarkupFn = Callable[[int, str, dict[str, Any], int | None], Awaitable[object]]
@@ -528,6 +529,17 @@ class Dispatcher:
                     payload={"reason": "ai_error", "router_reason": decision.reason_code.value},
                 )
                 session.commit()
+
+            explicit_trigger_reason_codes = {
+                AIRouterReasonCode.MENTION_IN_ACTIVE_SCOPE,
+                AIRouterReasonCode.REPLY_TO_BOT_IN_ACTIVE_SCOPE,
+            }
+            if decision.reason_code in explicit_trigger_reason_codes:
+                await self._send_text(
+                    message.chat.id,
+                    AI_AUTOREPLY_ERROR_FALLBACK_TEXT,
+                    message.message_thread_id,
+                )
             return
 
         if not response:

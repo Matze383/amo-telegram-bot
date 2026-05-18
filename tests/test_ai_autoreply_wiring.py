@@ -16,12 +16,15 @@ from amo_bot.telegram.role_resolver import DBRoleResolver
 
 
 class FakeAIService:
-    def __init__(self, answer: str = "ai-ok") -> None:
+    def __init__(self, answer: str = "ai-ok", error: Exception | None = None) -> None:
         self.answer = answer
+        self.error = error
         self.prompts: list[str] = []
 
     async def ask(self, prompt: str) -> str:
         self.prompts.append(prompt)
+        if self.error is not None:
+            raise self.error
         return self.answer
 
 
@@ -562,6 +565,87 @@ def test_group_scope_reply_to_other_bot_does_not_trigger_ai(tmp_path) -> None:
 
     assert sender.sent == []
     assert ai.prompts == []
+
+
+def test_ai_mention_trigger_error_sends_fallback_and_audits_error(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'ai_autoreply_mention_error_fallback.db'}"
+    init_db(db_url)
+    _seed_user(
+        db_url,
+        user_id=2401,
+        role="vip",
+        consent="accepted",
+        group_chat_id=-1401,
+        group_role="vip",
+    )
+
+    sf = create_session_factory(db_url)
+    with sf() as session:
+        TopicAgentMemoryRepository(session).upsert_config(scope_type="topic", chat_id=-1401, topic_id=81, ai_enabled=True)
+
+    ai = FakeAIService(error=RuntimeError("timeout"))
+    sender = Sender()
+    dispatcher = _mk_dispatcher(db_url, ai, sender)
+
+    asyncio.run(
+        dispatcher.handle_raw_update(
+            _mk_update(uid=2401, chat_id=-1401, chat_type="supergroup", text="hi @AmoBot", update_id=41, message_thread_id=81)
+        )
+    )
+
+    assert sender.sent == [(-1401, "Ich konnte gerade keine KI-Antwort erzeugen. Bitte versuch es gleich nochmal.", 81)]
+
+    with sf() as session:
+        events = session.scalars(select(AuditEvent).where(AuditEvent.event_type == "ai_autoreply_error")).all()
+        assert len(events) == 1
+        import json
+
+        payload = json.loads(events[0].payload_json)
+        assert payload["router_reason"] == "mention_in_active_scope"
+
+
+def test_ai_reply_to_bot_trigger_error_sends_fallback(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'ai_autoreply_reply_error_fallback.db'}"
+    init_db(db_url)
+    _seed_user(db_url, user_id=2402, role="vip", consent="accepted")
+
+    sf = create_session_factory(db_url)
+    with sf() as session:
+        TopicAgentMemoryRepository(session).upsert_config(scope_type="private_user", user_id=2402, ai_enabled=True)
+
+    ai = FakeAIService(error=RuntimeError("503"))
+    sender = Sender()
+    dispatcher = _mk_dispatcher(db_url, ai, sender)
+
+    asyncio.run(
+        dispatcher.handle_raw_update(
+            _mk_update(uid=2402, chat_id=2402, chat_type="private", text="followup", update_id=42, reply_to_is_bot=True)
+        )
+    )
+
+    assert sender.sent == [(2402, "Ich konnte gerade keine KI-Antwort erzeugen. Bitte versuch es gleich nochmal.", None)]
+
+
+def test_non_explicit_private_scope_error_does_not_send_fallback(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'ai_autoreply_scope_error_no_fallback.db'}"
+    init_db(db_url)
+    _seed_user(db_url, user_id=2403, role="vip", consent="accepted")
+
+    sf = create_session_factory(db_url)
+    with sf() as session:
+        TopicAgentMemoryRepository(session).upsert_config(scope_type="private_user", user_id=2403, ai_enabled=True)
+
+    ai = FakeAIService(error=RuntimeError("down"))
+    sender = Sender()
+    dispatcher = _mk_dispatcher(db_url, ai, sender)
+
+    asyncio.run(
+        dispatcher.handle_raw_update(
+            _mk_update(uid=2403, chat_id=2403, chat_type="private", text="plain text", update_id=43)
+        )
+    )
+
+    assert sender.sent == []
 
 
 def test_group_scope_unaffected_by_private_min_ai_role(tmp_path) -> None:
