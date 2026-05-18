@@ -1,4 +1,4 @@
-blank_issues_enabled: false
+blank_issues_enabled: true
 contact_links:
   - name: Security Issue / Sicherheitsproblem
     url: https://github.com/Matze383/amo-telegram-bot/security/advisories/new
