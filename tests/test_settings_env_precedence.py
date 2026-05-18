@@ -99,6 +99,34 @@ def test_new_webui_security_env_values_are_parsed(monkeypatch, tmp_path) -> None
     assert settings.webui_session_cookie_secure is False
 
 
+def test_ollama_retry_and_fallback_env_values_are_parsed(monkeypatch, tmp_path) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "\n".join(
+            [
+                "BOT_TOKEN=token-from-dotenv",
+                "WEBUI_PASSWORD=pw-from-dotenv",
+                "WEBUI_SECRET_KEY=dotenv-secret-key-0123456789-abcdefghij",
+                "OLLAMA_RETRY_ON_TRANSIENT_ERROR=false",
+                "OLLAMA_RETRY_DELAY_SECONDS=1.5",
+                "OLLAMA_FALLBACK_MODEL=kimi-k2.5:cloud",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("DOTENV_PATH", str(env_file))
+    monkeypatch.delenv("AMO_ENV_OVERRIDE", raising=False)
+
+    settings = get_settings()
+
+    assert settings.ollama_retry_on_transient_error is False
+    assert settings.ollama_retry_delay_seconds == 1.5
+    assert settings.ollama_fallback_model == "kimi-k2.5:cloud"
+
+
 def test_webui_login_delay_rejects_negative_values(monkeypatch, tmp_path) -> None:
     env_file = tmp_path / ".env"
     env_file.write_text(

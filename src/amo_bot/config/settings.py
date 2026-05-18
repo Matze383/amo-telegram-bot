@@ -22,6 +22,9 @@ class Settings(BaseSettings):
     ollama_model: str = Field(default="llama3.1", alias="OLLAMA_MODEL")
     ollama_timeout_seconds: int = Field(default=20, alias="OLLAMA_TIMEOUT_SECONDS")
     ollama_max_response_chars: int = Field(default=1500, alias="OLLAMA_MAX_RESPONSE_CHARS")
+    ollama_retry_on_transient_error: bool = Field(default=True, alias="OLLAMA_RETRY_ON_TRANSIENT_ERROR")
+    ollama_retry_delay_seconds: float = Field(default=1.0, alias="OLLAMA_RETRY_DELAY_SECONDS", ge=0)
+    ollama_fallback_model: str | None = Field(default=None, alias="OLLAMA_FALLBACK_MODEL")
 
     database_url: str = Field(default="sqlite:///./data/amo_bot.db", alias="DATABASE_URL")
     amo_plugin_dir: str = Field(default="./plugins", alias="AMO_PLUGIN_DIR")

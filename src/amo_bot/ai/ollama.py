@@ -10,6 +10,12 @@ class OllamaError(RuntimeError):
     pass
 
 
+class OllamaHTTPStatusError(OllamaError):
+    def __init__(self, status_code: int, message: str | None = None) -> None:
+        super().__init__(message or f"http {status_code}")
+        self.status_code = status_code
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -43,7 +49,7 @@ class OllamaClient:
                 len(prompt),
                 response_preview,
             )
-            raise OllamaError(f"http {exc.response.status_code}") from exc
+            raise OllamaHTTPStatusError(exc.response.status_code) from exc
         except (httpx.HTTPError, ValueError, TypeError) as exc:
             raise OllamaError("invalid ollama response") from exc
 

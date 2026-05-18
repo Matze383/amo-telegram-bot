@@ -3,7 +3,7 @@ from typing import Any
 
 import httpx
 
-from amo_bot.ai.ollama import OllamaClient, OllamaError
+from amo_bot.ai.ollama import OllamaClient, OllamaError, OllamaHTTPStatusError
 
 
 class _DummyAsyncClient:
@@ -51,7 +51,8 @@ def test_ollama_client_http_error(monkeypatch) -> None:
     try:
         asyncio.run(client.generate("hello"))
         assert False, "expected OllamaError"
-    except OllamaError as exc:
+    except OllamaHTTPStatusError as exc:
+        assert exc.status_code == 500
         assert "http 500" in str(exc)
 
 

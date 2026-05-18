@@ -64,7 +64,10 @@ def run(argv: list[str] | None = None) -> None:
             model=settings.ollama_model,
             timeout_seconds=settings.ollama_timeout_seconds,
             max_response_chars=settings.ollama_max_response_chars,
-        )
+        ),
+        retry_on_transient_error=settings.ollama_retry_on_transient_error,
+        retry_delay_seconds=settings.ollama_retry_delay_seconds,
+        fallback_model=settings.ollama_fallback_model,
     )
     async def send_owner_private_text(chat_id: int, text: str) -> object:
         return await tg.send_message(chat_id=chat_id, text=text)
