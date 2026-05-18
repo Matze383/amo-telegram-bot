@@ -33,6 +33,15 @@ from .capability_quota import (
     QuotaDecisionResult,
 )
 from .memory_maintenance import MemoryMaintenanceResult, MemoryMaintenanceService
+from .ki_request_gate import (
+    KIAuditEntry,
+    KIPluginDecisionResult,
+    KIPluginExecutionOutcome,
+    KIPluginPolicyContext,
+    KIPluginPolicyGate,
+    KIPluginRequest,
+    KIPluginRequestDecision,
+)
 from .memory_coreplugin_cp_g2 import (
     MemoryCorepluginRequest,
     MemoryCorepluginService,
@@ -142,6 +151,13 @@ __all__ = [
     "CapabilityQuotaRule",
     "CoreCapabilityQuotaLimiter",
     "InMemoryCapabilityAuditSink",
+    "KIAuditEntry",
+    "KIPluginDecisionResult",
+    "KIPluginExecutionOutcome",
+    "KIPluginPolicyContext",
+    "KIPluginPolicyGate",
+    "KIPluginRequest",
+    "KIPluginRequestDecision",
     "CoreCapabilityPolicyRequest",
     "CorePolicyDecisionResult",
     "QuotaDecisionResult",
