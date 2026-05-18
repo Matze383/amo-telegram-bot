@@ -199,7 +199,7 @@ class KIPluginPolicyGate:
             lowered = key.lower()
             if lowered.startswith("raw_") or lowered in {"private", "internal", "debug", "prompt", "secrets"}:
                 continue
-            if _SECRET_KEY_RE.search(lowered):
+            if _SECRET_KEY_RE.search(lowered) or "path" in lowered:
                 out[key] = "[redacted]"
                 continue
             out[key] = self._sanitize_value(inner)
