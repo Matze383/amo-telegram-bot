@@ -26,6 +26,7 @@ def init_db(database_url: str) -> None:
                 response_mode VARCHAR(32) NOT NULL DEFAULT 'command',
                 memory_retention_days INTEGER NOT NULL DEFAULT 30,
                 tools_enabled BOOLEAN NOT NULL DEFAULT 0,
+                recent_context_window_size INTEGER NOT NULL DEFAULT 0,
                 main_soul_text TEXT,
                 topic_soul_text TEXT,
                 topic_soul_owner_only_edit BOOLEAN NOT NULL DEFAULT 1,
@@ -92,6 +93,7 @@ def init_db(database_url: str) -> None:
     table_column_migrations: dict[str, dict[str, str]] = {
         "topic_agent_configs": {
             "main_soul_text": "ALTER TABLE topic_agent_configs ADD COLUMN main_soul_text TEXT",
+            "recent_context_window_size": "ALTER TABLE topic_agent_configs ADD COLUMN recent_context_window_size INTEGER NOT NULL DEFAULT 0",
         },
         "topic_long_memories": {
             "promotion_status": "ALTER TABLE topic_long_memories ADD COLUMN promotion_status VARCHAR(16) NOT NULL DEFAULT 'none'",
