@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hmac
 import time
 
 from flask import Blueprint, abort, current_app, flash, redirect, render_template, request, session, url_for
@@ -101,7 +102,7 @@ def login_submit():
         return render_template("login.html", form=form, insecure_password=False), 400
 
     key = _get_client_key()
-    if form.password.data != configured:
+    if not hmac.compare_digest(form.password.data or "", configured or ""):
         delay_seconds = _get_login_attempt_tracker().next_delay_seconds(key)
         delay_fn = current_app.extensions.get("amo.login_delay_fn", _sleep_delay)
         delay_fn(delay_seconds)

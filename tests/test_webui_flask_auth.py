@@ -15,6 +15,7 @@ def _make_settings(
     webui_require_https: bool = False,
     webui_session_cookie_secure: bool | None = None,
     webui_owner_telegram_id: int | None = None,
+    webui_secret_key: str = "test-secret-key-0123456789-abcdef",
 ) -> Settings:
     payload = {
         "BOT_TOKEN": "dummy-token",
@@ -28,6 +29,7 @@ def _make_settings(
         "WEBUI_HOST": "127.0.0.1",
         "WEBUI_PORT": 8080,
         "WEBUI_PASSWORD": password,
+        "WEBUI_SECRET_KEY": webui_secret_key,
         "WEBUI_SESSION_TTL_SECONDS": session_ttl_seconds,
         "WEBUI_PUBLIC_MODE": webui_public_mode,
         "WEBUI_REQUIRE_HTTPS": webui_require_https,
@@ -316,6 +318,29 @@ def test_logout_requires_csrf(tmp_path) -> None:
         response = client.post("/logout", data={}, follow_redirects=False)
 
     assert response.status_code == 400
+
+
+def test_create_app_rejects_missing_webui_secret_key(tmp_path) -> None:
+    with pytest.raises(ValueError, match="WEBUI_SECRET_KEY"):
+        create_flask_app(settings=_make_settings(tmp_path, webui_secret_key=""))
+
+
+def test_create_app_rejects_weak_webui_secret_key(tmp_path) -> None:
+    with pytest.raises(ValueError, match="WEBUI_SECRET_KEY"):
+        create_flask_app(settings=_make_settings(tmp_path, webui_secret_key="change_me"))
+
+
+def test_create_app_uses_configured_webui_secret_key(tmp_path) -> None:
+    strong_secret = "this-is-a-very-strong-test-secret-key-1234567890"
+    app = create_flask_app(settings=_make_settings(tmp_path, webui_secret_key=strong_secret))
+    assert app.secret_key == strong_secret
+
+
+def test_webui_secret_key_not_derived_from_password(tmp_path) -> None:
+    strong_secret = "independent-secret-key-abcdefghijklmnopqrstuvwxyz"
+    app_a = create_flask_app(settings=_make_settings(tmp_path, password="pw-a", webui_secret_key=strong_secret))
+    app_b = create_flask_app(settings=_make_settings(tmp_path, password="pw-b", webui_secret_key=strong_secret))
+    assert app_a.secret_key == app_b.secret_key == strong_secret
 
 
 def test_default_cookie_security_flags_present_without_secure(tmp_path) -> None:

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 from datetime import timedelta
 
 from flask import Flask, abort, jsonify, request, session, url_for
@@ -21,10 +20,23 @@ from amo_bot.webui.flask_blueprints import register_blueprints
 csrf = CSRFProtect()
 
 
-def _derive_secret_key(password: str | None) -> str:
-    """Defensive fallback key derivation from configured webui password."""
-    seed = (password or "change_me").encode("utf-8")
-    return hashlib.sha256(seed).hexdigest()
+def _is_weak_webui_secret(secret: str) -> bool:
+    normalized = secret.strip().lower()
+    if len(secret.strip()) < 32:
+        return True
+
+    weak_values = {
+        "change_me",
+        "replace_me",
+        "secret",
+        "webui_secret",
+        "webui-secret",
+        "webui_secret_key",
+        "webui-secret-key",
+        "webui_password",
+        "password",
+    }
+    return normalized in weak_values or "change_me" in normalized or "webui_password" in normalized
 
 
 def create_flask_app(
@@ -46,9 +58,15 @@ def create_flask_app(
             "Set WEBUI_SESSION_COOKIE_SECURE=true (or leave unset with WEBUI_REQUIRE_HTTPS=true)."
         )
 
+    secret_key = (app_settings.webui_secret_key or "").strip()
+    if _is_weak_webui_secret(secret_key):
+        raise ValueError(
+            "WEBUI_SECRET_KEY must be set to a strong random value (min 32 chars, no placeholders like change_me)."
+        )
+
     app = Flask(__name__)
     app.config.update(
-        SECRET_KEY=(app_settings.webui_password or "").strip() or _derive_secret_key(app_settings.webui_password),
+        SECRET_KEY=secret_key,
         PERMANENT_SESSION_LIFETIME=timedelta(seconds=max(1, app_settings.webui_session_ttl_seconds)),
         SESSION_COOKIE_HTTPONLY=True,
         SESSION_COOKIE_SAMESITE="Lax",

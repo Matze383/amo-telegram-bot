@@ -13,6 +13,7 @@ def test_main_wires_plugin_command_executor_into_dispatcher(monkeypatch, tmp_pat
 
     monkeypatch.setenv("BOT_TOKEN", "123:ABC")
     monkeypatch.setenv("WEBUI_PASSWORD", "secret")
+    monkeypatch.setenv("WEBUI_SECRET_KEY", "unit-test-webui-secret-key-0123456789abcdef")
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
     monkeypatch.setenv("OFFSET_STATE_FILE", str(offset_path))
     monkeypatch.setenv("AMO_PLUGIN_DIR", str(tmp_path / "plugins"))

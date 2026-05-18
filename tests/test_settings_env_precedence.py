@@ -13,6 +13,7 @@ def test_dotenv_overrides_existing_environment_variables(monkeypatch, tmp_path) 
             [
                 "BOT_TOKEN=token-from-dotenv",
                 "WEBUI_PASSWORD=pw-from-dotenv",
+                "WEBUI_SECRET_KEY=dotenv-secret-key-0123456789-abcdefghij",
                 "WEBUI_HOST=0.0.0.0",
                 "OLLAMA_MODEL=llama3.1:8b",
             ]
@@ -24,6 +25,7 @@ def test_dotenv_overrides_existing_environment_variables(monkeypatch, tmp_path) 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("BOT_TOKEN", "token-from-shell")
     monkeypatch.setenv("WEBUI_PASSWORD", "pw-from-shell")
+    monkeypatch.setenv("WEBUI_SECRET_KEY", "shell-secret-key-0123456789-abcdefghij")
     monkeypatch.setenv("WEBUI_HOST", "127.0.0.1")
     monkeypatch.setenv("OLLAMA_MODEL", "legacy-shell-model")
     monkeypatch.delenv("AMO_ENV_OVERRIDE", raising=False)
@@ -33,6 +35,7 @@ def test_dotenv_overrides_existing_environment_variables(monkeypatch, tmp_path) 
 
     assert settings.bot_token == "token-from-dotenv"
     assert settings.webui_password == "pw-from-dotenv"
+    assert settings.webui_secret_key == "dotenv-secret-key-0123456789-abcdefghij"
     assert settings.webui_host == "0.0.0.0"
     assert settings.ollama_model == "llama3.1:8b"
 
@@ -44,6 +47,7 @@ def test_can_opt_out_from_dotenv_override_via_explicit_flag(monkeypatch, tmp_pat
             [
                 "BOT_TOKEN=token-from-dotenv",
                 "WEBUI_PASSWORD=pw-from-dotenv",
+                "WEBUI_SECRET_KEY=dotenv-secret-key-0123456789-abcdefghij",
                 "WEBUI_HOST=0.0.0.0",
             ]
         )
@@ -54,6 +58,7 @@ def test_can_opt_out_from_dotenv_override_via_explicit_flag(monkeypatch, tmp_pat
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("BOT_TOKEN", "token-from-shell")
     monkeypatch.setenv("WEBUI_PASSWORD", "pw-from-shell")
+    monkeypatch.setenv("WEBUI_SECRET_KEY", "shell-secret-key-0123456789-abcdefghij")
     monkeypatch.setenv("WEBUI_HOST", "127.0.0.1")
     monkeypatch.setenv("AMO_ENV_OVERRIDE", "0")
     monkeypatch.setenv("DOTENV_PATH", str(env_file))
@@ -62,6 +67,7 @@ def test_can_opt_out_from_dotenv_override_via_explicit_flag(monkeypatch, tmp_pat
 
     assert settings.bot_token == "token-from-shell"
     assert settings.webui_password == "pw-from-shell"
+    assert settings.webui_secret_key == "shell-secret-key-0123456789-abcdefghij"
     assert settings.webui_host == "127.0.0.1"
 
 
@@ -72,6 +78,7 @@ def test_new_webui_security_env_values_are_parsed(monkeypatch, tmp_path) -> None
             [
                 "BOT_TOKEN=token-from-dotenv",
                 "WEBUI_PASSWORD=pw-from-dotenv",
+                "WEBUI_SECRET_KEY=dotenv-secret-key-0123456789-abcdefghij",
                 "WEBUI_PUBLIC_MODE=true",
                 "WEBUI_REQUIRE_HTTPS=1",
                 "WEBUI_SESSION_COOKIE_SECURE=false",
@@ -99,6 +106,7 @@ def test_webui_login_delay_rejects_negative_values(monkeypatch, tmp_path) -> Non
             [
                 "BOT_TOKEN=token-from-dotenv",
                 "WEBUI_PASSWORD=pw-from-dotenv",
+                "WEBUI_SECRET_KEY=dotenv-secret-key-0123456789-abcdefghij",
                 "WEBUI_LOGIN_DELAY_BASE_SECONDS=-0.1",
             ]
         )
@@ -125,6 +133,7 @@ def test_webui_login_delay_rejects_max_below_base(monkeypatch, tmp_path) -> None
             [
                 "BOT_TOKEN=token-from-dotenv",
                 "WEBUI_PASSWORD=pw-from-dotenv",
+                "WEBUI_SECRET_KEY=dotenv-secret-key-0123456789-abcdefghij",
                 "WEBUI_LOGIN_DELAY_BASE_SECONDS=1.5",
                 "WEBUI_LOGIN_DELAY_MAX_SECONDS=1.0",
             ]
@@ -154,6 +163,7 @@ def test_no_secret_values_are_exposed_in_validation_error(monkeypatch, tmp_path)
             [
                 "BOT_TOKEN=token-from-dotenv",
                 "WEBUI_PASSWORD=pw-from-dotenv",
+                "WEBUI_SECRET_KEY=dotenv-secret-key-0123456789-abcdefghij",
             ]
         )
         + "\n",

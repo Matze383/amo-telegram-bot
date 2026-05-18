@@ -29,6 +29,7 @@ class Settings(BaseSettings):
     webui_host: str = Field(default="127.0.0.1", alias="WEBUI_HOST")
     webui_port: int = Field(default=8080, alias="WEBUI_PORT")
     webui_password: str = Field(alias="WEBUI_PASSWORD")
+    webui_secret_key: str = Field(alias="WEBUI_SECRET_KEY")
     webui_owner_telegram_id: int | None = Field(default=None, alias="WEBUI_OWNER_TELEGRAM_ID")
     webui_session_ttl_seconds: int = Field(default=3600, alias="WEBUI_SESSION_TTL_SECONDS")
     webui_public_mode: bool = Field(default=False, alias="WEBUI_PUBLIC_MODE")

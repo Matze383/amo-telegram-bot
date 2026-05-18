@@ -25,6 +25,7 @@ class _StubDispatcher:
 def _set_env(monkeypatch, tmp_path, webui_host: str = "127.0.0.1") -> None:
     monkeypatch.setenv("BOT_TOKEN", "123:ABC")
     monkeypatch.setenv("WEBUI_PASSWORD", "secret")
+    monkeypatch.setenv("WEBUI_SECRET_KEY", "unit-test-webui-secret-key-0123456789abcdef")
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'bot.db'}")
     monkeypatch.setenv("OFFSET_STATE_FILE", str(tmp_path / "offset.json"))
     monkeypatch.setenv("AMO_PLUGIN_DIR", str(tmp_path / "plugins"))
