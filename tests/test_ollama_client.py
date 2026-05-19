@@ -184,7 +184,11 @@ def test_ollama_client_chat_endpoint_payload_and_response(monkeypatch) -> None:
         seen_url = url
         seen_payload = payload
         req = httpx.Request("POST", url)
-        return httpx.Response(200, json={"message": {"role": "assistant", "content": "chat-ok"}}, request=req)
+        return httpx.Response(
+            200,
+            json={"message": {"role": "assistant", "content": "chat-ok"}, "done": True},
+            request=req,
+        )
 
     _patch_async_client(monkeypatch, post_impl)
 
@@ -206,7 +210,7 @@ def test_ollama_client_chat_endpoint_payload_and_response(monkeypatch) -> None:
     assert seen_payload["options"] == {"num_predict": 7}
 
 
-def test_ollama_client_chat_endpoint_invalid_message_shape(monkeypatch) -> None:
+def test_ollama_client_chat_endpoint_missing_done_flag(monkeypatch) -> None:
     async def post_impl(url: str, payload: dict[str, Any]) -> httpx.Response:
         req = httpx.Request("POST", url)
         return httpx.Response(200, json={"message": "nope"}, request=req)
@@ -223,7 +227,7 @@ def test_ollama_client_chat_endpoint_invalid_message_shape(monkeypatch) -> None:
         asyncio.run(client.generate("hello"))
         assert False, "expected OllamaError"
     except OllamaError as exc:
-        assert "invalid ollama response" in str(exc)
+        assert "invalid provider response contract" in str(exc)
 
 
 def test_settings_rejects_invalid_ollama_limit_config() -> None:

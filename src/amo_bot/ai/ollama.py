@@ -5,7 +5,11 @@ import logging
 
 import httpx
 
-from amo_bot.ai.response_contract import envelope_from_full_response_text
+from amo_bot.ai.response_contract import (
+    AIResponseContractError,
+    envelope_from_full_response_text,
+    envelope_from_provider_chat_response,
+)
 
 
 class OllamaError(RuntimeError):
@@ -81,21 +85,15 @@ class OllamaClient:
         if not isinstance(data, dict):
             raise OllamaError("invalid ollama response")
 
-        if self.request_endpoint == "chat":
-            message = data.get("message")
-            if not isinstance(message, dict):
-                raise OllamaError("invalid ollama response")
-            response_text = message.get("content")
-            if not isinstance(response_text, str):
-                raise OllamaError("invalid ollama response")
-        else:
-            response_text = data.get("response")
-            if not isinstance(response_text, str):
-                raise OllamaError("invalid ollama response")
-
         try:
-            envelope = envelope_from_full_response_text(response_text)
-        except RuntimeError as exc:
+            if self.request_endpoint == "chat":
+                envelope = envelope_from_provider_chat_response(data)
+            else:
+                response_text = data.get("response")
+                if not isinstance(response_text, str):
+                    raise OllamaError("invalid ollama response")
+                envelope = envelope_from_full_response_text(response_text)
+        except AIResponseContractError as exc:
             raise OllamaError(str(exc)) from exc
 
         text = envelope.final_text
