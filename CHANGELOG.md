@@ -71,6 +71,7 @@ This is the first public release candidate of the AMO Telegram Bot. The software
 - **CI Status:** GitHub Actions configured; cross-platform tests validated on Linux, macOS/Windows native tests pending (no native runners available)
 
 #### Security
+- Added strict `command.execute.v1` sandbox command protocol contract (typed request/response validation, host-op allowlist, and defensive limits checks) as preparatory hardening without runtime integration switch yet.
 
 - WebUI is **local-only** (`127.0.0.1`) – never expose to the internet
 - Flask WebUI CSP hardened: removed `style-src 'unsafe-inline'` and moved styles to static stylesheet (`/static/webui.css`)
