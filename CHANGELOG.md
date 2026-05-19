@@ -11,6 +11,10 @@
 
 ---
 
+### Security
+
+- SEC-SB3: Added plugin command sandbox worker adapter (`command.execute.v1`) with safe relative plugin-entry resolution, restricted recording host API (`send_message`/`reply` only), protocol-bound op/text limits, and sanitized error mapping without traceback leakage.
+
 ### 🇩🇪 Deutsch
 
 #### Übersicht
