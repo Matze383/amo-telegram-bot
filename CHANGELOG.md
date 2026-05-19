@@ -5,6 +5,56 @@
 
 ---
 
+## [2026.5.19] – Release Candidate
+
+**Datum / Date:** 2026-05-19
+
+### 🇩🇪 Deutsch
+
+#### Übersicht
+Dieser Release-Kandidat enthält Verbesserungen beim KI-Kontext-Management, Abschaltung der veralteten FastAPI-WebUI, gehärtete CSP-Richtlinien sowie den neuen Command-Sandbox-Mechanismus.
+
+#### Neu (Highlights)
+- **Scoped Recent Context (default ON):** Pro-Scope (Topic/Gruppe/Privat) werden jetzt bis zu 20 normale Nachrichten persistiert. Der KI-Prompt erhält automatisch das passende Recent Context-Fenster, basierend auf der Router-Entscheidung.
+- **Group/Topic Trigger-Guard beibehalten:** In Gruppen/Topics antwortet die KI weiterhin nur bei Mention (`@botname`) oder echtem Reply-to-Bot (Owner ist stets eingeschlossen).
+- **FastAPI WebUI hard-disabled:** Die alte FastAPI-WebUI-Oberfläche wurde komplett deaktiviert; nur Flask-WebUI bleibt unterstützt.
+- **Flask CSP gehärtet:** `style-src 'unsafe-inline'` entfernt; Styles wurden in statische CSS-Datei (`/static/webui.css`) verschoben.
+- **Command Sandbox Hardening (GitHub Issue #2):**
+  - SEC-SB2: Protokoll-Vertrag `command.execute.v1` mit typisiertem Request/Response-Validierung
+  - SEC-SB3: Worker-Adapter für Sandbox-Ausführung mit sicherer Plugin-Entry-Auflösung
+  - SEC-SB4: Runtime-Schalter `PLUGIN_COMMAND_SANDBOX_ENABLED` (default OFF) – Commands laufen bei Aktivierung durch Sandbox-Worker
+  - SEC-SB5: Audit- und Fehlercode-Härtung ohne Traceback-Leakage
+
+#### Bekannte Einschränkungen / Betriebsnotizen
+- **Sandbox Runtime:** `PLUGIN_COMMAND_SANDBOX_ENABLED` ist standardmäßig OFF; explizite Aktivierung erforderlich
+- **Transportmodus:** Long Polling bleibt aktueller Beta-Modus; Webhook-Migration ist in diesem Release nicht enthalten
+- **Cross-Platform:** Linux validiert; macOS/Windows Native-Smoke-Tests noch nicht abgeschlossen (keine nativen Runner verfügbar)
+
+---
+
+### 🇬🇧 English
+
+#### Overview
+This release candidate includes improvements to AI context management, removal of the legacy FastAPI WebUI, hardened CSP policies, and the new command sandbox mechanism.
+
+#### New (Highlights)
+- **Scoped Recent Context (default ON):** Up to 20 normal messages are now persisted per scope (topic/group/private). The AI prompt automatically receives the appropriate recent context window based on the router decision.
+- **Group/Topic Trigger Guard Preserved:** In groups/topics, AI replies only on mention (`@botname`) or genuine reply-to-bot (owner always included).
+- **FastAPI WebUI Hard-Disabled:** The legacy FastAPI WebUI surface has been completely disabled; only Flask WebUI remains supported.
+- **Flask CSP Hardened:** Removed `style-src 'unsafe-inline'`; styles moved to static CSS file (`/static/webui.css`).
+- **Command Sandbox Hardening (GitHub Issue #2):**
+  - SEC-SB2: Protocol contract `command.execute.v1` with typed request/response validation
+  - SEC-SB3: Worker adapter for sandbox execution with safe plugin-entry resolution
+  - SEC-SB4: Runtime switch `PLUGIN_COMMAND_SANDBOX_ENABLED` (default OFF) – commands run through sandbox worker when enabled
+  - SEC-SB5: Audit and error code hardening without traceback leakage
+
+#### Known Limitations / Operational Notes
+- **Sandbox Runtime:** `PLUGIN_COMMAND_SANDBOX_ENABLED` is OFF by default; explicit activation required
+- **Transport Mode:** Long Polling remains current beta mode; webhook migration is not included in this release
+- **Cross-Platform:** Linux validated; macOS/Windows native smoke tests not yet completed (no native runners available)
+
+---
+
 ## [Unreleased] – 2026.05.16 (Public Release Candidate)
 
 **Datum / Date:** 2026-05-16
@@ -116,4 +166,4 @@ This is the first public release candidate of the AMO Telegram Bot. The software
 
 ---
 
-*Letzte Aktualisierung / Last updated: 2026-05-16*
+*Letzte Aktualisierung / Last updated: 2026-05-19*
