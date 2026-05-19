@@ -111,6 +111,8 @@ class AIService:
         msg = str(exc).casefold()
         if "timed out" in msg or "timeout" in msg:
             return True
+        if "empty response" in msg:
+            return True
         if "transport" in msg or "network" in msg or "connection" in msg:
             return True
         if isinstance(exc.__cause__, (httpx.TimeoutException, httpx.TransportError)):

@@ -159,3 +159,13 @@ def test_logs_fallback_success_metadata_only(monkeypatch, caplog: pytest.LogCapt
     messages = [rec.message for rec in caplog.records if rec.name == "amo_bot.ai.service"]
     assert any("phase=fallback" in msg and "outcome=success" in msg for msg in messages)
     assert all("sensitive prompt text" not in msg for msg in messages)
+
+
+def test_ai_service_retries_on_empty_response_when_enabled() -> None:
+    client = _FakeClient(outcomes=[OllamaError("empty response"), "ok-after-empty"])
+    service = AIService(client=client, retry_on_transient_error=True, retry_delay_seconds=0)
+
+    answer = asyncio.run(service.ask("hello"))
+
+    assert answer == "ok-after-empty"
+    assert len(client.calls) == 2
