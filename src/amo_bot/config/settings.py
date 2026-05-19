@@ -18,6 +18,8 @@ class Settings(BaseSettings):
     poll_retry_max_seconds: int = Field(default=30, alias="POLL_RETRY_MAX_SECONDS")
     offset_state_file: str = Field(default=".state/offset.json", alias="OFFSET_STATE_FILE")
 
+    ai_provider: str = Field(default="openai", alias="AI_PROVIDER")
+
     ollama_base_url: str = Field(default="http://127.0.0.1:11434", alias="OLLAMA_URL")
     ollama_model: str = Field(default="llama3.1", alias="OLLAMA_MODEL")
     ollama_timeout_seconds: int = Field(default=20, alias="OLLAMA_TIMEOUT_SECONDS")
@@ -48,6 +50,12 @@ class Settings(BaseSettings):
     def _validate_login_delay_bounds(self) -> Settings:
         if self.webui_login_delay_max_seconds < self.webui_login_delay_base_seconds:
             raise ValueError("WEBUI_LOGIN_DELAY_MAX_SECONDS must be >= WEBUI_LOGIN_DELAY_BASE_SECONDS")
+
+        provider = self.ai_provider.strip().casefold()
+        if provider not in {"openai", "ollama"}:
+            raise ValueError("AI_PROVIDER must be one of: openai, ollama")
+
+        self.ai_provider = provider
         return self
 
 
