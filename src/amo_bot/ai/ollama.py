@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import logging
+from typing import Literal
 
 import httpx
 
@@ -34,6 +35,7 @@ class OllamaClient:
     max_predict_tokens: int = 512
     max_response_chars: int = 1500
     request_endpoint: str = "generate"
+    streaming_mode: Literal["off", "collect_only", "live_edit"] = "off"
 
     def __post_init__(self) -> None:
         if self.max_prompt_chars <= 0:
@@ -42,6 +44,8 @@ class OllamaClient:
             raise ValueError("max_predict_tokens must be > 0")
         if self.request_endpoint not in {"generate", "chat"}:
             raise ValueError("request_endpoint must be one of: generate, chat")
+        if self.streaming_mode not in {"off", "collect_only", "live_edit"}:
+            raise ValueError("streaming_mode must be one of: off, collect_only, live_edit")
 
     async def generate(self, prompt: str) -> str:
         request_prompt = prompt[: self.max_prompt_chars]

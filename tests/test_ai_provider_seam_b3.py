@@ -49,6 +49,24 @@ def test_ollama_request_endpoint_invalid_fails_closed() -> None:
         _settings(OLLAMA_REQUEST_ENDPOINT="stream")
 
 
+def test_ollama_streaming_mode_defaults_off() -> None:
+    settings = _settings()
+    provider = build_ai_provider(settings)
+    assert provider.service.client.streaming_mode == "off"
+
+
+@pytest.mark.parametrize("mode", ["off", "collect_only", "live_edit"])
+def test_ollama_streaming_mode_accepts_known_values(mode: str) -> None:
+    settings = _settings(OLLAMA_STREAMING_MODE=mode)
+    provider = build_ai_provider(settings)
+    assert provider.service.client.streaming_mode == mode
+
+
+def test_ollama_streaming_mode_invalid_fails_closed() -> None:
+    with pytest.raises(ValueError, match="OLLAMA_STREAMING_MODE must be one of: off, collect_only, live_edit"):
+        _settings(OLLAMA_STREAMING_MODE="stream")
+
+
 @pytest.mark.parametrize("value", ["", "anthropic", "OPEN_AI", "123"])
 def test_invalid_provider_fails_validation(value: str) -> None:
     with pytest.raises(ValueError):

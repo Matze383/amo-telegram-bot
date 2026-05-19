@@ -30,6 +30,7 @@ class Settings(BaseSettings):
     ollama_retry_delay_seconds: float = Field(default=1.0, alias="OLLAMA_RETRY_DELAY_SECONDS", ge=0)
     ollama_fallback_model: str | None = Field(default=None, alias="OLLAMA_FALLBACK_MODEL")
     ollama_request_endpoint: str = Field(default="generate", alias="OLLAMA_REQUEST_ENDPOINT")
+    ollama_streaming_mode: str = Field(default="off", alias="OLLAMA_STREAMING_MODE")
 
     database_url: str = Field(default="sqlite:///./data/amo_bot.db", alias="DATABASE_URL")
     amo_plugin_dir: str = Field(default="./plugins", alias="AMO_PLUGIN_DIR")
@@ -62,6 +63,11 @@ class Settings(BaseSettings):
         if endpoint not in {"generate", "chat"}:
             raise ValueError("OLLAMA_REQUEST_ENDPOINT must be one of: generate, chat")
         self.ollama_request_endpoint = endpoint
+
+        streaming_mode = self.ollama_streaming_mode.strip().casefold()
+        if streaming_mode not in {"off", "collect_only", "live_edit"}:
+            raise ValueError("OLLAMA_STREAMING_MODE must be one of: off, collect_only, live_edit")
+        self.ollama_streaming_mode = streaming_mode
 
         return self
 

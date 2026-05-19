@@ -166,13 +166,18 @@ def test_ollama_client_rejects_invalid_limit_config() -> None:
         {"max_predict_tokens": 0},
         {"max_predict_tokens": -5},
         {"request_endpoint": "invalid"},
+        {"streaming_mode": "stream"},
     ):
         try:
             OllamaClient(base_url="http://ollama", model="m1", timeout_seconds=1.0, **kwargs)
             assert False, "expected ValueError"
         except ValueError as exc:
             text = str(exc)
-            assert "must be > 0" in text or "request_endpoint must be one of: generate, chat" in text
+            assert (
+                "must be > 0" in text
+                or "request_endpoint must be one of: generate, chat" in text
+                or "streaming_mode must be one of: off, collect_only, live_edit" in text
+            )
 
 
 def test_ollama_client_chat_endpoint_payload_and_response(monkeypatch) -> None:
@@ -228,6 +233,30 @@ def test_ollama_client_chat_endpoint_missing_done_flag(monkeypatch) -> None:
         assert False, "expected OllamaError"
     except OllamaError as exc:
         assert "invalid provider response contract" in str(exc)
+
+
+def test_ollama_client_collect_only_mode_does_not_enable_live_streaming(monkeypatch) -> None:
+    seen_payload: dict[str, Any] = {}
+
+    async def post_impl(url: str, payload: dict[str, Any]) -> httpx.Response:
+        nonlocal seen_payload
+        seen_payload = payload
+        req = httpx.Request("POST", url)
+        return httpx.Response(200, json={"response": "ok"}, request=req)
+
+    _patch_async_client(monkeypatch, post_impl)
+
+    client = OllamaClient(
+        base_url="http://ollama",
+        model="m1",
+        timeout_seconds=1.0,
+        request_endpoint="generate",
+        streaming_mode="collect_only",
+    )
+    out = asyncio.run(client.generate("hello"))
+
+    assert out == "ok"
+    assert seen_payload["stream"] is False
 
 
 def test_settings_rejects_invalid_ollama_limit_config() -> None:
