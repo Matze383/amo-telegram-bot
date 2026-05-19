@@ -24,13 +24,22 @@ class OllamaClient:
     base_url: str
     model: str
     timeout_seconds: float
-    max_response_chars: int
+    max_prompt_chars: int = 4000
+    max_predict_tokens: int = 512
+    max_response_chars: int = 1500
+
+    def __post_init__(self) -> None:
+        if self.max_prompt_chars <= 0:
+            raise ValueError("max_prompt_chars must be > 0")
+        if self.max_predict_tokens <= 0:
+            raise ValueError("max_predict_tokens must be > 0")
 
     async def generate(self, prompt: str) -> str:
         payload = {
             "model": self.model,
-            "prompt": prompt[:4000],
+            "prompt": prompt[: self.max_prompt_chars],
             "stream": False,
+            "options": {"num_predict": self.max_predict_tokens},
         }
         try:
             async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:

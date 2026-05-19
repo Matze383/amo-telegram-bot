@@ -63,6 +63,8 @@ def run(argv: list[str] | None = None) -> None:
             base_url=settings.ollama_base_url,
             model=settings.ollama_model,
             timeout_seconds=settings.ollama_timeout_seconds,
+            max_prompt_chars=settings.ollama_max_prompt_chars,
+            max_predict_tokens=settings.ollama_max_predict_tokens,
             max_response_chars=settings.ollama_max_response_chars,
         ),
         retry_on_transient_error=settings.ollama_retry_on_transient_error,

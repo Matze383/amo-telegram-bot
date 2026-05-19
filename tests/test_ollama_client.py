@@ -4,6 +4,7 @@ from typing import Any
 import httpx
 
 from amo_bot.ai.ollama import OllamaClient, OllamaError, OllamaHTTPStatusError
+from amo_bot.config.settings import Settings
 
 
 class _DummyAsyncClient:
@@ -38,6 +39,34 @@ def test_ollama_client_limits_response(monkeypatch) -> None:
     client = OllamaClient(base_url="http://ollama", model="m1", timeout_seconds=1.0, max_response_chars=10)
     out = asyncio.run(client.generate("hello"))
     assert out == "x" * 10
+
+
+def test_ollama_client_sends_server_side_request_limits(monkeypatch) -> None:
+    seen_payload: dict[str, Any] = {}
+
+    async def post_impl(url: str, payload: dict[str, Any]) -> httpx.Response:
+        nonlocal seen_payload
+        seen_payload = payload
+        req = httpx.Request("POST", url)
+        return httpx.Response(200, json={"response": "ok"}, request=req)
+
+    _patch_async_client(monkeypatch, post_impl)
+
+    client = OllamaClient(
+        base_url="http://ollama",
+        model="m1",
+        timeout_seconds=1.0,
+        max_prompt_chars=5,
+        max_predict_tokens=42,
+        max_response_chars=10,
+    )
+    out = asyncio.run(client.generate("abcdefghij"))
+
+    assert out == "ok"
+    assert seen_payload["model"] == "m1"
+    assert seen_payload["prompt"] == "abcde"
+    assert seen_payload["stream"] is False
+    assert seen_payload["options"] == {"num_predict": 42}
 
 
 def test_ollama_client_http_error(monkeypatch) -> None:
@@ -128,3 +157,42 @@ def test_ollama_client_non_string_response_field(monkeypatch) -> None:
         assert False, "expected OllamaError"
     except OllamaError as exc:
         assert "invalid ollama response" in str(exc)
+
+
+def test_ollama_client_rejects_invalid_limit_config() -> None:
+    for kwargs in (
+        {"max_prompt_chars": 0},
+        {"max_prompt_chars": -1},
+        {"max_predict_tokens": 0},
+        {"max_predict_tokens": -5},
+    ):
+        try:
+            OllamaClient(base_url="http://ollama", model="m1", timeout_seconds=1.0, **kwargs)
+            assert False, "expected ValueError"
+        except ValueError as exc:
+            assert "must be > 0" in str(exc)
+
+
+def test_settings_rejects_invalid_ollama_limit_config() -> None:
+    base = {
+        "BOT_TOKEN": "token",
+        "WEBUI_PASSWORD": "pw",
+        "WEBUI_SECRET_KEY": "secret",
+    }
+
+    for bad_env in (
+        {"OLLAMA_MAX_PROMPT_CHARS": "0"},
+        {"OLLAMA_MAX_PROMPT_CHARS": "-1"},
+        {"OLLAMA_MAX_PREDICT_TOKENS": "0"},
+        {"OLLAMA_MAX_PREDICT_TOKENS": "-2"},
+    ):
+        try:
+            Settings.model_validate({**base, **bad_env})
+            assert False, "expected validation failure"
+        except Exception as exc:
+            text = str(exc)
+            assert (
+                "OLLAMA_MAX_PROMPT_CHARS" in text
+                or "OLLAMA_MAX_PREDICT_TOKENS" in text
+                or "greater than 0" in text
+            )
