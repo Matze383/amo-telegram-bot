@@ -11,6 +11,8 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
+from amo_bot.plugins.sandbox.command_protocol import CommandError, CommandExecuteRequestV1, CommandOp
+
 from sqlalchemy.orm import sessionmaker
 
 from amo_bot.auth.roles import Role
@@ -110,6 +112,7 @@ class PluginCommandExecutor:
         timeout_seconds: float = 2.0,
         image_media_store: TelegramImageMediaStore | None = None,
         enable_image_attachments: bool = False,
+        command_sandbox_enabled: bool = False,
     ) -> None:
         self._loader = loader
         self._session_factory = session_factory
@@ -118,6 +121,7 @@ class PluginCommandExecutor:
         self._timeout_seconds = timeout_seconds
         self._image_media_store = image_media_store
         self._enable_image_attachments = enable_image_attachments
+        self._command_sandbox_enabled = command_sandbox_enabled
 
     async def execute(self, *, actor: CommandActor, invocation: CommandInvocation) -> None:
         manifest = self._find_manifest_for_command(invocation.command_name)
@@ -203,13 +207,16 @@ class PluginCommandExecutor:
 
         start = time.monotonic()
         try:
-            host_api = PluginHostAPI(
-                send_message=self._send_message,
-                reply=self._reply,
-                required_permissions=set(manifest.required_permissions),
-            )
-            handler = self._load_handler(manifest)
-            await asyncio.wait_for(handler(context, host_api), timeout=self._timeout_seconds)
+            if self._command_sandbox_enabled:
+                await self._execute_via_sandbox(manifest=manifest, context=context)
+            else:
+                host_api = PluginHostAPI(
+                    send_message=self._send_message,
+                    reply=self._reply,
+                    required_permissions=set(manifest.required_permissions),
+                )
+                handler = self._load_handler(manifest)
+                await asyncio.wait_for(handler(context, host_api), timeout=self._timeout_seconds)
         except asyncio.TimeoutError:
             self._write_audit(
                 event_type="plugin_command_timeout",
@@ -362,6 +369,60 @@ class PluginCommandExecutor:
             raise RuntimeError("plugin handle_command must be async")
 
         return handler
+
+    async def _execute_via_sandbox(self, *, manifest: PluginManifest, context: PluginCommandContext) -> None:
+        request = CommandExecuteRequestV1.from_dict(
+            {
+                "action": "command.execute.v1",
+                "request_id": context.run_id,
+                "plugin_id": None,
+                "plugin_entry": f"{manifest.name}/main.py",
+                "command_name": context.command_name,
+                "argument": context.argument,
+                "context": {
+                    "chat_id": context.chat_id,
+                    "message_id": context.message_id,
+                    "message_thread_id": context.message_thread_id,
+                    "user_id": context.user_id,
+                    "role": context.role.value,
+                    "trigger_type": context.trigger_type,
+                    "run_id": context.run_id,
+                    "attachments": list(context.attachments),
+                    "reply_to_image": context.reply_to_image,
+                },
+                "permissions": list(manifest.required_permissions),
+                "limits": {
+                    "timeout_ms": max(1, int(self._timeout_seconds * 1000)),
+                    "max_ops": 16,
+                    "max_text_len": 4000,
+                },
+            }
+        )
+        from amo_bot.plugins.sandbox.command_worker import execute_command_request
+
+        response = await asyncio.wait_for(
+            execute_command_request(request, plugins_root=self._loader.plugins_dir),
+            timeout=self._timeout_seconds,
+        )
+        if not response.get("ok", False):
+            error_obj = response.get("error")
+            if isinstance(error_obj, dict):
+                command_error = CommandError(
+                    code=str(error_obj.get("code") or "runtime_error"),
+                    message=str(error_obj.get("message") or "command execution failed"),
+                )
+            else:
+                command_error = CommandError(code="runtime_error", message="command execution failed")
+            raise RuntimeError(command_error.message)
+
+        for op_payload in response.get("ops", []):
+            op = CommandOp.from_dict(op_payload, max_text_len=request.limits.max_text_len)
+            if op.op == "send_message":
+                await self._send_message(op.chat_id, op.text)
+            elif op.op == "reply":
+                if op.message_id is None:
+                    raise RuntimeError("sandbox reply operation missing message_id")
+                await self._reply(op.chat_id, op.message_id, op.text, None)
 
     def _write_audit(self, *, event_type: str, actor_telegram_user_id: int, payload: dict[str, Any]) -> None:
         with self._session_factory() as session:

@@ -129,6 +129,7 @@ def run(argv: list[str] | None = None) -> None:
         session_factory=session_factory,
         send_message=send_text,
         reply=reply_text,
+        command_sandbox_enabled=settings.plugin_command_sandbox_enabled,
     )
 
     scheduled_plugin_executor = ScheduledPluginExecutor(

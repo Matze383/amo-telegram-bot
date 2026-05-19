@@ -22,6 +22,7 @@ def _mk_executor(
     *,
     required_permissions: list[str] | None = None,
     commands: list[str] | None = None,
+    command_sandbox_enabled: bool = False,
 ) -> tuple[PluginCommandExecutor, list[tuple[int, str]], list[tuple[int, int, str, int | None]]]:
     plugins_dir = tmp_path / "plugins"
     pdir = plugins_dir / plugin_name
@@ -64,6 +65,7 @@ def _mk_executor(
         send_message=_send,
         reply=_reply,
         timeout_seconds=0.05,
+        command_sandbox_enabled=command_sandbox_enabled,
     )
     return executor, sent, replied
 
@@ -270,6 +272,92 @@ async def handle_command(context, host_api):
     assert sent_reply == []
     assert sent_send == [(77, "send-path")]
     assert replied_send == []
+
+
+def test_plugin_command_default_path_uses_inprocess_handler(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'plugin_runtime_inprocess.db'}"
+    init_db(db_url)
+
+    executor, sent, replied = _mk_executor(
+        tmp_path,
+        db_url,
+        "inprocess_demo",
+        """
+async def handle_command(context, host_api):
+    await host_api.send_message(context.chat_id, "inprocess")
+""",
+        command_sandbox_enabled=False,
+    )
+
+    asyncio.run(
+        executor.execute(
+            actor=CommandActor(telegram_user_id=100, role=Role.ADMIN),
+            invocation=CommandInvocation(command_name="plug", argument=None, chat_id=77, message_id=9),
+        )
+    )
+
+    assert sent == [(77, "inprocess")]
+    assert replied == []
+
+
+def test_plugin_command_sandbox_enabled_routes_via_worker(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'plugin_runtime_sandbox.db'}"
+    init_db(db_url)
+
+    executor, sent, replied = _mk_executor(
+        tmp_path,
+        db_url,
+        "sandbox_demo",
+        """
+async def handle_command(context, host_api):
+    await host_api.send_message(context.chat_id, f"sandbox:{context.command_name}")
+    await host_api.reply(context.chat_id, context.message_id, "sandbox-ack")
+""",
+        command_sandbox_enabled=True,
+    )
+
+    asyncio.run(
+        executor.execute(
+            actor=CommandActor(telegram_user_id=100, role=Role.ADMIN),
+            invocation=CommandInvocation(command_name="plug", argument=None, chat_id=77, message_id=9),
+        )
+    )
+
+    assert sent == [(77, "sandbox:plug")]
+    assert replied == [(77, 9, "sandbox-ack", None)]
+
+
+def test_plugin_command_sandbox_runtime_error_is_safely_mapped(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'plugin_runtime_sandbox_error.db'}"
+    init_db(db_url)
+
+    executor, sent, replied = _mk_executor(
+        tmp_path,
+        db_url,
+        "sandbox_error_demo",
+        """
+async def handle_command(context, host_api):
+    raise RuntimeError("Traceback: leaked details")
+""",
+        command_sandbox_enabled=True,
+    )
+
+    asyncio.run(
+        executor.execute(
+            actor=CommandActor(telegram_user_id=100, role=Role.ADMIN),
+            invocation=CommandInvocation(command_name="plug", argument=None, chat_id=77, message_id=9),
+        )
+    )
+
+    assert sent == []
+    assert replied == []
+
+    sf = create_session_factory(db_url)
+    with sf() as session:
+        rows = session.scalars(select(AuditEvent).where(AuditEvent.event_type == "plugin_command_error")).all()
+    assert rows
+    assert "command execution failed" in (rows[-1].payload_json or "")
+    assert "Traceback" not in (rows[-1].payload_json or "")
 
 
 def test_plugin_command_timeout_and_error_are_isolated(tmp_path) -> None:

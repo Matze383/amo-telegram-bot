@@ -183,6 +183,35 @@ def test_webui_login_delay_rejects_max_below_base(monkeypatch, tmp_path) -> None
     assert "WEBUI_LOGIN_DELAY_MAX_SECONDS must be >= WEBUI_LOGIN_DELAY_BASE_SECONDS" in str(exc_info.value)
 
 
+def test_plugin_command_sandbox_enabled_defaults_false_and_can_be_enabled(monkeypatch, tmp_path) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "\n".join(
+            [
+                "BOT_TOKEN=token-from-dotenv",
+                "WEBUI_PASSWORD=pw-from-dotenv",
+                "WEBUI_SECRET_KEY=dotenv-secret-key-0123456789-abcdefghij",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("DOTENV_PATH", str(env_file))
+    monkeypatch.delenv("AMO_ENV_OVERRIDE", raising=False)
+    monkeypatch.delenv("PLUGIN_COMMAND_SANDBOX_ENABLED", raising=False)
+    monkeypatch.delenv("WEBUI_LOGIN_DELAY_BASE_SECONDS", raising=False)
+    monkeypatch.delenv("WEBUI_LOGIN_DELAY_MAX_SECONDS", raising=False)
+
+    settings_default = get_settings()
+    assert settings_default.plugin_command_sandbox_enabled is False
+
+    monkeypatch.setenv("PLUGIN_COMMAND_SANDBOX_ENABLED", "true")
+    settings_enabled = get_settings()
+    assert settings_enabled.plugin_command_sandbox_enabled is True
+
+
 def test_no_secret_values_are_exposed_in_validation_error(monkeypatch, tmp_path) -> None:
     env_file = tmp_path / ".env"
     secret_value = "super-secret-value"

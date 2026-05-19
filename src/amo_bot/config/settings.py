@@ -28,6 +28,7 @@ class Settings(BaseSettings):
 
     database_url: str = Field(default="sqlite:///./data/amo_bot.db", alias="DATABASE_URL")
     amo_plugin_dir: str = Field(default="./plugins", alias="AMO_PLUGIN_DIR")
+    plugin_command_sandbox_enabled: bool = Field(default=False, alias="PLUGIN_COMMAND_SANDBOX_ENABLED")
 
     webui_host: str = Field(default="127.0.0.1", alias="WEBUI_HOST")
     webui_port: int = Field(default=8080, alias="WEBUI_PORT")
