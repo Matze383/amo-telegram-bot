@@ -231,15 +231,19 @@ class PluginCommandExecutor:
             return
         except Exception as exc:
             logger.exception("plugin command failed plugin=%s command=%s", manifest.name, invocation.command_name)
+            payload = {
+                "plugin_name": manifest.name,
+                "command": invocation.command_name,
+                "run_id": run_id,
+                "error": str(exc),
+            }
+            sandbox_error_code = getattr(exc, "sandbox_error_code", None)
+            if isinstance(sandbox_error_code, str) and sandbox_error_code.strip():
+                payload["error_code"] = sandbox_error_code.strip()
             self._write_audit(
                 event_type="plugin_command_error",
                 actor_telegram_user_id=actor.telegram_user_id,
-                payload={
-                    "plugin_name": manifest.name,
-                    "command": invocation.command_name,
-                    "run_id": run_id,
-                    "error": str(exc),
-                },
+                payload=payload,
             )
             return
 
@@ -413,7 +417,9 @@ class PluginCommandExecutor:
                 )
             else:
                 command_error = CommandError(code="runtime_error", message="command execution failed")
-            raise RuntimeError(command_error.message)
+            sandbox_exc = RuntimeError(command_error.message)
+            sandbox_exc.__dict__["sandbox_error_code"] = command_error.code
+            raise sandbox_exc
 
         for op_payload in response.get("ops", []):
             op = CommandOp.from_dict(op_payload, max_text_len=request.limits.max_text_len)

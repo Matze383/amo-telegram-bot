@@ -356,7 +356,9 @@ async def handle_command(context, host_api):
     with sf() as session:
         rows = session.scalars(select(AuditEvent).where(AuditEvent.event_type == "plugin_command_error")).all()
     assert rows
-    assert "command execution failed" in (rows[-1].payload_json or "")
+    payload = json.loads(rows[-1].payload_json or "{}")
+    assert payload.get("error") == "command execution failed"
+    assert payload.get("error_code") == "runtime_error"
     assert "Traceback" not in (rows[-1].payload_json or "")
 
 
