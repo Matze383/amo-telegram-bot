@@ -54,11 +54,12 @@ def test_primary_retry_fail_then_fallback_model_success(monkeypatch) -> None:
     client = _FakeClient(outcomes=[OllamaHTTPStatusError(503), OllamaHTTPStatusError(503)])
     fallback = _FallbackClient(response="fallback success")
 
-    def _mk_fallback(*, base_url: str, model: str, timeout_seconds: float, max_response_chars: int):
+    def _mk_fallback(*, base_url: str, model: str, timeout_seconds: float, max_response_chars: int, request_endpoint: str):
         assert base_url == "http://ollama"
         assert model == "kimi-k2.5:cloud"
         assert timeout_seconds == 1.0
         assert max_response_chars == 1000
+        assert request_endpoint == "generate"
         return fallback
 
     monkeypatch.setattr("amo_bot.ai.service.OllamaClient", _mk_fallback)
@@ -80,7 +81,8 @@ def test_primary_retry_fail_then_fallback_model_success(monkeypatch) -> None:
 def test_primary_retry_and_fallback_fail_raises(monkeypatch) -> None:
     client = _FakeClient(outcomes=[OllamaHTTPStatusError(503), OllamaHTTPStatusError(503)])
 
-    def _mk_fallback(*, base_url: str, model: str, timeout_seconds: float, max_response_chars: int):
+    def _mk_fallback(*, base_url: str, model: str, timeout_seconds: float, max_response_chars: int, request_endpoint: str):
+        assert request_endpoint == "generate"
         return _FallbackClient(response=OllamaError("request timed out"))
 
     monkeypatch.setattr("amo_bot.ai.service.OllamaClient", _mk_fallback)
@@ -137,7 +139,8 @@ def test_logs_fallback_success_metadata_only(monkeypatch, caplog: pytest.LogCapt
     client = _FakeClient(model="qwen3", outcomes=[OllamaHTTPStatusError(503), OllamaHTTPStatusError(503)])
     fallback = _FallbackClient(response="fallback success")
 
-    def _mk_fallback(*, base_url: str, model: str, timeout_seconds: float, max_response_chars: int):
+    def _mk_fallback(*, base_url: str, model: str, timeout_seconds: float, max_response_chars: int, request_endpoint: str):
+        assert request_endpoint == "generate"
         return fallback
 
     monkeypatch.setattr("amo_bot.ai.service.OllamaClient", _mk_fallback)

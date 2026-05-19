@@ -29,6 +29,7 @@ class Settings(BaseSettings):
     ollama_retry_on_transient_error: bool = Field(default=True, alias="OLLAMA_RETRY_ON_TRANSIENT_ERROR")
     ollama_retry_delay_seconds: float = Field(default=1.0, alias="OLLAMA_RETRY_DELAY_SECONDS", ge=0)
     ollama_fallback_model: str | None = Field(default=None, alias="OLLAMA_FALLBACK_MODEL")
+    ollama_request_endpoint: str = Field(default="generate", alias="OLLAMA_REQUEST_ENDPOINT")
 
     database_url: str = Field(default="sqlite:///./data/amo_bot.db", alias="DATABASE_URL")
     amo_plugin_dir: str = Field(default="./plugins", alias="AMO_PLUGIN_DIR")
@@ -56,6 +57,12 @@ class Settings(BaseSettings):
             raise ValueError("AI_PROVIDER must be one of: openai, ollama")
 
         self.ai_provider = provider
+
+        endpoint = self.ollama_request_endpoint.strip().casefold()
+        if endpoint not in {"generate", "chat"}:
+            raise ValueError("OLLAMA_REQUEST_ENDPOINT must be one of: generate, chat")
+        self.ollama_request_endpoint = endpoint
+
         return self
 
 

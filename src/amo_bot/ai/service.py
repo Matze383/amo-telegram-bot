@@ -48,11 +48,13 @@ class AIService:
             if not fallback_model:
                 raise retry_exc
 
+        request_endpoint = getattr(self.client, "request_endpoint", "generate")
         fallback_client = OllamaClient(
             base_url=self.client.base_url,
             model=fallback_model,
             timeout_seconds=self.client.timeout_seconds,
             max_response_chars=self.client.max_response_chars,
+            request_endpoint=request_endpoint,
         )
         return await self._timed_generate(client=fallback_client, prompt=cleaned, phase="fallback", prompt_len=prompt_len)
 
