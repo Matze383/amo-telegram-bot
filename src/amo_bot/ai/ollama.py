@@ -5,6 +5,8 @@ import logging
 
 import httpx
 
+from amo_bot.ai.response_contract import envelope_from_full_response_text
+
 
 class OllamaError(RuntimeError):
     pass
@@ -91,7 +93,10 @@ class OllamaClient:
             if not isinstance(response_text, str):
                 raise OllamaError("invalid ollama response")
 
-        text = response_text.strip()
-        if not text:
-            raise OllamaError("empty response")
+        try:
+            envelope = envelope_from_full_response_text(response_text)
+        except RuntimeError as exc:
+            raise OllamaError(str(exc)) from exc
+
+        text = envelope.final_text
         return text[: self.max_response_chars]
