@@ -27,29 +27,43 @@ class OllamaClient:
     max_prompt_chars: int = 4000
     max_predict_tokens: int = 512
     max_response_chars: int = 1500
+    request_endpoint: str = "generate"
 
     def __post_init__(self) -> None:
         if self.max_prompt_chars <= 0:
             raise ValueError("max_prompt_chars must be > 0")
         if self.max_predict_tokens <= 0:
             raise ValueError("max_predict_tokens must be > 0")
+        if self.request_endpoint not in {"generate", "chat"}:
+            raise ValueError("request_endpoint must be one of: generate, chat")
 
     async def generate(self, prompt: str) -> str:
-        payload = {
-            "model": self.model,
-            "prompt": prompt[: self.max_prompt_chars],
-            "stream": False,
-            "options": {"num_predict": self.max_predict_tokens},
-        }
+        request_prompt = prompt[: self.max_prompt_chars]
+        if self.request_endpoint == "chat":
+            payload = {
+                "model": self.model,
+                "messages": [{"role": "user", "content": request_prompt}],
+                "stream": False,
+                "options": {"num_predict": self.max_predict_tokens},
+            }
+            endpoint_path = "/api/chat"
+        else:
+            payload = {
+                "model": self.model,
+                "prompt": request_prompt,
+                "stream": False,
+                "options": {"num_predict": self.max_predict_tokens},
+            }
+            endpoint_path = "/api/generate"
         try:
             async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
-                response = await client.post(f"{self.base_url}/api/generate", json=payload)
+                response = await client.post(f"{self.base_url}{endpoint_path}", json=payload)
             response.raise_for_status()
             data = response.json()
         except httpx.TimeoutException as exc:
             raise OllamaError("request timed out") from exc
         except httpx.HTTPStatusError as exc:
-            endpoint = str(exc.request.url) if exc.request is not None else f"{self.base_url}/api/generate"
+            endpoint = str(exc.request.url) if exc.request is not None else f"{self.base_url}{endpoint_path}"
             response_preview = (exc.response.text or "")[:300]
             logger.error(
                 "ollama http error endpoint=%s status_code=%s prompt_len=%s response_preview=%r",
@@ -65,9 +79,17 @@ class OllamaClient:
         if not isinstance(data, dict):
             raise OllamaError("invalid ollama response")
 
-        response_text = data.get("response")
-        if not isinstance(response_text, str):
-            raise OllamaError("invalid ollama response")
+        if self.request_endpoint == "chat":
+            message = data.get("message")
+            if not isinstance(message, dict):
+                raise OllamaError("invalid ollama response")
+            response_text = message.get("content")
+            if not isinstance(response_text, str):
+                raise OllamaError("invalid ollama response")
+        else:
+            response_text = data.get("response")
+            if not isinstance(response_text, str):
+                raise OllamaError("invalid ollama response")
 
         text = response_text.strip()
         if not text:

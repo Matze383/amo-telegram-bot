@@ -165,12 +165,65 @@ def test_ollama_client_rejects_invalid_limit_config() -> None:
         {"max_prompt_chars": -1},
         {"max_predict_tokens": 0},
         {"max_predict_tokens": -5},
+        {"request_endpoint": "invalid"},
     ):
         try:
             OllamaClient(base_url="http://ollama", model="m1", timeout_seconds=1.0, **kwargs)
             assert False, "expected ValueError"
         except ValueError as exc:
-            assert "must be > 0" in str(exc)
+            text = str(exc)
+            assert "must be > 0" in text or "request_endpoint must be one of: generate, chat" in text
+
+
+def test_ollama_client_chat_endpoint_payload_and_response(monkeypatch) -> None:
+    seen_url = ""
+    seen_payload: dict[str, Any] = {}
+
+    async def post_impl(url: str, payload: dict[str, Any]) -> httpx.Response:
+        nonlocal seen_url, seen_payload
+        seen_url = url
+        seen_payload = payload
+        req = httpx.Request("POST", url)
+        return httpx.Response(200, json={"message": {"role": "assistant", "content": "chat-ok"}}, request=req)
+
+    _patch_async_client(monkeypatch, post_impl)
+
+    client = OllamaClient(
+        base_url="http://ollama",
+        model="m1",
+        timeout_seconds=1.0,
+        max_prompt_chars=5,
+        max_predict_tokens=7,
+        request_endpoint="chat",
+    )
+    out = asyncio.run(client.generate("abcdefghij"))
+
+    assert out == "chat-ok"
+    assert seen_url == "http://ollama/api/chat"
+    assert seen_payload["model"] == "m1"
+    assert seen_payload["stream"] is False
+    assert seen_payload["messages"] == [{"role": "user", "content": "abcde"}]
+    assert seen_payload["options"] == {"num_predict": 7}
+
+
+def test_ollama_client_chat_endpoint_invalid_message_shape(monkeypatch) -> None:
+    async def post_impl(url: str, payload: dict[str, Any]) -> httpx.Response:
+        req = httpx.Request("POST", url)
+        return httpx.Response(200, json={"message": "nope"}, request=req)
+
+    _patch_async_client(monkeypatch, post_impl)
+
+    client = OllamaClient(
+        base_url="http://ollama",
+        model="m1",
+        timeout_seconds=1.0,
+        request_endpoint="chat",
+    )
+    try:
+        asyncio.run(client.generate("hello"))
+        assert False, "expected OllamaError"
+    except OllamaError as exc:
+        assert "invalid ollama response" in str(exc)
 
 
 def test_settings_rejects_invalid_ollama_limit_config() -> None:
