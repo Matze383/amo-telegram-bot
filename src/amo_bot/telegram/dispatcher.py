@@ -512,7 +512,39 @@ class Dispatcher:
             "The message was addressed to this bot; treat own-bot mentions as routing triggers, not user intent. "
             "Do not claim to be the underlying model/provider unless explicitly asked."
         )
-        llm_prompt = f"{identity_instruction}\n\nUser message:\n{normalized_text}"
+
+        def _normalize_context_lines(value: str, *, drop_exact_line: str) -> str:
+            lines = [line.rstrip() for line in value.splitlines()]
+            filtered = [line for line in lines if line.strip() and line.strip() != drop_exact_line]
+            return "\n".join(filtered).strip()
+
+        prompt_sections: list[str] = [identity_instruction]
+        prompt_sections.append(
+            "Use provided context only as background. Prioritize the current user message when determining intent and reply."
+        )
+
+        drop_exact_line = normalized_text.strip()
+
+        recent_messages_text = (decision.context.recent_messages_text or "").strip()
+        if recent_messages_text:
+            recent_messages_text = _normalize_context_lines(recent_messages_text, drop_exact_line=drop_exact_line)
+            if recent_messages_text:
+                prompt_sections.append(f"Relevant recent chat context (same scope):\n{recent_messages_text}")
+
+        assembled_soul_text = (decision.context.assembled_soul_text or "").strip()
+        if assembled_soul_text:
+            prompt_sections.append(f"Assistant behavior context:\n{assembled_soul_text}")
+
+        daily_memory_text = (decision.context.daily_memory_text or "").strip()
+        if daily_memory_text:
+            prompt_sections.append(f"Daily memory context:\n{daily_memory_text}")
+
+        long_memory_text = (decision.context.long_memory_text or "").strip()
+        if long_memory_text:
+            prompt_sections.append(f"Long-term memory context:\n{long_memory_text}")
+
+        prompt_sections.append(f"User message:\n{normalized_text}")
+        llm_prompt = "\n\n".join(prompt_sections)
 
         try:
             response = await self.ai_service.ask(llm_prompt)

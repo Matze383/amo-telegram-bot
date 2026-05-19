@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 from unittest.mock import patch
 
+from amo_bot.ai.router import AIRouterContextV1, AIRouterDecision, AIRouterReasonCode
+
 from sqlalchemy import select
 
 from amo_bot.db.base import create_session_factory
@@ -646,6 +648,104 @@ def test_non_explicit_private_scope_error_does_not_send_fallback(tmp_path) -> No
     )
 
     assert sender.sent == []
+
+
+def test_ai_prompt_includes_router_context_sections_and_deduplicates_current_message(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'ai_autoreply_prompt_context_sections.db'}"
+    init_db(db_url)
+    _seed_user(
+        db_url,
+        user_id=2501,
+        role="vip",
+        consent="accepted",
+        group_chat_id=-1501,
+        group_role="vip",
+    )
+
+    sf = create_session_factory(db_url)
+    with sf() as session:
+        TopicAgentMemoryRepository(session).upsert_config(scope_type="topic", chat_id=-1501, topic_id=11, ai_enabled=True)
+
+    ai = FakeAIService(answer="ai-answer")
+    sender = Sender()
+    dispatcher = _mk_dispatcher(db_url, ai, sender)
+
+    router_context = AIRouterContextV1(
+        scope_type="topic",
+        scope_chat_id=-1501,
+        scope_topic_id=11,
+        user_id=2501,
+        message_text="aktuelle frage",
+        route_reason=AIRouterReasonCode.MENTION_IN_ACTIVE_SCOPE,
+        flag_ai_scope_active=True,
+        flag_bot_mention=True,
+        flag_reply_to_bot=False,
+        recent_messages_text="u1: vorherige relevante nachricht\nu1: @AmoBot aktuelle frage",
+        assembled_soul_text="Sei präzise.",
+        daily_memory_text="Heute: wichtige Info.",
+        long_memory_text="Langzeit: Präferenz X.",
+    )
+    forced_decision = AIRouterDecision(
+        passthrough=True,
+        eligible=True,
+        reason_code=AIRouterReasonCode.MENTION_IN_ACTIVE_SCOPE,
+        context=router_context,
+    )
+
+    with patch("amo_bot.telegram.dispatcher.AIRouter.decide", return_value=forced_decision):
+        asyncio.run(
+            dispatcher.handle_raw_update(
+                _mk_update(uid=2501, chat_id=-1501, chat_type="supergroup", text="@AmoBot aktuelle frage", update_id=53, message_thread_id=11)
+            )
+        )
+
+    assert sender.sent == [(-1501, "ai-answer", 11)]
+    assert len(ai.prompts) == 1
+
+    prompt = ai.prompts[0]
+    assert "Relevant recent chat context (same scope):" in prompt
+    assert "u1: vorherige relevante nachricht" in prompt
+    assert "u1: aktuelle frage" not in prompt
+    assert "Assistant behavior context:\nSei präzise." in prompt
+    assert "Daily memory context:\nHeute: wichtige Info." in prompt
+    assert "Long-term memory context:\nLangzeit: Präferenz X." in prompt
+    assert "User message:\naktuelle frage" in prompt
+
+
+def test_group_non_trigger_stays_silent_with_recent_context_present(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'ai_autoreply_group_non_trigger_guard.db'}"
+    init_db(db_url)
+    _seed_user(
+        db_url,
+        user_id=2502,
+        role="vip",
+        consent="accepted",
+        group_chat_id=-1502,
+        group_role="vip",
+    )
+
+    sf = create_session_factory(db_url)
+    with sf() as session:
+        repo = TopicAgentMemoryRepository(session)
+        repo.upsert_config(scope_type="topic", chat_id=-1502, topic_id=21, ai_enabled=True)
+
+    ai = FakeAIService(answer="ai-answer")
+    sender = Sender()
+    dispatcher = _mk_dispatcher(db_url, ai, sender)
+
+    asyncio.run(
+        dispatcher.handle_raw_update(
+            _mk_update(uid=2502, chat_id=-1502, chat_type="supergroup", text="historie", update_id=61, message_thread_id=21)
+        )
+    )
+    asyncio.run(
+        dispatcher.handle_raw_update(
+            _mk_update(uid=2502, chat_id=-1502, chat_type="supergroup", text="kein trigger", update_id=62, message_thread_id=21)
+        )
+    )
+
+    assert sender.sent == []
+    assert ai.prompts == []
 
 
 def test_group_scope_unaffected_by_private_min_ai_role(tmp_path) -> None:
