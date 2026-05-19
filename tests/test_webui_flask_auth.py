@@ -368,6 +368,8 @@ def test_security_headers_present_on_normal_response(tmp_path) -> None:
     assert "object-src 'none'" in csp
     assert "base-uri 'self'" in csp
     assert "form-action 'self'" in csp
+    assert "style-src 'self'" in csp
+    assert "'unsafe-inline'" not in csp
     assert response.headers.get("X-Frame-Options") == "DENY"
     assert response.headers.get("X-Content-Type-Options") == "nosniff"
     assert response.headers.get("Referrer-Policy") == "strict-origin-when-cross-origin"

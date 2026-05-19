@@ -4,49 +4,49 @@
   <h1>Group Detail</h1>
   <p><a href="{{ url_for('ui.groups_page') }}">Back to Groups</a></p>
 
-  <section aria-labelledby="group-info-heading" style="margin-bottom: 2rem; border: 1px solid #ddd; border-radius: 8px; padding: 1rem 1.25rem; background: #fafafa;">
-    <h2 id="group-info-heading" style="margin-top: 0;">Group Info</h2>
-    <h3 style="margin-bottom: 0.75rem;">{{ group.title or "(ohne Titel)" }}</h3>
-    <dl style="display: grid; grid-template-columns: minmax(140px, max-content) 1fr; gap: 0.4rem 1rem; margin: 0;">
+  <section aria-labelledby="group-info-heading" class="card-muted">
+    <h2 id="group-info-heading" class="mt-0">Group Info</h2>
+    <h3 class="mb-075">{{ group.title or "(ohne Titel)" }}</h3>
+    <dl class="dl-grid">
       <dt><strong>chat_id</strong></dt>
-      <dd style="margin: 0;">{{ group.chat_id }}</dd>
+      <dd class="dd-reset">{{ group.chat_id }}</dd>
       <dt><strong>chat_type</strong></dt>
-      <dd style="margin: 0;">{{ group.chat_type }}</dd>
+      <dd class="dd-reset">{{ group.chat_type }}</dd>
       <dt><strong>username</strong></dt>
-      <dd style="margin: 0;">{{ group.username or "-" }}</dd>
+      <dd class="dd-reset">{{ group.username or "-" }}</dd>
       <dt><strong>last_seen_at</strong></dt>
-      <dd style="margin: 0;">{{ group.last_seen_at or "-" }}</dd>
+      <dd class="dd-reset">{{ group.last_seen_at or "-" }}</dd>
       <dt><strong>updated_at</strong></dt>
-      <dd style="margin: 0;">{{ group.updated_at or "-" }}</dd>
+      <dd class="dd-reset">{{ group.updated_at or "-" }}</dd>
     </dl>
   </section>
 
   <section aria-labelledby="topics-heading">
-    <h2 id="topics-heading" style="margin-bottom: 1rem;">Topics</h2>
+    <h2 id="topics-heading" class="mb-1">Topics</h2>
     {% if group.topics %}
-      <div style="display: grid; gap: 1rem;">
+      <div class="topics-grid">
         {% for topic in group.topics %}
-          <article aria-labelledby="topic-{{ topic.message_thread_id }}-heading" style="border: 1px solid #ddd; border-radius: 8px; padding: 1rem 1.25rem; background: #fff;">
-            <h3 id="topic-{{ topic.message_thread_id }}-heading" style="margin-top: 0; margin-bottom: 0.75rem;">
+          <article aria-labelledby="topic-{{ topic.message_thread_id }}-heading" class="topic-card">
+            <h3 id="topic-{{ topic.message_thread_id }}-heading" class="mt-0 mb-075">
               {{ topic.display_name or topic.telegram_topic_name or ('Topic #' ~ topic.message_thread_id) }}
             </h3>
-            <dl style="display: grid; grid-template-columns: minmax(180px, max-content) 1fr; gap: 0.4rem 1rem; margin: 0 0 1rem 0;">
+            <dl class="dl-grid-wide">
               <dt><strong>message_thread_id</strong></dt>
-              <dd style="margin: 0;">{{ topic.message_thread_id }}</dd>
+              <dd class="dd-reset">{{ topic.message_thread_id }}</dd>
               <dt><strong>telegram_topic_name</strong></dt>
-              <dd style="margin: 0;">{{ topic.telegram_topic_name or "-" }}</dd>
+              <dd class="dd-reset">{{ topic.telegram_topic_name or "-" }}</dd>
               <dt><strong>display_name</strong></dt>
-              <dd style="margin: 0;">{{ topic.display_name or "-" }}</dd>
+              <dd class="dd-reset">{{ topic.display_name or "-" }}</dd>
               <dt><strong>notes</strong></dt>
-              <dd style="margin: 0;">{{ topic.notes or "-" }}</dd>
+              <dd class="dd-reset">{{ topic.notes or "-" }}</dd>
               <dt><strong>enabled</strong></dt>
-              <dd style="margin: 0;">{{ 'yes' if lang == 'en' and topic.enabled else 'no' if lang == 'en' else 'ja' if topic.enabled else 'nein' }}</dd>
+              <dd class="dd-reset">{{ 'yes' if lang == 'en' and topic.enabled else 'no' if lang == 'en' else 'ja' if topic.enabled else 'nein' }}</dd>
             </dl>
 
             <form method="post" action="{{ url_for('ui.update_topic_metadata', chat_id=group.chat_id, message_thread_id=topic.message_thread_id) }}">
               {{ topic_form.csrf_token }}
-              <section aria-labelledby="topic-{{ topic.message_thread_id }}-basic-heading" style="margin-bottom: 1rem;">
-                <h4 id="topic-{{ topic.message_thread_id }}-basic-heading" style="margin: 0 0 0.5rem 0;">Basic metadata</h4>
+              <section aria-labelledby="topic-{{ topic.message_thread_id }}-basic-heading" class="mb-1">
+                <h4 id="topic-{{ topic.message_thread_id }}-basic-heading" class="mb-05">Basic metadata</h4>
                 <label>
                   display_name
                   <input type="text" name="display_name" value="{{ topic.display_name or '' }}" maxlength="255" placeholder="Display Name">
@@ -63,17 +63,17 @@
                 </label>
               </section>
 
-              <section aria-labelledby="topic-{{ topic.message_thread_id }}-soul-heading" style="margin-bottom: 1rem; border-top: 1px solid #eee; padding-top: 0.75rem;">
-                <h4 id="topic-{{ topic.message_thread_id }}-soul-heading" style="margin: 0 0 0.5rem 0;">Topic Soul</h4>
-                <p style="margin: 0 0 0.5rem 0;"><small>Owner-only mutation. Escaping is enforced on render.</small></p>
+              <section aria-labelledby="topic-{{ topic.message_thread_id }}-soul-heading" class="topic-divider">
+                <h4 id="topic-{{ topic.message_thread_id }}-soul-heading" class="mb-05">Topic Soul</h4>
+                <p class="mb-05-small"><small>Owner-only mutation. Escaping is enforced on render.</small></p>
                 <label>
                   topic_soul_text
                   <textarea name="topic_soul_text" rows="5" cols="60" maxlength="4000" placeholder="Topic Soul text">{{ topic.topic_soul_text or '' }}</textarea>
                 </label>
               </section>
 
-              <section aria-labelledby="topic-{{ topic.message_thread_id }}-advanced-heading" style="margin-bottom: 1rem; border-top: 1px solid #eee; padding-top: 0.75rem;">
-                <h4 id="topic-{{ topic.message_thread_id }}-advanced-heading" style="margin: 0 0 0.5rem 0;">Advanced</h4>
+              <section aria-labelledby="topic-{{ topic.message_thread_id }}-advanced-heading" class="topic-divider">
+                <h4 id="topic-{{ topic.message_thread_id }}-advanced-heading" class="mb-05">Advanced</h4>
                 <label>
                   <input type="checkbox" name="ai_enabled" value="y" {% if topic.ai_enabled %}checked{% endif %}>
                   Topic AI enabled

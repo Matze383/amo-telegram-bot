@@ -11,12 +11,12 @@
   {% endif %}
 
   {% if error_message %}
-    <p style="color: #b00020;">{{ error_message }}</p>
+    <p class="error-message">{{ error_message }}</p>
   {% endif %}
 
   {% if groups %}
     {% for group in groups %}
-      <section style="margin-bottom: 2rem;">
+      <section class="group-section">
         <h2>{{ group.title or "(ohne Titel)" }}</h2>
         <ul>
           <li><strong>chat_id:</strong> {{ group.chat_id }}</li>
@@ -29,7 +29,7 @@
 
         {% if group.chat_type in ["group", "supergroup"] %}
           <h3>{{ t('groups.roles') }}</h3>
-          <form method="post" action="{{ url_for('ui.update_group_role', chat_id=group.chat_id) }}" style="margin-bottom: 0.75rem;">
+          <form method="post" action="{{ url_for('ui.update_group_role', chat_id=group.chat_id) }}" class="group-role-form">
             {{ group_role_form.csrf_token }}
             <select name="telegram_user_id">
               {% for user_role in group.group_user_roles %}

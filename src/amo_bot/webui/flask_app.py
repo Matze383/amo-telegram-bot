@@ -164,14 +164,13 @@ def create_flask_app(
 
     @app.after_request
     def _security_headers(response):  # type: ignore[no-untyped-def]
-        # style-src allows inline styles for existing server-rendered templates.
         response.headers["Content-Security-Policy"] = (
             "default-src 'self'; "
             "object-src 'none'; "
             "base-uri 'self'; "
             "form-action 'self'; "
             "frame-ancestors 'none'; "
-            "style-src 'self' 'unsafe-inline'"
+            "style-src 'self'"
         )
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["X-Content-Type-Options"] = "nosniff"

@@ -39,6 +39,7 @@ Dies ist der erste öffentliche Release-Kandidat des AMO Telegram Bot. Die Softw
 #### Sicherheit
 
 - WebUI ist **lokal only** (`127.0.0.1`) – niemals ins Internet freigeben
+- Flask-WebUI-CSP gehärtet: `style-src 'unsafe-inline'` entfernt, Styles auf statische Datei (`/static/webui.css`) umgestellt
 - Alle Secrets gehören in `.env` (bereits in `.gitignore`)
 - Für öffentliche Deployments: Reverse Proxy mit HTTPS verwenden
 
@@ -72,6 +73,7 @@ This is the first public release candidate of the AMO Telegram Bot. The software
 #### Security
 
 - WebUI is **local-only** (`127.0.0.1`) – never expose to the internet
+- Flask WebUI CSP hardened: removed `style-src 'unsafe-inline'` and moved styles to static stylesheet (`/static/webui.css`)
 - All secrets belong in `.env` (already in `.gitignore`)
 - For public deployments: Use reverse proxy with HTTPS
 

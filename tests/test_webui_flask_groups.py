@@ -25,6 +25,7 @@ def _make_settings(database_url: str, password: str = "test-secret", owner_id: i
         "WEBUI_HOST": "127.0.0.1",
         "WEBUI_PORT": 8080,
         "WEBUI_PASSWORD": password,
+        "WEBUI_SECRET_KEY": "test-secret-key-0123456789-abcdef",
         "WEBUI_PUBLIC_MODE": False,
         "WEBUI_REQUIRE_HTTPS": False,
         "WEBUI_SESSION_COOKIE_SECURE": False,
@@ -545,7 +546,7 @@ def test_group_roles_only_show_seen_users_per_chat_and_keep_assigned_not_seen(tm
         assert "<li><strong>chat_id:</strong> -100301</li>" in html
         assert "<li><strong>chat_id:</strong> -100302</li>" in html
 
-        sections = html.split('<section style="margin-bottom: 2rem;">')
+        sections = html.split('<section class="group-section">')
         group1_html = next((section for section in sections if "<strong>chat_id:</strong> -100301" in section), "")
         assert group1_html
 
