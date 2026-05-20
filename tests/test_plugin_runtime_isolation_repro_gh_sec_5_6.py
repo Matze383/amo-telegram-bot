@@ -106,7 +106,6 @@ async def handle_command(context, host_api):
     assert sent == []
 
 
-@pytest.mark.xfail(reason="GH-SEC-5/6: worker runtime not yet routed through real sandbox plugin execution")
 def test_repro_worker_runtime_should_execute_via_sandbox_not_host_import(tmp_path, monkeypatch) -> None:
     settings, session_factory = _mk_settings(tmp_path)
     loader = _write_plugin(
