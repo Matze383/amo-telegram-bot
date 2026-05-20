@@ -157,7 +157,6 @@ async def handle_worker(context, host_api):
     assert calls, "expected sandbox runner call once worker isolation is implemented"
 
 
-@pytest.mark.xfail(reason="GH-SEC-5/6: scheduled runtime not yet routed through real sandbox plugin execution")
 def test_repro_scheduled_runtime_should_execute_via_sandbox_not_host_import(tmp_path, monkeypatch) -> None:
     settings, session_factory = _mk_settings(tmp_path)
     loader = _write_plugin(
@@ -200,7 +199,9 @@ async def handle_schedule(context, host_api):
     )
 
     with session_factory() as session:
-        PluginRepository(session).activate("scheduled_isolation", actor_telegram_user_id=42)
+        repo = PluginRepository(session)
+        repo.sync_discovered(loader.discover().valid)
+        repo.activate("scheduled_isolation", actor_telegram_user_id=42)
 
     asyncio.run(executor.run_due_once(now=datetime(2030, 1, 1, tzinfo=timezone.utc)))
 

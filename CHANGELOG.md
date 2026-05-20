@@ -25,6 +25,10 @@ Dieser Release-Kandidat enthält Verbesserungen beim KI-Kontext-Management, Absc
   - SEC-SB4: Runtime-Schalter `PLUGIN_COMMAND_SANDBOX_ENABLED` (default OFF) – Commands laufen bei Aktivierung durch Sandbox-Worker
   - SEC-SB5: Audit- und Fehlercode-Härtung ohne Traceback-Leakage
 
+#### Sicherheit / Security
+- **GH-SEC-5/6 – Scheduled + Worker Runtime Sandbox Isolation:** Plugin-Ausführung für Scheduled- und Worker-Runtime jetzt vollständig über Sandbox-Worker (`command.execute.v1`) mit Capability-Enforcement (`plugin.runtime.schedule.execute`, `plugin.runtime.worker.execute`), striktem Op-Replay und sanitized Errors. Worker-Timeout reduziert auf 3s.
+- **GH-SEC-5/6 – Scheduled + Worker Runtime Sandbox Isolation:** Scheduled and worker plugin execution now fully routed through sandbox worker (`command.execute.v1`) with capability enforcement (`plugin.runtime.schedule.execute`, `plugin.runtime.worker.execute`), strict op replay, and sanitized errors. Worker timeout reduced to 3s.
+
 #### Architektur / Interna
 - **AI Response Contract (AI-LAT-B3):** Interner Vertrag zwischen Provider-Response und Bot-Ausgabe; aktuell wird Ollama-Volltext über `envelope_from_full_response_text` normalisiert. Semantik ist fail-closed (ungültige/leere Responses werden abgelehnt). Vorbereitung für inkrementelles Streaming ohne aktiviertes Live-Streaming.
 
@@ -50,6 +54,9 @@ This release candidate includes improvements to AI context management, removal o
   - SEC-SB3: Worker adapter for sandbox execution with safe plugin-entry resolution
   - SEC-SB4: Runtime switch `PLUGIN_COMMAND_SANDBOX_ENABLED` (default OFF) – commands run through sandbox worker when enabled
   - SEC-SB5: Audit and error code hardening without traceback leakage
+
+#### Security
+- **GH-SEC-5/6 – Scheduled + Worker Runtime Sandbox Isolation:** Scheduled and worker plugin execution now fully routed through sandbox worker (`command.execute.v1`) with capability enforcement (`plugin.runtime.schedule.execute`, `plugin.runtime.worker.execute`), strict op replay, and sanitized errors. Worker timeout reduced to 3s.
 
 #### Architecture / Internal
 - **AI Response Contract (AI-LAT-B3):** Internal contract between provider response and bot output; Ollama full-text is currently normalized via `envelope_from_full_response_text`. Semantics are fail-closed (invalid/empty responses are rejected). Prepares for incremental streaming without live streaming currently enabled.

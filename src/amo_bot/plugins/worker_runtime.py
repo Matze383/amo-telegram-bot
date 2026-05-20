@@ -139,8 +139,9 @@ class WorkerPluginManager:
                     "run_id": run_id,
                     "started_at": started_at.isoformat(),
                     "capability": "plugin.runtime.worker.execute",
+                    "permissions": list(manifest.required_permissions),
                 },
-                "timeout_ms": 30_000,
+                "timeout_ms": 3_000,
             }
         )
         response = PluginSandboxRunner(plugins_dir=self._loader.plugins_dir).run(request)
