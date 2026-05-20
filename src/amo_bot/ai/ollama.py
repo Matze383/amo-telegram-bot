@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import json
 import logging
-from typing import Literal
+from typing import Any, Literal, TypedDict
 
 import httpx
 
@@ -27,6 +27,20 @@ class OllamaHTTPStatusError(OllamaError):
 logger = logging.getLogger(__name__)
 
 
+class StreamMetadata(TypedDict):
+    phase: Literal["primary", "retry", "fallback"]
+    live_edit_enabled: bool
+    prompt_len: int
+    model: str
+    done: bool
+    done_reason: str | None
+    error_category: str | None
+    content_len: int
+    fallback_used: bool
+    cancelled: bool
+    timed_out: bool
+
+
 @dataclass(slots=True)
 class OllamaClient:
     base_url: str
@@ -37,6 +51,7 @@ class OllamaClient:
     max_response_chars: int = 1500
     request_endpoint: str = "generate"
     streaming_mode: Literal["off", "collect_only", "live_edit"] = "off"
+    stream_phase: Literal["primary", "retry", "fallback"] = "primary"
 
     def __post_init__(self) -> None:
         if self.max_prompt_chars <= 0:
@@ -72,7 +87,7 @@ class OllamaClient:
                 response = await client.post(f"{self.base_url}{endpoint_path}", json=payload)
             response.raise_for_status()
             if self.request_endpoint == "chat" and payload["stream"] is True:
-                data = self._collect_chat_stream_response(response)
+                data = self._collect_chat_stream_response(response, prompt_len=len(request_prompt))
             else:
                 data = response.json()
         except httpx.TimeoutException as exc:
@@ -108,9 +123,44 @@ class OllamaClient:
         text = envelope.final_text
         return text[: self.max_response_chars]
 
-    def _collect_chat_stream_response(self, response: httpx.Response) -> dict[str, object]:
+    def _collect_chat_stream_response(self, response: httpx.Response, *, prompt_len: int) -> dict[str, object]:
+        events = self.iter_chat_stream_events(
+            response=response,
+            prompt_len=prompt_len,
+            fallback_used=self.stream_phase == "fallback",
+        )
+
+        final_chunk: dict[str, object] | None = None
+        for event in events:
+            if event["event"] == "done":
+                payload = event.get("payload")
+                if isinstance(payload, dict):
+                    final_chunk = payload
+                break
+        if final_chunk is None:
+            raise OllamaError("invalid ollama response")
+        return final_chunk
+
+    def iter_chat_stream_events(self, *, response: httpx.Response, prompt_len: int, fallback_used: bool = False) -> list[dict[str, Any]]:
+        events: list[dict[str, object]] = []
         final_chunk: dict[str, object] | None = None
         accumulated_content_parts: list[str] = []
+
+        events.append(
+            {
+                "event": "start",
+                "metadata": self._event_meta(
+                    prompt_len=prompt_len,
+                    done=False,
+                    done_reason=None,
+                    error_category=None,
+                    content_len=0,
+                    fallback_used=fallback_used,
+                    cancelled=False,
+                    timed_out=False,
+                ),
+            }
+        )
 
         for raw_line in response.iter_lines():
             line = raw_line.strip() if isinstance(raw_line, str) else ""
@@ -119,8 +169,38 @@ class OllamaClient:
             try:
                 chunk = json.loads(line)
             except json.JSONDecodeError as exc:
+                events.append(
+                    {
+                        "event": "error",
+                        "metadata": self._event_meta(
+                            prompt_len=prompt_len,
+                            done=False,
+                            done_reason=None,
+                            error_category="invalid_response",
+                            content_len=len("".join(accumulated_content_parts)),
+                            fallback_used=fallback_used,
+                            cancelled=False,
+                            timed_out=False,
+                        ),
+                    }
+                )
                 raise OllamaError("invalid ollama response") from exc
             if not isinstance(chunk, dict):
+                events.append(
+                    {
+                        "event": "error",
+                        "metadata": self._event_meta(
+                            prompt_len=prompt_len,
+                            done=False,
+                            done_reason=None,
+                            error_category="invalid_response",
+                            content_len=len("".join(accumulated_content_parts)),
+                            fallback_used=fallback_used,
+                            cancelled=False,
+                            timed_out=False,
+                        ),
+                    }
+                )
                 raise OllamaError("invalid ollama response")
 
             message = chunk.get("message")
@@ -133,11 +213,42 @@ class OllamaClient:
                         raise OllamaError("invalid ollama response")
                     if content:
                         accumulated_content_parts.append(content)
+                        events.append(
+                            {
+                                "event": "delta",
+                                "delta": content,
+                                "metadata": self._event_meta(
+                                    prompt_len=prompt_len,
+                                    done=False,
+                                    done_reason=None,
+                                    error_category=None,
+                                    content_len=len(content),
+                                    fallback_used=fallback_used,
+                                    cancelled=False,
+                                    timed_out=False,
+                                ),
+                            }
+                        )
 
             if chunk.get("done") is True:
                 final_chunk = chunk
 
         if final_chunk is None:
+            events.append(
+                {
+                    "event": "error",
+                    "metadata": self._event_meta(
+                        prompt_len=prompt_len,
+                        done=False,
+                        done_reason=None,
+                        error_category="invalid_response",
+                        content_len=len("".join(accumulated_content_parts)),
+                        fallback_used=fallback_used,
+                        cancelled=False,
+                        timed_out=False,
+                    ),
+                }
+            )
             raise OllamaError("invalid ollama response")
 
         final_message = final_chunk.get("message")
@@ -156,4 +267,47 @@ class OllamaClient:
         elif combined and final_content and not final_content.startswith(combined):
             final_message["content"] = combined
 
-        return final_chunk
+        events.append(
+            {
+                "event": "done",
+                "metadata": self._event_meta(
+                    prompt_len=prompt_len,
+                    done=True,
+                    done_reason=str(final_chunk.get("done_reason")) if final_chunk.get("done_reason") is not None else None,
+                    error_category=None,
+                    content_len=len(final_message.get("content", "")) if isinstance(final_message.get("content"), str) else 0,
+                    fallback_used=fallback_used,
+                    cancelled=bool(final_chunk.get("done_reason") == "cancelled"),
+                    timed_out=bool(final_chunk.get("done_reason") == "timeout"),
+                ),
+                "payload": final_chunk,
+            }
+        )
+
+        return events
+
+    def _event_meta(
+        self,
+        *,
+        prompt_len: int,
+        done: bool,
+        done_reason: str | None,
+        error_category: str | None,
+        content_len: int,
+        fallback_used: bool,
+        cancelled: bool,
+        timed_out: bool,
+    ) -> StreamMetadata:
+        return {
+            "phase": self.stream_phase,
+            "live_edit_enabled": False,
+            "prompt_len": max(0, int(prompt_len)),
+            "model": self.model,
+            "done": done,
+            "done_reason": done_reason,
+            "error_category": error_category,
+            "content_len": max(0, int(content_len)),
+            "fallback_used": fallback_used,
+            "cancelled": cancelled,
+            "timed_out": timed_out,
+        }

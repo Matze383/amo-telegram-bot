@@ -400,6 +400,44 @@ def test_ollama_client_chat_collect_only_missing_done_chunk_fails_closed(monkeyp
         assert "invalid ollama response" in str(exc)
 
 
+def test_ollama_client_chat_collect_only_stream_events_canonical_contract(monkeypatch) -> None:
+    async def post_impl(url: str, payload: dict[str, Any]) -> httpx.Response:
+        req = httpx.Request("POST", url)
+        body = "\n".join(
+            [
+                '{"message":{"role":"assistant","content":"Hel"},"done":false}',
+                '{"message":{"role":"assistant","content":"lo"},"done":false}',
+                '{"message":{"role":"assistant","content":""},"done":true,"done_reason":"stop"}',
+            ]
+        )
+        return httpx.Response(200, text=body, request=req)
+
+    _patch_async_client(monkeypatch, post_impl)
+
+    client = OllamaClient(
+        base_url="http://ollama",
+        model="m1",
+        timeout_seconds=1.0,
+        request_endpoint="chat",
+        streaming_mode="collect_only",
+        stream_phase="retry",
+    )
+
+    response = asyncio.run(post_impl("http://ollama/api/chat", {"stream": True}))
+    events = client.iter_chat_stream_events(response=response, prompt_len=5, fallback_used=False)
+
+    assert [event["event"] for event in events] == ["start", "delta", "delta", "done"]
+    assert events[0]["metadata"]["live_edit_enabled"] is False
+    assert events[0]["metadata"]["prompt_len"] == 5
+    assert events[0]["metadata"]["phase"] == "retry"
+    assert events[1]["delta"] == "Hel"
+    assert events[2]["delta"] == "lo"
+    assert events[3]["metadata"]["done"] is True
+    assert events[3]["metadata"]["done_reason"] == "stop"
+    assert events[3]["metadata"]["cancelled"] is False
+    assert events[3]["metadata"]["timed_out"] is False
+
+
 def test_ollama_client_chat_collect_only_final_blank_uses_accumulated_deltas(monkeypatch) -> None:
     async def post_impl(url: str, payload: dict[str, Any]) -> httpx.Response:
         req = httpx.Request("POST", url)
