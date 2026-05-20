@@ -259,6 +259,134 @@ def test_ollama_client_collect_only_mode_does_not_enable_live_streaming(monkeypa
     assert seen_payload["stream"] is False
 
 
+def test_ollama_client_chat_collect_only_requests_stream_and_collects_final(monkeypatch) -> None:
+    seen_payload: dict[str, Any] = {}
+
+    async def post_impl(url: str, payload: dict[str, Any]) -> httpx.Response:
+        nonlocal seen_payload
+        seen_payload = payload
+        req = httpx.Request("POST", url)
+        body = "\n".join(
+            [
+                '{"message":{"role":"assistant","content":"Hel"},"done":false}',
+                '{"message":{"role":"assistant","content":"lo"},"done":true}',
+            ]
+        )
+        return httpx.Response(200, text=body, request=req)
+
+    _patch_async_client(monkeypatch, post_impl)
+
+    client = OllamaClient(
+        base_url="http://ollama",
+        model="m1",
+        timeout_seconds=1.0,
+        request_endpoint="chat",
+        streaming_mode="collect_only",
+    )
+    out = asyncio.run(client.generate("hello"))
+
+    assert seen_payload["stream"] is True
+    assert out == "Hello"
+
+
+def test_ollama_client_chat_live_edit_mode_reserved_non_live_behavior(monkeypatch) -> None:
+    seen_payload: dict[str, Any] = {}
+
+    async def post_impl(url: str, payload: dict[str, Any]) -> httpx.Response:
+        nonlocal seen_payload
+        seen_payload = payload
+        req = httpx.Request("POST", url)
+        return httpx.Response(
+            200,
+            json={"message": {"role": "assistant", "content": "ok"}, "done": True},
+            request=req,
+        )
+
+    _patch_async_client(monkeypatch, post_impl)
+
+    client = OllamaClient(
+        base_url="http://ollama",
+        model="m1",
+        timeout_seconds=1.0,
+        request_endpoint="chat",
+        streaming_mode="live_edit",
+    )
+    out = asyncio.run(client.generate("hello"))
+
+    assert seen_payload["stream"] is False
+    assert out == "ok"
+
+
+def test_ollama_client_chat_collect_only_missing_done_chunk_fails_closed(monkeypatch) -> None:
+    async def post_impl(url: str, payload: dict[str, Any]) -> httpx.Response:
+        req = httpx.Request("POST", url)
+        body = '{"message":{"role":"assistant","content":"partial"},"done":false}'
+        return httpx.Response(200, text=body, request=req)
+
+    _patch_async_client(monkeypatch, post_impl)
+
+    client = OllamaClient(
+        base_url="http://ollama",
+        model="m1",
+        timeout_seconds=1.0,
+        request_endpoint="chat",
+        streaming_mode="collect_only",
+    )
+    try:
+        asyncio.run(client.generate("hello"))
+        assert False, "expected OllamaError"
+    except OllamaError as exc:
+        assert "invalid ollama response" in str(exc)
+
+
+def test_ollama_client_chat_collect_only_final_blank_uses_accumulated_deltas(monkeypatch) -> None:
+    async def post_impl(url: str, payload: dict[str, Any]) -> httpx.Response:
+        req = httpx.Request("POST", url)
+        body = "\n".join(
+            [
+                '{"message":{"role":"assistant","content":"Hel"},"done":false}',
+                '{"message":{"role":"assistant","content":"lo"},"done":false}',
+                '{"message":{"role":"assistant","content":""},"done":true}',
+            ]
+        )
+        return httpx.Response(200, text=body, request=req)
+
+    _patch_async_client(monkeypatch, post_impl)
+
+    client = OllamaClient(
+        base_url="http://ollama",
+        model="m1",
+        timeout_seconds=1.0,
+        request_endpoint="chat",
+        streaming_mode="collect_only",
+    )
+    out = asyncio.run(client.generate("hello"))
+
+    assert out == "Hello"
+
+
+def test_ollama_client_chat_collect_only_malformed_chunk_fails_closed(monkeypatch) -> None:
+    async def post_impl(url: str, payload: dict[str, Any]) -> httpx.Response:
+        req = httpx.Request("POST", url)
+        body = "not-json"
+        return httpx.Response(200, text=body, request=req)
+
+    _patch_async_client(monkeypatch, post_impl)
+
+    client = OllamaClient(
+        base_url="http://ollama",
+        model="m1",
+        timeout_seconds=1.0,
+        request_endpoint="chat",
+        streaming_mode="collect_only",
+    )
+    try:
+        asyncio.run(client.generate("hello"))
+        assert False, "expected OllamaError"
+    except OllamaError as exc:
+        assert "invalid ollama response" in str(exc)
+
+
 def test_settings_rejects_invalid_ollama_limit_config() -> None:
     base = {
         "BOT_TOKEN": "token",

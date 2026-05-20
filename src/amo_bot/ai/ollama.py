@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 import logging
 from typing import Literal
 
@@ -50,10 +51,11 @@ class OllamaClient:
     async def generate(self, prompt: str) -> str:
         request_prompt = prompt[: self.max_prompt_chars]
         if self.request_endpoint == "chat":
+            stream_enabled = self.streaming_mode == "collect_only"
             payload = {
                 "model": self.model,
                 "messages": [{"role": "user", "content": request_prompt}],
-                "stream": False,
+                "stream": stream_enabled,
                 "options": {"num_predict": self.max_predict_tokens},
             }
             endpoint_path = "/api/chat"
@@ -69,7 +71,10 @@ class OllamaClient:
             async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
                 response = await client.post(f"{self.base_url}{endpoint_path}", json=payload)
             response.raise_for_status()
-            data = response.json()
+            if self.request_endpoint == "chat" and payload["stream"] is True:
+                data = self._collect_chat_stream_response(response)
+            else:
+                data = response.json()
         except httpx.TimeoutException as exc:
             raise OllamaError("request timed out") from exc
         except httpx.HTTPStatusError as exc:
@@ -102,3 +107,53 @@ class OllamaClient:
 
         text = envelope.final_text
         return text[: self.max_response_chars]
+
+    def _collect_chat_stream_response(self, response: httpx.Response) -> dict[str, object]:
+        final_chunk: dict[str, object] | None = None
+        accumulated_content_parts: list[str] = []
+
+        for raw_line in response.iter_lines():
+            line = raw_line.strip() if isinstance(raw_line, str) else ""
+            if not line:
+                continue
+            try:
+                chunk = json.loads(line)
+            except json.JSONDecodeError as exc:
+                raise OllamaError("invalid ollama response") from exc
+            if not isinstance(chunk, dict):
+                raise OllamaError("invalid ollama response")
+
+            message = chunk.get("message")
+            if message is not None:
+                if not isinstance(message, dict):
+                    raise OllamaError("invalid ollama response")
+                content = message.get("content")
+                if content is not None:
+                    if not isinstance(content, str):
+                        raise OllamaError("invalid ollama response")
+                    if content:
+                        accumulated_content_parts.append(content)
+
+            if chunk.get("done") is True:
+                final_chunk = chunk
+
+        if final_chunk is None:
+            raise OllamaError("invalid ollama response")
+
+        final_message = final_chunk.get("message")
+        if not isinstance(final_message, dict):
+            raise OllamaError("invalid ollama response")
+
+        final_content = final_message.get("content")
+        if final_content is None:
+            final_content = ""
+        if not isinstance(final_content, str):
+            raise OllamaError("invalid ollama response")
+
+        combined = "".join(accumulated_content_parts)
+        if combined and not final_content:
+            final_message["content"] = combined
+        elif combined and final_content and not final_content.startswith(combined):
+            final_message["content"] = combined
+
+        return final_chunk
