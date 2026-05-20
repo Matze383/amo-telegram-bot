@@ -83,7 +83,12 @@ class Dispatcher:
         )
 
         if command is None:
-            await self._maybe_handle_ai_autoreply(message=message, role=role, bot_username=self.bot_username)
+            await self._maybe_handle_ai_autoreply(
+                message=message,
+                role=role,
+                bot_username=self.bot_username,
+                from_parsed_update=True,
+            )
             return
 
         if not can_use_bot(role):
@@ -379,7 +384,14 @@ class Dispatcher:
         reply_username = (message.reply_to_username or "").strip().lstrip("@").casefold()
         return bool(reply_username) and reply_username == configured
 
-    async def _maybe_handle_ai_autoreply(self, *, message: TelegramMessage, role: Role, bot_username: str | None) -> None:
+    async def _maybe_handle_ai_autoreply(
+        self,
+        *,
+        message: TelegramMessage,
+        role: Role,
+        bot_username: str | None,
+        from_parsed_update: bool = False,
+    ) -> None:
         if self.ai_service is None:
             return
 
@@ -419,88 +431,96 @@ class Dispatcher:
                     reply_to_is_bot=self._is_reply_to_current_bot(message=message, bot_username=bot_username),
                 )
 
-            allowed_reason_codes = {
+        allowed_reason_codes = {
                 AIRouterReasonCode.MENTION_IN_ACTIVE_SCOPE,
                 AIRouterReasonCode.REPLY_TO_BOT_IN_ACTIVE_SCOPE,
             }
-            if (
-                decision.reason_code == AIRouterReasonCode.SCOPE_ENABLED
-                and decision.context.scope_type == "private_user"
-                and message.chat.type == "private"
-            ):
-                allowed_reason_codes.add(AIRouterReasonCode.SCOPE_ENABLED)
+        if (
+            decision.reason_code == AIRouterReasonCode.SCOPE_ENABLED
+            and decision.context.scope_type == "private_user"
+            and message.chat.type == "private"
+        ):
+            allowed_reason_codes.add(AIRouterReasonCode.SCOPE_ENABLED)
 
-            # Context fallback is only safe when it came from a true reply trigger.
-            # Mention-trigger fallback is intentionally blocked to prevent false-positive
-            # mention detection from producing unsolicited group replies.
-            if (
-                decision.reason_code == AIRouterReasonCode.CONTEXT_GUARD_FALLBACK
-                and decision.context.flag_reply_to_bot
-            ):
-                allowed_reason_codes.add(AIRouterReasonCode.CONTEXT_GUARD_FALLBACK)
+        # Context fallback is only safe when it came from a true reply trigger.
+        # Mention-trigger fallback is intentionally blocked to prevent false-positive
+        # mention detection from producing unsolicited group replies.
+        if (
+            decision.reason_code == AIRouterReasonCode.CONTEXT_GUARD_FALLBACK
+            and decision.context.flag_reply_to_bot
+        ):
+            allowed_reason_codes.add(AIRouterReasonCode.CONTEXT_GUARD_FALLBACK)
 
-            if decision.reason_code not in allowed_reason_codes:
-                return
+        if decision.reason_code not in allowed_reason_codes:
+            return
 
-            # Hard invariant: group/supergroup/forum AI replies require explicit trigger
-            # (mention or reply-to-bot), independent of resolved scope/config/role.
-            is_group_chat = message.chat.type in {"group", "supergroup"}
-            explicit_group_trigger = decision.context.flag_bot_mention or decision.context.flag_reply_to_bot
-            if is_group_chat and not explicit_group_trigger:
-                self._write_ai_audit(
-                    session=session,
-                    actor_user_id=message.from_user.id,
-                    chat_id=message.chat.id,
-                    message_id=message.message_id,
-                    message_thread_id=message.message_thread_id,
-                    event_type="ai_autoreply_denied",
-                    payload={
-                        "reason": "missing_group_trigger",
-                        "router_reason": decision.reason_code.value,
-                        "chat_type": message.chat.type,
-                        "scope_type": decision.context.scope_type,
-                        "flag_bot_mention": decision.context.flag_bot_mention,
-                        "flag_reply_to_bot": decision.context.flag_reply_to_bot,
-                    },
-                )
-                session.commit()
-                return
-
-            min_ai_role = Role.OWNER
+        # Hard invariant: group/supergroup/forum AI replies require explicit trigger
+        # (mention or reply-to-bot), independent of resolved scope/config/role.
+        is_group_chat = message.chat.type in {"group", "supergroup"}
+        explicit_group_trigger = decision.context.flag_bot_mention or decision.context.flag_reply_to_bot
+        if is_group_chat and not explicit_group_trigger:
             if self.database_url is not None:
+                with create_session_factory(self.database_url)() as session:
+                    self._write_ai_audit(
+                        session=session,
+                        actor_user_id=message.from_user.id,
+                        chat_id=message.chat.id,
+                        message_id=message.message_id,
+                        message_thread_id=message.message_thread_id,
+                        event_type="ai_autoreply_denied",
+                        payload={
+                            "reason": "missing_group_trigger",
+                            "router_reason": decision.reason_code.value,
+                            "chat_type": message.chat.type,
+                            "scope_type": decision.context.scope_type,
+                            "flag_bot_mention": decision.context.flag_bot_mention,
+                            "flag_reply_to_bot": decision.context.flag_reply_to_bot,
+                        },
+                    )
+                    session.commit()
+            return
+
+        min_ai_role = Role.OWNER
+        if self.database_url is not None:
+            with create_session_factory(self.database_url)() as session:
                 min_ai_role = PrivateChatPolicyRepository(session).get_policy().min_ai_role
-            if decision.context.scope_type == "private_user" and not role_meets_minimum(role, min_ai_role):
-                self._write_ai_audit(
-                    session=session,
-                    actor_user_id=message.from_user.id,
-                    chat_id=message.chat.id,
-                    message_id=message.message_id,
-                    message_thread_id=message.message_thread_id,
-                    event_type="ai_autoreply_denied",
-                    payload={
-                        "reason": "role_denied",
-                        "router_reason": decision.reason_code.value,
-                        "role": role.value,
-                        "required_role": min_ai_role.value,
-                    },
-                )
-                session.commit()
-                return
-
-            if decision.context.scope_type != "private_user" and role not in AUTOREPLY_ALLOWED_ROLES:
-                self._write_ai_audit(
-                    session=session,
-                    actor_user_id=message.from_user.id,
-                    chat_id=message.chat.id,
-                    message_id=message.message_id,
-                    message_thread_id=message.message_thread_id,
-                    event_type="ai_autoreply_denied",
-                    payload={"reason": "role_denied", "router_reason": decision.reason_code.value, "role": role.value},
-                )
-                session.commit()
-                return
-
+        if decision.context.scope_type == "private_user" and not role_meets_minimum(role, min_ai_role):
             if self.database_url is not None:
+                with create_session_factory(self.database_url)() as session:
+                    self._write_ai_audit(
+                        session=session,
+                        actor_user_id=message.from_user.id,
+                        chat_id=message.chat.id,
+                        message_id=message.message_id,
+                        message_thread_id=message.message_thread_id,
+                        event_type="ai_autoreply_denied",
+                        payload={
+                            "reason": "role_denied",
+                            "router_reason": decision.reason_code.value,
+                            "role": role.value,
+                            "required_role": min_ai_role.value,
+                        },
+                    )
+                    session.commit()
+            return
+
+        if decision.context.scope_type != "private_user" and role not in AUTOREPLY_ALLOWED_ROLES:
+            if self.database_url is not None:
+                with create_session_factory(self.database_url)() as session:
+                    self._write_ai_audit(
+                        session=session,
+                        actor_user_id=message.from_user.id,
+                        chat_id=message.chat.id,
+                        message_id=message.message_id,
+                        message_thread_id=message.message_thread_id,
+                        event_type="ai_autoreply_denied",
+                        payload={"reason": "role_denied", "router_reason": decision.reason_code.value, "role": role.value},
+                    )
+                    session.commit()
+            return
+
+        if self.database_url is not None:
+            with create_session_factory(self.database_url)() as session:
                 user = session.query(User).filter(User.telegram_user_id == message.from_user.id).one_or_none()
                 if user is None:
                     self._write_ai_audit(
@@ -570,6 +590,14 @@ class Dispatcher:
         prompt_sections.append(f"User message:\n{normalized_text}")
         llm_prompt = "\n\n".join(prompt_sections)
 
+        explicit_trigger_reason_codes = {
+            AIRouterReasonCode.MENTION_IN_ACTIVE_SCOPE,
+            AIRouterReasonCode.REPLY_TO_BOT_IN_ACTIVE_SCOPE,
+        }
+        decision_reason_value = getattr(decision.reason_code, "value", decision.reason_code)
+        explicit_trigger_reason_values = {code.value for code in explicit_trigger_reason_codes}
+        is_triggered_path = decision_reason_value in explicit_trigger_reason_values
+
         try:
             response = await self.ai_service.ask(llm_prompt)
         except Exception:
@@ -587,11 +615,7 @@ class Dispatcher:
                     )
                     session.commit()
 
-            explicit_trigger_reason_codes = {
-                AIRouterReasonCode.MENTION_IN_ACTIVE_SCOPE,
-                AIRouterReasonCode.REPLY_TO_BOT_IN_ACTIVE_SCOPE,
-            }
-            if decision.reason_code in explicit_trigger_reason_codes:
+            if is_triggered_path:
                 await self._send_text(
                     message.chat.id,
                     AI_AUTOREPLY_ERROR_FALLBACK_TEXT,
@@ -599,8 +623,27 @@ class Dispatcher:
                 )
             return
 
-        for event in getattr(self.ai_service, "last_stream_events", []) or []:
-            await adapter.consume(chat_id=message.chat.id, message_thread_id=message.message_thread_id, event=event)
+        client = getattr(self.ai_service, "client", None)
+        # Safety distinction: live-edit streaming is only allowed when we have
+        # request-scoped Telegram context from parsed updates (handle_raw_update).
+        # Direct/internal calls without current request context must degrade safely.
+        has_request_scoped_context = bool(from_parsed_update)
+        live_edit_enabled = bool(
+            is_triggered_path
+            and has_request_scoped_context
+            and client is not None
+            and getattr(client, "request_endpoint", None) == "chat"
+            and getattr(client, "streaming_mode", None) == "live_edit"
+            and adapter is not None
+        )
+
+        if live_edit_enabled:
+            for event in getattr(self.ai_service, "last_stream_events", []) or []:
+                try:
+                    await adapter.consume(chat_id=message.chat.id, message_thread_id=message.message_thread_id, event=event)
+                except Exception:
+                    logger.info("ai_live_edit_degraded stage=consume code=adapter_error")
+                    break
 
         if not response:
             return

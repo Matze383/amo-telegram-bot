@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 
+from amo_bot.ai.router import AIRouterReasonCode
 from amo_bot.telegram.live_edit_adapter import (
     DisabledTelegramLiveEditAdapter,
     LiveEditFailure,
@@ -140,7 +141,7 @@ def test_dispatcher_consumes_current_request_events_after_ask_and_keeps_final_re
 
     class _RoleResolver:
         async def resolve(self, *_args, **_kwargs):
-            return Role.ADMIN
+            return Role.OWNER
 
     class _Decision:
         class _Context:
@@ -152,7 +153,7 @@ def test_dispatcher_consumes_current_request_events_after_ask_and_keeps_final_re
             daily_memory_text = None
             long_memory_text = None
 
-        reason_code = type("RC", (), {"value": "mention_in_active_scope"})
+        reason_code = AIRouterReasonCode.MENTION_IN_ACTIVE_SCOPE
         context = _Context()
 
     class _Router:
@@ -170,6 +171,7 @@ def test_dispatcher_consumes_current_request_events_after_ask_and_keeps_final_re
 
     class _AIService:
         def __init__(self) -> None:
+            self.client = type("Client", (), {"request_endpoint": "chat", "streaming_mode": "live_edit"})()
             self.last_stream_events: list[dict[str, object]] = []
 
         async def ask(self, _prompt: str) -> str:
