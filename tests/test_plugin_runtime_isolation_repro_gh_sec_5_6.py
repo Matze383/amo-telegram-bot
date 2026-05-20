@@ -9,6 +9,7 @@ import pytest
 from amo_bot.db.base import create_session_factory
 from amo_bot.db.init_db import init_db
 from amo_bot.db.repositories import PluginRepository
+from amo_bot.auth.roles import Role
 from amo_bot.plugins.command_runtime import CommandActor, CommandInvocation, PluginCommandExecutor
 from amo_bot.plugins.loader import PluginLoader
 from amo_bot.plugins.sandbox.types import SandboxRequest
@@ -21,7 +22,7 @@ def _write_plugin(tmp_path, name: str, manifest: dict, main_py: str) -> PluginLo
     plugins_dir = tmp_path / "plugins"
     plugin_dir = plugins_dir / name
     plugin_dir.mkdir(parents=True, exist_ok=True)
-    (plugin_dir / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    (plugin_dir / "plugin.json").write_text(json.dumps(manifest), encoding="utf-8")
     (plugin_dir / "main.py").write_text(main_py, encoding="utf-8")
     return PluginLoader(str(plugins_dir))
 
@@ -42,8 +43,7 @@ def _mk_settings(tmp_path):
     return settings, session_factory
 
 
-@pytest.mark.xfail(reason="GH-SEC-5/6: command runtime should no longer use legacy host-process import/execute path")
-def test_repro_command_legacy_branch_executes_in_host_process_when_sandbox_disabled(tmp_path) -> None:
+def test_repro_command_runtime_always_routes_via_sandbox_and_ignores_legacy_toggle(tmp_path, monkeypatch) -> None:
     _settings, session_factory = _mk_settings(tmp_path)
     loader = _write_plugin(
         tmp_path,
@@ -65,6 +65,7 @@ async def handle_command(context, host_api):
 
     sent: list[tuple[int, str]] = []
     host_call_count = 0
+    worker_call_count = 0
 
     async def _send(chat_id: int, text: str) -> None:
         sent.append((chat_id, text))
@@ -72,12 +73,16 @@ async def handle_command(context, host_api):
     async def _reply(chat_id: int, message_id: int, text: str, message_thread_id: int | None = None) -> None:
         return None
 
+    with session_factory() as session:
+        repo = PluginRepository(session)
+        repo.sync_discovered(loader.discover().valid)
+        repo.activate("legacy_host_exec", actor_telegram_user_id=42)
+
     executor = PluginCommandExecutor(
         loader=loader,
         session_factory=session_factory,
         send_message=_send,
         reply=_reply,
-        command_sandbox_enabled=False,
     )
 
     original_load_handler = executor._load_handler  # type: ignore[attr-defined]
@@ -89,9 +94,17 @@ async def handle_command(context, host_api):
 
     executor._load_handler = _wrapped_load_handler  # type: ignore[method-assign]
 
+    async def _fake_execute_via_sandbox(*, manifest, context):
+        nonlocal worker_call_count
+        worker_call_count += 1
+        assert manifest.name == "legacy_host_exec"
+        assert context.command_name == "legacy"
+
+    monkeypatch.setattr(executor, "_execute_via_sandbox", _fake_execute_via_sandbox)
+
     asyncio.run(
         executor.execute(
-            actor=CommandActor(telegram_user_id=42, role="owner"),
+            actor=CommandActor(telegram_user_id=42, role=Role.OWNER),
             invocation=CommandInvocation(
                 chat_id=100,
                 message_id=1,
@@ -102,7 +115,8 @@ async def handle_command(context, host_api):
         )
     )
 
-    assert host_call_count == 1
+    assert host_call_count == 0
+    assert worker_call_count == 1
     assert sent == []
 
 

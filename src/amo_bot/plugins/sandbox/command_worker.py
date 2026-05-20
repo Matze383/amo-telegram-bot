@@ -48,12 +48,21 @@ def _resolve_plugin_entry(*, plugins_root: Path, plugin_entry: str) -> Path:
 
 
 class _RecordingHostAPI:
-    def __init__(self, *, max_ops: int, max_text_len: int) -> None:
+    def __init__(self, *, permissions: set[str], max_ops: int, max_text_len: int) -> None:
+        self._permissions = permissions
         self._max_ops = max_ops
         self._max_text_len = max_text_len
         self._ops: list[CommandOp] = []
 
+    def _require_permission(self, permission: str, operation: str) -> None:
+        if permission not in self._permissions:
+            raise CommandWorkerError(
+                "permission_denied",
+                f"operation '{operation}' requires capability '{permission}'",
+            )
+
     async def send_message(self, chat_id: int, text: str) -> dict[str, object]:
+        self._require_permission("send_message", "send_message")
         if not isinstance(chat_id, int):
             raise ValueError("chat_id must be int")
         text_clean = (text or "").strip()
@@ -61,6 +70,7 @@ class _RecordingHostAPI:
         return {"ok": True}
 
     async def reply(self, chat_id: int, message_id: int, text: str) -> dict[str, object]:
+        self._require_permission("send_message", "reply")
         if not isinstance(chat_id, int) or not isinstance(message_id, int):
             raise ValueError("chat_id and message_id must be int")
         text_clean = (text or "").strip()
@@ -140,7 +150,11 @@ async def execute_command_request(
         module_path = _resolve_plugin_entry(plugins_root=Path(plugins_root), plugin_entry=request.plugin_entry)
         handler = _load_handler(module_path)
         context = _build_context(request)
-        host_api = _RecordingHostAPI(max_ops=request.limits.max_ops, max_text_len=request.limits.max_text_len)
+        host_api = _RecordingHostAPI(
+            permissions=set(request.permissions),
+            max_ops=request.limits.max_ops,
+            max_text_len=request.limits.max_text_len,
+        )
         await handler(context, host_api)
         response = CommandExecuteResponseV1(
             action="command.execute.v1",
