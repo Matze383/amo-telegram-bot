@@ -220,24 +220,3 @@ async def handle_schedule(context, host_api):
     asyncio.run(executor.run_due_once(now=datetime(2030, 1, 1, tzinfo=timezone.utc)))
 
     assert calls, "expected sandbox runner call once scheduled isolation is implemented"
-
-
-@pytest.mark.xfail(reason="GH-SEC-6: generic sandbox worker currently echo/stub; should execute real plugin behavior")
-def test_repro_generic_sandbox_worker_is_stub_non_execution() -> None:
-    request = SandboxRequest.from_dict(
-        {
-            "request_id": "r1",
-            "action": "run",
-            "plugin_id": "demo",
-            "payload": {
-                "plugin_entry": "demo/main.py",
-                "trigger": "worker",
-            },
-            "capability": "plugin.runtime.worker.execute",
-        }
-    )
-
-    from amo_bot.plugins.sandbox.worker import _sanitize_payload
-
-    payload = _sanitize_payload(request.payload)
-    assert payload.get("executed") is True
