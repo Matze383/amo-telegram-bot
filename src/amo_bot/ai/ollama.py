@@ -136,7 +136,7 @@ class OllamaClient:
 
         final_chunk: dict[str, object] | None = None
         for event in events:
-            if event["event"] == "done":
+            if event["event"] in {"done", "cancel", "timeout"}:
                 payload = event.get("payload")
                 if isinstance(payload, dict):
                     final_chunk = payload
@@ -149,6 +149,7 @@ class OllamaClient:
         events: list[dict[str, object]] = []
         final_chunk: dict[str, object] | None = None
         accumulated_content_parts: list[str] = []
+        terminal_seen = False
 
         events.append(
             {
@@ -207,6 +208,9 @@ class OllamaClient:
                 )
                 raise OllamaError("invalid ollama response")
 
+            if terminal_seen:
+                continue
+
             message = chunk.get("message")
             if message is not None:
                 if not isinstance(message, dict):
@@ -236,6 +240,7 @@ class OllamaClient:
 
             if chunk.get("done") is True:
                 final_chunk = chunk
+                terminal_seen = True
 
         if final_chunk is None:
             events.append(
@@ -271,18 +276,25 @@ class OllamaClient:
         elif combined and final_content and not final_content.startswith(combined):
             final_message["content"] = combined
 
+        done_reason_value = str(final_chunk.get("done_reason")) if final_chunk.get("done_reason") is not None else None
+        terminal_event = "done"
+        if done_reason_value == "cancelled":
+            terminal_event = "cancel"
+        elif done_reason_value == "timeout":
+            terminal_event = "timeout"
+
         events.append(
             {
-                "event": "done",
+                "event": terminal_event,
                 "metadata": self._event_meta(
                     prompt_len=prompt_len,
                     done=True,
-                    done_reason=str(final_chunk.get("done_reason")) if final_chunk.get("done_reason") is not None else None,
+                    done_reason=done_reason_value,
                     error_category=None,
                     content_len=len(final_message.get("content", "")) if isinstance(final_message.get("content"), str) else 0,
                     fallback_used=fallback_used,
-                    cancelled=bool(final_chunk.get("done_reason") == "cancelled"),
-                    timed_out=bool(final_chunk.get("done_reason") == "timeout"),
+                    cancelled=bool(done_reason_value == "cancelled"),
+                    timed_out=bool(done_reason_value == "timeout"),
                 ),
                 "payload": final_chunk,
             }

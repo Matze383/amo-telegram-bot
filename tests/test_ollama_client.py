@@ -438,6 +438,69 @@ def test_ollama_client_chat_collect_only_stream_events_canonical_contract(monkey
     assert events[3]["metadata"]["timed_out"] is False
 
 
+def test_ollama_client_chat_collect_only_stream_terminal_cancellation_maps_and_stops(monkeypatch) -> None:
+    async def post_impl(url: str, payload: dict[str, Any]) -> httpx.Response:
+        req = httpx.Request("POST", url)
+        body = "\n".join(
+            [
+                '{"message":{"role":"assistant","content":"Hel"},"done":false}',
+                '{"message":{"role":"assistant","content":""},"done":true,"done_reason":"cancelled"}',
+                '{"message":{"role":"assistant","content":"ignored"},"done":false}',
+                '{"message":{"role":"assistant","content":"still ignored"},"done":true,"done_reason":"stop"}',
+            ]
+        )
+        return httpx.Response(200, text=body, request=req)
+
+    _patch_async_client(monkeypatch, post_impl)
+
+    client = OllamaClient(
+        base_url="http://ollama",
+        model="m1",
+        timeout_seconds=1.0,
+        max_response_chars=100,
+        request_endpoint="chat",
+        streaming_mode="collect_only",
+    )
+
+    text = asyncio.run(client.generate("p"))
+
+    assert text == "Hel"
+    events = client.last_stream_events or []
+    assert [event["event"] for event in events] == ["start", "delta", "cancel"]
+    assert events[2]["metadata"]["done_reason"] == "cancelled"
+
+
+def test_ollama_client_chat_collect_only_stream_terminal_timeout_maps_and_stops(monkeypatch) -> None:
+    async def post_impl(url: str, payload: dict[str, Any]) -> httpx.Response:
+        req = httpx.Request("POST", url)
+        body = "\n".join(
+            [
+                '{"message":{"role":"assistant","content":"Hel"},"done":false}',
+                '{"message":{"role":"assistant","content":""},"done":true,"done_reason":"timeout"}',
+                '{"message":{"role":"assistant","content":"ignored"},"done":false}',
+            ]
+        )
+        return httpx.Response(200, text=body, request=req)
+
+    _patch_async_client(monkeypatch, post_impl)
+
+    client = OllamaClient(
+        base_url="http://ollama",
+        model="m1",
+        timeout_seconds=1.0,
+        max_response_chars=100,
+        request_endpoint="chat",
+        streaming_mode="collect_only",
+    )
+
+    text = asyncio.run(client.generate("p"))
+
+    assert text == "Hel"
+    events = client.last_stream_events or []
+    assert [event["event"] for event in events] == ["start", "delta", "timeout"]
+    assert events[2]["metadata"]["done_reason"] == "timeout"
+
+
 def test_ollama_client_chat_collect_only_final_blank_uses_accumulated_deltas(monkeypatch) -> None:
     async def post_impl(url: str, payload: dict[str, Any]) -> httpx.Response:
         req = httpx.Request("POST", url)
