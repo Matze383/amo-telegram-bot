@@ -2,6 +2,7 @@ import asyncio
 from typing import Any
 
 import httpx
+import pytest
 
 from amo_bot.ai.ollama import OllamaClient, OllamaError, OllamaHTTPStatusError
 from amo_bot.config.settings import Settings
@@ -20,6 +21,17 @@ class _DummyAsyncClient:
 
     async def post(self, url: str, json: dict[str, Any]) -> Any:
         return await self._post_impl(url, json)
+
+
+class _DummyStreamingResponse:
+    def __init__(self, lines: list[str]) -> None:
+        self._lines = lines
+
+    def raise_for_status(self) -> None:
+        return None
+
+    def iter_lines(self):
+        return iter(self._lines)
 
 
 def _patch_async_client(monkeypatch, post_impl):
@@ -257,6 +269,55 @@ def test_ollama_client_collect_only_mode_does_not_enable_live_streaming(monkeypa
 
     assert out == "ok"
     assert seen_payload["stream"] is False
+
+
+def test_ollama_client_collect_only_chat_stream_pre_delta_malformed_fails_closed(monkeypatch) -> None:
+    async def post_impl(url: str, payload: dict[str, Any]) -> _DummyStreamingResponse:
+        assert payload["stream"] is True
+        return _DummyStreamingResponse(
+            [
+                '{"message": {"role": "assistant", "content": "partial"}}',
+                '{"message": {"role": "assistant", "content": "oops"}',
+                '{"message": {"role": "assistant", "content": "final"}, "done": true}',
+            ]
+        )
+
+    _patch_async_client(monkeypatch, post_impl)
+
+    client = OllamaClient(
+        base_url="http://ollama",
+        model="m1",
+        timeout_seconds=1.0,
+        request_endpoint="chat",
+        streaming_mode="collect_only",
+    )
+
+    with pytest.raises(OllamaError, match="invalid ollama response"):
+        asyncio.run(client.generate("hello"))
+
+
+def test_ollama_client_collect_only_chat_stream_missing_done_fails_closed(monkeypatch) -> None:
+    async def post_impl(url: str, payload: dict[str, Any]) -> _DummyStreamingResponse:
+        assert payload["stream"] is True
+        return _DummyStreamingResponse(
+            [
+                '{"message": {"role": "assistant", "content": "partial-1"}}',
+                '{"message": {"role": "assistant", "content": "partial-2"}}',
+            ]
+        )
+
+    _patch_async_client(monkeypatch, post_impl)
+
+    client = OllamaClient(
+        base_url="http://ollama",
+        model="m1",
+        timeout_seconds=1.0,
+        request_endpoint="chat",
+        streaming_mode="collect_only",
+    )
+
+    with pytest.raises(OllamaError, match="invalid ollama response"):
+        asyncio.run(client.generate("hello"))
 
 
 def test_ollama_client_chat_collect_only_requests_stream_and_collects_final(monkeypatch) -> None:

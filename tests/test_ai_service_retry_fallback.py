@@ -169,3 +169,42 @@ def test_ai_service_retries_on_empty_response_when_enabled() -> None:
 
     assert answer == "ok-after-empty"
     assert len(client.calls) == 2
+
+
+def test_ai_service_collect_only_stream_contract_error_retries_then_fallback(monkeypatch) -> None:
+    client = _FakeClient(model="qwen3", outcomes=[OllamaError("request timed out"), OllamaError("request timed out")])
+    client.request_endpoint = "chat"
+    fallback = _FallbackClient(response="fallback final")
+
+    def _mk_fallback(*, base_url: str, model: str, timeout_seconds: float, max_response_chars: int, request_endpoint: str):
+        assert request_endpoint == "chat"
+        return fallback
+
+    monkeypatch.setattr("amo_bot.ai.service.OllamaClient", _mk_fallback)
+
+    service = AIService(
+        client=client,
+        retry_on_transient_error=True,
+        retry_delay_seconds=0,
+        fallback_model="kimi-k2.5:cloud",
+    )
+
+    out = asyncio.run(service.ask("prompt content that must never be logged"))
+
+    assert out == "fallback final"
+    assert len(client.calls) == 2
+    assert len(fallback.calls) == 1
+
+
+def test_logs_timeout_as_generic_metadata_only(caplog: pytest.LogCaptureFixture) -> None:
+    client = _FakeClient(model="qwen3", outcomes=[OllamaError("request timed out"), "ok after retry"])
+    service = AIService(client=client, retry_on_transient_error=True, retry_delay_seconds=0)
+
+    with caplog.at_level(logging.INFO, logger="amo_bot.ai.service"):
+        out = asyncio.run(service.ask("super-secret prompt"))
+
+    assert out == "ok after retry"
+    messages = [rec.message for rec in caplog.records if rec.name == "amo_bot.ai.service"]
+    assert any("phase=primary" in msg and "outcome=error" in msg and "error_category=timeout" in msg for msg in messages)
+    assert any("phase=retry" in msg and "outcome=success" in msg for msg in messages)
+    assert all("super-secret prompt" not in msg for msg in messages)
