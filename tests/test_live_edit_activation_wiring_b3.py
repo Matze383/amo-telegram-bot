@@ -165,3 +165,37 @@ def test_live_edit_requires_request_scoped_context_thread(monkeypatch) -> None:
 
     assert consumed == []
     assert sends == [(-100, "final response", None)]
+
+
+def test_live_edit_terminal_cancel_blocks_followup_deltas(monkeypatch) -> None:
+    consumed: list[dict[str, object]] = []
+
+    class _Adapter:
+        async def consume(self, **kwargs):
+            consumed.append(kwargs["event"])
+
+    class _AIServiceCancel(_AIService):
+        async def ask(self, _prompt: str) -> str:
+            self.last_stream_events = [
+                {"event": "start"},
+                {"event": "delta", "delta": "x"},
+                {"event": "cancel"},
+                {"event": "delta", "delta": "ignored"},
+                {"event": "done"},
+            ]
+            return "final response"
+
+    dispatcher, sends = _mk_dispatcher(ai_service=_AIServiceCancel(request_endpoint="chat", streaming_mode="live_edit"), adapter=_Adapter())
+    monkeypatch.setattr("amo_bot.telegram.dispatcher.AIRouter", _RouterMention)
+
+    asyncio.run(
+        dispatcher._maybe_handle_ai_autoreply(
+            message=_mk_message(text="@amo_bot hi", thread_id=7),
+            role=Role.ADMIN,
+            bot_username="amo_bot",
+            from_parsed_update=True,
+        )
+    )
+
+    assert [event["event"] for event in consumed] == ["start", "delta", "cancel", "delta", "done"]
+    assert sends == [(-100, "final response", 7)]

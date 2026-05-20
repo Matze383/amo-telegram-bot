@@ -5,6 +5,9 @@ from time import monotonic
 from typing import Any, Awaitable, Callable, Protocol
 
 
+_TERMINAL_EVENTS = {"done", "error", "cancel", "timeout"}
+
+
 class TelegramLiveEditAdapter(Protocol):
     async def consume(self, *, chat_id: int, message_thread_id: int | None, event: dict[str, Any]) -> None: ...
 
@@ -48,12 +51,16 @@ class SafeTelegramLiveEditAdapter:
     _last_edit_at: float = 0.0
     _consecutive_edit_failures: int = 0
     _degraded: bool = False
+    _terminal_outcome: str | None = None
 
     async def consume(self, *, chat_id: int, message_thread_id: int | None, event: dict[str, Any]) -> None:
         if not self.enabled:
             return
 
         event_type = str(event.get("event") or "").strip().casefold()
+        if self._terminal_outcome is not None:
+            return
+
         if event_type == "start":
             if self.send_text is None:
                 await self._record_failure(stage="start", code="send_missing")
@@ -92,7 +99,8 @@ class SafeTelegramLiveEditAdapter:
                     await self._record_failure(stage="delta", code="edit_disabled_after_failures")
             return
 
-        if event_type in {"done", "error"}:
+        if event_type in _TERMINAL_EVENTS:
+            self._terminal_outcome = event_type
             return
 
         await self._record_failure(stage="event", code="unsupported_event")
