@@ -638,12 +638,20 @@ class Dispatcher:
         )
 
         if live_edit_enabled:
+            terminal_seen = False
+            terminal_events = {"done", "error", "cancel", "timeout"}
             for event in getattr(self.ai_service, "last_stream_events", []) or []:
+                if terminal_seen:
+                    break
+
                 try:
                     await adapter.consume(chat_id=message.chat.id, message_thread_id=message.message_thread_id, event=event)
                 except Exception:
                     logger.info("ai_live_edit_degraded stage=consume code=adapter_error")
                     break
+
+                if str(getattr(event, "get", lambda *_args, **_kwargs: None)("event", "")).casefold() in terminal_events:
+                    terminal_seen = True
 
         if not response:
             return

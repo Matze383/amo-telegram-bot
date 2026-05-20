@@ -197,5 +197,77 @@ def test_live_edit_terminal_cancel_blocks_followup_deltas(monkeypatch) -> None:
         )
     )
 
-    assert [event["event"] for event in consumed] == ["start", "delta", "cancel", "delta", "done"]
+    assert [event["event"] for event in consumed] == ["start", "delta", "cancel"]
+    assert sends == [(-100, "final response", 7)]
+
+
+def test_live_edit_terminal_timeout_blocks_followup_deltas(monkeypatch) -> None:
+    consumed: list[dict[str, object]] = []
+
+    class _Adapter:
+        async def consume(self, **kwargs):
+            consumed.append(kwargs["event"])
+
+    class _AIServiceTimeout(_AIService):
+        async def ask(self, _prompt: str) -> str:
+            self.last_stream_events = [
+                {"event": "start"},
+                {"event": "delta", "delta": "x"},
+                {"event": "timeout"},
+                {"event": "delta", "delta": "ignored"},
+                {"event": "done"},
+            ]
+            return "final response"
+
+    dispatcher, sends = _mk_dispatcher(ai_service=_AIServiceTimeout(request_endpoint="chat", streaming_mode="live_edit"), adapter=_Adapter())
+    monkeypatch.setattr("amo_bot.telegram.dispatcher.AIRouter", _RouterMention)
+
+    asyncio.run(
+        dispatcher._maybe_handle_ai_autoreply(
+            message=_mk_message(text="@amo_bot hi", thread_id=7),
+            role=Role.ADMIN,
+            bot_username="amo_bot",
+            from_parsed_update=True,
+        )
+    )
+
+    assert [event["event"] for event in consumed] == ["start", "delta", "timeout"]
+    assert sends == [(-100, "final response", 7)]
+
+
+def test_live_edit_duplicate_terminal_events_only_first_forwarded(monkeypatch) -> None:
+    consumed: list[dict[str, object]] = []
+
+    class _Adapter:
+        async def consume(self, **kwargs):
+            consumed.append(kwargs["event"])
+
+    class _AIServiceDuplicateTerminal(_AIService):
+        async def ask(self, _prompt: str) -> str:
+            self.last_stream_events = [
+                {"event": "start"},
+                {"event": "delta", "delta": "x"},
+                {"event": "cancel"},
+                {"event": "timeout"},
+                {"event": "error"},
+                {"event": "done"},
+            ]
+            return "final response"
+
+    dispatcher, sends = _mk_dispatcher(
+        ai_service=_AIServiceDuplicateTerminal(request_endpoint="chat", streaming_mode="live_edit"),
+        adapter=_Adapter(),
+    )
+    monkeypatch.setattr("amo_bot.telegram.dispatcher.AIRouter", _RouterMention)
+
+    asyncio.run(
+        dispatcher._maybe_handle_ai_autoreply(
+            message=_mk_message(text="@amo_bot hi", thread_id=7),
+            role=Role.ADMIN,
+            bot_username="amo_bot",
+            from_parsed_update=True,
+        )
+    )
+
+    assert [event["event"] for event in consumed] == ["start", "delta", "cancel"]
     assert sends == [(-100, "final response", 7)]
