@@ -61,6 +61,73 @@ def test_live_edit_failure_records_metadata_only_without_content_leak() -> None:
     assert [(f.stage, f.code) for f in failures] == [("delta", "edit_failed")]
 
 
+def test_live_edit_throttles_fast_deltas_and_never_leaks_content() -> None:
+    failures: list[LiveEditFailure] = []
+    edits: list[str] = []
+
+    async def _record(failure: LiveEditFailure) -> None:
+        failures.append(failure)
+
+    async def _send(_chat_id: int, _text: str, _thread_id: int | None):
+        return {"message_id": 42}
+
+    async def _edit(_chat_id: int, _message_id: int, text: str, _thread_id: int | None):
+        edits.append(text)
+        return {}
+
+    adapter = SafeTelegramLiveEditAdapter(
+        enabled=True,
+        send_text=_send,
+        edit_text=_edit,
+        failure_recorder=_record,
+        min_edit_interval_seconds=60.0,
+    )
+
+    asyncio.run(adapter.consume(chat_id=-100, message_thread_id=10, event={"event": "start"}))
+    asyncio.run(adapter.consume(chat_id=-100, message_thread_id=10, event={"event": "delta", "delta": "SECRET_DELTA"}))
+    asyncio.run(adapter.consume(chat_id=-100, message_thread_id=10, event={"event": "delta", "delta": "ANOTHER_SECRET"}))
+
+    assert edits == ["…"]
+    assert [(f.stage, f.code) for f in failures] == [("delta", "edit_throttled")]
+
+
+def test_live_edit_disables_after_capped_failures_with_safe_fallback() -> None:
+    failures: list[LiveEditFailure] = []
+    edit_calls = 0
+
+    async def _record(failure: LiveEditFailure) -> None:
+        failures.append(failure)
+
+    async def _send(_chat_id: int, _text: str, _thread_id: int | None):
+        return {"message_id": 42}
+
+    async def _edit(_chat_id: int, _message_id: int, _text: str, _thread_id: int | None):
+        nonlocal edit_calls
+        edit_calls += 1
+        raise RuntimeError("sensitive stream token should never be logged")
+
+    adapter = SafeTelegramLiveEditAdapter(
+        enabled=True,
+        send_text=_send,
+        edit_text=_edit,
+        failure_recorder=_record,
+        min_edit_interval_seconds=0.0,
+        max_consecutive_edit_failures=2,
+    )
+
+    asyncio.run(adapter.consume(chat_id=-100, message_thread_id=10, event={"event": "start"}))
+    asyncio.run(adapter.consume(chat_id=-100, message_thread_id=10, event={"event": "delta", "delta": "a"}))
+    asyncio.run(adapter.consume(chat_id=-100, message_thread_id=10, event={"event": "delta", "delta": "b"}))
+    asyncio.run(adapter.consume(chat_id=-100, message_thread_id=10, event={"event": "delta", "delta": "c"}))
+
+    assert edit_calls == 2
+    assert [(f.stage, f.code) for f in failures] == [
+        ("delta", "edit_failed"),
+        ("delta", "edit_failed"),
+        ("delta", "edit_disabled_after_failures"),
+    ]
+
+
 def test_dispatcher_consumes_current_request_events_after_ask_and_keeps_final_response_parity() -> None:
     calls: list[tuple[int, str, int | None]] = []
 

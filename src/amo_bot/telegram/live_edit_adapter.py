@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from time import monotonic
 from typing import Any, Awaitable, Callable, Protocol
 
 
@@ -41,7 +42,12 @@ class SafeTelegramLiveEditAdapter:
     send_text: Callable[[int, str, int | None], Awaitable[object]] | None = None
     edit_text: Callable[[int, int, str, int | None], Awaitable[object]] | None = None
     failure_recorder: LiveEditFailureRecorder | None = None
+    min_edit_interval_seconds: float = 0.35
+    max_consecutive_edit_failures: int = 2
     _live_message_id: int | None = None
+    _last_edit_at: float = 0.0
+    _consecutive_edit_failures: int = 0
+    _degraded: bool = False
 
     async def consume(self, *, chat_id: int, message_thread_id: int | None, event: dict[str, Any]) -> None:
         if not self.enabled:
@@ -63,16 +69,27 @@ class SafeTelegramLiveEditAdapter:
             return
 
         if event_type == "delta":
+            if self._degraded:
+                return
             if self._live_message_id is None:
                 await self._record_failure(stage="delta", code="missing_live_message")
                 return
             if self.edit_text is None:
                 await self._record_failure(stage="delta", code="edit_missing")
                 return
+            if self._is_throttled():
+                await self._record_failure(stage="delta", code="edit_throttled")
+                return
             try:
                 await self.edit_text(chat_id, self._live_message_id, "…", message_thread_id)
+                self._last_edit_at = monotonic()
+                self._consecutive_edit_failures = 0
             except Exception:
+                self._consecutive_edit_failures += 1
                 await self._record_failure(stage="delta", code="edit_failed")
+                if self._consecutive_edit_failures >= self.max_consecutive_edit_failures:
+                    self._degraded = True
+                    await self._record_failure(stage="delta", code="edit_disabled_after_failures")
             return
 
         if event_type in {"done", "error"}:
@@ -84,6 +101,12 @@ class SafeTelegramLiveEditAdapter:
         if self.failure_recorder is None:
             return
         await self.failure_recorder(LiveEditFailure(stage=stage, code=code))
+
+    def _is_throttled(self) -> bool:
+        if self.min_edit_interval_seconds <= 0:
+            return False
+        now = monotonic()
+        return (now - self._last_edit_at) < self.min_edit_interval_seconds
 
     @staticmethod
     def _extract_message_id(value: object) -> int | None:
