@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import asyncio
 import logging
 import time
+from typing import Any
 
 import httpx
 
@@ -19,6 +20,7 @@ class AIService:
     retry_on_transient_error: bool = True
     retry_delay_seconds: float = 1.0
     fallback_model: str | None = None
+    last_stream_events: list[dict[str, Any]] = field(default_factory=list)
 
     async def ask(self, prompt: str) -> str:
         cleaned = prompt.strip()
@@ -26,9 +28,12 @@ class AIService:
             raise ValueError("empty prompt")
 
         prompt_len = len(cleaned)
+        self.last_stream_events = []
 
         try:
-            return await self._timed_generate(client=self.client, prompt=cleaned, phase="primary", prompt_len=prompt_len)
+            response = await self._timed_generate(client=self.client, prompt=cleaned, phase="primary", prompt_len=prompt_len)
+            self.last_stream_events = list(getattr(self.client, "last_stream_events", []) or [])
+            return response
         except OllamaError as exc:
             if not (self.retry_on_transient_error and self._is_transient_error(exc)):
                 raise
@@ -37,7 +42,9 @@ class AIService:
             await asyncio.sleep(self.retry_delay_seconds)
 
         try:
-            return await self._timed_generate(client=self.client, prompt=cleaned, phase="retry", prompt_len=prompt_len)
+            response = await self._timed_generate(client=self.client, prompt=cleaned, phase="retry", prompt_len=prompt_len)
+            self.last_stream_events = list(getattr(self.client, "last_stream_events", []) or [])
+            return response
         except OllamaError as retry_exc:
             if not self.fallback_model:
                 raise retry_exc
@@ -56,7 +63,9 @@ class AIService:
             max_response_chars=self.client.max_response_chars,
             request_endpoint=request_endpoint,
         )
-        return await self._timed_generate(client=fallback_client, prompt=cleaned, phase="fallback", prompt_len=prompt_len)
+        response = await self._timed_generate(client=fallback_client, prompt=cleaned, phase="fallback", prompt_len=prompt_len)
+        self.last_stream_events = list(getattr(fallback_client, "last_stream_events", []) or [])
+        return response
 
     async def _timed_generate(self, *, client: OllamaClient, prompt: str, phase: str, prompt_len: int) -> str:
         model = getattr(client, "model", "unknown")

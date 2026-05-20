@@ -52,8 +52,10 @@ class OllamaClient:
     request_endpoint: str = "generate"
     streaming_mode: Literal["off", "collect_only", "live_edit"] = "off"
     stream_phase: Literal["primary", "retry", "fallback"] = "primary"
+    last_stream_events: list[dict[str, Any]] | None = None
 
     def __post_init__(self) -> None:
+        self.last_stream_events = []
         if self.max_prompt_chars <= 0:
             raise ValueError("max_prompt_chars must be > 0")
         if self.max_predict_tokens <= 0:
@@ -64,6 +66,7 @@ class OllamaClient:
             raise ValueError("streaming_mode must be one of: off, collect_only, live_edit")
 
     async def generate(self, prompt: str) -> str:
+        self.last_stream_events = []
         request_prompt = prompt[: self.max_prompt_chars]
         if self.request_endpoint == "chat":
             stream_enabled = self.streaming_mode == "collect_only"
@@ -129,6 +132,7 @@ class OllamaClient:
             prompt_len=prompt_len,
             fallback_used=self.stream_phase == "fallback",
         )
+        self.last_stream_events = list(events)
 
         final_chunk: dict[str, object] | None = None
         for event in events:
