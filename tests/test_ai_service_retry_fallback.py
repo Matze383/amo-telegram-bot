@@ -10,13 +10,14 @@ from amo_bot.ai.service import AIService
 
 
 class _FakeClient:
-    def __init__(self, *, base_url: str = "http://ollama", model: str = "primary", timeout_seconds: float = 1.0, max_response_chars: int = 1000, outcomes: list[object] | None = None) -> None:
+    def __init__(self, *, base_url: str = "http://ollama", model: str = "primary", timeout_seconds: float = 1.0, max_response_chars: int = 1000, outcomes: list[object] | None = None, stream_events: list[dict[str, object]] | None = None) -> None:
         self.base_url = base_url
         self.model = model
         self.timeout_seconds = timeout_seconds
         self.max_response_chars = max_response_chars
         self._outcomes = list(outcomes or [])
         self.calls: list[str] = []
+        self.last_stream_events = list(stream_events or [])
 
     async def generate(self, prompt: str) -> str:
         self.calls.append(prompt)
@@ -29,9 +30,10 @@ class _FakeClient:
 
 
 class _FallbackClient:
-    def __init__(self, *, response: object) -> None:
+    def __init__(self, *, response: object, stream_events: list[dict[str, object]] | None = None) -> None:
         self.response = response
         self.calls: list[str] = []
+        self.last_stream_events = list(stream_events or [])
 
     async def generate(self, prompt: str) -> str:
         self.calls.append(prompt)
@@ -194,6 +196,122 @@ def test_ai_service_collect_only_stream_contract_error_retries_then_fallback(mon
     assert out == "fallback final"
     assert len(client.calls) == 2
     assert len(fallback.calls) == 1
+
+
+def test_stream_handoff_dedupes_duplicate_terminal_done() -> None:
+    client = _FakeClient(
+        outcomes=["ok"],
+        stream_events=[
+            {"type": "delta", "text": "hel"},
+            {"type": "terminal", "outcome": "done"},
+            {"type": "terminal", "outcome": "done"},
+        ],
+    )
+    service = AIService(client=client, retry_on_transient_error=True, retry_delay_seconds=0)
+
+    out = asyncio.run(service.ask("hello"))
+
+    assert out == "ok"
+    assert service.last_stream_events == [
+        {"type": "delta", "text": "hel"},
+        {"type": "terminal", "outcome": "done"},
+    ]
+
+
+def test_stream_handoff_suppresses_post_terminal_delta() -> None:
+    client = _FakeClient(
+        outcomes=["ok"],
+        stream_events=[
+            {"type": "delta", "text": "before"},
+            {"type": "terminal", "outcome": "done"},
+            {"type": "delta", "text": "after"},
+        ],
+    )
+    service = AIService(client=client, retry_on_transient_error=True, retry_delay_seconds=0)
+
+    _ = asyncio.run(service.ask("hello"))
+
+    assert service.last_stream_events == [
+        {"type": "delta", "text": "before"},
+        {"type": "terminal", "outcome": "done"},
+    ]
+
+
+@pytest.mark.parametrize("outcome", ["cancel", "timeout"])
+def test_stream_handoff_cancel_timeout_terminals_win(outcome: str) -> None:
+    client = _FakeClient(
+        outcomes=["ok"],
+        stream_events=[
+            {"type": "delta", "text": "start"},
+            {"type": "terminal", "outcome": outcome},
+            {"type": "delta", "text": "ignored"},
+            {"type": "terminal", "outcome": "done"},
+        ],
+    )
+    service = AIService(client=client, retry_on_transient_error=True, retry_delay_seconds=0)
+
+    _ = asyncio.run(service.ask("hello"))
+
+    assert service.last_stream_events == [
+        {"type": "delta", "text": "start"},
+        {"type": "terminal", "outcome": outcome},
+    ]
+
+
+def test_stream_handoff_non_terminal_passthrough_before_terminal() -> None:
+    client = _FakeClient(
+        outcomes=["ok"],
+        stream_events=[
+            {"type": "status", "phase": "queued"},
+            {"type": "delta", "text": "hel"},
+            {"type": "delta", "text": "lo"},
+            {"type": "terminal", "outcome": "done"},
+        ],
+    )
+    service = AIService(client=client, retry_on_transient_error=True, retry_delay_seconds=0)
+
+    _ = asyncio.run(service.ask("hello"))
+
+    assert service.last_stream_events == [
+        {"type": "status", "phase": "queued"},
+        {"type": "delta", "text": "hel"},
+        {"type": "delta", "text": "lo"},
+        {"type": "terminal", "outcome": "done"},
+    ]
+
+
+def test_stream_handoff_uses_fallback_events_with_terminal_convergence(monkeypatch) -> None:
+    client = _FakeClient(outcomes=[OllamaHTTPStatusError(503), OllamaHTTPStatusError(503)])
+    fallback = _FallbackClient(
+        response="fallback final",
+        stream_events=[
+            {"type": "delta", "text": "fb"},
+            {"type": "terminal", "outcome": "error"},
+            {"type": "delta", "text": "ignored"},
+            {"type": "terminal", "outcome": "done"},
+        ],
+    )
+
+    def _mk_fallback(*, base_url: str, model: str, timeout_seconds: float, max_response_chars: int, request_endpoint: str):
+        assert request_endpoint == "generate"
+        return fallback
+
+    monkeypatch.setattr("amo_bot.ai.service.OllamaClient", _mk_fallback)
+
+    service = AIService(
+        client=client,
+        retry_on_transient_error=True,
+        retry_delay_seconds=0,
+        fallback_model="kimi-k2.5:cloud",
+    )
+
+    out = asyncio.run(service.ask("hello"))
+
+    assert out == "fallback final"
+    assert service.last_stream_events == [
+        {"type": "delta", "text": "fb"},
+        {"type": "terminal", "outcome": "error"},
+    ]
 
 
 def test_logs_timeout_as_generic_metadata_only(caplog: pytest.LogCaptureFixture) -> None:

@@ -6,6 +6,8 @@ import logging
 import time
 from typing import Any
 
+_TERMINAL_OUTCOMES = {"done", "error", "cancel", "timeout"}
+
 import httpx
 
 from amo_bot.ai.ollama import OllamaClient, OllamaError, OllamaHTTPStatusError
@@ -32,7 +34,7 @@ class AIService:
 
         try:
             response = await self._timed_generate(client=self.client, prompt=cleaned, phase="primary", prompt_len=prompt_len)
-            self.last_stream_events = list(getattr(self.client, "last_stream_events", []) or [])
+            self.last_stream_events = self._normalize_stream_events(getattr(self.client, "last_stream_events", []) or [])
             return response
         except OllamaError as exc:
             if not (self.retry_on_transient_error and self._is_transient_error(exc)):
@@ -43,7 +45,7 @@ class AIService:
 
         try:
             response = await self._timed_generate(client=self.client, prompt=cleaned, phase="retry", prompt_len=prompt_len)
-            self.last_stream_events = list(getattr(self.client, "last_stream_events", []) or [])
+            self.last_stream_events = self._normalize_stream_events(getattr(self.client, "last_stream_events", []) or [])
             return response
         except OllamaError as retry_exc:
             if not self.fallback_model:
@@ -64,7 +66,7 @@ class AIService:
             request_endpoint=request_endpoint,
         )
         response = await self._timed_generate(client=fallback_client, prompt=cleaned, phase="fallback", prompt_len=prompt_len)
-        self.last_stream_events = list(getattr(fallback_client, "last_stream_events", []) or [])
+        self.last_stream_events = self._normalize_stream_events(getattr(fallback_client, "last_stream_events", []) or [])
         return response
 
     async def _timed_generate(self, *, client: OllamaClient, prompt: str, phase: str, prompt_len: int) -> str:
@@ -93,6 +95,24 @@ class AIService:
             duration_ms,
         )
         return response
+
+    @staticmethod
+    def _normalize_stream_events(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        normalized: list[dict[str, Any]] = []
+        terminal_seen = False
+
+        for event in events:
+            if terminal_seen:
+                continue
+
+            normalized.append(event)
+            event_type = str(event.get("type", "")).casefold()
+            if event_type == "terminal":
+                outcome = str(event.get("outcome", "")).casefold()
+                if outcome in _TERMINAL_OUTCOMES:
+                    terminal_seen = True
+
+        return normalized
 
     @staticmethod
     def _error_category(exc: OllamaError) -> str:
