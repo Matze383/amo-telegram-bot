@@ -149,6 +149,7 @@ async def handle_worker(context, host_api):
     )
 
     with session_factory() as session:
+        PluginRepository(session).sync_discovered(loader.discover().valid)
         PluginRepository(session).activate("worker_isolation", actor_telegram_user_id=42)
 
     assert manager.start_sync("worker_isolation", now=datetime(2030, 1, 1, tzinfo=timezone.utc)) is True
