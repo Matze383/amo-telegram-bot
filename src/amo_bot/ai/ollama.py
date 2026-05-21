@@ -74,6 +74,7 @@ class OllamaClient:
                 "model": self.model,
                 "messages": [{"role": "user", "content": request_prompt}],
                 "stream": stream_enabled,
+                "think": False,
                 "options": {"num_predict": self.max_predict_tokens},
             }
             endpoint_path = "/api/chat"
@@ -82,6 +83,7 @@ class OllamaClient:
                 "model": self.model,
                 "prompt": request_prompt,
                 "stream": False,
+                "think": False,
                 "options": {"num_predict": self.max_predict_tokens},
             }
             endpoint_path = "/api/generate"
@@ -121,10 +123,43 @@ class OllamaClient:
                     raise OllamaError("invalid ollama response")
                 envelope = envelope_from_full_response_text(response_text)
         except AIResponseContractError as exc:
+            if str(exc) == "empty response":
+                logger.warning(
+                    "ollama empty response endpoint=%s model=%s done=%s done_reason=%s has_response=%s response_len=%s has_thinking=%s thinking_len=%s has_message_thinking=%s message_thinking_len=%s",
+                    endpoint_path,
+                    self.model,
+                    data.get("done"),
+                    data.get("done_reason"),
+                    "response" in data,
+                    len(data.get("response", "")) if isinstance(data.get("response"), str) else None,
+                    isinstance(data.get("thinking"), str) and bool(data.get("thinking")),
+                    len(data.get("thinking", "")) if isinstance(data.get("thinking"), str) else None,
+                    self._message_field_is_nonempty_string(data, "thinking"),
+                    self._message_field_len(data, "thinking"),
+                )
             raise OllamaError(str(exc)) from exc
 
         text = envelope.final_text
         return text[: self.max_response_chars]
+
+
+    @staticmethod
+    def _message_field_is_nonempty_string(data: dict[str, object], field_name: str) -> bool:
+        message = data.get("message")
+        if not isinstance(message, dict):
+            return False
+        value = message.get(field_name)
+        return isinstance(value, str) and bool(value)
+
+    @staticmethod
+    def _message_field_len(data: dict[str, object], field_name: str) -> int | None:
+        message = data.get("message")
+        if not isinstance(message, dict):
+            return None
+        value = message.get(field_name)
+        if not isinstance(value, str):
+            return None
+        return len(value)
 
     def _collect_chat_stream_response(self, response: httpx.Response, *, prompt_len: int) -> dict[str, object]:
         events = self.iter_chat_stream_events(

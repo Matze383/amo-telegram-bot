@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from typing import Any
 
 import httpx
@@ -78,6 +79,7 @@ def test_ollama_client_sends_server_side_request_limits(monkeypatch) -> None:
     assert seen_payload["model"] == "m1"
     assert seen_payload["prompt"] == "abcde"
     assert seen_payload["stream"] is False
+    assert seen_payload["think"] is False
     assert seen_payload["options"] == {"num_predict": 42}
 
 
@@ -125,6 +127,71 @@ def test_ollama_client_empty_response(monkeypatch) -> None:
     except OllamaError as exc:
         assert "empty response" in str(exc)
 
+
+
+def test_ollama_client_empty_generate_response_with_thinking_fails_closed(monkeypatch, caplog: pytest.LogCaptureFixture) -> None:
+    async def post_impl(url: str, payload: dict[str, Any]) -> httpx.Response:
+        req = httpx.Request("POST", url)
+        return httpx.Response(
+            200,
+            json={
+                "response": "",
+                "thinking": "internal reasoning that must not be returned",
+                "done": True,
+                "done_reason": "stop",
+            },
+            request=req,
+        )
+
+    _patch_async_client(monkeypatch, post_impl)
+
+    client = OllamaClient(base_url="http://ollama", model="kimi-k2.5:cloud", timeout_seconds=1.0)
+
+    with caplog.at_level(logging.WARNING, logger="amo_bot.ai.ollama"):
+        with pytest.raises(OllamaError, match="empty response"):
+            asyncio.run(client.generate("hello"))
+
+    messages = [rec.message for rec in caplog.records if rec.name == "amo_bot.ai.ollama"]
+    assert any(
+        "ollama empty response" in msg
+        and "done_reason=stop" in msg
+        and "has_thinking=True" in msg
+        and "thinking_len=44" in msg
+        for msg in messages
+    )
+    assert all("internal reasoning" not in msg for msg in messages)
+
+
+def test_ollama_client_empty_chat_content_with_thinking_fails_closed(monkeypatch, caplog: pytest.LogCaptureFixture) -> None:
+    async def post_impl(url: str, payload: dict[str, Any]) -> httpx.Response:
+        req = httpx.Request("POST", url)
+        return httpx.Response(
+            200,
+            json={
+                "message": {"role": "assistant", "content": "", "thinking": "hidden reasoning"},
+                "done": True,
+                "done_reason": "stop",
+            },
+            request=req,
+        )
+
+    _patch_async_client(monkeypatch, post_impl)
+
+    client = OllamaClient(base_url="http://ollama", model="kimi-k2.5:cloud", timeout_seconds=1.0, request_endpoint="chat")
+
+    with caplog.at_level(logging.WARNING, logger="amo_bot.ai.ollama"):
+        with pytest.raises(OllamaError, match="empty response"):
+            asyncio.run(client.generate("hello"))
+
+    messages = [rec.message for rec in caplog.records if rec.name == "amo_bot.ai.ollama"]
+    assert any(
+        "ollama empty response" in msg
+        and "done_reason=stop" in msg
+        and "has_message_thinking=True" in msg
+        and "message_thinking_len=16" in msg
+        for msg in messages
+    )
+    assert all("hidden reasoning" not in msg for msg in messages)
 
 def test_ollama_client_non_dict_json_response(monkeypatch) -> None:
     async def post_impl(url: str, payload: dict[str, Any]) -> httpx.Response:
@@ -223,6 +290,7 @@ def test_ollama_client_chat_endpoint_payload_and_response(monkeypatch) -> None:
     assert seen_url == "http://ollama/api/chat"
     assert seen_payload["model"] == "m1"
     assert seen_payload["stream"] is False
+    assert seen_payload["think"] is False
     assert seen_payload["messages"] == [{"role": "user", "content": "abcde"}]
     assert seen_payload["options"] == {"num_predict": 7}
 
