@@ -18,8 +18,8 @@ This document tracks public-facing repository metadata requirements for the AMO 
 | Field | Status | Notes |
 |-------|--------|-------|
 | **Repository name** | `AMO-telegram-bot` | Set |
-| **Description** | A modular, role-based Telegram bot with plugin support, WebUI management, and optional Ollama AI integration. | Ready |
-| **Topics / Tags** | `telegram-bot`, `python`, `flask`, `ollama`, `ai`, `plugin-system`, `webui` | Candidate list |
+| **Description** | A modular, role-based Telegram bot with plugin support, WebUI management, and optional Ollama/OpenAI AI integration. | Ready |
+| **Topics / Tags** | `telegram-bot`, `python`, `flask`, `ollama`, `openai`, `ai`, `plugin-system`, `webui` | Candidate list |
 | **Default branch** | `main` | Set |
 | **License** | MIT | ✅ Added (see `LICENSE`) |
 
@@ -93,8 +93,8 @@ Dieses Dokument erfasst öffentliche Repository-Metadaten-Anforderungen für das
 | Feld | Status | Hinweise |
 |------|--------|----------|
 | **Repository-Name** | `AMO-telegram-bot` | Gesetzt |
-| **Beschreibung** | Ein modularer, rollenbasierter Telegram-Bot mit Plugin-Unterstützung, WebUI-Verwaltung und optionaler Ollama-KI-Integration. | Bereit |
-| **Themen / Tags** | `telegram-bot`, `python`, `flask`, `ollama`, `ai`, `plugin-system`, `webui` | Kandidatenliste |
+| **Beschreibung** | Ein modularer, rollenbasierter Telegram-Bot mit Plugin-Unterstützung, WebUI-Verwaltung und optionaler Ollama/OpenAI-KI-Integration. | Bereit |
+| **Themen / Tags** | `telegram-bot`, `python`, `flask`, `ollama`, `openai`, `ai`, `plugin-system`, `webui` | Kandidatenliste |
 | **Standard-Branch** | `main` | Gesetzt |
 | **Lizenz** | MIT | ✅ Hinzugefügt (siehe `LICENSE`) |
 

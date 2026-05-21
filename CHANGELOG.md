@@ -5,14 +5,14 @@
 
 ---
 
-## [2026.5.19] – Release Candidate
+## [2026.05.21] – Local Release Candidate
 
-**Datum / Date:** 2026-05-19
+**Datum / Date:** 2026-05-21
 
 ### 🇩🇪 Deutsch
 
 #### Übersicht
-Dieser Release-Kandidat enthält Verbesserungen beim KI-Kontext-Management, Abschaltung der veralteten FastAPI-WebUI, gehärtete CSP-Richtlinien sowie den neuen Command-Sandbox-Mechanismus.
+Dieser lokale Release-Kandidat enthält OpenAI-Provider-Support, Verbesserungen beim KI-Kontext-Management, die A5-Kontext-/Memory-Architekturspezifikation, Abschaltung der veralteten FastAPI-WebUI, gehärtete CSP-Richtlinien sowie vollständige Sandbox-Isolation für Command-, Scheduled- und Worker-Plugin-Runtimes.
 
 #### Neu (Highlights)
 - **OpenAI Provider Support:** Alternative AI provider for `/ask` and auto-reply features
@@ -34,7 +34,9 @@ Dieser Release-Kandidat enthält Verbesserungen beim KI-Kontext-Management, Absc
 - **GH-SEC-5/6 – Scheduled + Worker Runtime Sandbox Isolation:** Plugin-Ausführung für Scheduled- und Worker-Runtime jetzt vollständig über Sandbox-Worker (`command.execute.v1`) mit Capability-Enforcement (`plugin.runtime.schedule.execute`, `plugin.runtime.worker.execute`), striktem Op-Replay und sanitized Errors. Worker-Timeout reduziert auf 3s.
 
 #### Architektur / Interna
+- **A5 Context & Memory Architecture:** Architektur-/Spezifikationsdokument für Kontext-Layer, Telegram-Identity-Scope, Memory-Promotion-Policy, Auditmodell sowie DM/Gruppe/Topic-Isolation ergänzt (`docs/CONTEXT_MEMORY_ARCHITECTURE.md`).
 - **AI Response Contract (AI-LAT-B3):** Interner Vertrag zwischen Provider-Response und Bot-Ausgabe; aktuell wird Ollama-Volltext über `envelope_from_full_response_text` normalisiert. Semantik ist fail-closed (ungültige/leere Responses werden abgelehnt). Vorbereitung für inkrementelles Streaming ohne aktiviertes Live-Streaming.
+- **AI Empty Response Classification:** Leere oder ungültige Provider-Antworten werden intern spezifisch als `empty_response` bzw. `invalid_response` klassifiziert statt generisch als `other`.
 
 #### Bekannte Einschränkungen / Betriebsnotizen
 - **Command Runtime:** Ab diesem Release werden Commands immer über den Sandbox-Worker ausgeführt (vollständige Isolation).
@@ -47,7 +49,7 @@ Dieser Release-Kandidat enthält Verbesserungen beim KI-Kontext-Management, Absc
 ### 🇬🇧 English
 
 #### Overview
-This release candidate includes improvements to AI context management, removal of the legacy FastAPI WebUI, hardened CSP policies, and the new command sandbox mechanism.
+This local release candidate includes OpenAI provider support, AI context-management improvements, the A5 context/memory architecture specification, removal of the legacy FastAPI WebUI, hardened CSP policies, and complete sandbox isolation for command, scheduled, and worker plugin runtimes.
 
 #### New (Highlights)
 - **OpenAI Provider Support:** Alternative AI provider for `/ask` and auto-reply features
@@ -69,7 +71,9 @@ This release candidate includes improvements to AI context management, removal o
 - **GH-SEC-5/6 – Scheduled + Worker Runtime Sandbox Isolation:** Scheduled and worker plugin execution now fully routed through sandbox worker (`command.execute.v1`) with capability enforcement (`plugin.runtime.schedule.execute`, `plugin.runtime.worker.execute`), strict op replay, and sanitized errors. Worker timeout reduced to 3s.
 
 #### Architecture / Internal
+- **A5 Context & Memory Architecture:** Added architecture/spec document for context layers, Telegram identity scoping, memory-promotion policy, audit model, and DM/group/topic isolation (`docs/CONTEXT_MEMORY_ARCHITECTURE.md`).
 - **AI Response Contract (AI-LAT-B3):** Internal contract between provider response and bot output; Ollama full-text is currently normalized via `envelope_from_full_response_text`. Semantics are fail-closed (invalid/empty responses are rejected). Prepares for incremental streaming without live streaming currently enabled.
+- **AI Empty Response Classification:** Empty or invalid provider responses are now classified internally as `empty_response` / `invalid_response` instead of generic `other`.
 
 #### Known Limitations / Operational Notes
 - **Command Runtime:** Commands now always execute via sandbox worker (complete isolation).
@@ -190,4 +194,4 @@ This is the first public release candidate of the AMO Telegram Bot. The software
 
 ---
 
-*Letzte Aktualisierung / Last updated: 2026-05-19*
+*Letzte Aktualisierung / Last updated: 2026-05-21*
