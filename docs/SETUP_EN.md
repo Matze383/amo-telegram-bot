@@ -9,7 +9,9 @@ Complete setup instructions for running the bot locally.
 - Python 3.12 or higher
 - Windows, macOS, or Linux
 - Telegram Bot Token (from [@BotFather](https://t.me/BotFather))
-- Optional: Local [Ollama](https://ollama.com/) instance for AI features
+- Optional: AI provider for `/ask` command:
+  - Local [Ollama](https://ollama.com/) instance, **OR**
+  - OpenAI API key
 
 ---
 
@@ -160,11 +162,23 @@ BOT_USERNAME=your_bot_username
 WEBUI_PASSWORD=your_secure_password
 WEBUI_OWNER_TELEGRAM_ID=your_telegram_user_id
 
+# AI Provider Configuration
+AI_PROVIDER=ollama  # ollama (default) or openai
+
+# Optional: OpenAI (for /ask command)
+# OPENAI_API_KEY=sk-your-key-here
+# OPENAI_MODEL=gpt-4o-mini
+# OPENAI_TIMEOUT_SECONDS=30
+
 # Optional: Ollama (for /ask command)
 OLLAMA_URL=http://127.0.0.1:11434
 OLLAMA_MODEL=llama3.1
 OLLAMA_TIMEOUT_SECONDS=20
+OLLAMA_MAX_PROMPT_CHARS=4000
+OLLAMA_MAX_PREDICT_TOKENS=512
 OLLAMA_MAX_RESPONSE_CHARS=1500
+# OLLAMA_REQUEST_ENDPOINT=generate  # generate (default) or chat; invalid values fail startup validation
+# OLLAMA_STREAMING_MODE=off  # off (default), collect_only, live_edit (parsed gate only; no live Telegram streaming)
 
 # Optional: Database (defaults to SQLite)
 DATABASE_URL=sqlite:///./data/amo_bot.db

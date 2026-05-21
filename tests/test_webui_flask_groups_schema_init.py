@@ -16,6 +16,7 @@ def _make_settings(database_url: str) -> Settings:
         "WEBUI_HOST": "127.0.0.1",
         "WEBUI_PORT": 5010,
         "WEBUI_PASSWORD": "secret",
+        "WEBUI_SECRET_KEY": "test-webui-secret-key-0123456789-abcdef",
         "WEBUI_SESSION_TTL_SECONDS": 900,
         "WEBUI_PUBLIC_MODE": False,
         "WEBUI_REQUIRE_HTTPS": False,

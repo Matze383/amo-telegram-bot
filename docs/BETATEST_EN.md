@@ -18,7 +18,9 @@ This guide helps you test the MVP status of the bot:
 - Python 3.12 or higher
 - Linux/macOS development environment
 - A Telegram bot token (from @BotFather)
-- Optional: Local Ollama instance for `/ask`
+- Optional: AI provider for `/ask`:
+  - Local Ollama instance, **OR**
+  - OpenAI API key
 
 ---
 
@@ -38,10 +40,20 @@ BOT_TOKEN=your_bot_token_here
 BOT_USERNAME=your_bot_username
 TELEGRAM_API_BASE=https://api.telegram.org
 
-# Ollama (optional for /ask)
+# AI Provider Configuration
+AI_PROVIDER=ollama  # ollama (default) or openai
+
+# Optional: OpenAI (for /ask command)
+# OPENAI_API_KEY=sk-your-key-here
+# OPENAI_MODEL=gpt-4o-mini
+# OPENAI_TIMEOUT_SECONDS=30
+
+# Optional: Ollama (for /ask command)
 OLLAMA_URL=http://127.0.0.1:11434
 OLLAMA_MODEL=llama3.1
 OLLAMA_TIMEOUT_SECONDS=20
+OLLAMA_MAX_PROMPT_CHARS=4000
+OLLAMA_MAX_PREDICT_TOKENS=512
 OLLAMA_MAX_RESPONSE_CHARS=1500
 
 # Database
@@ -275,14 +287,19 @@ Start a private chat with your bot:
 
 ---
 
-### /ask Test with Ollama (optional)
+### /ask Test with AI Provider (optional)
 
-**Prerequisite:** Ollama running locally
+**Prerequisite:** AI provider configured (Ollama or OpenAI)
 
+**For Ollama:**
 ```bash
 # Check Ollama status
 curl http://127.0.0.1:11434/api/tags
 ```
+
+**For OpenAI:**
+- Ensure `OPENAI_API_KEY` is set in `.env`
+- Ensure `AI_PROVIDER=openai` is set in `.env`
 
 **Test:**
 - Send: `/ask What is Python?`
@@ -290,7 +307,7 @@ curl http://127.0.0.1:11434/api/tags
 
 **MVP Limitations:**
 - Stateless (no chat history)
-- Timeout after 20 seconds
+- Timeout after 20 seconds (Ollama) or 30 seconds (OpenAI)
 - Maximum response length: 1500 characters
 
 ---
@@ -308,7 +325,7 @@ The bot can auto-respond via AI when mentioned or replied to in **active scopes*
 - User must have role `vip`, `admin`, or `owner`
 - User must have accepted consent (`/accept`)
 - The scope (topic or private chat) must have AI enabled in the configuration
-- The AI service must be configured (Ollama)
+- The AI service must be configured (Ollama or OpenAI)
 
 **Audit Events:**
 - `ai_autoreply_sent` — Response successfully sent

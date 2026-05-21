@@ -3,12 +3,16 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 from typing import Any
+import logging
 
 import httpx
 
 
 class TelegramApiError(RuntimeError):
     pass
+
+
+logger = logging.getLogger(__name__)
 
 
 class TelegramRateLimitError(TelegramApiError):
@@ -22,6 +26,7 @@ class TelegramClient:
     token: str
     base_url: str = "https://api.telegram.org"
     timeout_seconds: float = 30.0
+    poll_read_timeout_margin_seconds: float = 10.0
 
     @property
     def api_root(self) -> str:
@@ -29,7 +34,8 @@ class TelegramClient:
 
     async def _call(self, method: str, payload: dict[str, Any]) -> Any:
         url = f"{self.api_root}/{method}"
-        async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
+        timeout = self._timeout_for_method(method=method, payload=payload)
+        async with httpx.AsyncClient(timeout=timeout) as client:
             response = await client.post(url, json=payload)
 
         if response.status_code == 429:
@@ -47,6 +53,26 @@ class TelegramClient:
         if not data.get("ok", False):
             raise TelegramApiError(str(data.get("description", "Unknown Telegram error")))
         return data.get("result")
+
+    def _timeout_for_method(self, *, method: str, payload: dict[str, Any]) -> httpx.Timeout | float:
+        if method != "getUpdates":
+            return self.timeout_seconds
+
+        poll_timeout_raw = payload.get("timeout")
+        try:
+            poll_timeout = float(poll_timeout_raw)
+        except (TypeError, ValueError):
+            poll_timeout = 0.0
+
+        read_timeout = max(self.timeout_seconds, poll_timeout + self.poll_read_timeout_margin_seconds)
+        connect_write_pool = max(5.0, self.timeout_seconds)
+        logger.debug(
+            "telegram getUpdates timeout config: shared_timeout=%s poll_timeout=%s read_timeout=%s",
+            self.timeout_seconds,
+            poll_timeout,
+            read_timeout,
+        )
+        return httpx.Timeout(connect=connect_write_pool, write=connect_write_pool, pool=connect_write_pool, read=read_timeout)
 
     async def get_updates(
         self,

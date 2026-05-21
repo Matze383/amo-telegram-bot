@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import importlib.util
-import inspect
 import json
 import logging
 import threading
@@ -11,15 +9,17 @@ from concurrent.futures import Future
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Coroutine
+from typing import Any, Coroutine
 
 from sqlalchemy.orm import sessionmaker
 
 from amo_bot.db.models import AuditEvent
 from amo_bot.db.repositories import PluginRepository
-from amo_bot.plugins.command_runtime import PluginHostAPI, ReplyFn, SendMessageFn
+from amo_bot.plugins.command_runtime import ReplyFn, SendMessageFn
 from amo_bot.plugins.loader import PluginLoader
 from amo_bot.plugins.manifest import PluginManifest
+from amo_bot.plugins.sandbox.runner import PluginSandboxRunner
+from amo_bot.plugins.sandbox.types import SandboxErrorCode, SandboxRequest, SandboxResponse, SandboxRunnerError
 
 logger = logging.getLogger(__name__)
 
@@ -91,19 +91,13 @@ class WorkerPluginManager:
             self._mark_state(plugin_name, state="stopped", heartbeat_at=now or datetime.now(timezone.utc))
             return False
         task.cancel()
-        if isinstance(task, asyncio.Task):
-            try:
-                await task
-            except asyncio.CancelledError:
-                pass
-        else:
-            try:
+        try:
+            if isinstance(task, Future):
                 await asyncio.wrap_future(task)
-            except asyncio.CancelledError:
-                pass
-            except Exception:
-                if not task.cancelled():
-                    raise
+            elif task.get_loop() is asyncio.get_running_loop():
+                await task
+        except (asyncio.CancelledError, RuntimeError):
+            pass
         self._mark_state(plugin_name, state="stopped", heartbeat_at=now or datetime.now(timezone.utc))
         self._write_audit("plugin_worker_stop", {"plugin_name": plugin_name})
         return True
@@ -127,21 +121,58 @@ class WorkerPluginManager:
         return status.worker_state if status else None
 
     async def _run_worker(self, *, manifest: PluginManifest, run_id: str, started_at: datetime) -> None:
-        handler = self._load_handler(manifest)
-        context = WorkerPluginContext(
-            plugin_id=manifest.name,
-            run_id=run_id,
-            trigger_type="worker",
-            started_at=started_at,
-        )
-        host_api = PluginHostAPI(
-            send_message=self._send_message,
-            reply=self._reply,
-            required_permissions=set(manifest.required_permissions),
-        )
-        await handler(context, host_api)
+        plugin_entry = (Path(self._loader.plugins_dir) / manifest.name / "main.py").as_posix()
+        worker_timeout_ms = int(manifest.worker.get("timeout_ms", 60_000)) if manifest.worker else 60_000
+        worker_timeout_ms = max(100, min(worker_timeout_ms, 60_000))
 
-    def _on_worker_done(self, plugin_name: str, manifest: PluginManifest, task: asyncio.Task[None] | Future[None]) -> None:
+        while True:
+            request = SandboxRequest.from_dict(
+                {
+                    "request_id": run_id,
+                    "action": "run",
+                    "plugin_id": manifest.name,
+                    "payload": {
+                        "plugin_entry": plugin_entry,
+                        "trigger": "worker",
+                        "run_id": run_id,
+                        "started_at": started_at.isoformat(),
+                        "capability": "plugin.runtime.worker.execute",
+                        "permissions": list(manifest.required_permissions),
+                    },
+                    "timeout_ms": worker_timeout_ms,
+                }
+            )
+            response = await asyncio.to_thread(
+                self._run_sandbox_request,
+                request,
+                worker_timeout_ms,
+            )
+            if response is None:
+                continue
+            if response.ok:
+                return
+
+            error_code = response.error_code or ""
+            raise RuntimeError(response.error_message or error_code or "sandbox_worker_failed")
+
+    def _run_sandbox_request(self, request: SandboxRequest, worker_timeout_ms: int) -> SandboxResponse | None:
+        try:
+            response = PluginSandboxRunner(base_timeout_ms=worker_timeout_ms, plugins_dir=self._loader.plugins_dir).run(request)
+        except SandboxRunnerError as exc:
+            if exc.code == SandboxErrorCode.WORKER_TIMEOUT:
+                return None
+            raise RuntimeError(exc.message or exc.code.value or "sandbox_worker_failed") from exc
+
+        if isinstance(response, dict):
+            response = SandboxResponse.from_dict(response)
+        return response
+
+    async def _finalize_worker_done(
+        self,
+        plugin_name: str,
+        manifest: PluginManifest,
+        task: asyncio.Task[None] | Future[None],
+    ) -> None:
         if task.cancelled():
             return
         exc = task.exception()
@@ -163,6 +194,14 @@ class WorkerPluginManager:
         )
         self._write_audit("plugin_worker_crash", {"plugin_name": plugin_name, "error": str(exc), "backoff_seconds": backoff})
 
+    def _on_worker_done(self, plugin_name: str, manifest: PluginManifest, task: asyncio.Task[None] | Future[None]) -> None:
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            asyncio.run(self._finalize_worker_done(plugin_name, manifest, task))
+            return
+        loop.create_task(self._finalize_worker_done(plugin_name, manifest, task))
+
     def _require_worker_manifest(self, plugin_name: str) -> PluginManifest:
         discovery = self._loader.discover()
         for manifest in discovery.valid:
@@ -170,25 +209,6 @@ class WorkerPluginManager:
                 return manifest
         raise ValueError("plugin not found or manifest invalid")
 
-    def _load_handler(self, manifest: PluginManifest) -> Callable[[WorkerPluginContext, PluginHostAPI], Awaitable[Any]]:
-        plugin_dir = Path(self._loader.plugins_dir) / manifest.name
-        module_path = plugin_dir / "main.py"
-        if not module_path.exists():
-            raise RuntimeError("plugin entrypoint main.py not found")
-
-        module_name = f"amo_worker_plugin_{manifest.name}"
-        spec = importlib.util.spec_from_file_location(module_name, module_path)
-        if spec is None or spec.loader is None:
-            raise RuntimeError("unable to load plugin module")
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-
-        handler = getattr(module, "handle_worker", None)
-        if handler is None or not callable(handler):
-            raise RuntimeError("plugin handle_worker(context, host_api) missing")
-        if not inspect.iscoroutinefunction(handler):
-            raise RuntimeError("plugin handle_worker must be async")
-        return handler
 
     def _create_worker_task(self, coroutine: Coroutine[Any, Any, None]) -> asyncio.Task[None] | Future[None]:
         try:

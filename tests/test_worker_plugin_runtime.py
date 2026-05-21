@@ -11,6 +11,7 @@ from amo_bot.db.init_db import init_db
 from amo_bot.db.models import AuditEvent, Plugin
 from amo_bot.db.repositories import PluginRepository
 from amo_bot.plugins.loader import PluginLoader
+from amo_bot.plugins.sandbox.types import SandboxErrorCode, SandboxRequest, SandboxResponse, SandboxRunnerError
 from amo_bot.plugins.worker_runtime import WorkerPluginManager
 
 
@@ -99,6 +100,14 @@ async def handle_worker(context, host_api):
     assert "plugin_worker_stop" in events
 
 
+async def _wait_for_state(manager: WorkerPluginManager, plugin_name: str, expected_state: str) -> None:
+    for _ in range(20):
+        await asyncio.sleep(0.1)
+        if manager.state(plugin_name) == expected_state:
+            return
+    raise AssertionError(f"expected {plugin_name} to reach {expected_state}, got {manager.state(plugin_name)}")
+
+
 def test_worker_crash_sets_backoff_and_audit(tmp_path) -> None:
     db_url = f"sqlite:///{tmp_path / 'worker2.db'}"
     init_db(db_url)
@@ -114,8 +123,7 @@ async def handle_worker(context, host_api):
 
     async def _run() -> None:
         assert await manager.start("worker_crash", now=datetime(2030, 1, 1, tzinfo=timezone.utc)) is True
-        await asyncio.sleep(0)
-        await asyncio.sleep(0)
+        await _wait_for_state(manager, "worker_crash", "crashed")
 
     asyncio.run(_run())
 
@@ -176,8 +184,7 @@ async def handle_worker(context, host_api):
 
     async def _run() -> None:
         assert await manager.start("worker_no_cap", now=datetime(2030, 1, 1, tzinfo=timezone.utc)) is True
-        await asyncio.sleep(0)
-        await asyncio.sleep(0)
+        await _wait_for_state(manager, "worker_no_cap", "crashed")
 
     asyncio.run(_run())
 
@@ -190,6 +197,39 @@ async def handle_worker(context, host_api):
         crashes = [row for row in events if row.event_type == "plugin_worker_crash"]
     assert crashes
     assert "requires capability 'send_message'" in (crashes[-1].payload_json or "")
+
+
+def test_worker_sandbox_timeout_keeps_worker_running(tmp_path, monkeypatch) -> None:
+    db_url = f"sqlite:///{tmp_path / 'worker_timeout.db'}"
+    init_db(db_url)
+    manager = _manager(
+        tmp_path,
+        db_url,
+        "worker_timeout",
+        """
+async def handle_worker(context, host_api):
+    return None
+""",
+    )
+
+    calls = 0
+
+    def _fake_run(self, request: SandboxRequest) -> SandboxResponse:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise SandboxRunnerError(SandboxErrorCode.WORKER_TIMEOUT, "worker_timeout")
+        return SandboxResponse(request_id=request.request_id, ok=True, result={"ops": []})
+
+    monkeypatch.setattr("amo_bot.plugins.sandbox.runner.PluginSandboxRunner.run", _fake_run)
+
+    async def _run() -> None:
+        assert await manager.start("worker_timeout", now=datetime(2030, 1, 1, tzinfo=timezone.utc)) is True
+        await _wait_for_state(manager, "worker_timeout", "stopped")
+
+    asyncio.run(_run())
+
+    assert calls == 2
 
 
 def test_worker_sync_start_uses_persistent_background_loop(tmp_path) -> None:

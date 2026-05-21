@@ -5,8 +5,7 @@ import logging
 import threading
 from argparse import ArgumentParser
 
-from amo_bot.ai.ollama import OllamaClient
-from amo_bot.ai.service import AIService
+from amo_bot.ai.providers import build_ai_provider
 from amo_bot.config.settings import get_settings
 from amo_bot.core.logging import setup_logging
 from amo_bot.db.base import create_session_factory
@@ -50,25 +49,16 @@ def run(argv: list[str] | None = None) -> None:
 
     tg = TelegramClient(token=settings.bot_token, base_url=settings.telegram_api_base)
     logger.info(
-        "bot startup config: bot_username=%s ollama_url=%s ollama_model=%s",
+        "bot startup config: bot_username=%s ai_provider=%s ollama_url=%s ollama_model=%s",
         settings.bot_username,
+        settings.ai_provider,
         settings.ollama_base_url,
         settings.ollama_model,
     )
     offset_store = OffsetStore(settings.offset_state_file)
 
     role_resolver = DBRoleResolver(session_factory)
-    ai_service = AIService(
-        OllamaClient(
-            base_url=settings.ollama_base_url,
-            model=settings.ollama_model,
-            timeout_seconds=settings.ollama_timeout_seconds,
-            max_response_chars=settings.ollama_max_response_chars,
-        ),
-        retry_on_transient_error=settings.ollama_retry_on_transient_error,
-        retry_delay_seconds=settings.ollama_retry_delay_seconds,
-        fallback_model=settings.ollama_fallback_model,
-    )
+    ai_service = build_ai_provider(settings)
     async def send_owner_private_text(chat_id: int, text: str) -> object:
         return await tg.send_message(chat_id=chat_id, text=text)
 
@@ -129,7 +119,6 @@ def run(argv: list[str] | None = None) -> None:
         session_factory=session_factory,
         send_message=send_text,
         reply=reply_text,
-        command_sandbox_enabled=settings.plugin_command_sandbox_enabled,
     )
 
     scheduled_plugin_executor = ScheduledPluginExecutor(

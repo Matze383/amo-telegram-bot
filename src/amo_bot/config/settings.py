@@ -18,13 +18,23 @@ class Settings(BaseSettings):
     poll_retry_max_seconds: int = Field(default=30, alias="POLL_RETRY_MAX_SECONDS")
     offset_state_file: str = Field(default=".state/offset.json", alias="OFFSET_STATE_FILE")
 
+    ai_provider: str = Field(default="ollama", alias="AI_PROVIDER")
+
+    openai_api_key: str | None = Field(default=None, alias="OPENAI_API_KEY")
+    openai_model: str = Field(default="gpt-4o-mini", alias="OPENAI_MODEL")
+    openai_timeout_seconds: float = Field(default=30.0, alias="OPENAI_TIMEOUT_SECONDS", gt=0)
+
     ollama_base_url: str = Field(default="http://127.0.0.1:11434", alias="OLLAMA_URL")
     ollama_model: str = Field(default="llama3.1", alias="OLLAMA_MODEL")
     ollama_timeout_seconds: int = Field(default=20, alias="OLLAMA_TIMEOUT_SECONDS")
+    ollama_max_prompt_chars: int = Field(default=4000, alias="OLLAMA_MAX_PROMPT_CHARS", gt=0)
+    ollama_max_predict_tokens: int = Field(default=512, alias="OLLAMA_MAX_PREDICT_TOKENS", gt=0)
     ollama_max_response_chars: int = Field(default=1500, alias="OLLAMA_MAX_RESPONSE_CHARS")
     ollama_retry_on_transient_error: bool = Field(default=True, alias="OLLAMA_RETRY_ON_TRANSIENT_ERROR")
     ollama_retry_delay_seconds: float = Field(default=1.0, alias="OLLAMA_RETRY_DELAY_SECONDS", ge=0)
     ollama_fallback_model: str | None = Field(default=None, alias="OLLAMA_FALLBACK_MODEL")
+    ollama_request_endpoint: str = Field(default="generate", alias="OLLAMA_REQUEST_ENDPOINT")
+    ollama_streaming_mode: str = Field(default="off", alias="OLLAMA_STREAMING_MODE")
 
     database_url: str = Field(default="sqlite:///./data/amo_bot.db", alias="DATABASE_URL")
     amo_plugin_dir: str = Field(default="./plugins", alias="AMO_PLUGIN_DIR")
@@ -46,6 +56,29 @@ class Settings(BaseSettings):
     def _validate_login_delay_bounds(self) -> Settings:
         if self.webui_login_delay_max_seconds < self.webui_login_delay_base_seconds:
             raise ValueError("WEBUI_LOGIN_DELAY_MAX_SECONDS must be >= WEBUI_LOGIN_DELAY_BASE_SECONDS")
+
+        provider = self.ai_provider.strip().casefold()
+        if provider not in {"openai", "ollama"}:
+            raise ValueError("AI_PROVIDER must be one of: openai, ollama")
+
+        self.ai_provider = provider
+
+        if provider == "openai":
+            api_key = (self.openai_api_key or "").strip()
+            if not api_key:
+                raise ValueError("OPENAI_API_KEY is required when AI_PROVIDER=openai")
+            self.openai_api_key = api_key
+
+        endpoint = self.ollama_request_endpoint.strip().casefold()
+        if endpoint not in {"generate", "chat"}:
+            raise ValueError("OLLAMA_REQUEST_ENDPOINT must be one of: generate, chat")
+        self.ollama_request_endpoint = endpoint
+
+        streaming_mode = self.ollama_streaming_mode.strip().casefold()
+        if streaming_mode not in {"off", "collect_only", "live_edit"}:
+            raise ValueError("OLLAMA_STREAMING_MODE must be one of: off, collect_only, live_edit")
+        self.ollama_streaming_mode = streaming_mode
+
         return self
 
 

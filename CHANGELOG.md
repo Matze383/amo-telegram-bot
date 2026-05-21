@@ -5,16 +5,20 @@
 
 ---
 
-## [2026.5.19] – Release Candidate
+## [2026.05.21] – Local Release Candidate
 
-**Datum / Date:** 2026-05-19
+**Datum / Date:** 2026-05-21
 
 ### 🇩🇪 Deutsch
 
 #### Übersicht
-Dieser Release-Kandidat enthält Verbesserungen beim KI-Kontext-Management, Abschaltung der veralteten FastAPI-WebUI, gehärtete CSP-Richtlinien sowie den neuen Command-Sandbox-Mechanismus.
+Dieser lokale Release-Kandidat enthält OpenAI-Provider-Support, Verbesserungen beim KI-Kontext-Management, die A5-Kontext-/Memory-Architekturspezifikation, Abschaltung der veralteten FastAPI-WebUI, gehärtete CSP-Richtlinien sowie vollständige Sandbox-Isolation für Command-, Scheduled- und Worker-Plugin-Runtimes.
 
 #### Neu (Highlights)
+- **OpenAI Provider Support:** Alternative AI provider for `/ask` and auto-reply features
+  - Configure via `.env`: `AI_PROVIDER` (ollama/openai), `OPENAI_API_KEY`, `OPENAI_MODEL`, `OPENAI_TIMEOUT_SECONDS`
+  - Runtime provider selection without code changes
+  - Secure API key handling with redaction in diagnostics
 - **Scoped Recent Context (default ON):** Pro-Scope (Topic/Gruppe/Privat) werden jetzt bis zu 20 normale Nachrichten persistiert. Der KI-Prompt erhält automatisch das passende Recent Context-Fenster, basierend auf der Router-Entscheidung.
 - **Group/Topic Trigger-Guard beibehalten:** In Gruppen/Topics antwortet die KI weiterhin nur bei Mention (`@botname`) oder echtem Reply-to-Bot (Owner ist stets eingeschlossen).
 - **FastAPI WebUI hard-disabled:** Die alte FastAPI-WebUI-Oberfläche wurde komplett deaktiviert; nur Flask-WebUI bleibt unterstützt.
@@ -22,11 +26,21 @@ Dieser Release-Kandidat enthält Verbesserungen beim KI-Kontext-Management, Absc
 - **Command Sandbox Hardening (GitHub Issue #2):**
   - SEC-SB2: Protokoll-Vertrag `command.execute.v1` mit typisiertem Request/Response-Validierung
   - SEC-SB3: Worker-Adapter für Sandbox-Ausführung mit sicherer Plugin-Entry-Auflösung
-  - SEC-SB4: Runtime-Schalter `PLUGIN_COMMAND_SANDBOX_ENABLED` (default OFF) – Commands laufen bei Aktivierung durch Sandbox-Worker
+  - SEC-SB4: Commands laufen jetzt immer durch Sandbox-Worker (Cutover); Legacy-In-Process-Pfad entfernt
   - SEC-SB5: Audit- und Fehlercode-Härtung ohne Traceback-Leakage
 
+#### Sicherheit / Security
+- **GH-SEC-5/6 – Command Runtime Sandbox Isolation (Cutover):** Command-Plugin-Ausführung jetzt immer über Sandbox-Worker (`command.execute.v1`); veralteter In-Process Command-Pfad entfernt. Command-Worker erzwingt `send_message`-Capability für alle Send/Reply-Operationen.
+- **GH-SEC-5/6 – Scheduled + Worker Runtime Sandbox Isolation:** Plugin-Ausführung für Scheduled- und Worker-Runtime jetzt vollständig über Sandbox-Worker (`command.execute.v1`) mit Capability-Enforcement (`plugin.runtime.schedule.execute`, `plugin.runtime.worker.execute`), striktem Op-Replay und sanitized Errors. Worker-Timeout reduziert auf 3s.
+
+#### Architektur / Interna
+- **A5 Context & Memory Architecture:** Architektur-/Spezifikationsdokument für Kontext-Layer, Telegram-Identity-Scope, Memory-Promotion-Policy, Auditmodell sowie DM/Gruppe/Topic-Isolation ergänzt (`docs/CONTEXT_MEMORY_ARCHITECTURE.md`).
+- **AI Response Contract (AI-LAT-B3):** Interner Vertrag zwischen Provider-Response und Bot-Ausgabe; aktuell wird Ollama-Volltext über `envelope_from_full_response_text` normalisiert. Semantik ist fail-closed (ungültige/leere Responses werden abgelehnt). Vorbereitung für inkrementelles Streaming ohne aktiviertes Live-Streaming.
+- **AI Empty Response Classification:** Leere oder ungültige Provider-Antworten werden intern spezifisch als `empty_response` bzw. `invalid_response` klassifiziert statt generisch als `other`.
+
 #### Bekannte Einschränkungen / Betriebsnotizen
-- **Sandbox Runtime:** `PLUGIN_COMMAND_SANDBOX_ENABLED` ist standardmäßig OFF; explizite Aktivierung erforderlich
+- **Command Runtime:** Ab diesem Release werden Commands immer über den Sandbox-Worker ausgeführt (vollständige Isolation).
+- **Scheduled/Worker Runtime:** Scheduled- und Worker-Plugins laufen jetzt immer über den Sandbox-Worker (`command.execute.v1`). Worker-Timeout (Default: 60s, max 60s) wird als normaler Heartbeat/Slice-Timeout behandelt (kein Crash, sanftes Retry).
 - **Transportmodus:** Long Polling bleibt aktueller Beta-Modus; Webhook-Migration ist in diesem Release nicht enthalten
 - **Cross-Platform:** Linux validiert; macOS/Windows Native-Smoke-Tests noch nicht abgeschlossen (keine nativen Runner verfügbar)
 
@@ -35,9 +49,13 @@ Dieser Release-Kandidat enthält Verbesserungen beim KI-Kontext-Management, Absc
 ### 🇬🇧 English
 
 #### Overview
-This release candidate includes improvements to AI context management, removal of the legacy FastAPI WebUI, hardened CSP policies, and the new command sandbox mechanism.
+This local release candidate includes OpenAI provider support, AI context-management improvements, the A5 context/memory architecture specification, removal of the legacy FastAPI WebUI, hardened CSP policies, and complete sandbox isolation for command, scheduled, and worker plugin runtimes.
 
 #### New (Highlights)
+- **OpenAI Provider Support:** Alternative AI provider for `/ask` and auto-reply features
+  - Configure via `.env`: `AI_PROVIDER` (ollama/openai), `OPENAI_API_KEY`, `OPENAI_MODEL`, `OPENAI_TIMEOUT_SECONDS`
+  - Runtime provider selection without code changes
+  - Secure API key handling with redaction in diagnostics
 - **Scoped Recent Context (default ON):** Up to 20 normal messages are now persisted per scope (topic/group/private). The AI prompt automatically receives the appropriate recent context window based on the router decision.
 - **Group/Topic Trigger Guard Preserved:** In groups/topics, AI replies only on mention (`@botname`) or genuine reply-to-bot (owner always included).
 - **FastAPI WebUI Hard-Disabled:** The legacy FastAPI WebUI surface has been completely disabled; only Flask WebUI remains supported.
@@ -45,11 +63,21 @@ This release candidate includes improvements to AI context management, removal o
 - **Command Sandbox Hardening (GitHub Issue #2):**
   - SEC-SB2: Protocol contract `command.execute.v1` with typed request/response validation
   - SEC-SB3: Worker adapter for sandbox execution with safe plugin-entry resolution
-  - SEC-SB4: Runtime switch `PLUGIN_COMMAND_SANDBOX_ENABLED` (default OFF) – commands run through sandbox worker when enabled
+  - SEC-SB4: Commands now always run through sandbox worker (cutover); legacy in-process path removed
   - SEC-SB5: Audit and error code hardening without traceback leakage
 
+#### Security
+- **GH-SEC-5/6 – Command Runtime Sandbox Isolation (Cutover):** Command plugin execution now always routes through sandbox worker (`command.execute.v1`); legacy in-process command execution path removed. Command worker enforces `send_message` capability for all send/reply operations.
+- **GH-SEC-5/6 – Scheduled + Worker Runtime Sandbox Isolation:** Scheduled and worker plugin execution now fully routed through sandbox worker (`command.execute.v1`) with capability enforcement (`plugin.runtime.schedule.execute`, `plugin.runtime.worker.execute`), strict op replay, and sanitized errors. Worker timeout reduced to 3s.
+
+#### Architecture / Internal
+- **A5 Context & Memory Architecture:** Added architecture/spec document for context layers, Telegram identity scoping, memory-promotion policy, audit model, and DM/group/topic isolation (`docs/CONTEXT_MEMORY_ARCHITECTURE.md`).
+- **AI Response Contract (AI-LAT-B3):** Internal contract between provider response and bot output; Ollama full-text is currently normalized via `envelope_from_full_response_text`. Semantics are fail-closed (invalid/empty responses are rejected). Prepares for incremental streaming without live streaming currently enabled.
+- **AI Empty Response Classification:** Empty or invalid provider responses are now classified internally as `empty_response` / `invalid_response` instead of generic `other`.
+
 #### Known Limitations / Operational Notes
-- **Sandbox Runtime:** `PLUGIN_COMMAND_SANDBOX_ENABLED` is OFF by default; explicit activation required
+- **Command Runtime:** Commands now always execute via sandbox worker (complete isolation).
+- **Scheduled/Worker Runtime:** Scheduled and worker plugins now always run through sandbox worker (`command.execute.v1`). Worker timeout (default: 60s, max 60s) is treated as a normal heartbeat/slice timeout (no crash, graceful retry).
 - **Transport Mode:** Long Polling remains current beta mode; webhook migration is not included in this release
 - **Cross-Platform:** Linux validated; macOS/Windows native smoke tests not yet completed (no native runners available)
 
@@ -166,4 +194,4 @@ This is the first public release candidate of the AMO Telegram Bot. The software
 
 ---
 
-*Letzte Aktualisierung / Last updated: 2026-05-19*
+*Letzte Aktualisierung / Last updated: 2026-05-21*

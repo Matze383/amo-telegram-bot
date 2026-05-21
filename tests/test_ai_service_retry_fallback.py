@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 
 import pytest
 
@@ -9,13 +10,14 @@ from amo_bot.ai.service import AIService
 
 
 class _FakeClient:
-    def __init__(self, *, base_url: str = "http://ollama", model: str = "primary", timeout_seconds: float = 1.0, max_response_chars: int = 1000, outcomes: list[object] | None = None) -> None:
+    def __init__(self, *, base_url: str = "http://ollama", model: str = "primary", timeout_seconds: float = 1.0, max_response_chars: int = 1000, outcomes: list[object] | None = None, stream_events: list[dict[str, object]] | None = None) -> None:
         self.base_url = base_url
         self.model = model
         self.timeout_seconds = timeout_seconds
         self.max_response_chars = max_response_chars
         self._outcomes = list(outcomes or [])
         self.calls: list[str] = []
+        self.last_stream_events = list(stream_events or [])
 
     async def generate(self, prompt: str) -> str:
         self.calls.append(prompt)
@@ -28,9 +30,10 @@ class _FakeClient:
 
 
 class _FallbackClient:
-    def __init__(self, *, response: object) -> None:
+    def __init__(self, *, response: object, stream_events: list[dict[str, object]] | None = None) -> None:
         self.response = response
         self.calls: list[str] = []
+        self.last_stream_events = list(stream_events or [])
 
     async def generate(self, prompt: str) -> str:
         self.calls.append(prompt)
@@ -53,11 +56,12 @@ def test_primary_retry_fail_then_fallback_model_success(monkeypatch) -> None:
     client = _FakeClient(outcomes=[OllamaHTTPStatusError(503), OllamaHTTPStatusError(503)])
     fallback = _FallbackClient(response="fallback success")
 
-    def _mk_fallback(*, base_url: str, model: str, timeout_seconds: float, max_response_chars: int):
+    def _mk_fallback(*, base_url: str, model: str, timeout_seconds: float, max_response_chars: int, request_endpoint: str):
         assert base_url == "http://ollama"
         assert model == "kimi-k2.5:cloud"
         assert timeout_seconds == 1.0
         assert max_response_chars == 1000
+        assert request_endpoint == "generate"
         return fallback
 
     monkeypatch.setattr("amo_bot.ai.service.OllamaClient", _mk_fallback)
@@ -79,7 +83,8 @@ def test_primary_retry_fail_then_fallback_model_success(monkeypatch) -> None:
 def test_primary_retry_and_fallback_fail_raises(monkeypatch) -> None:
     client = _FakeClient(outcomes=[OllamaHTTPStatusError(503), OllamaHTTPStatusError(503)])
 
-    def _mk_fallback(*, base_url: str, model: str, timeout_seconds: float, max_response_chars: int):
+    def _mk_fallback(*, base_url: str, model: str, timeout_seconds: float, max_response_chars: int, request_endpoint: str):
+        assert request_endpoint == "generate"
         return _FallbackClient(response=OllamaError("request timed out"))
 
     monkeypatch.setattr("amo_bot.ai.service.OllamaClient", _mk_fallback)
@@ -103,3 +108,235 @@ def test_non_transient_http_4xx_does_not_retry() -> None:
         asyncio.run(service.ask("hello"))
 
     assert len(client.calls) == 1
+
+
+def test_logs_primary_success_metadata_only(caplog: pytest.LogCaptureFixture) -> None:
+    client = _FakeClient(model="qwen3", outcomes=["ok"])
+    service = AIService(client=client, retry_on_transient_error=True, retry_delay_seconds=0)
+
+    with caplog.at_level(logging.INFO, logger="amo_bot.ai.service"):
+        out = asyncio.run(service.ask("hello world"))
+
+    assert out == "ok"
+    messages = [rec.message for rec in caplog.records if rec.name == "amo_bot.ai.service"]
+    assert any("phase=primary" in msg and "model=qwen3" in msg and "prompt_len=11" in msg and "outcome=success" in msg for msg in messages)
+    assert all("hello world" not in msg for msg in messages)
+
+
+def test_logs_retry_error_then_success_metadata_only(caplog: pytest.LogCaptureFixture) -> None:
+    client = _FakeClient(model="qwen3", outcomes=[OllamaHTTPStatusError(503), "ok after retry"])
+    service = AIService(client=client, retry_on_transient_error=True, retry_delay_seconds=0)
+
+    with caplog.at_level(logging.INFO, logger="amo_bot.ai.service"):
+        out = asyncio.run(service.ask("hello"))
+
+    assert out == "ok after retry"
+    messages = [rec.message for rec in caplog.records if rec.name == "amo_bot.ai.service"]
+    assert any("phase=primary" in msg and "outcome=error" in msg and "error_category=transient_http" in msg for msg in messages)
+    assert any("phase=retry" in msg and "outcome=success" in msg for msg in messages)
+    assert all("hello" not in msg for msg in messages)
+
+
+def test_logs_fallback_success_metadata_only(monkeypatch, caplog: pytest.LogCaptureFixture) -> None:
+    client = _FakeClient(model="qwen3", outcomes=[OllamaHTTPStatusError(503), OllamaHTTPStatusError(503)])
+    fallback = _FallbackClient(response="fallback success")
+
+    def _mk_fallback(*, base_url: str, model: str, timeout_seconds: float, max_response_chars: int, request_endpoint: str):
+        assert request_endpoint == "generate"
+        return fallback
+
+    monkeypatch.setattr("amo_bot.ai.service.OllamaClient", _mk_fallback)
+
+    service = AIService(
+        client=client,
+        retry_on_transient_error=True,
+        retry_delay_seconds=0,
+        fallback_model="kimi-k2.5:cloud",
+    )
+
+    with caplog.at_level(logging.INFO, logger="amo_bot.ai.service"):
+        out = asyncio.run(service.ask("sensitive prompt text"))
+
+    assert out == "fallback success"
+    messages = [rec.message for rec in caplog.records if rec.name == "amo_bot.ai.service"]
+    assert any("phase=fallback" in msg and "outcome=success" in msg for msg in messages)
+    assert all("sensitive prompt text" not in msg for msg in messages)
+
+
+def test_ai_service_retries_on_empty_response_when_enabled() -> None:
+    client = _FakeClient(outcomes=[OllamaError("empty response"), "ok-after-empty"])
+    service = AIService(client=client, retry_on_transient_error=True, retry_delay_seconds=0)
+
+    answer = asyncio.run(service.ask("hello"))
+
+    assert answer == "ok-after-empty"
+    assert len(client.calls) == 2
+
+
+def test_ai_service_collect_only_stream_contract_error_retries_then_fallback(monkeypatch) -> None:
+    client = _FakeClient(model="qwen3", outcomes=[OllamaError("request timed out"), OllamaError("request timed out")])
+    client.request_endpoint = "chat"
+    fallback = _FallbackClient(response="fallback final")
+
+    def _mk_fallback(*, base_url: str, model: str, timeout_seconds: float, max_response_chars: int, request_endpoint: str):
+        assert request_endpoint == "chat"
+        return fallback
+
+    monkeypatch.setattr("amo_bot.ai.service.OllamaClient", _mk_fallback)
+
+    service = AIService(
+        client=client,
+        retry_on_transient_error=True,
+        retry_delay_seconds=0,
+        fallback_model="kimi-k2.5:cloud",
+    )
+
+    out = asyncio.run(service.ask("prompt content that must never be logged"))
+
+    assert out == "fallback final"
+    assert len(client.calls) == 2
+    assert len(fallback.calls) == 1
+
+
+def test_stream_handoff_dedupes_duplicate_terminal_done() -> None:
+    client = _FakeClient(
+        outcomes=["ok"],
+        stream_events=[
+            {"type": "delta", "text": "hel"},
+            {"type": "terminal", "outcome": "done"},
+            {"type": "terminal", "outcome": "done"},
+        ],
+    )
+    service = AIService(client=client, retry_on_transient_error=True, retry_delay_seconds=0)
+
+    out = asyncio.run(service.ask("hello"))
+
+    assert out == "ok"
+    assert service.last_stream_events == [
+        {"type": "delta", "text": "hel"},
+        {"type": "terminal", "outcome": "done"},
+    ]
+
+
+def test_stream_handoff_suppresses_post_terminal_delta() -> None:
+    client = _FakeClient(
+        outcomes=["ok"],
+        stream_events=[
+            {"type": "delta", "text": "before"},
+            {"type": "terminal", "outcome": "done"},
+            {"type": "delta", "text": "after"},
+        ],
+    )
+    service = AIService(client=client, retry_on_transient_error=True, retry_delay_seconds=0)
+
+    _ = asyncio.run(service.ask("hello"))
+
+    assert service.last_stream_events == [
+        {"type": "delta", "text": "before"},
+        {"type": "terminal", "outcome": "done"},
+    ]
+
+
+@pytest.mark.parametrize("outcome", ["cancel", "timeout"])
+def test_stream_handoff_cancel_timeout_terminals_win(outcome: str) -> None:
+    client = _FakeClient(
+        outcomes=["ok"],
+        stream_events=[
+            {"type": "delta", "text": "start"},
+            {"type": "terminal", "outcome": outcome},
+            {"type": "delta", "text": "ignored"},
+            {"type": "terminal", "outcome": "done"},
+        ],
+    )
+    service = AIService(client=client, retry_on_transient_error=True, retry_delay_seconds=0)
+
+    _ = asyncio.run(service.ask("hello"))
+
+    assert service.last_stream_events == [
+        {"type": "delta", "text": "start"},
+        {"type": "terminal", "outcome": outcome},
+    ]
+
+
+def test_stream_handoff_non_terminal_passthrough_before_terminal() -> None:
+    client = _FakeClient(
+        outcomes=["ok"],
+        stream_events=[
+            {"type": "status", "phase": "queued"},
+            {"type": "delta", "text": "hel"},
+            {"type": "delta", "text": "lo"},
+            {"type": "terminal", "outcome": "done"},
+        ],
+    )
+    service = AIService(client=client, retry_on_transient_error=True, retry_delay_seconds=0)
+
+    _ = asyncio.run(service.ask("hello"))
+
+    assert service.last_stream_events == [
+        {"type": "status", "phase": "queued"},
+        {"type": "delta", "text": "hel"},
+        {"type": "delta", "text": "lo"},
+        {"type": "terminal", "outcome": "done"},
+    ]
+
+
+def test_stream_handoff_uses_fallback_events_with_terminal_convergence(monkeypatch) -> None:
+    client = _FakeClient(outcomes=[OllamaHTTPStatusError(503), OllamaHTTPStatusError(503)])
+    fallback = _FallbackClient(
+        response="fallback final",
+        stream_events=[
+            {"type": "delta", "text": "fb"},
+            {"type": "terminal", "outcome": "error"},
+            {"type": "delta", "text": "ignored"},
+            {"type": "terminal", "outcome": "done"},
+        ],
+    )
+
+    def _mk_fallback(*, base_url: str, model: str, timeout_seconds: float, max_response_chars: int, request_endpoint: str):
+        assert request_endpoint == "generate"
+        return fallback
+
+    monkeypatch.setattr("amo_bot.ai.service.OllamaClient", _mk_fallback)
+
+    service = AIService(
+        client=client,
+        retry_on_transient_error=True,
+        retry_delay_seconds=0,
+        fallback_model="kimi-k2.5:cloud",
+    )
+
+    out = asyncio.run(service.ask("hello"))
+
+    assert out == "fallback final"
+    assert service.last_stream_events == [
+        {"type": "delta", "text": "fb"},
+        {"type": "terminal", "outcome": "error"},
+    ]
+
+
+def test_logs_timeout_as_generic_metadata_only(caplog: pytest.LogCaptureFixture) -> None:
+    client = _FakeClient(model="qwen3", outcomes=[OllamaError("request timed out"), "ok after retry"])
+    service = AIService(client=client, retry_on_transient_error=True, retry_delay_seconds=0)
+
+    with caplog.at_level(logging.INFO, logger="amo_bot.ai.service"):
+        out = asyncio.run(service.ask("super-secret prompt"))
+
+    assert out == "ok after retry"
+    messages = [rec.message for rec in caplog.records if rec.name == "amo_bot.ai.service"]
+    assert any("phase=primary" in msg and "outcome=error" in msg and "error_category=timeout" in msg for msg in messages)
+    assert any("phase=retry" in msg and "outcome=success" in msg for msg in messages)
+    assert all("super-secret prompt" not in msg for msg in messages)
+
+
+def test_logs_empty_response_error_category_metadata_only(caplog: pytest.LogCaptureFixture) -> None:
+    client = _FakeClient(model="qwen3", outcomes=[OllamaError("empty response"), "ok after retry"])
+    service = AIService(client=client, retry_on_transient_error=True, retry_delay_seconds=0)
+
+    with caplog.at_level(logging.INFO, logger="amo_bot.ai.service"):
+        out = asyncio.run(service.ask("top-secret prompt"))
+
+    assert out == "ok after retry"
+    messages = [rec.message for rec in caplog.records if rec.name == "amo_bot.ai.service"]
+    assert any("phase=primary" in msg and "outcome=error" in msg and "error_category=empty_response" in msg for msg in messages)
+    assert any("phase=retry" in msg and "outcome=success" in msg for msg in messages)
+    assert all("top-secret prompt" not in msg for msg in messages)

@@ -19,6 +19,8 @@ from amo_bot.db.repositories import PluginRepository
 from amo_bot.plugins.command_runtime import PluginHostAPI, ReplyFn, SendMessageFn
 from amo_bot.plugins.loader import PluginLoader
 from amo_bot.plugins.manifest import PluginManifest
+from amo_bot.plugins.sandbox.runner import PluginSandboxRunner
+from amo_bot.plugins.sandbox.types import SandboxRequest
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +49,7 @@ class ScheduledPluginExecutor:
         self._send_message = send_message
         self._reply = reply
         self._timeout_seconds = timeout_seconds
+        self._sandbox_timeout_seconds = max(timeout_seconds, 1.0)
         self._backoff_seconds = backoff_seconds
 
     async def run_due_once(self, *, now: datetime | None = None) -> int:
@@ -92,13 +95,26 @@ class ScheduledPluginExecutor:
 
         start = time.monotonic()
         try:
-            host_api = PluginHostAPI(
-                send_message=self._send_message,
-                reply=self._reply,
-                required_permissions=set(manifest.required_permissions),
+            request = SandboxRequest.from_dict(
+                {
+                    "request_id": run_id,
+                    "action": "run",
+                    "plugin_id": manifest.name,
+                    "payload": {
+                        "plugin_entry": (Path(self._loader.plugins_dir) / manifest.name / "main.py").as_posix(),
+                        "trigger": "schedule",
+                        "run_id": run_id,
+                        "scheduled_at": now.isoformat(),
+                        "capability": "plugin.runtime.schedule.execute",
+                        "permissions": list(manifest.required_permissions),
+                    },
+                    "timeout_ms": int(self._sandbox_timeout_seconds * 1000),
+                }
             )
-            handler = self._load_handler(manifest)
-            await asyncio.wait_for(handler(context, host_api), timeout=self._timeout_seconds)
+            response = PluginSandboxRunner(plugins_dir=self._loader.plugins_dir).run(request)
+            if not response.ok:
+                raise RuntimeError(response.error_message or response.error_code or "sandbox_schedule_failed")
+            await self._apply_sandbox_ops(response.result or {})
         except asyncio.TimeoutError:
             self._record_result(
                 manifest.name,
@@ -130,6 +146,28 @@ class ScheduledPluginExecutor:
             event_type="plugin_schedule_success",
             payload={"plugin_name": manifest.name, "run_id": run_id, "duration_ms": duration_ms},
         )
+
+    async def _apply_sandbox_ops(self, result: dict[str, Any]) -> None:
+        ops = result.get("ops", [])
+        if not isinstance(ops, list):
+            raise RuntimeError("invalid sandbox ops")
+        for op in ops:
+            if not isinstance(op, dict):
+                raise RuntimeError("invalid sandbox op")
+            op_name = op.get("op")
+            chat_id = op.get("chat_id")
+            text = op.get("text")
+            if op_name == "send_message":
+                if not isinstance(chat_id, int) or not isinstance(text, str):
+                    raise RuntimeError("invalid sandbox send_message op")
+                await self._send_message(chat_id, text)
+            elif op_name == "reply":
+                message_id = op.get("message_id")
+                if not isinstance(chat_id, int) or not isinstance(message_id, int) or not isinstance(text, str):
+                    raise RuntimeError("invalid sandbox reply op")
+                await self._reply(chat_id, message_id, text, None)
+            else:
+                raise RuntimeError("invalid sandbox op")
 
     def _load_handler(self, manifest: PluginManifest) -> Callable[[ScheduledPluginContext, PluginHostAPI], Awaitable[Any]]:
         plugin_dir = Path(self._loader.plugins_dir) / manifest.name

@@ -112,7 +112,6 @@ class PluginCommandExecutor:
         timeout_seconds: float = 2.0,
         image_media_store: TelegramImageMediaStore | None = None,
         enable_image_attachments: bool = False,
-        command_sandbox_enabled: bool = False,
     ) -> None:
         self._loader = loader
         self._session_factory = session_factory
@@ -121,7 +120,6 @@ class PluginCommandExecutor:
         self._timeout_seconds = timeout_seconds
         self._image_media_store = image_media_store
         self._enable_image_attachments = enable_image_attachments
-        self._command_sandbox_enabled = command_sandbox_enabled
 
     async def execute(self, *, actor: CommandActor, invocation: CommandInvocation) -> None:
         manifest = self._find_manifest_for_command(invocation.command_name)
@@ -207,16 +205,7 @@ class PluginCommandExecutor:
 
         start = time.monotonic()
         try:
-            if self._command_sandbox_enabled:
-                await self._execute_via_sandbox(manifest=manifest, context=context)
-            else:
-                host_api = PluginHostAPI(
-                    send_message=self._send_message,
-                    reply=self._reply,
-                    required_permissions=set(manifest.required_permissions),
-                )
-                handler = self._load_handler(manifest)
-                await asyncio.wait_for(handler(context, host_api), timeout=self._timeout_seconds)
+            await self._execute_via_sandbox(manifest=manifest, context=context)
         except asyncio.TimeoutError:
             self._write_audit(
                 event_type="plugin_command_timeout",

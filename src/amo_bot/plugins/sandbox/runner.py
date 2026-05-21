@@ -223,6 +223,7 @@ class PluginSandboxRunner:
         max_cpu_seconds: int = 2,
         max_output_bytes: int = 64 * 1024,
         worker_timeout_grace_ms: int = 500,
+        plugins_dir: Path | str | None = None,
     ) -> None:
         self._worker_module = worker_module
         self._base_timeout_ms = base_timeout_ms
@@ -232,6 +233,7 @@ class PluginSandboxRunner:
         self._max_cpu_seconds = max_cpu_seconds
         self._max_output_bytes = max_output_bytes
         self._worker_timeout_grace_ms = worker_timeout_grace_ms
+        self._plugins_dir = Path(plugins_dir).expanduser().resolve() if plugins_dir else None
 
     def _validate_request(self, request: SandboxRequest) -> None:
         if request.timeout_ms > self._base_timeout_ms:
@@ -251,8 +253,22 @@ class PluginSandboxRunner:
             "PYTHONUNBUFFERED": "1",
             "PYTHONSAFEPATH": "1",
             "PYTHONNOUSERSITE": "1",
-            "AMO_SANDBOX_ALLOWED_CAPABILITIES": "plugin.execute",
+            "AMO_SANDBOX_ALLOWED_CAPABILITIES": "plugin.execute,plugin.runtime.worker.execute,plugin.runtime.schedule.execute,run",
+            "AMO_PLUGIN_SANDBOX": "1",
+            "AMO_SANDBOX_PLUGIN_DIR": str(self._plugins_dir or self._resolve_plugin_dir()),
         }
+
+    @staticmethod
+    def _resolve_plugin_dir() -> Path:
+        cwd = Path.cwd()
+        direct = cwd / "plugins"
+        if direct.exists():
+            return direct.resolve()
+        for parent in cwd.parents:
+            candidate = parent / "plugins"
+            if candidate.exists():
+                return candidate.resolve()
+        return direct.resolve()
 
     def _preexec_limits(self):
         def _apply() -> None:
@@ -389,7 +405,7 @@ class PluginSandboxRunner:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
-                env=self._build_env(),
+                env={**self._build_env(), "AMO_SANDBOX_REQUEST_PLUGIN_ID": request.plugin_id},
                 preexec_fn=self._preexec_limits(),
             )
         except OSError as exc:
