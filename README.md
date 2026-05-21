@@ -27,7 +27,7 @@ AMO ist ein erweiterbarer Telegram-Bot für Gruppen und private Chats. Er bietet
 | 🔐 **Rollen-System** | Owner, Admin, VIP, Normal, Ignore — gruppenspezifisch und berechtigungsbasiert |
 | ✅ **Consent-Management** | Nutzer müssen explizit zustimmen, bevor der Bot aktiv wird |
 | 🌐 **WebUI** | Lokale Flask-Oberfläche für Verwaltung und Konfiguration |
-| 🤖 **KI-Integration** | Optionales `/ask`-Kommando und Auto-Antworten via Ollama |
+| 🤖 **KI-Integration** | Optionales `/ask`-Kommando und Auto-Antworten via Ollama oder OpenAI |
 | 🧠 **Memory-System** | Tägliche Langzeitgedächtnis-Kuratierung mit Datenschutz-Defaults |
 
 ### Schnellstart
@@ -80,6 +80,7 @@ python main.py
 - Python 3.12+
 - Windows, macOS oder Linux
 - Telegram Bot Token von [@BotFather](https://t.me/BotFather)
+- Optional: Lokale [Ollama](https://ollama.com/)-Instanz oder OpenAI API-Key für KI-Funktionen
 
 ### Dokumentation
 
@@ -119,7 +120,7 @@ AMO is an extensible Telegram bot for groups and private chats. It provides a ro
 | 🔐 **Role System** | Owner, Admin, VIP, Normal, Ignore — group-scoped and permission-based |
 | ✅ **Consent Management** | Users must explicitly opt-in before the bot becomes active |
 | 🌐 **WebUI** | Local Flask interface for management and configuration |
-| 🤖 **AI Integration** | Optional `/ask` command and auto-replies via Ollama |
+| 🤖 **AI Integration** | Optional `/ask` command and auto-replies via Ollama or OpenAI |
 | 🧠 **Memory System** | Daily long-term memory curation with privacy-first defaults |
 
 ### Quick Start
@@ -172,6 +173,7 @@ python main.py
 - Python 3.12+
 - Windows, macOS or Linux
 - Telegram Bot Token from [@BotFather](https://t.me/BotFather)
+- Optional: Local [Ollama](https://ollama.com/) instance OR OpenAI API key for AI features
 
 ### Documentation
 

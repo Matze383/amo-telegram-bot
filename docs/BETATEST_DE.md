@@ -18,7 +18,9 @@ Diese Anleitung unterstützt dich beim Testen des MVP-Status des Bots:
 - Python 3.12 oder höher
 - Linux/macOS-Entwicklungsumgebung
 - Ein Telegram-Bot-Token (von @BotFather)
-- Optional: Lokale Ollama-Instanz für `/ask`
+- Optional: KI-Provider für `/ask`:
+  - Lokale Ollama-Instanz, **ODER**
+  - OpenAI API-Key
 
 ---
 
@@ -38,7 +40,15 @@ BOT_TOKEN=dein_bot_token_hier
 BOT_USERNAME=dein_bot_username
 TELEGRAM_API_BASE=https://api.telegram.org
 
-# Ollama (optional für /ask)
+# KI-Provider Konfiguration
+AI_PROVIDER=ollama  # ollama (Standard) oder openai
+
+# Optional: OpenAI (für /ask Kommando)
+# OPENAI_API_KEY=sk-your-key-hier
+# OPENAI_MODEL=gpt-4o-mini
+# OPENAI_TIMEOUT_SECONDS=30
+
+# Optional: Ollama (für /ask Kommando)
 OLLAMA_URL=http://127.0.0.1:11434
 OLLAMA_MODEL=llama3.1
 OLLAMA_TIMEOUT_SECONDS=20
@@ -277,14 +287,19 @@ Starte einen privaten Chat mit deinem Bot:
 
 ---
 
-### /ask-Test mit Ollama (optional)
+### /ask-Test mit KI-Provider (optional)
 
-**Voraussetzung:** Ollama läuft lokal
+**Voraussetzung:** KI-Provider konfiguriert (Ollama oder OpenAI)
 
+**Für Ollama:**
 ```bash
 # Prüfe Ollama-Status
 curl http://127.0.0.1:11434/api/tags
 ```
+
+**Für OpenAI:**
+- Stelle sicher, dass `OPENAI_API_KEY` in `.env` gesetzt ist
+- Stelle sicher, dass `AI_PROVIDER=openai` in `.env` gesetzt ist
 
 **Test:**
 - Sende: `/ask Was ist Python?`
@@ -292,7 +307,7 @@ curl http://127.0.0.1:11434/api/tags
 
 **Einschränkungen im MVP:**
 - Stateless (kein Chat-Verlauf)
-- Timeout nach 20 Sekunden
+- Timeout nach 20 Sekunden (Ollama) oder 30 Sekunden (OpenAI)
 - Maximale Antwortlänge: 1500 Zeichen
 
 ---
@@ -310,7 +325,7 @@ Der Bot kann bei Erwähnung oder als Antwort in **aktiven Scopes** (Themen oder 
 - Nutzer muss Rolle `vip`, `admin` oder `owner` haben
 - Nutzer muss Consent akzeptiert haben (`/accept`)
 - Der Scope (Thema oder privater Chat) muss KI-aktiviert konfiguriert sein
-- Der KI-Service muss konfiguriert sein (Ollama)
+- Der KI-Service muss konfiguriert sein (Ollama oder OpenAI)
 
 **Audit-Events:**
 - `ai_autoreply_sent` — Antwort erfolgreich gesendet

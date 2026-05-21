@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from amo_bot.ai.ollama import OllamaClient
-from amo_bot.ai.openai_provider import OpenAIProviderConfig
+from amo_bot.ai.openai_provider import OpenAIProviderConfig, OpenAIRequestClient
 from amo_bot.ai.service import AIService
 from amo_bot.config.settings import Settings
 
@@ -25,8 +25,12 @@ class OllamaProvider:
 class OpenAIProvider:
     config: OpenAIProviderConfig
 
+    @property
+    def client(self) -> OpenAIRequestClient:
+        return OpenAIRequestClient(config=self.config)
+
     async def ask(self, prompt: str) -> str:
-        raise NotImplementedError("OpenAI provider network client is not implemented in this slice")
+        return await self.client.ask(prompt)
 
 
 def _build_ollama_provider(settings: Settings) -> OllamaProvider:

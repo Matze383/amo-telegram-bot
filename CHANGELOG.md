@@ -15,6 +15,10 @@
 Dieser Release-Kandidat enthält Verbesserungen beim KI-Kontext-Management, Abschaltung der veralteten FastAPI-WebUI, gehärtete CSP-Richtlinien sowie den neuen Command-Sandbox-Mechanismus.
 
 #### Neu (Highlights)
+- **OpenAI Provider Support:** Alternative AI provider for `/ask` and auto-reply features
+  - Configure via `.env`: `AI_PROVIDER` (ollama/openai), `OPENAI_API_KEY`, `OPENAI_MODEL`, `OPENAI_TIMEOUT_SECONDS`
+  - Runtime provider selection without code changes
+  - Secure API key handling with redaction in diagnostics
 - **Scoped Recent Context (default ON):** Pro-Scope (Topic/Gruppe/Privat) werden jetzt bis zu 20 normale Nachrichten persistiert. Der KI-Prompt erhält automatisch das passende Recent Context-Fenster, basierend auf der Router-Entscheidung.
 - **Group/Topic Trigger-Guard beibehalten:** In Gruppen/Topics antwortet die KI weiterhin nur bei Mention (`@botname`) oder echtem Reply-to-Bot (Owner ist stets eingeschlossen).
 - **FastAPI WebUI hard-disabled:** Die alte FastAPI-WebUI-Oberfläche wurde komplett deaktiviert; nur Flask-WebUI bleibt unterstützt.
@@ -46,6 +50,10 @@ Dieser Release-Kandidat enthält Verbesserungen beim KI-Kontext-Management, Absc
 This release candidate includes improvements to AI context management, removal of the legacy FastAPI WebUI, hardened CSP policies, and the new command sandbox mechanism.
 
 #### New (Highlights)
+- **OpenAI Provider Support:** Alternative AI provider for `/ask` and auto-reply features
+  - Configure via `.env`: `AI_PROVIDER` (ollama/openai), `OPENAI_API_KEY`, `OPENAI_MODEL`, `OPENAI_TIMEOUT_SECONDS`
+  - Runtime provider selection without code changes
+  - Secure API key handling with redaction in diagnostics
 - **Scoped Recent Context (default ON):** Up to 20 normal messages are now persisted per scope (topic/group/private). The AI prompt automatically receives the appropriate recent context window based on the router decision.
 - **Group/Topic Trigger Guard Preserved:** In groups/topics, AI replies only on mention (`@botname`) or genuine reply-to-bot (owner always included).
 - **FastAPI WebUI Hard-Disabled:** The legacy FastAPI WebUI surface has been completely disabled; only Flask WebUI remains supported.

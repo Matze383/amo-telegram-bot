@@ -101,6 +101,20 @@ Instead:
 - Nur in `.env` speichern (`.env` ist in `.gitignore`)
 - Bei Verdacht auf Kompromittierung: Bei @BotFather neu generieren
 
+### OPENAI_API_KEY
+
+- **Niemals** committen — behandle wie `BOT_TOKEN`
+- Nur in `.env` speichern, niemals in Code oder Config-Dateien
+- Bei Verdacht auf Kompromittierung: Bei OpenAI neu generieren
+- Wird intern redacted (nur `***` in Diagnostics sichtbar)
+
+### OPENAI_API_KEY
+
+- **Never** commit — treat like `BOT_TOKEN`
+- Store only in `.env`, never in code or config files
+- If compromised: Regenerate at OpenAI dashboard
+- Internally redacted (only `***` visible in diagnostics)
+
 ### WEBUI_PASSWORD
 
 - Starke Passwörter verwenden (mindestens 16 Zeichen)
