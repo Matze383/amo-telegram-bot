@@ -132,6 +132,24 @@ def test_forbidden_dm_marks_unreachable() -> None:
     assert user.consent_status == "unreachable"
 
 
+
+def test_chat_not_found_marks_unreachable() -> None:
+    svc = ConsentPromptService()
+    user = _user(status="pending")
+
+    async def _send(_chat_id: int, _text: str) -> None:
+        raise TelegramApiError(
+            'HTTP 400: {"ok":false,"error_code":400,"description":"Bad Request: chat not found"}'
+        )
+
+    import asyncio
+    sent = asyncio.run(svc.maybe_prompt_user(user=user, send_private_message=_send))
+
+    assert sent == "unreachable"
+    assert user.consent_status == "unreachable"
+    assert user.consent_prompt_count == 0
+    assert user.consent_prompted_at is None
+
 def test_non_unreachable_api_error_is_raised() -> None:
     svc = ConsentPromptService()
     user = _user(status="pending")

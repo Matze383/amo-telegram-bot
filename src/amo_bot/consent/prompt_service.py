@@ -101,8 +101,17 @@ class ConsentPromptService:
 
     @staticmethod
     def _is_unreachable_error(exc: TelegramApiError) -> bool:
-        msg = str(exc).lower()
-        return "forbidden" in msg and ("can't initiate conversation" in msg or "cannot initiate conversation" in msg)
+        msg = str(exc).casefold()
+        return any(
+            marker in msg
+            for marker in (
+                "chat not found",
+                "bot was blocked",
+                "user is deactivated",
+                "can't initiate conversation",
+                "cannot initiate conversation",
+            )
+        )
 
     @staticmethod
     def build_prompt_markup() -> dict[str, object]:

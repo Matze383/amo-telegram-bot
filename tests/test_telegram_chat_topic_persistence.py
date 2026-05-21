@@ -898,6 +898,48 @@ def test_forbidden_dm_existing_group_user_sends_no_group_fallback(tmp_path) -> N
     assert len(sent_group_markup) == 1
 
 
+
+def test_discovery_chat_not_found_private_dm_marks_unreachable_without_persistence_error(tmp_path, caplog) -> None:
+    from amo_bot.telegram.client import TelegramApiError
+
+    db_url = f"sqlite:///{tmp_path / 'persist_chat_not_found_unreachable.db'}"
+    init_db(db_url)
+    sent_group_markup: list[tuple[int, str, dict[str, object], int | None]] = []
+    sent_group_text: list[tuple[int, str, int | None]] = []
+
+    dispatcher = _build_dispatcher(
+        db_url,
+        sent_group_markup=sent_group_markup,
+        sent_group_text=sent_group_text,
+        private_send_error=TelegramApiError(
+            'HTTP 400: {"ok":false,"error_code":400,"description":"Bad Request: chat not found"}'
+        ),
+        bot_username="AmoBot",
+    )
+
+    with caplog.at_level("ERROR"):
+        asyncio.run(
+            dispatcher.handle_raw_update(
+                _mk_update(update_id=105, user_id=8106, chat_id=-108106, chat_type="supergroup", title="G")
+            )
+        )
+
+    assert "Failed to persist Telegram message" not in caplog.text
+
+    sf = create_session_factory(db_url)
+    with sf() as session:
+        user = session.scalar(select(User).where(User.telegram_user_id == 8106))
+        assert user is not None
+        assert user.consent_status == "unreachable"
+        assert user.consent_prompt_count == 0
+        assert user.consent_prompted_at is None
+
+    assert len(sent_group_markup) == 1
+    assert sent_group_markup[0][0] == -108106
+    assert sent_group_markup[0][3] is None
+    block_msgs = [m for m in sent_group_text if m[1] == "Bitte kläre Consent privat mit dem Bot."]
+    assert len(block_msgs) == 1
+
 def test_dm_success_sends_no_group_fallback(tmp_path) -> None:
     db_url = f"sqlite:///{tmp_path / 'persist_no_group_fallback_on_dm_success.db'}"
     init_db(db_url)
