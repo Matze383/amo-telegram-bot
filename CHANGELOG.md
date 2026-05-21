@@ -5,6 +5,38 @@
 
 ---
 
+## [2026.05.21-1] – AI stability bugfix
+
+**Datum / Date:** 2026-05-21
+
+### 🇩🇪 Deutsch
+
+#### Übersicht
+Kleines Stabilitäts-Release für KI-Antworten über Ollama/Kimi. Der Bot verarbeitet Thinking-Ausgaben jetzt so, dass keine leeren Antworten mehr entstehen.
+
+#### Behoben
+- **KI-Antworten stabilisiert:** Ollama/Kimi liefert wieder zuverlässig sichtbare, nutzbare Bot-Antworten.
+- **Leere Antworten verhindert:** Fälle mit leeren AI-Antworten durch Thinking-Output-Handling wurden behoben.
+
+#### Betriebsnotiz
+- Nach dem Neustart wurden erfolgreiche KI-Anfragen beobachtet; keine neuen `empty response`- oder `ai_autoreply failed`-Fehler nach Patch/Restart.
+
+---
+
+### 🇬🇧 English
+
+#### Overview
+Small stability release for AI replies via Ollama/Kimi. The bot now handles thinking output in a way that prevents empty replies.
+
+#### Fixed
+- **Stabilized AI replies:** Ollama/Kimi now reliably returns visible, usable bot responses again.
+- **Prevented empty replies:** Fixed empty AI responses caused by thinking-output handling.
+
+#### Operational Note
+- After restart, AI requests succeeded; no new `empty response` or `ai_autoreply failed` errors were observed after the patch/restart.
+
+---
+
 ## [2026.05.21] – Local Release Candidate
 
 **Datum / Date:** 2026-05-21
