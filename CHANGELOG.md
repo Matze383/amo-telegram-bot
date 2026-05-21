@@ -34,7 +34,7 @@ Dieser Release-Kandidat enthält Verbesserungen beim KI-Kontext-Management, Absc
 
 #### Bekannte Einschränkungen / Betriebsnotizen
 - **Command Runtime:** Ab diesem Release werden Commands immer über den Sandbox-Worker ausgeführt (vollständige Isolation).
-- **Scheduled/Worker Runtime:** `PLUGIN_COMMAND_SANDBOX_ENABLED` betrifft weiterhin Scheduled/Worker-Plugins (standardmäßig OFF); explizite Aktivierung erforderlich
+- **Scheduled/Worker Runtime:** Scheduled- und Worker-Plugins laufen jetzt immer über den Sandbox-Worker (`command.execute.v1`). Worker-Timeout (Default: 60s, max 60s) wird als normaler Heartbeat/Slice-Timeout behandelt (kein Crash, sanftes Retry).
 - **Transportmodus:** Long Polling bleibt aktueller Beta-Modus; Webhook-Migration ist in diesem Release nicht enthalten
 - **Cross-Platform:** Linux validiert; macOS/Windows Native-Smoke-Tests noch nicht abgeschlossen (keine nativen Runner verfügbar)
 
@@ -65,7 +65,7 @@ This release candidate includes improvements to AI context management, removal o
 
 #### Known Limitations / Operational Notes
 - **Command Runtime:** Commands now always execute via sandbox worker (complete isolation).
-- **Scheduled/Worker Runtime:** `PLUGIN_COMMAND_SANDBOX_ENABLED` still affects Scheduled/Worker plugins (OFF by default); explicit activation required
+- **Scheduled/Worker Runtime:** Scheduled and worker plugins now always run through sandbox worker (`command.execute.v1`). Worker timeout (default: 60s, max 60s) is treated as a normal heartbeat/slice timeout (no crash, graceful retry).
 - **Transport Mode:** Long Polling remains current beta mode; webhook migration is not included in this release
 - **Cross-Platform:** Linux validated; macOS/Windows native smoke tests not yet completed (no native runners available)
 
