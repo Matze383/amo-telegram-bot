@@ -10,16 +10,24 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-# The sandbox runner intentionally starts workers with a minimal, default-deny
-# environment and without PYTHONPATH. In CI the package is tested from the source
-# tree (pytest pythonpath=src) but is not installed into site-packages, so the
-# child process must bootstrap the trusted package root derived from this file
-# before importing amo_bot modules. This does not add cwd or user-provided paths.
-_PACKAGE_ROOT = Path(__file__).resolve().parents[3]
-if str(_PACKAGE_ROOT) not in sys.path:
-    sys.path.insert(0, str(_PACKAGE_ROOT))
 
-from amo_bot.plugins.sandbox.types import SandboxErrorCode, SandboxRequest, SandboxResponse
+def _load_sandbox_types():
+    # The sandbox runner starts workers with a minimal, default-deny environment
+    # and without PYTHONPATH. In CI the source tree is on pytest's path but the
+    # child process does not inherit that. Load the trusted sibling protocol
+    # module directly instead of importing amo_bot.plugins.*, which would execute
+    # the heavier parent package __init__ in the sandbox process.
+    types_path = Path(__file__).with_name("types.py")
+    spec = importlib.util.spec_from_file_location("amo_sandbox_protocol_types", types_path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("unable to load sandbox protocol types")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module.SandboxErrorCode, module.SandboxRequest, module.SandboxResponse
+
+
+SandboxErrorCode, SandboxRequest, SandboxResponse = _load_sandbox_types()
 
 
 def _safe_error(request_id: str, code: SandboxErrorCode, message: str) -> dict[str, object]:
