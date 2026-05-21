@@ -18,7 +18,11 @@ class Settings(BaseSettings):
     poll_retry_max_seconds: int = Field(default=30, alias="POLL_RETRY_MAX_SECONDS")
     offset_state_file: str = Field(default=".state/offset.json", alias="OFFSET_STATE_FILE")
 
-    ai_provider: str = Field(default="openai", alias="AI_PROVIDER")
+    ai_provider: str = Field(default="ollama", alias="AI_PROVIDER")
+
+    openai_api_key: str | None = Field(default=None, alias="OPENAI_API_KEY")
+    openai_model: str = Field(default="gpt-4o-mini", alias="OPENAI_MODEL")
+    openai_timeout_seconds: float = Field(default=30.0, alias="OPENAI_TIMEOUT_SECONDS", gt=0)
 
     ollama_base_url: str = Field(default="http://127.0.0.1:11434", alias="OLLAMA_URL")
     ollama_model: str = Field(default="llama3.1", alias="OLLAMA_MODEL")
@@ -58,6 +62,12 @@ class Settings(BaseSettings):
             raise ValueError("AI_PROVIDER must be one of: openai, ollama")
 
         self.ai_provider = provider
+
+        if provider == "openai":
+            api_key = (self.openai_api_key or "").strip()
+            if not api_key:
+                raise ValueError("OPENAI_API_KEY is required when AI_PROVIDER=openai")
+            self.openai_api_key = api_key
 
         endpoint = self.ollama_request_endpoint.strip().casefold()
         if endpoint not in {"generate", "chat"}:
