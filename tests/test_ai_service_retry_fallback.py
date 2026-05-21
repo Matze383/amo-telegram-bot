@@ -326,3 +326,17 @@ def test_logs_timeout_as_generic_metadata_only(caplog: pytest.LogCaptureFixture)
     assert any("phase=primary" in msg and "outcome=error" in msg and "error_category=timeout" in msg for msg in messages)
     assert any("phase=retry" in msg and "outcome=success" in msg for msg in messages)
     assert all("super-secret prompt" not in msg for msg in messages)
+
+
+def test_logs_empty_response_error_category_metadata_only(caplog: pytest.LogCaptureFixture) -> None:
+    client = _FakeClient(model="qwen3", outcomes=[OllamaError("empty response"), "ok after retry"])
+    service = AIService(client=client, retry_on_transient_error=True, retry_delay_seconds=0)
+
+    with caplog.at_level(logging.INFO, logger="amo_bot.ai.service"):
+        out = asyncio.run(service.ask("top-secret prompt"))
+
+    assert out == "ok after retry"
+    messages = [rec.message for rec in caplog.records if rec.name == "amo_bot.ai.service"]
+    assert any("phase=primary" in msg and "outcome=error" in msg and "error_category=empty_response" in msg for msg in messages)
+    assert any("phase=retry" in msg and "outcome=success" in msg for msg in messages)
+    assert all("top-secret prompt" not in msg for msg in messages)
