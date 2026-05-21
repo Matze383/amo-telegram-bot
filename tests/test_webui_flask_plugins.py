@@ -24,6 +24,7 @@ def _make_settings(
         "WEBUI_HOST": "127.0.0.1",
         "WEBUI_PORT": 8080,
         "WEBUI_PASSWORD": password,
+        "WEBUI_SECRET_KEY": "test-secret-key-0123456789-abcdef",
         "WEBUI_PUBLIC_MODE": False,
         "WEBUI_REQUIRE_HTTPS": False,
         "WEBUI_SESSION_COOKIE_SECURE": False,
