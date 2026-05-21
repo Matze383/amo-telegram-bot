@@ -10,6 +10,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+# The sandbox runner intentionally starts workers with a minimal, default-deny
+# environment and without PYTHONPATH. In CI the package is tested from the source
+# tree (pytest pythonpath=src) but is not installed into site-packages, so the
+# child process must bootstrap the trusted package root derived from this file
+# before importing amo_bot modules. This does not add cwd or user-provided paths.
+_PACKAGE_ROOT = Path(__file__).resolve().parents[3]
+if str(_PACKAGE_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PACKAGE_ROOT))
+
 from amo_bot.plugins.sandbox.types import SandboxErrorCode, SandboxRequest, SandboxResponse
 
 
