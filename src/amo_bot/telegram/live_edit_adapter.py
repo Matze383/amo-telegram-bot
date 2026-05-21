@@ -48,7 +48,7 @@ class SafeTelegramLiveEditAdapter:
     min_edit_interval_seconds: float = 0.35
     max_consecutive_edit_failures: int = 2
     _live_message_id: int | None = None
-    _last_edit_at: float = 0.0
+    _last_edit_at: float | None = None
     _consecutive_edit_failures: int = 0
     _degraded: bool = False
     _terminal_outcome: str | None = None
@@ -111,7 +111,7 @@ class SafeTelegramLiveEditAdapter:
         await self.failure_recorder(LiveEditFailure(stage=stage, code=code))
 
     def _is_throttled(self) -> bool:
-        if self.min_edit_interval_seconds <= 0:
+        if self.min_edit_interval_seconds <= 0 or self._last_edit_at is None:
             return False
         now = monotonic()
         return (now - self._last_edit_at) < self.min_edit_interval_seconds

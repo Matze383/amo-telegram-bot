@@ -4,28 +4,43 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}AMO WebUI{% endblock %}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="{{ url_for('static', filename='webui.css') }}">
 </head>
 <body>
-  <nav>
-    <a href="{{ url_for('ui.dashboard', lang=lang) }}">{{ t('nav.dashboard') }}</a> |
-    <a href="{{ url_for('ui.users_page', lang=lang) }}">{{ t('nav.users') }}</a> |
-    <a href="{{ url_for('ui.groups_page', lang=lang) }}">{{ t('nav.groups') }}</a> |
-    <a href="{{ url_for('plugins.plugins_page', lang=lang) }}">{{ t('nav.plugins') }}</a> |
-    <a href="{{ url_for('health.health', lang=lang) }}">{{ t('nav.health') }}</a>
-    <span class="inline-lang-label">{{ t('nav.language') }}:</span>
-    <a href="{{ lang_url('de') }}">{{ t('lang.de') }}</a>
-    <a href="{{ lang_url('en') }}">{{ t('lang.en') }}</a>
-  </nav>
-  {% with messages = get_flashed_messages(with_categories=true) %}
-    {% if messages %}
-      <ul>
-        {% for category, message in messages %}
-          <li data-category="{{ category }}">{{ message }}</li>
-        {% endfor %}
-      </ul>
-    {% endif %}
-  {% endwith %}
-  {% block content %}{% endblock %}
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a class="brand" href="{{ url_for('ui.dashboard', lang=lang) }}">AMO</a>
+      <nav class="main-nav">
+        <a href="{{ url_for('ui.dashboard', lang=lang) }}">{{ t('nav.dashboard') }}</a>
+        <a href="{{ url_for('ui.users_page', lang=lang) }}">{{ t('nav.users') }}</a>
+        <a href="{{ url_for('ui.groups_page', lang=lang) }}">{{ t('nav.groups') }}</a>
+        <a href="{{ url_for('plugins.plugins_page', lang=lang) }}">{{ t('nav.plugins') }}</a>
+        <a href="{{ url_for('health.health', lang=lang) }}">{{ t('nav.health') }}</a>
+      </nav>
+      <div class="lang-switch">
+        <span class="inline-lang-label">{{ t('nav.language') }}</span>
+        <a href="{{ lang_url('de') }}">{{ t('lang.de') }}</a>
+        <a href="{{ lang_url('en') }}">{{ t('lang.en') }}</a>
+      </div>
+    </div>
+  </header>
+
+  <main class="page-shell">
+    <section class="page-card">
+      {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+          <ul class="flash-list">
+            {% for category, message in messages %}
+              <li class="flash-item" data-category="{{ category }}">{{ message }}</li>
+            {% endfor %}
+          </ul>
+        {% endif %}
+      {% endwith %}
+      {% block content %}{% endblock %}
+    </section>
+  </main>
 </body>
 </html>
