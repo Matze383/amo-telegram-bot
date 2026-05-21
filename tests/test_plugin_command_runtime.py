@@ -649,3 +649,50 @@ async def handle_command(context, host_api):
         )
     )
     assert sent == [(-222, "ok")]
+
+
+def test_plugin_command_topic_allow_mode_isolated_by_message_thread_id_same_chat(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'plugin_runtime_topic_thread_isolation.db'}"
+    init_db(db_url)
+    executor, sent, _ = _mk_executor(
+        tmp_path,
+        db_url,
+        "topic_thread_isolation_demo",
+        """
+async def handle_command(context, host_api):
+    await host_api.send_message(context.chat_id, "ok")
+""",
+    )
+
+    sf = create_session_factory(db_url)
+    with sf() as session:
+        override = PluginPolicyOverride(
+            plugin_name="topic_thread_isolation_demo",
+            topics_mode="allow",
+        )
+        session.add(override)
+        session.commit()
+        override_id = override.id
+        session.add(PluginPolicyAllowedTopic(override_id=override_id, chat_id=-222, message_thread_id=1))
+        session.commit()
+
+    asyncio.run(
+        executor.execute(
+            actor=CommandActor(telegram_user_id=100, role=Role.ADMIN),
+            invocation=CommandInvocation(command_name="plug", argument=None, chat_id=-222, message_id=11, message_thread_id=1),
+        )
+    )
+    assert sent == [(-222, "ok")]
+
+    asyncio.run(
+        executor.execute(
+            actor=CommandActor(telegram_user_id=100, role=Role.ADMIN),
+            invocation=CommandInvocation(command_name="plug", argument=None, chat_id=-222, message_id=12, message_thread_id=2),
+        )
+    )
+    assert sent == [(-222, "ok")]
+
+    with sf() as session:
+        denied = session.scalars(select(AuditEvent).where(AuditEvent.event_type == "plugin_command_denied")).all()
+    assert denied
+    assert _denied_reason_payload(denied[-1].payload_json) == "topic_not_allowed"
