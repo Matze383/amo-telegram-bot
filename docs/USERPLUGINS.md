@@ -1,13 +1,13 @@
 # Userplugin Development Guide
 
-> **DE:** Anleitung für Entwickler, die eigene Userplugins für AMO schreiben wollen.  
+> **DE:** Anleitung für Entwickler, die eigene Userplugins für AMO schreiben wollen.
 > **EN:** Guide for developers who want to write custom userplugins for AMO.
 
 **Target Audience:**
 - Human developers building userplugins
 - AI agents/subagents generating userplugins from this guide
 
-**Version:** 2026.05.22  
+**Version:** 2026.05.22
 **Required AMO Version:** 2026.05.22 or later (for `rss.fetch` capability)
 
 ---
@@ -223,18 +223,18 @@ Config = Dict[str, Any]
 class Plugin:
     """
     Main plugin class. Must be named 'Plugin'.
-    
+
     The core calls these lifecycle methods:
     - __init__: Plugin initialization
     - setup: Called with configuration from WebUI
     - run: Called on schedule (if background plugin)
     - handle_command: Called for command plugins
     """
-    
+
     def __init__(self, core_api: Any) -> None:
         """
         Initialize plugin with core API reference.
-        
+
         Args:
             core_api: The AMO core API object. Use this to call capabilities.
         """
@@ -242,14 +242,14 @@ class Plugin:
         self.logger = logging.getLogger(__name__)
         self.config: Optional[Config] = None
         self.seen_ids: set = set()
-    
+
     def setup(self, config: Config) -> bool:
         """
         Setup plugin with configuration from WebUI.
-        
+
         Args:
             config: Configuration dict matching config_schema
-            
+
         Returns:
             True if setup successful, False otherwise
         """
@@ -257,23 +257,23 @@ class Plugin:
         if not config.get("feed_url"):
             self.logger.error("Missing required config: feed_url")
             return False
-        
+
         self.config = config
         self.logger.info(f"RSS Notifier configured for: {config['feed_url']}")
         return True
-    
+
     def run(self) -> None:
         """
         Main execution method (called on schedule for background plugins).
-        
+
         This example polls the RSS feed and sends new items.
         """
         if not self.config:
             self.logger.error("Plugin not configured")
             return
-        
+
         feed_url = self.config["feed_url"]
-        
+
         try:
             # Call rss.fetch capability
             # This is the ONLY way to fetch RSS feeds - no direct HTTP
@@ -285,34 +285,34 @@ class Plugin:
                     "max_items": 10
                 }
             )
-            
+
             if not feed_data or "items" not in feed_data:
                 self.logger.warning(f"No items fetched from {feed_url}")
                 return
-            
+
             # Process new items
             new_items = self._filter_new_items(feed_data["items"])
-            
+
             for item in new_items:
                 self._send_notification(item)
                 self.seen_ids.add(item["id"])
-                
+
         except Exception as e:
             # Log error WITHOUT exposing sensitive data
             self.logger.error(f"Failed to fetch RSS feed: {type(e).__name__}")
             # DO NOT log: feed_url in full, exception message with URLs, etc.
-    
+
     def _filter_new_items(self, items: List[FeedItem]) -> List[FeedItem]:
         """Filter to only unseen items."""
         return [item for item in items if item.get("id") not in self.seen_ids]
-    
+
     def _send_notification(self, item: FeedItem) -> None:
         """Send Telegram notification for a feed item."""
         title = item.get("title", "No title")[:100]  # Truncate long titles
         link = item.get("link", "")
-        
+
         message = f"📰 <b>{title}</b>\n{link}"
-        
+
         try:
             # Use telegram.send_message capability
             self.core.call_capability(
@@ -330,12 +330,12 @@ class Plugin:
 def handle_command(command: str, args: List[str], context: Dict[str, Any]) -> str:
     """
     Handle plugin commands.
-    
+
     Args:
         command: The command name (e.g., "rss")
         args: Command arguments
         context: Message context (user, chat, etc.)
-        
+
     Returns:
         Response message text
     """
@@ -674,17 +674,17 @@ import logging
 
 class Plugin:
     """Main plugin class."""
-    
+
     def __init__(self, core_api: Any) -> None:
         self.core = core_api
         self.logger = logging.getLogger(__name__)
         self.config: Optional[Dict[str, Any]] = None
-    
+
     def setup(self, config: Dict[str, Any]) -> bool:
         """Configure plugin."""
         self.config = config
         return True
-    
+
     def run(self) -> None:
         """Main execution."""
         pass
