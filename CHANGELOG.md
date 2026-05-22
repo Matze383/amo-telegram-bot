@@ -5,6 +5,58 @@
 
 ---
 
+## [2026.05.22] – Image analysis runtime and Telegram reply fixes
+
+**Datum / Date:** 2026-05-22
+
+### 🇩🇪 Deutsch
+
+#### Übersicht
+Dieses Release macht die Bildanalyse in aktivierten Telegram-Topics praktisch nutzbar und dokumentiert die zugehörigen Datenschutz- und Sicherheitsgrenzen. Zusätzlich wurden Reply-Kontext und Plugin-Topic-Isolation stabilisiert.
+
+#### Neu
+- **Pro-Topic Bildanalyse-Steuerung:** Die WebUI zeigt und speichert Bildanalyse-Modi pro Topic (`inherit`, `enabled`, `disabled`); die Runtime wertet diese Einstellung vor der Analyse aus.
+- **Rollenbasierte 24h-Quotas:** Die WebUI verwaltet Quotas pro Rolle; die Runtime erzwingt Rolling-24h-Limits vor dem Provider-Aufruf.
+- **Automatische Telegram-Bildanalyse:** Fotos und Bild-Dokumente werden in aktivierten Topics automatisch erkannt und an den Bildanalyse-Pfad übergeben.
+- **Reply-Kontext:** Telegram-Replies auf Bot- oder Nutzernachrichten erhalten allgemeinen Antwortkontext, damit Folgefragen natürlicher funktionieren.
+
+#### Behoben
+- **Async-sicherer Provider-Pfad:** Der Bildanalyse-Provider wird async-safe aufgerufen; Diagnosen bleiben privacy-safe und enthalten keine Rohbilder.
+- **Telegram Photo Octet-Stream Hotfix:** Telegram-Foto-Downloads mit `application/octet-stream` werden akzeptiert, aber nur über vertrauenswürdige Telegram-Pfade und erlaubte Dateisuffixe.
+- **Plugin Topic Thread Isolation:** Regression gegen Topic-Leaks abgesichert; Plugin-Antworten bleiben im richtigen Telegram-Thread isoliert.
+- **Reply-Kontext gehärtet:** Kontextauflösung für Antworten wurde robuster gemacht und bleibt auf passende Bot-/User-Reply-Szenarien begrenzt.
+
+#### Datenschutz & Sicherheit
+- Bilder werden nur temporär in einem kurzlebigen Temp-Verzeichnis verarbeitet und per TTL-Cleanup bereinigt.
+- Keine Rohbilder werden ins Repository, in Audit-Events oder Logs geschrieben.
+- Policy-, Topic- und Quota-Prüfungen erfolgen vor dem Provider-Aufruf; blockierte Anfragen verursachen keinen Provider-Call.
+- Diagnose- und Fehlermeldungen bleiben generisch/redacted und enthalten keine sensiblen Bilddaten.
+
+### 🇬🇧 English
+
+#### Overview
+This release makes image analysis practically usable in enabled Telegram topics and documents the related privacy and security boundaries. It also stabilizes reply context and plugin topic isolation.
+
+#### New
+- **Per-topic image analysis controls:** The WebUI displays and stores image analysis modes per topic (`inherit`, `enabled`, `disabled`); runtime evaluates this setting before analysis.
+- **Role-based 24h quotas:** The WebUI manages quotas per role; runtime enforces rolling 24h limits before provider invocation.
+- **Automatic Telegram image analysis:** Photos and image documents are detected automatically in enabled topics and passed into the image-analysis path.
+- **Reply context:** Telegram replies to bot or user messages now receive general reply context, making follow-up questions work more naturally.
+
+#### Fixed
+- **Async-safe provider path:** The image-analysis provider is invoked safely from async runtime code; diagnostics remain privacy-safe and contain no raw images.
+- **Telegram photo octet-stream hotfix:** Telegram photo downloads with `application/octet-stream` are accepted, but only through trusted Telegram paths and allowed file suffixes.
+- **Plugin topic thread isolation:** Regression coverage protects against topic leaks; plugin replies stay isolated to the correct Telegram thread.
+- **Hardened reply context:** Reply-context resolution is more robust and remains limited to appropriate bot/user reply scenarios.
+
+#### Privacy & Security
+- Images are processed temporarily only in a short-lived temp directory and cleaned up via TTL cleanup.
+- No raw images are written to the repository, audit events, or logs.
+- Policy, topic, and quota checks happen before provider invocation; denied requests do not call the provider.
+- Diagnostics and error messages remain generic/redacted and contain no sensitive image data.
+
+---
+
 ## [Unreleased] – IMG-B8 Runtime Role Quota Enforcement
 
 **Datum / Date:** 2026-05-21
