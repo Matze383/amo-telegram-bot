@@ -2,8 +2,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from hashlib import sha256
-from typing import Callable, Protocol
+from ipaddress import ip_address
+from time import monotonic
+from typing import Protocol
 from urllib.parse import urlparse
+import socket
 import xml.etree.ElementTree as ET
 
 from .capability_policy import CapabilityDecisionResult
@@ -39,6 +42,7 @@ class RSSFetchResult:
     result: CapabilityDecisionResult
     reason_code: str
     entries: tuple[RSSFeedEntry, ...]
+    audit: dict[str, object]
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,12 +54,16 @@ class RSSFetchRequest:
     timeout_seconds: float
     max_response_bytes: int
     max_entries: int = 20
+    plugin_id: str = ""
+    max_redirects: int = 5
+    host_allowlist: frozenset[str] | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class RSSHTTPResponse:
     status_code: int
     body: bytes
+    redirects: int = 0
 
 
 class RSSHTTPClient(Protocol):
@@ -99,53 +107,159 @@ def execute_rss_fetch(
     http_get: RSSHTTPClient,
     now_monotonic_seconds: float,
     last_fetch_monotonic_seconds: float | None,
+    resolve_host_ips: callable | None = None,
 ) -> RSSFetchResult:
+    audit = _new_audit(request=request)
+    started = monotonic()
+
+    def _deny(reason: str, *, blocked_reason: str | None = None, bytes_count: int = 0, items_count: int = 0) -> RSSFetchResult:
+        audit.update(
+            {
+                "status": "deny",
+                "reason": reason,
+                "duration_ms": int((monotonic() - started) * 1000),
+                "bytes": bytes_count,
+                "items_count": items_count,
+                "blocked_reason": blocked_reason,
+            }
+        )
+        return RSSFetchResult(result=CapabilityDecisionResult.DENY, reason_code=reason, entries=(), audit=audit)
+
+    def _allow(entries: tuple[RSSFeedEntry, ...], *, bytes_count: int) -> RSSFetchResult:
+        audit.update(
+            {
+                "status": "allow",
+                "reason": "ok",
+                "duration_ms": int((monotonic() - started) * 1000),
+                "bytes": bytes_count,
+                "items_count": len(entries),
+                "blocked_reason": None,
+            }
+        )
+        return RSSFetchResult(result=CapabilityDecisionResult.ALLOW, reason_code="ok", entries=entries, audit=audit)
+
     validation = validate_rss_input(feed_id=request.feed_id, url=request.url)
     if not validation.ok:
-        return RSSFetchResult(result=CapabilityDecisionResult.DENY, reason_code=validation.reason_code, entries=())
+        return _deny(validation.reason_code)
 
     allowed_urls = {_normalize_url(item) for item in request.allowed_urls if isinstance(item, str) and item.strip()}
     if _normalize_url(request.url) not in allowed_urls:
-        return RSSFetchResult(result=CapabilityDecisionResult.DENY, reason_code="url_not_allowlisted", entries=())
+        return _deny("url_not_allowlisted")
+
+    host = (urlparse(request.url).hostname or "").strip().lower()
+    if not host:
+        return _deny("invalid_url")
+    audit["url_host"] = host
+
+    if request.host_allowlist is not None and host not in {h.strip().lower() for h in request.host_allowlist if isinstance(h, str)}:
+        return _deny("host_not_allowlisted", blocked_reason="policy_host_allowlist")
+
+    blocked_reason = _block_reason_for_host(host=host, resolve_host_ips=resolve_host_ips)
+    if blocked_reason is not None:
+        return _deny("ssrf_blocked", blocked_reason=blocked_reason)
 
     if request.min_interval_seconds < 1:
-        return RSSFetchResult(result=CapabilityDecisionResult.DENY, reason_code="invalid_min_interval", entries=())
+        return _deny("invalid_min_interval")
     if request.timeout_seconds <= 0:
-        return RSSFetchResult(result=CapabilityDecisionResult.DENY, reason_code="invalid_timeout", entries=())
+        return _deny("invalid_timeout")
     if request.max_response_bytes < 1024:
-        return RSSFetchResult(result=CapabilityDecisionResult.DENY, reason_code="invalid_max_response_bytes", entries=())
+        return _deny("invalid_max_response_bytes")
     if request.max_entries < 1:
-        return RSSFetchResult(result=CapabilityDecisionResult.DENY, reason_code="invalid_max_entries", entries=())
+        return _deny("invalid_max_entries")
+    if request.max_redirects < 0:
+        return _deny("invalid_max_redirects")
 
     if last_fetch_monotonic_seconds is not None:
         elapsed = now_monotonic_seconds - last_fetch_monotonic_seconds
         if elapsed < request.min_interval_seconds:
-            return RSSFetchResult(result=CapabilityDecisionResult.DENY, reason_code="rate_limited", entries=())
+            return _deny("rate_limited")
 
     try:
         response = http_get(request.url, request.timeout_seconds)
     except TimeoutError:
-        return RSSFetchResult(result=CapabilityDecisionResult.DENY, reason_code="fetch_timeout", entries=())
+        return _deny("fetch_timeout")
     except Exception:
-        return RSSFetchResult(result=CapabilityDecisionResult.DENY, reason_code="fetch_failed", entries=())
+        return _deny("fetch_failed")
+
+    if response.redirects > request.max_redirects:
+        return _deny("redirect_limit_exceeded", blocked_reason="max_redirects")
 
     if response.status_code < 200 or response.status_code >= 300:
-        return RSSFetchResult(result=CapabilityDecisionResult.DENY, reason_code="http_error", entries=())
+        return _deny("http_error")
 
     if len(response.body) > request.max_response_bytes:
-        return RSSFetchResult(result=CapabilityDecisionResult.DENY, reason_code="response_too_large", entries=())
+        return _deny("response_too_large", bytes_count=len(response.body))
 
     try:
         root = ET.fromstring(response.body)
     except ET.ParseError:
-        return RSSFetchResult(result=CapabilityDecisionResult.DENY, reason_code="malformed_xml", entries=())
+        return _deny("malformed_xml", bytes_count=len(response.body))
 
     entries = _parse_rss_entries(root=root, max_entries=request.max_entries)
-    return RSSFetchResult(result=CapabilityDecisionResult.ALLOW, reason_code="ok", entries=entries)
+    return _allow(entries, bytes_count=len(response.body))
 
 
 def _normalize_url(url: str) -> str:
     return url.strip()
+
+
+def _new_audit(*, request: RSSFetchRequest) -> dict[str, object]:
+    host = (urlparse(request.url).hostname or "").strip().lower()
+    return {
+        "plugin_id": request.plugin_id or "unknown",
+        "url_host": host,
+        "status": "deny",
+        "reason": "unknown",
+        "duration_ms": 0,
+        "bytes": 0,
+        "items_count": 0,
+        "blocked_reason": None,
+    }
+
+
+def _block_reason_for_host(*, host: str, resolve_host_ips: callable | None) -> str | None:
+    if host in {"localhost", "localhost.localdomain", "0", "0.0.0.0"}:
+        return "localhost"
+
+    if _is_ip_blocked(host):
+        return "ip_literal_blocked"
+
+    resolver = resolve_host_ips or _resolve_host_ips
+    try:
+        ips = resolver(host)
+    except Exception:
+        return None
+
+    for ip_text in ips:
+        if _is_ip_blocked(ip_text):
+            return "resolved_ip_blocked"
+    return None
+
+
+def _resolve_host_ips(host: str) -> tuple[str, ...]:
+    infos = socket.getaddrinfo(host, None, proto=socket.IPPROTO_TCP)
+    out: list[str] = []
+    for info in infos:
+        sockaddr = info[4]
+        if not sockaddr:
+            continue
+        ip_text = sockaddr[0]
+        if ip_text not in out:
+            out.append(ip_text)
+    return tuple(out)
+
+
+def _is_ip_blocked(host_or_ip: str) -> bool:
+    try:
+        addr = ip_address(host_or_ip)
+    except ValueError:
+        return False
+
+    if addr.is_loopback or addr.is_link_local or addr.is_private:
+        return True
+    if addr.is_multicast or addr.is_unspecified or addr.is_reserved:
+        return True
+    return False
 
 
 def _parse_rss_entries(*, root: ET.Element, max_entries: int) -> tuple[RSSFeedEntry, ...]:
