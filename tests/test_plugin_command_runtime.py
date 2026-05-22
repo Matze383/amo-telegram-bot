@@ -8,7 +8,7 @@ from sqlalchemy import select
 from amo_bot.auth.roles import Role
 from amo_bot.db.base import create_session_factory
 from amo_bot.db.init_db import init_db
-from amo_bot.db.models import AuditEvent, PluginPolicyAllowedGroup, PluginPolicyAllowedTopic, PluginPolicyOverride
+from amo_bot.db.models import AuditEvent, ImageAnalyzeAuditEvent, PluginPolicyAllowedGroup, PluginPolicyAllowedTopic, PluginPolicyOverride
 from amo_bot.telegram.update_parser import TelegramAttachment
 from amo_bot.db.repositories import PluginRepository
 from amo_bot.plugins.command_runtime import CommandActor, CommandInvocation, PluginCommandExecutor
@@ -884,6 +884,83 @@ async def handle_command(context, host_api):
     with sf() as session:
         from amo_bot.db.models import ImageAnalyzeAuditEvent
 
+        audits = session.scalars(select(ImageAnalyzeAuditEvent).order_by(ImageAnalyzeAuditEvent.id)).all()
+    assert audits[-1].command == "auto_image"
+    assert audits[-1].outcome == "allowed"
+
+
+def test_auto_image_plain_photo_with_octet_stream_download_reaches_provider(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'plugin_runtime_auto_image_plain_photo.db'}"
+    init_db(db_url)
+    executor, sent, replied, _, _ = _mk_executor(
+        tmp_path,
+        db_url,
+        "unrelated_plain_photo_demo",
+        """
+async def handle_command(context, host_api):
+    await host_api.reply(context.chat_id, context.message_id, "should-not-run")
+""",
+        commands=["plug"],
+    )
+    executor._enable_image_attachments = True
+
+    class _MediaResult:
+        ok = True
+        reason_code = "ok"
+        mime_type = "image/png"
+        bytes_stored = 99
+        file_path = "/tmp/amo-safe-test-image.png"
+
+    class _MediaStore:
+        seen: list[TelegramAttachment] = []
+
+        async def download_image(self, *, attachment):
+            self.seen.append(attachment)
+            return _MediaResult()
+
+    media_store = _MediaStore()
+    executor._image_media_store = media_store
+
+    sf = create_session_factory(db_url)
+    with sf() as session:
+        from amo_bot.db.repositories import TopicAgentMemoryRepository
+
+        repo = TopicAgentMemoryRepository(session)
+        repo.upsert_config(scope_type="topic", chat_id=-1002003580909, topic_id=6845, image_analysis_mode="enabled")
+        session.commit()
+
+    handled = asyncio.run(
+        executor.analyze_image_automatically(
+            actor=CommandActor(telegram_user_id=100, role=Role.ADMIN),
+            invocation=CommandInvocation(
+                command_name="auto_image",
+                argument=None,
+                chat_id=-1002003580909,
+                message_id=94,
+                message_thread_id=6845,
+                attachments=(
+                    TelegramAttachment(
+                        source_kind="photo",
+                        type_hint="image",
+                        file_id="photo-file-id",
+                        file_unique_id="photo-unique-id",
+                        width=100,
+                        height=80,
+                        size=123,
+                        mime_type="image/*",
+                    ),
+                ),
+            ),
+        )
+    )
+
+    assert handled is True
+    assert media_store.seen and media_store.seen[0].source_kind == "photo"
+    assert media_store.seen[0].type_hint == "image"
+    assert sent == []
+    assert replied == [(-1002003580909, 94, "fake image analysis for telegram-file:photo-unique-id: describe image", 6845)]
+
+    with sf() as session:
         audits = session.scalars(select(ImageAnalyzeAuditEvent).order_by(ImageAnalyzeAuditEvent.id)).all()
     assert audits[-1].command == "auto_image"
     assert audits[-1].outcome == "allowed"

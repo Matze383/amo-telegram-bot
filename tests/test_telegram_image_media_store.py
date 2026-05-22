@@ -5,6 +5,7 @@ from pathlib import Path
 import asyncio
 
 import httpx
+import pytest
 
 
 from amo_bot.telegram.image_media_store import ImageDownloadPolicy, TelegramImageMediaStore
@@ -143,6 +144,67 @@ def test_deny_mime_not_allowed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
 
     store = TelegramImageMediaStore(bot_token="token", base_dir=tmp_path)
     result = asyncio.run(store.download_image(attachment=_image_attachment()))
+
+    assert result.ok is False
+    assert result.reason_code == "deny_mime_not_allowed"
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_plain_telegram_photo_accepts_octet_stream_when_file_path_is_image(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    content = b"\x89PNG\r\n\x1a\nabc"
+    post = _JsonResponse(
+        status_code=200,
+        payload={"ok": True, "result": {"file_path": "photos/file_123.png", "file_size": len(content)}},
+    )
+    stream = _FakeStreamResponse(
+        status_code=200,
+        headers={"content-type": "application/octet-stream", "content-length": str(len(content))},
+        chunks=[content],
+    )
+
+    monkeypatch.setattr(
+        httpx,
+        "AsyncClient",
+        lambda timeout=None: _FakeClient(post_result=post, stream_result=stream),
+    )
+
+    store = TelegramImageMediaStore(bot_token="token", base_dir=tmp_path)
+    result = asyncio.run(store.download_image(attachment=_image_attachment(size=len(content))))
+
+    assert result.ok is True
+    assert result.reason_code == "ok"
+    assert result.mime_type == "image/png"
+    assert result.bytes_stored == len(content)
+    assert result.file_path is not None
+    assert Path(result.file_path).read_bytes() == content
+
+
+def test_image_document_keeps_rejecting_octet_stream_without_allowed_mime(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    post = _JsonResponse(
+        status_code=200,
+        payload={"ok": True, "result": {"file_path": "docs/file_123.png"}},
+    )
+    stream = _FakeStreamResponse(
+        status_code=200,
+        headers={"content-type": "application/octet-stream"},
+        chunks=[b"not-trusted-by-document-metadata"],
+    )
+
+    monkeypatch.setattr(
+        httpx,
+        "AsyncClient",
+        lambda timeout=None: _FakeClient(post_result=post, stream_result=stream),
+    )
+
+    store = TelegramImageMediaStore(bot_token="token", base_dir=tmp_path)
+    attachment = TelegramAttachment(
+        source_kind="document",
+        type_hint="image_document",
+        file_id="doc123",
+        file_unique_id="doc-u1",
+        mime_type="image/png",
+    )
+    result = asyncio.run(store.download_image(attachment=attachment))
 
     assert result.ok is False
     assert result.reason_code == "deny_mime_not_allowed"

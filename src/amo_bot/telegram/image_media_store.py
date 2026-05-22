@@ -89,9 +89,10 @@ class TelegramImageMediaStore:
             return ImageDownloadResult(ok=False, reason_code="deny_size_limit")
 
         remote_url = f"https://api.telegram.org/file/bot{self._bot_token}/{file_path_raw}"
+        fallback_mime_type = self._trusted_photo_mime_type(attachment=attachment, file_path=file_path_raw)
 
         try:
-            download = await self._bounded_download(remote_url)
+            download = await self._bounded_download(remote_url, fallback_mime_type=fallback_mime_type)
         except TimeoutError:
             return ImageDownloadResult(ok=False, reason_code="error_timeout")
         except Exception:
@@ -134,7 +135,7 @@ class TelegramImageMediaStore:
             raise RuntimeError("telegram_api_error")
         return data.get("result")
 
-    async def _bounded_download(self, remote_url: str) -> ImageDownloadResult:
+    async def _bounded_download(self, remote_url: str, *, fallback_mime_type: str | None = None) -> ImageDownloadResult:
         timeout = httpx.Timeout(self._policy.timeout_seconds)
         try:
             async with httpx.AsyncClient(timeout=timeout) as client:
@@ -145,7 +146,9 @@ class TelegramImageMediaStore:
                     content_type_raw = response.headers.get("content-type", "")
                     mime_type = content_type_raw.split(";", 1)[0].strip().casefold()
                     if mime_type not in self._policy.allowed_mime_types:
-                        return ImageDownloadResult(ok=False, reason_code="deny_mime_not_allowed")
+                        if fallback_mime_type is None or mime_type not in {"", "application/octet-stream", "binary/octet-stream"}:
+                            return ImageDownloadResult(ok=False, reason_code="deny_mime_not_allowed")
+                        mime_type = fallback_mime_type
 
                     declared_len = self._safe_int(response.headers.get("content-length"))
                     if declared_len is not None and declared_len > self._policy.max_bytes:
@@ -193,6 +196,21 @@ class TelegramImageMediaStore:
         if mime_type == "image/gif":
             return ".gif"
         return ".img"
+
+    def _trusted_photo_mime_type(self, *, attachment: TelegramAttachment, file_path: str) -> str | None:
+        if attachment.source_kind != "photo" or attachment.type_hint != "image":
+            return None
+        suffix = Path(file_path).suffix.casefold()
+        suffix_mime = {
+            ".jpg": "image/jpeg",
+            ".jpeg": "image/jpeg",
+            ".png": "image/png",
+            ".webp": "image/webp",
+            ".gif": "image/gif",
+        }.get(suffix)
+        if suffix_mime in self._policy.allowed_mime_types:
+            return suffix_mime
+        return None
 
     @staticmethod
     def _safe_int(raw: object) -> int | None:
