@@ -66,6 +66,23 @@ def init_db(database_url: str) -> None:
                 updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
         """,
+        "topic_recent_messages": """
+            CREATE TABLE topic_recent_messages (
+                id INTEGER NOT NULL PRIMARY KEY,
+                scope_type VARCHAR(32) NOT NULL,
+                chat_id BIGINT,
+                topic_id BIGINT,
+                user_id BIGINT,
+                message_text TEXT NOT NULL,
+                telegram_message_id BIGINT,
+                telegram_author_user_id BIGINT,
+                telegram_author_username VARCHAR(255),
+                telegram_author_is_bot BOOLEAN NOT NULL DEFAULT 0,
+                source VARCHAR(32) NOT NULL DEFAULT 'user',
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                CONSTRAINT uq_topic_recent_messages_id UNIQUE (id)
+            )
+        """,
         "topic_ai_sessions": """
             CREATE TABLE topic_ai_sessions (
                 id INTEGER NOT NULL PRIMARY KEY,
@@ -151,6 +168,13 @@ def init_db(database_url: str) -> None:
         },
         "topic_long_memories": {
             "promotion_status": "ALTER TABLE topic_long_memories ADD COLUMN promotion_status VARCHAR(16) NOT NULL DEFAULT 'none'",
+        },
+        "topic_recent_messages": {
+            "telegram_message_id": "ALTER TABLE topic_recent_messages ADD COLUMN telegram_message_id BIGINT",
+            "telegram_author_user_id": "ALTER TABLE topic_recent_messages ADD COLUMN telegram_author_user_id BIGINT",
+            "telegram_author_username": "ALTER TABLE topic_recent_messages ADD COLUMN telegram_author_username VARCHAR(255)",
+            "telegram_author_is_bot": "ALTER TABLE topic_recent_messages ADD COLUMN telegram_author_is_bot BOOLEAN NOT NULL DEFAULT 0",
+            "source": "ALTER TABLE topic_recent_messages ADD COLUMN source VARCHAR(32) NOT NULL DEFAULT 'user'",
         },
         "users": {
             "first_name": "ALTER TABLE users ADD COLUMN first_name VARCHAR(255)",

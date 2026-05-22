@@ -782,3 +782,170 @@ def test_group_scope_unaffected_by_private_min_ai_role(tmp_path) -> None:
 
     assert sender.sent == [(-1200, "ai-answer", 5)]
     assert len(ai.prompts) == 1
+
+
+def test_reply_to_persisted_bot_message_includes_reply_context(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'ai_reply_context_bot.db'}"
+    init_db(db_url)
+    _seed_user(
+        db_url,
+        user_id=2601,
+        role="vip",
+        consent="accepted",
+        group_chat_id=-1601,
+        group_role="vip",
+    )
+
+    sf = create_session_factory(db_url)
+    with sf() as session:
+        TopicAgentMemoryRepository(session).upsert_config(scope_type="topic", chat_id=-1601, topic_id=31, ai_enabled=True)
+        TopicAgentMemoryRepository(session).add_message(
+            scope_type="topic",
+            chat_id=-1601,
+            topic_id=31,
+            message_text="Bot sample answer for reply context",
+            telegram_message_id=7001,
+            telegram_author_user_id=0,
+            telegram_author_username="AmoBot",
+            telegram_author_is_bot=True,
+            source="bot",
+        )
+        session.commit()
+
+    ai = FakeAIService(answer="ai-answer")
+    sender = Sender()
+    dispatcher = _mk_dispatcher(db_url, ai, sender)
+
+    asyncio.run(
+        dispatcher.handle_raw_update(
+            _mk_update(
+                uid=2601,
+                chat_id=-1601,
+                chat_type="supergroup",
+                text="Was meinst du damit?",
+                update_id=71,
+                message_thread_id=31,
+                reply_to_is_bot=True,
+                reply_to_message_id=7001,
+            )
+        )
+    )
+
+    assert sender.sent == [(-1601, "ai-answer", 31)]
+    assert len(ai.prompts) == 1
+    prompt = ai.prompts[0]
+    assert "Telegram reply context:" in prompt
+    assert "Replied-to author/source: bot @AmoBot" in prompt
+    assert "Bot sample answer for reply context" in prompt
+    assert "User message:\nWas meinst du damit?" in prompt
+
+
+def test_reply_to_user_message_uses_safe_inline_quote_context(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'ai_reply_context_user.db'}"
+    init_db(db_url)
+    _seed_user(
+        db_url,
+        user_id=2602,
+        role="vip",
+        consent="accepted",
+        group_chat_id=-1602,
+        group_role="vip",
+    )
+
+    sf = create_session_factory(db_url)
+    with sf() as session:
+        TopicAgentMemoryRepository(session).upsert_config(scope_type="topic", chat_id=-1602, topic_id=32, ai_enabled=True)
+
+    ai = FakeAIService(answer="ai-answer")
+    sender = Sender()
+    dispatcher = _mk_dispatcher(db_url, ai, sender)
+    raw = _mk_update(
+        uid=2602,
+        chat_id=-1602,
+        chat_type="supergroup",
+        text="@AmoBot erklär das bitte",
+        update_id=72,
+        message_thread_id=32,
+    )
+    message = raw["message"]
+    assert isinstance(message, dict)
+    message["reply_to_message"] = {
+        "message_id": 7002,
+        "from": {"id": 3602, "is_bot": False, "first_name": "Other", "username": "other"},
+        "text": "User sample statement for reply context",
+    }
+
+    asyncio.run(dispatcher.handle_raw_update(raw))
+
+    assert sender.sent == [(-1602, "ai-answer", 32)]
+    assert len(ai.prompts) == 1
+    prompt = ai.prompts[0]
+    assert "Telegram reply context:" in prompt
+    assert "Replied-to author/source: user @other" in prompt
+    assert "User sample statement for reply context" in prompt
+
+
+def test_unresolvable_reply_context_does_not_crash(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'ai_reply_context_missing.db'}"
+    init_db(db_url)
+    _seed_user(
+        db_url,
+        user_id=2603,
+        role="vip",
+        consent="accepted",
+        group_chat_id=-1603,
+        group_role="vip",
+    )
+
+    sf = create_session_factory(db_url)
+    with sf() as session:
+        TopicAgentMemoryRepository(session).upsert_config(scope_type="topic", chat_id=-1603, topic_id=33, ai_enabled=True)
+
+    ai = FakeAIService(answer="ai-answer")
+    sender = Sender()
+    dispatcher = _mk_dispatcher(db_url, ai, sender)
+
+    asyncio.run(
+        dispatcher.handle_raw_update(
+            _mk_update(
+                uid=2603,
+                chat_id=-1603,
+                chat_type="supergroup",
+                text="Weiter bitte",
+                update_id=73,
+                message_thread_id=33,
+                reply_to_is_bot=True,
+                reply_to_message_id=99999,
+            )
+        )
+    )
+
+    assert sender.sent == [(-1603, "ai-answer", 33)]
+    assert len(ai.prompts) == 1
+    assert "Telegram reply context:" not in ai.prompts[0]
+    assert "User message:\nWeiter bitte" in ai.prompts[0]
+
+
+def test_bot_authored_incoming_update_still_ignored_for_loop_protection(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'ai_reply_context_loop_protection.db'}"
+    init_db(db_url)
+    ai = FakeAIService(answer="ai-answer")
+    sender = Sender()
+    dispatcher = _mk_dispatcher(db_url, ai, sender)
+
+    asyncio.run(
+        dispatcher.handle_raw_update(
+            {
+                "update_id": 74,
+                "message": {
+                    "message_id": 174,
+                    "from": {"id": 999, "is_bot": True, "first_name": "Amo", "username": "AmoBot"},
+                    "chat": {"id": -1604, "type": "supergroup"},
+                    "text": "@AmoBot loop?",
+                },
+            }
+        )
+    )
+
+    assert sender.sent == []
+    assert ai.prompts == []

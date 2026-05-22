@@ -42,6 +42,15 @@ class CommandMatch:
 
 
 @dataclass(slots=True)
+class TelegramReplyToMessage:
+    message_id: int
+    from_user: TelegramUser | None = None
+    text: str = ""
+    chat_id: int | None = None
+    message_thread_id: int | None = None
+
+
+@dataclass(slots=True)
 class TelegramMessage:
     message_id: int
     from_user: TelegramUser
@@ -49,10 +58,13 @@ class TelegramMessage:
     text: str
     message_thread_id: int | None = None
     telegram_topic_name: str | None = None
+    reply_to_message_id: int | None = None
+    reply_to_message_text: str = ""
     reply_to_is_bot: bool = False
     reply_to_user_id: int | None = None
     reply_to_username: str | None = None
     reply_to_user_is_bot: bool = False
+    reply_to_message: TelegramReplyToMessage | None = None
     attachments: tuple[TelegramAttachment, ...] = ()
 
     def parse_command(self, bot_username: str | None = None) -> CommandMatch | None:
@@ -249,22 +261,41 @@ def _parse_message(raw: Any) -> TelegramMessage | None:
     if telegram_topic_name is None:
         telegram_topic_name = _extract_topic_name(reply_to_message_raw)
 
+    reply_to_message_id: int | None = None
+    reply_to_message_text = ""
     reply_to_is_bot = False
     reply_to_user_id: int | None = None
     reply_to_username: str | None = None
     reply_to_user_is_bot = False
+    reply_to_message: TelegramReplyToMessage | None = None
     if isinstance(reply_to_message_raw, dict):
+        try:
+            reply_to_message_id = int(reply_to_message_raw.get("message_id"))
+        except (TypeError, ValueError):
+            reply_to_message_id = None
+
         reply_to_user = _parse_user(reply_to_message_raw.get("from"))
         if reply_to_user is not None:
             reply_to_user_id = reply_to_user.id
             reply_to_username = reply_to_user.username
             reply_to_user_is_bot = bool(reply_to_user.is_bot)
             reply_to_is_bot = reply_to_user_is_bot
+
+        reply_text_raw = reply_to_message_raw.get("text")
+        if not isinstance(reply_text_raw, str):
+            reply_text_raw = reply_to_message_raw.get("caption")
+        reply_to_message_text = reply_text_raw if isinstance(reply_text_raw, str) else ""
+
+        if reply_to_message_id is not None:
+            reply_to_message = TelegramReplyToMessage(
+                message_id=reply_to_message_id,
+                from_user=reply_to_user,
+                text=reply_to_message_text,
+                chat_id=chat.id,
+                message_thread_id=message_thread_id,
+            )
+
         if reply_to_is_bot and message_thread_id is not None:
-            try:
-                reply_to_message_id = int(reply_to_message_raw.get("message_id"))
-            except (TypeError, ValueError):
-                reply_to_message_id = None
             # In forum topics Telegram may include the topic-root message in reply_to_message
             # for ordinary thread messages. Treat that as thread context, not explicit reply.
             if reply_to_message_id == message_thread_id:
@@ -277,10 +308,13 @@ def _parse_message(raw: Any) -> TelegramMessage | None:
         text=text if isinstance(text, str) else "",
         message_thread_id=message_thread_id,
         telegram_topic_name=telegram_topic_name,
+        reply_to_message_id=reply_to_message_id,
+        reply_to_message_text=reply_to_message_text,
         reply_to_is_bot=reply_to_is_bot,
         reply_to_user_id=reply_to_user_id,
         reply_to_username=reply_to_username,
         reply_to_user_is_bot=reply_to_user_is_bot,
+        reply_to_message=reply_to_message,
         attachments=_parse_attachments(raw),
     )
 

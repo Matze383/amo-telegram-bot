@@ -60,8 +60,33 @@ def run(argv: list[str] | None = None) -> None:
 
     role_resolver = DBRoleResolver(session_factory)
     ai_service = build_ai_provider(settings)
-    async def send_owner_private_text(chat_id: int, text: str) -> object:
-        return await tg.send_message(chat_id=chat_id, text=text)
+    message_persistence: ChatTopicPersistenceService | None = None
+
+    async def persist_sent_result(
+        *,
+        chat_id: int,
+        text: str,
+        message_thread_id: int | None,
+        result: object,
+    ) -> None:
+        if message_persistence is None or not isinstance(result, dict):
+            return
+        try:
+            message_id = int(result.get("message_id"))
+        except (TypeError, ValueError):
+            return
+        await message_persistence.persist_bot_sent_message(
+            chat_id=chat_id,
+            message_thread_id=message_thread_id,
+            message_id=message_id,
+            text=text,
+            bot_username=settings.bot_username,
+        )
+
+    async def send_owner_private_text(chat_id: int, text: str, _persist_sent_result=persist_sent_result) -> object:
+        result = await tg.send_message(chat_id=chat_id, text=text)
+        await _persist_sent_result(chat_id=chat_id, text=text, message_thread_id=None, result=result)
+        return result
 
     owner_notifier = OwnerNotifier(
         owner_telegram_user_id=settings.webui_owner_telegram_id,
@@ -74,28 +99,36 @@ def run(argv: list[str] | None = None) -> None:
         owner_notifier=owner_notifier,
     )
 
-    async def send_text(chat_id: int, text: str, message_thread_id: int | None = None) -> object:
-        return await tg.send_message(chat_id=chat_id, text=text, message_thread_id=message_thread_id)
+    async def send_text(chat_id: int, text: str, message_thread_id: int | None = None, _persist_sent_result=persist_sent_result) -> object:
+        result = await tg.send_message(chat_id=chat_id, text=text, message_thread_id=message_thread_id)
+        await _persist_sent_result(chat_id=chat_id, text=text, message_thread_id=message_thread_id, result=result)
+        return result
 
     async def send_markup(
         chat_id: int,
         text: str,
         reply_markup: dict[str, object],
         message_thread_id: int | None = None,
+        _persist_sent_result=persist_sent_result,
     ) -> object:
-        return await tg.send_message(
+        result = await tg.send_message(
             chat_id=chat_id,
             text=text,
             message_thread_id=message_thread_id,
             reply_markup=reply_markup,
         )
+        await _persist_sent_result(chat_id=chat_id, text=text, message_thread_id=message_thread_id, result=result)
+        return result
 
     async def send_private_text_with_markup(
         chat_id: int,
         text: str,
         reply_markup: dict[str, object],
+        _persist_sent_result=persist_sent_result,
     ) -> object:
-        return await tg.send_message(chat_id=chat_id, text=text, reply_markup=reply_markup)
+        result = await tg.send_message(chat_id=chat_id, text=text, reply_markup=reply_markup)
+        await _persist_sent_result(chat_id=chat_id, text=text, message_thread_id=None, result=result)
+        return result
 
     async def answer_callback(callback_query_id: str, text: str | None = None) -> object:
         return await tg.answer_callback_query(callback_query_id=callback_query_id, text=text)
@@ -105,26 +138,32 @@ def run(argv: list[str] | None = None) -> None:
         message_id: int,
         text: str,
         message_thread_id: int | None = None,
+        _persist_sent_result=persist_sent_result,
     ) -> object:
-        return await tg.send_message(
+        result = await tg.send_message(
             chat_id=chat_id,
             text=text,
             reply_to_message_id=message_id,
             message_thread_id=message_thread_id,
         )
+        await _persist_sent_result(chat_id=chat_id, text=text, message_thread_id=message_thread_id, result=result)
+        return result
 
     async def send_photo(
         chat_id: int,
         file_path: str,
         caption: str,
         message_thread_id: int | None = None,
+        _persist_sent_result=persist_sent_result,
     ) -> object:
-        return await tg.send_photo(
+        result = await tg.send_photo(
             chat_id=chat_id,
             photo_path=file_path,
             caption=caption,
             message_thread_id=message_thread_id,
         )
+        await _persist_sent_result(chat_id=chat_id, text=caption, message_thread_id=message_thread_id, result=result)
+        return result
 
     async def send_document(
         chat_id: int,
@@ -132,14 +171,17 @@ def run(argv: list[str] | None = None) -> None:
         caption: str,
         message_thread_id: int | None = None,
         mime_type: str | None = None,
+        _persist_sent_result=persist_sent_result,
     ) -> object:
-        return await tg.send_document(
+        result = await tg.send_document(
             chat_id=chat_id,
             document_path=file_path,
             caption=caption,
             message_thread_id=message_thread_id,
             mime_type=mime_type,
         )
+        await _persist_sent_result(chat_id=chat_id, text=caption, message_thread_id=message_thread_id, result=result)
+        return result
 
     plugin_loader = PluginLoader(settings.amo_plugin_dir)
 
@@ -162,6 +204,15 @@ def run(argv: list[str] | None = None) -> None:
         reply=reply_text,
     )
 
+    message_persistence = ChatTopicPersistenceService(
+        session_factory,
+        send_private_message=send_private_text_with_markup,
+        owner_notifier=owner_notifier,
+        send_group_markup=send_markup,
+        send_group_text=send_text,
+        bot_username=settings.bot_username,
+    )
+
     dispatcher = Dispatcher(
         command_registry=command_registry,
         role_resolver=role_resolver,
@@ -170,14 +221,7 @@ def run(argv: list[str] | None = None) -> None:
         send_private_markup=send_markup,
         answer_callback=answer_callback,
         bot_username=settings.bot_username,
-        message_persistence=ChatTopicPersistenceService(
-            session_factory,
-            send_private_message=send_private_text_with_markup,
-            owner_notifier=owner_notifier,
-            send_group_markup=send_markup,
-            send_group_text=send_text,
-            bot_username=settings.bot_username,
-        ),
+        message_persistence=message_persistence,
         plugin_command_executor=plugin_command_executor,
         database_url=settings.database_url,
         ai_service=ai_service,

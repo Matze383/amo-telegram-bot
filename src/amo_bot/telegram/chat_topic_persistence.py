@@ -8,7 +8,7 @@ from amo_bot.consent.prompt_service import ConsentPromptService
 from amo_bot.db.models import GROUP_CHAT_TYPES
 from amo_bot.db.repositories import ChatSeenUserRepository, ChatTopicRepository, TopicAgentMemoryRepository, UserRoleRepository
 from amo_bot.telegram.owner_notify import OwnerNotifier
-from amo_bot.telegram.update_parser import TelegramMessage
+from amo_bot.telegram.update_parser import TelegramMessage, TelegramUser
 
 
 logger = logging.getLogger(__name__)
@@ -64,24 +64,33 @@ class ChatTopicPersistenceService:
 
             text = (message.text or "").strip()
             if text and not text.startswith("/"):
-                scope: tuple[str, int | None, int | None, int | None] | None = None
-                if message.chat.type in GROUP_CHAT_TYPES:
-                    if message.message_thread_id is not None:
-                        scope = ("topic", message.chat.id, message.message_thread_id, None)
-                    else:
-                        scope = ("group_chat", message.chat.id, None, None)
-                elif message.chat.type == "private":
-                    scope = ("private_user", None, None, message.from_user.id)
+                self._persist_recent_message(
+                    session=session,
+                    chat_type=message.chat.type,
+                    chat_id=message.chat.id,
+                    message_thread_id=message.message_thread_id,
+                    private_user_id=message.from_user.id,
+                    message_id=message.message_id,
+                    author=message.from_user,
+                    text=text,
+                    source="bot" if message.from_user.is_bot else "user",
+                )
 
-                if scope is not None:
-                    scope_type, chat_id, topic_id, user_id = scope
-                    TopicAgentMemoryRepository(session).add_message(
-                        scope_type=scope_type,
-                        chat_id=chat_id,
-                        topic_id=topic_id,
-                        user_id=user_id,
-                        message_text=text,
-                    )
+            reply_to = message.reply_to_message
+            reply_text = (message.reply_to_message_text or "").strip()
+            if reply_to is not None and reply_text and not reply_text.startswith("/"):
+                self._persist_recent_message(
+                    session=session,
+                    chat_type=message.chat.type,
+                    chat_id=message.chat.id,
+                    message_thread_id=message.message_thread_id,
+                    private_user_id=message.from_user.id if message.chat.type == "private" else None,
+                    message_id=reply_to.message_id,
+                    author=reply_to.from_user,
+                    text=reply_text,
+                    source="bot" if (reply_to.from_user and reply_to.from_user.is_bot) else "user",
+                    skip_existing=True,
+                )
 
             if existing_user is None and self._owner_notifier is not None:
                 await self._owner_notifier.notify_new_user_discovered(user=user, message=message)
@@ -123,6 +132,88 @@ class ChatTopicPersistenceService:
                             # Fallback message send failure must not break persistence/consent state updates.
                             logger.exception("group consent fallback send failed: chat_id=%s user_id=%s", message.chat.id, message.from_user.id)
 
+            session.commit()
+
+    def _persist_recent_message(
+        self,
+        *,
+        session,
+        chat_type: str,
+        chat_id: int,
+        message_thread_id: int | None,
+        private_user_id: int | None,
+        message_id: int,
+        author: TelegramUser | None,
+        text: str,
+        source: str,
+        skip_existing: bool = False,
+    ) -> None:
+        scope: tuple[str, int | None, int | None, int | None] | None = None
+        if chat_type in GROUP_CHAT_TYPES:
+            if message_thread_id is not None:
+                scope = ("topic", chat_id, message_thread_id, None)
+            else:
+                scope = ("group_chat", chat_id, None, None)
+        elif chat_type == "private" and private_user_id is not None:
+            scope = ("private_user", None, None, private_user_id)
+
+        if scope is None:
+            return
+
+        scope_type, scope_chat_id, topic_id, user_id = scope
+        repo = TopicAgentMemoryRepository(session)
+        if skip_existing and repo.get_recent_by_telegram_message_id(
+            scope_type=scope_type,
+            chat_id=scope_chat_id,
+            topic_id=topic_id,
+            user_id=user_id,
+            telegram_message_id=message_id,
+        ) is not None:
+            return
+
+        repo.add_message(
+            scope_type=scope_type,
+            chat_id=scope_chat_id,
+            topic_id=topic_id,
+            user_id=user_id,
+            message_text=text,
+            telegram_message_id=message_id,
+            telegram_author_user_id=author.id if author is not None else None,
+            telegram_author_username=author.username if author is not None else None,
+            telegram_author_is_bot=bool(author and author.is_bot),
+            source=source,
+        )
+
+    async def persist_bot_sent_message(
+        self,
+        *,
+        chat_id: int,
+        message_thread_id: int | None,
+        message_id: int,
+        text: str,
+        bot_username: str | None = None,
+    ) -> None:
+        content = (text or "").strip()
+        if not content or content.startswith("/"):
+            return
+        with self._session_factory() as session:
+            self._persist_recent_message(
+                session=session,
+                chat_type="supergroup" if chat_id < 0 else "private",
+                chat_id=chat_id,
+                message_thread_id=message_thread_id,
+                private_user_id=chat_id if chat_id > 0 else None,
+                message_id=message_id,
+                author=TelegramUser(
+                    id=0,
+                    is_bot=True,
+                    first_name="Bot",
+                    username=(bot_username or self._bot_username),
+                ),
+                text=content,
+                source="bot",
+                skip_existing=True,
+            )
             session.commit()
 
     def _build_group_unreachable_text(self, *, message: TelegramMessage) -> str:

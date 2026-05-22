@@ -29,6 +29,10 @@ def test_parse_reply_to_bot_sets_flag_true_and_captures_identity() -> None:
     assert update.message.reply_to_user_is_bot is True
     assert update.message.reply_to_user_id == 99
     assert update.message.reply_to_username == "AmoBot"
+    assert update.message.reply_to_message_id == 9
+    assert update.message.reply_to_message_text == "bot msg"
+    assert update.message.reply_to_message is not None
+    assert update.message.reply_to_message.message_id == 9
 
 
 def test_parse_reply_to_other_sets_flag_false() -> None:
@@ -47,6 +51,8 @@ def test_parse_reply_to_other_sets_flag_false() -> None:
     assert update.message.reply_to_user_is_bot is False
     assert update.message.reply_to_user_id == 77
     assert update.message.reply_to_username is None
+    assert update.message.reply_to_message_id == 9
+    assert update.message.reply_to_message_text == "human msg"
 
 
 def test_parse_forum_topic_root_context_reply_to_bot_sets_flag_false() -> None:

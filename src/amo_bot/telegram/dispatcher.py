@@ -11,7 +11,7 @@ from amo_bot.auth.permissions import can_use_bot
 from amo_bot.auth.roles import Role, role_meets_minimum
 from amo_bot.consent import CONSENT_UNREACHABLE, ConsentService
 from amo_bot.db.base import create_session_factory
-from amo_bot.db.repositories import PrivateChatPolicyRepository
+from amo_bot.db.repositories import PrivateChatPolicyRepository, TopicAgentMemoryRepository, TopicRecentMessageRecord
 from amo_bot.db.models import AuditEvent, User
 from amo_bot.plugins.command_runtime import CommandActor, CommandInvocation, PluginCommandExecutor
 from amo_bot.telegram.commands import CommandContext, CommandRegistry, RoleResolver, resolve_locale
@@ -33,6 +33,16 @@ logger = logging.getLogger(__name__)
 
 class MessagePersistence(Protocol):
     async def persist_message(self, message: TelegramMessage) -> None: ...
+
+    async def persist_bot_sent_message(
+        self,
+        *,
+        chat_id: int,
+        message_thread_id: int | None,
+        message_id: int,
+        text: str,
+        bot_username: str | None = None,
+    ) -> None: ...
 
 
 @dataclass(slots=True)
@@ -476,6 +486,76 @@ class Dispatcher:
         reply_username = (message.reply_to_username or "").strip().lstrip("@").casefold()
         return bool(reply_username) and reply_username == configured
 
+
+    def _resolve_reply_context(self, *, message: TelegramMessage) -> TopicRecentMessageRecord | None:
+        reply_to_message_id = message.reply_to_message_id
+        if reply_to_message_id is None:
+            return None
+
+        inline_text = (message.reply_to_message_text or "").strip()
+        inline_user = message.reply_to_message.from_user if message.reply_to_message is not None else None
+        inline_record: TopicRecentMessageRecord | None = None
+        if inline_text:
+            inline_record = TopicRecentMessageRecord(
+                id=0,
+                scope_type="inline",
+                chat_id=message.chat.id,
+                topic_id=message.message_thread_id,
+                user_id=None,
+                message_text=inline_text,
+                telegram_message_id=reply_to_message_id,
+                telegram_author_user_id=inline_user.id if inline_user is not None else message.reply_to_user_id,
+                telegram_author_username=inline_user.username if inline_user is not None else message.reply_to_username,
+                telegram_author_is_bot=bool(inline_user.is_bot if inline_user is not None else message.reply_to_user_is_bot),
+                source="bot" if bool(inline_user.is_bot if inline_user is not None else message.reply_to_user_is_bot) else "user",
+            )
+
+        if self.database_url is None:
+            return inline_record
+
+        scope: tuple[str, int | None, int | None, int | None] | None = None
+        if message.chat.type in {"group", "supergroup"}:
+            if message.message_thread_id is not None:
+                scope = ("topic", message.chat.id, message.message_thread_id, None)
+            else:
+                scope = ("group_chat", message.chat.id, None, None)
+        elif message.chat.type == "private":
+            scope = ("private_user", None, None, message.from_user.id)
+
+        if scope is None:
+            return inline_record
+
+        scope_type, chat_id, topic_id, user_id = scope
+        with create_session_factory(self.database_url)() as session:
+            stored = TopicAgentMemoryRepository(session).get_recent_by_telegram_message_id(
+                scope_type=scope_type,
+                chat_id=chat_id,
+                topic_id=topic_id,
+                user_id=user_id,
+                telegram_message_id=reply_to_message_id,
+            )
+        return stored or inline_record
+
+    @staticmethod
+    def _format_reply_context(record: TopicRecentMessageRecord | None) -> str | None:
+        if record is None:
+            return None
+        content = (record.message_text or "").strip()
+        if not content:
+            return None
+        source = "bot" if record.telegram_author_is_bot or record.source == "bot" else "user"
+        author = source
+        if record.telegram_author_username:
+            author = f"{source} @{record.telegram_author_username.strip().lstrip('@')}"
+        elif record.telegram_author_user_id is not None and record.telegram_author_user_id != 0:
+            author = f"{source} user_id={record.telegram_author_user_id}"
+        return (
+            "The current user message is a Telegram reply to this prior message. "
+            "Use it to resolve references like this/that/he/she/it.\n"
+            f"Replied-to author/source: {author}\n"
+            f"Replied-to content:\n{content}"
+        )
+
     async def _maybe_handle_ai_autoreply(
         self,
         *,
@@ -659,6 +739,10 @@ class Dispatcher:
             "Use provided context only as background. Prioritize the current user message when determining intent and reply."
         )
 
+        reply_context_block = self._format_reply_context(self._resolve_reply_context(message=message))
+        if reply_context_block:
+            prompt_sections.append(f"Telegram reply context:\n{reply_context_block}")
+
         drop_exact_line = normalized_text.strip()
 
         recent_messages_text = (decision.context.recent_messages_text or "").strip()
@@ -769,12 +853,43 @@ class Dispatcher:
 
     async def _send_text(self, chat_id: int, text: str, message_thread_id: int | None) -> None:
         if message_thread_id is None:
-            await self.send_text(chat_id, text)
+            result = await self.send_text(chat_id, text)
+            await self._persist_bot_send_result(chat_id=chat_id, message_thread_id=None, text=text, result=result)
             return
         try:
-            await self.send_text(chat_id, text, message_thread_id)
+            result = await self.send_text(chat_id, text, message_thread_id)
         except TypeError:
-            await self.send_text(chat_id, text)
+            result = await self.send_text(chat_id, text)
+        await self._persist_bot_send_result(chat_id=chat_id, message_thread_id=message_thread_id, text=text, result=result)
+
+
+    async def _persist_bot_send_result(
+        self,
+        *,
+        chat_id: int,
+        message_thread_id: int | None,
+        text: str,
+        result: object,
+    ) -> None:
+        if self.message_persistence is None or not hasattr(self.message_persistence, "persist_bot_sent_message"):
+            return
+        if not isinstance(result, dict):
+            return
+        message_id_raw = result.get("message_id")
+        try:
+            message_id = int(message_id_raw)
+        except (TypeError, ValueError):
+            return
+        try:
+            await self.message_persistence.persist_bot_sent_message(
+                chat_id=chat_id,
+                message_thread_id=message_thread_id,
+                message_id=message_id,
+                text=text,
+                bot_username=self.bot_username,
+            )
+        except Exception:
+            logger.exception("Failed to persist bot-sent Telegram message; continuing")
 
 
     @staticmethod

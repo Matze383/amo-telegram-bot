@@ -1213,3 +1213,28 @@ def test_unreachable_dm_group_fallback_notifies_owner_when_fallback_sent(tmp_pat
     fallback_notifies = [text for _, text in sent_owner if "Gruppenfallback für Consent gesendet" in text]
     assert len(unreachable_notifies) == 1
     assert len(fallback_notifies) == 1
+
+
+def test_persist_bot_sent_message_stores_reply_context_lookup_metadata(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'persist_bot_sent_reply_context.db'}"
+    init_db(db_url)
+    sf = create_session_factory(db_url)
+    service = ChatTopicPersistenceService(sf, bot_username="AmoBot")
+
+    asyncio.run(
+        service.persist_bot_sent_message(
+            chat_id=-13001,
+            message_thread_id=701,
+            message_id=8801,
+            text="bot response that can be replied to later",
+            bot_username="AmoBot",
+        )
+    )
+
+    recent = _recent_messages_for_scope(db_url, scope_type="topic", chat_id=-13001, topic_id=701)
+    assert len(recent) == 1
+    assert recent[0].message_text == "bot response that can be replied to later"
+    assert recent[0].telegram_message_id == 8801
+    assert recent[0].telegram_author_is_bot is True
+    assert recent[0].telegram_author_username == "AmoBot"
+    assert recent[0].source == "bot"

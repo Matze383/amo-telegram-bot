@@ -311,6 +311,11 @@ class TopicRecentMessage(Base):
     topic_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     user_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     message_text: Mapped[str] = mapped_column(Text, nullable=False)
+    telegram_message_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, index=True)
+    telegram_author_user_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    telegram_author_username: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    telegram_author_is_bot: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="0")
+    source: Mapped[str] = mapped_column(String(32), nullable=False, default="user", server_default="user")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
     __table_args__ = (
