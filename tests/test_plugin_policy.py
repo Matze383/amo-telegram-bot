@@ -196,6 +196,50 @@ def test_sync_discovered_backfills_empty_activation_status_to_pending(tmp_path) 
         assert plugin.activation_status == "activation_pending"
 
 
+def test_activate_allows_non_rss_plugin_without_rss_fetch_permission(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'plugins_non_rss_perm.db'}"
+    init_db(db_url)
+
+    plugins_dir = tmp_path / "plugins"
+    pdir = plugins_dir / "demo"
+    pdir.mkdir(parents=True)
+    manifest = _manifest("demo")
+    manifest["required_permissions"] = ["send_message"]
+    (pdir / "plugin.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+    sf = create_session_factory(db_url)
+    service = PluginService(loader=PluginLoader(str(plugins_dir)), session_factory=sf)
+
+    changed = service.activate("demo", context=ActionContext.WEBUI, actor_telegram_user_id=1)
+    assert changed is True
+
+
+def test_activate_requires_rss_fetch_permission_for_rss_behavior(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'plugins_rss_perm.db'}"
+    init_db(db_url)
+
+    plugins_dir = tmp_path / "plugins"
+    pdir = plugins_dir / "rss_demo"
+    pdir.mkdir(parents=True)
+    manifest = _manifest("rss_demo")
+    manifest["required_permissions"] = ["send_message"]
+    manifest["settings_schema"] = {
+        "feed_sources": {"type": "text", "default": "https://example.com/rss.xml"},
+        "poll_interval_seconds": {"type": "number", "default": 300},
+    }
+    (pdir / "plugin.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+    sf = create_session_factory(db_url)
+    service = PluginService(loader=PluginLoader(str(plugins_dir)), session_factory=sf)
+
+    try:
+        service.activate("rss_demo", context=ActionContext.WEBUI, actor_telegram_user_id=1)
+    except PluginPolicyError as exc:
+        assert "rss.fetch permission" in str(exc)
+    else:
+        raise AssertionError("activation without rss.fetch must be blocked for rss behavior")
+
+
 def test_activate_and_deactivate_blocked_for_telegram_context(tmp_path) -> None:
     db_url = f"sqlite:///{tmp_path / 'plugins.db'}"
     init_db(db_url)

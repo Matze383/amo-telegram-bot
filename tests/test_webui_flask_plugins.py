@@ -137,6 +137,64 @@ def test_plugins_shows_valid_manifest_data(tmp_path) -> None:
     assert "kein Wert gesetzt" in html
 
 
+def test_plugins_rss_config_unavailable_message_without_rss_fetch_permission(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'plugins_rss_ui.db'}"
+    plugins_dir = tmp_path / "plugins"
+
+    non_rss_dir = plugins_dir / "weather"
+    non_rss_dir.mkdir(parents=True)
+    (non_rss_dir / "plugin.json").write_text(
+        json.dumps(
+            {
+                "name": "weather",
+                "version": "1.0.0",
+                "commands": ["/weather"],
+                "required_roles": ["admin"],
+                "required_permissions": ["send_message"],
+                "settings_schema": {
+                    "city": {"type": "text", "default": "Berlin"},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    rss_dir = plugins_dir / "rss_missing_perm"
+    rss_dir.mkdir(parents=True)
+    (rss_dir / "plugin.json").write_text(
+        json.dumps(
+            {
+                "name": "rss_missing_perm",
+                "version": "1.0.0",
+                "commands": ["/rss"],
+                "required_roles": ["admin"],
+                "required_permissions": ["send_message"],
+                "settings_schema": {
+                    "feed_sources": {"type": "text", "default": "https://example.com/rss.xml"},
+                    "poll_interval_seconds": {"type": "number", "default": 300},
+                    "label": {"type": "text", "default": "My Feed"},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    app = create_flask_app(settings=_make_settings(db_url, str(plugins_dir)))
+
+    with app.test_client() as client:
+        _login(client, "test-secret")
+        response = client.get("/plugins")
+        html = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    assert "weather" in html
+    assert "<code>city</code>" in html
+    assert "rss_missing_perm" in html
+    assert "<code>feed_sources</code>" in html
+    assert "<code>poll_interval_seconds</code>" in html
+    assert "RSS config unavailable: plugin lacks rss.fetch permission." in html
+
+
 def test_plugin_enable_disable_requires_owner_id_and_audits(tmp_path) -> None:
     from sqlalchemy import select
 

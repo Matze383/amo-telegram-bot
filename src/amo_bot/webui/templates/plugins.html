@@ -51,6 +51,10 @@
             <td>
               {% set settings_schema = plugin.settings_schema if plugin.settings_schema else {} %}
               {% set settings_values = plugin.settings if plugin.settings else {} %}
+              {% set capabilities = plugin.required_permissions if plugin.required_permissions else [] %}
+              {% set has_rss_fetch = 'rss.fetch' in capabilities %}
+              {% set rss_keys = ['feed_sources', 'poll_interval_seconds'] %}
+              {% set has_rss_config = (rss_keys | select('in', settings_schema.keys() | list) | list | length) > 0 %}
               {% if settings_schema %}
                 <details>
                   <summary>{{ settings_schema | length }} Feld(er)</summary>
@@ -72,6 +76,11 @@
                     {% endfor %}
                   </ul>
                 </details>
+                {% if has_rss_config and not has_rss_fetch %}
+                  <em>RSS config unavailable: plugin lacks rss.fetch permission.</em>
+                {% endif %}
+              {% elif has_rss_config and not has_rss_fetch %}
+                <em>RSS config unavailable: plugin lacks rss.fetch permission.</em>
               {% else %}
                 -
               {% endif %}

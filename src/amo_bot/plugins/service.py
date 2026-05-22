@@ -187,6 +187,8 @@ class PluginService:
             raise PluginPolicyError(decision.reason or "activation denied")
 
         manifest = self._require_discovered_valid_manifest(plugin_name)
+        if self._uses_rss_behavior(manifest) and "rss.fetch" not in set(manifest.required_permissions):
+            raise PluginPolicyError("plugin activation denied: rss.fetch permission is required for RSS behavior")
         validation = PluginSettingsValidator.validate(settings_schema=manifest.settings_schema, values={})
         if not validation.is_valid:
             first = validation.errors[0]
@@ -292,6 +294,26 @@ class PluginService:
             repo = PluginRepository(session)
             repo.sync_discovered([manifest])
             return repo.deactivate(plugin_name, actor_telegram_user_id=actor_telegram_user_id)
+
+    @staticmethod
+    def _uses_rss_behavior(manifest: PluginManifest) -> bool:
+        if "rss.fetch" in set(manifest.required_permissions):
+            return True
+
+        schema_keys = {key.casefold() for key in manifest.settings_schema.keys()}
+        rss_hints = {
+            "feed",
+            "feeds",
+            "feed_url",
+            "feed_urls",
+            "feed_sources",
+            "rss",
+            "rss_url",
+            "rss_urls",
+            "rss_sources",
+            "poll_interval_seconds",
+        }
+        return any(hint in schema_keys for hint in rss_hints)
 
     def _require_discovered_valid_manifest(self, plugin_name: str) -> PluginManifest:
         discovery: DiscoveryResult = self._loader.discover()
