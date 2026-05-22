@@ -81,8 +81,100 @@ class Dispatcher:
             chat_id=message.chat.id,
             chat_type=message.chat.type,
         )
+        attachment_count = len(message.attachments)
+        has_photo_attachment = any(item.type_hint == "image" or item.source_kind == "photo" for item in message.attachments)
+        has_image_document = any(item.type_hint == "image_document" for item in message.attachments)
+        logger.info(
+            "telegram message parsed update_id=%s chat_id=%s message_thread_id=%s message_id=%s user_id=%s chat_type=%s text_len=%s attachment_count=%s has_photo_attachment=%s has_image_document=%s command=%s role=%s",
+            update.update_id,
+            message.chat.id,
+            message.message_thread_id,
+            message.message_id,
+            message.from_user.id,
+            message.chat.type,
+            len(message.text or ""),
+            attachment_count,
+            has_photo_attachment,
+            has_image_document,
+            command.name if command is not None else None,
+            role.value,
+        )
 
         if command is None:
+            if not message.attachments:
+                logger.info(
+                    "auto_image decision=skipped_no_attachments update_id=%s chat_id=%s message_thread_id=%s message_id=%s user_id=%s role=%s",
+                    update.update_id,
+                    message.chat.id,
+                    message.message_thread_id,
+                    message.message_id,
+                    message.from_user.id,
+                    role.value,
+                )
+            elif not can_use_bot(role):
+                logger.info(
+                    "auto_image decision=skipped_role update_id=%s chat_id=%s message_thread_id=%s message_id=%s user_id=%s role=%s attachment_count=%s has_photo_attachment=%s has_image_document=%s",
+                    update.update_id,
+                    message.chat.id,
+                    message.message_thread_id,
+                    message.message_id,
+                    message.from_user.id,
+                    role.value,
+                    attachment_count,
+                    has_photo_attachment,
+                    has_image_document,
+                )
+            elif self.plugin_command_executor is None:
+                logger.info(
+                    "auto_image decision=skipped_no_executor update_id=%s chat_id=%s message_thread_id=%s message_id=%s user_id=%s role=%s attachment_count=%s has_photo_attachment=%s has_image_document=%s",
+                    update.update_id,
+                    message.chat.id,
+                    message.message_thread_id,
+                    message.message_id,
+                    message.from_user.id,
+                    role.value,
+                    attachment_count,
+                    has_photo_attachment,
+                    has_image_document,
+                )
+            else:
+                logger.info(
+                    "auto_image decision=invoked update_id=%s chat_id=%s message_thread_id=%s message_id=%s user_id=%s role=%s attachment_count=%s has_photo_attachment=%s has_image_document=%s",
+                    update.update_id,
+                    message.chat.id,
+                    message.message_thread_id,
+                    message.message_id,
+                    message.from_user.id,
+                    role.value,
+                    attachment_count,
+                    has_photo_attachment,
+                    has_image_document,
+                )
+                handled_image = await self.plugin_command_executor.analyze_image_automatically(
+                    actor=CommandActor(telegram_user_id=message.from_user.id, role=role),
+                    invocation=CommandInvocation(
+                        command_name="auto_image",
+                        argument=message.text or None,
+                        chat_id=message.chat.id,
+                        message_id=message.message_id,
+                        message_thread_id=message.message_thread_id,
+                        attachments=message.attachments,
+                    ),
+                )
+                logger.info(
+                    "auto_image decision=%s update_id=%s chat_id=%s message_thread_id=%s message_id=%s user_id=%s role=%s handled=%s",
+                    "handled" if handled_image else "not_handled",
+                    update.update_id,
+                    message.chat.id,
+                    message.message_thread_id,
+                    message.message_id,
+                    message.from_user.id,
+                    role.value,
+                    handled_image,
+                )
+                if handled_image:
+                    return
+
             await self._maybe_handle_ai_autoreply(
                 message=message,
                 role=role,

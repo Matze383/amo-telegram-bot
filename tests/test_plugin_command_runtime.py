@@ -9,6 +9,7 @@ from amo_bot.auth.roles import Role
 from amo_bot.db.base import create_session_factory
 from amo_bot.db.init_db import init_db
 from amo_bot.db.models import AuditEvent, PluginPolicyAllowedGroup, PluginPolicyAllowedTopic, PluginPolicyOverride
+from amo_bot.telegram.update_parser import TelegramAttachment
 from amo_bot.db.repositories import PluginRepository
 from amo_bot.plugins.command_runtime import CommandActor, CommandInvocation, PluginCommandExecutor
 from amo_bot.plugins.loader import PluginLoader
@@ -48,6 +49,8 @@ def _mk_executor(
         repo.activate(plugin_name, actor_telegram_user_id=1)
 
     sent: list[tuple[int, str]] = []
+    photos: list[tuple[int, str, str, int | None]] = []
+    documents: list[tuple[int, str, str, int | None, str | None]] = []
     replied: list[tuple[int, int, str, int | None]] = []
 
     async def _send(chat_id: int, text: str):
@@ -58,20 +61,137 @@ def _mk_executor(
         replied.append((chat_id, message_id, text, message_thread_id))
         return {"ok": True}
 
+    async def _send_photo(chat_id: int, file_path: str, caption: str, message_thread_id: int | None = None):
+        photos.append((chat_id, file_path, caption, message_thread_id))
+        return {"ok": True}
+
+    async def _send_document(
+        chat_id: int,
+        file_path: str,
+        caption: str,
+        message_thread_id: int | None = None,
+        mime_type: str | None = None,
+    ):
+        documents.append((chat_id, file_path, caption, message_thread_id, mime_type))
+        return {"ok": True}
+
     executor = PluginCommandExecutor(
         loader=PluginLoader(str(plugins_dir)),
         session_factory=sf,
         send_message=_send,
         reply=_reply,
+        send_photo=_send_photo,
+        send_document=_send_document,
         timeout_seconds=0.05,
     )
-    return executor, sent, replied
+    return executor, sent, replied, photos, documents
+
+
+def test_analyze_image_runtime_seam_with_fake_provider(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'plugin_runtime_analyze_image.db'}"
+    init_db(db_url)
+    executor, sent, replied, _, _ = _mk_executor(
+        tmp_path,
+        db_url,
+        "image_demo",
+        """
+async def handle_command(context, host_api):
+    assert context.reply_to_image["ok"] is True
+    await host_api.reply(context.chat_id, context.message_id, f"image-ok:{context.reply_to_image['type_hint']}")
+""",
+        commands=["analyze_image"],
+    )
+    executor._enable_image_attachments = True
+
+    class _MediaResult:
+        ok = True
+        reason_code = "ok"
+        mime_type = "image/png"
+        bytes_stored = 99
+
+    class _MediaStore:
+        async def download_image(self, *, attachment):
+            return _MediaResult()
+
+    executor._image_media_store = _MediaStore()
+
+    sf = create_session_factory(db_url)
+    with sf() as session:
+        from amo_bot.db.repositories import TopicAgentMemoryRepository
+
+        repo = TopicAgentMemoryRepository(session)
+        repo.upsert_config(scope_type="topic", chat_id=77, topic_id=None, image_analysis_mode="enabled")
+        session.commit()
+
+    asyncio.run(
+        executor.execute(
+            actor=CommandActor(telegram_user_id=100, role=Role.ADMIN),
+            invocation=CommandInvocation(
+                command_name="analyze_image",
+                argument="describe",
+                chat_id=77,
+                message_id=9,
+                attachments=(
+                    TelegramAttachment(
+                        source_kind="photo",
+                        type_hint="image",
+                        file_id="f1",
+                        file_unique_id="u1",
+                        width=100,
+                        height=80,
+                        size=123,
+                    ),
+                ),
+            ),
+        )
+    )
+
+    assert sent == []
+    assert replied == [(77, 9, "image-ok:image", None)]
+
+    sf = create_session_factory(db_url)
+    with sf() as session:
+        events = [row.event_type for row in session.scalars(select(AuditEvent)).all()]
+    assert "plugin_command_start" in events
+    assert "plugin_command_success" in events
+
+
+def test_analyze_image_missing_image_denied_before_plugin(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'plugin_runtime_analyze_missing.db'}"
+    init_db(db_url)
+    executor, sent, replied, _, _ = _mk_executor(
+        tmp_path,
+        db_url,
+        "image_missing_demo",
+        """
+async def handle_command(context, host_api):
+    await host_api.reply(context.chat_id, context.message_id, "should-not-run")
+""",
+        commands=["analyze_image"],
+    )
+    executor._enable_image_attachments = True
+
+    asyncio.run(
+        executor.execute(
+            actor=CommandActor(telegram_user_id=100, role=Role.ADMIN),
+            invocation=CommandInvocation(command_name="analyze_image", argument=None, chat_id=77, message_id=9),
+        )
+    )
+
+    assert sent == []
+    assert replied == []
+
+    sf = create_session_factory(db_url)
+    with sf() as session:
+        denied = session.scalars(select(AuditEvent).where(AuditEvent.event_type == "plugin_command_denied")).all()
+    assert denied
+    assert _denied_reason_payload(denied[-1].payload_json) == "missing_image"
 
 
 def test_plugin_command_success_and_audit(tmp_path) -> None:
     db_url = f"sqlite:///{tmp_path / 'plugin_runtime1.db'}"
     init_db(db_url)
-    executor, sent, replied = _mk_executor(
+    executor, sent, replied, _, _ = _mk_executor(
         tmp_path,
         db_url,
         "demo",
@@ -102,7 +222,7 @@ async def handle_command(context, host_api):
 def test_plugin_command_denied_by_role_and_ignore(tmp_path) -> None:
     db_url = f"sqlite:///{tmp_path / 'plugin_runtime2.db'}"
     init_db(db_url)
-    executor, sent, replied = _mk_executor(
+    executor, sent, replied, _, _ = _mk_executor(
         tmp_path,
         db_url,
         "demo",
@@ -138,7 +258,7 @@ async def handle_command(context, host_api):
 def test_plugin_command_missing_capability_errors_and_audits(tmp_path) -> None:
     db_url = f"sqlite:///{tmp_path / 'plugin_runtime4.db'}"
     init_db(db_url)
-    executor, sent, replied = _mk_executor(
+    executor, sent, replied, _, _ = _mk_executor(
         tmp_path,
         db_url,
         "no_send_perm",
@@ -172,7 +292,7 @@ async def handle_command(context, host_api):
 def test_plugin_command_reply_missing_capability_errors_and_audits(tmp_path) -> None:
     db_url = f"sqlite:///{tmp_path / 'plugin_runtime5.db'}"
     init_db(db_url)
-    executor, sent, replied = _mk_executor(
+    executor, sent, replied, _, _ = _mk_executor(
         tmp_path,
         db_url,
         "no_reply_perm",
@@ -206,7 +326,7 @@ async def handle_command(context, host_api):
 def test_plugin_command_manifest_slash_command_matches_slashless_invocation(tmp_path) -> None:
     db_url = f"sqlite:///{tmp_path / 'plugin_runtime6.db'}"
     init_db(db_url)
-    executor, sent, replied = _mk_executor(
+    executor, sent, replied, _, _ = _mk_executor(
         tmp_path,
         db_url,
         "slash_demo",
@@ -232,7 +352,7 @@ def test_plugin_command_handler_uses_reply_or_send_contract(tmp_path) -> None:
     db_url = f"sqlite:///{tmp_path / 'plugin_runtime7.db'}"
     init_db(db_url)
 
-    reply_executor, sent_reply, replied_reply = _mk_executor(
+    reply_executor, sent_reply, replied_reply, _, _ = _mk_executor(
         tmp_path,
         db_url,
         "contract_reply_demo",
@@ -249,7 +369,7 @@ async def handle_command(context, host_api):
         )
     )
 
-    send_executor, sent_send, replied_send = _mk_executor(
+    send_executor, sent_send, replied_send, _, _ = _mk_executor(
         tmp_path,
         db_url,
         "contract_send_demo",
@@ -276,7 +396,7 @@ def test_plugin_command_routes_via_worker(tmp_path) -> None:
     db_url = f"sqlite:///{tmp_path / 'plugin_runtime_sandbox.db'}"
     init_db(db_url)
 
-    executor, sent, replied = _mk_executor(
+    executor, sent, replied, _, _ = _mk_executor(
         tmp_path,
         db_url,
         "sandbox_demo",
@@ -302,7 +422,7 @@ def test_plugin_command_sandbox_runtime_error_is_safely_mapped(tmp_path) -> None
     db_url = f"sqlite:///{tmp_path / 'plugin_runtime_sandbox_error.db'}"
     init_db(db_url)
 
-    executor, sent, replied = _mk_executor(
+    executor, sent, replied, _, _ = _mk_executor(
         tmp_path,
         db_url,
         "sandbox_error_demo",
@@ -336,7 +456,7 @@ def test_plugin_command_timeout_and_error_are_isolated(tmp_path) -> None:
     db_url = f"sqlite:///{tmp_path / 'plugin_runtime3.db'}"
     init_db(db_url)
 
-    timeout_executor, sent1, _ = _mk_executor(
+    timeout_executor, sent1, _, _, _ = _mk_executor(
         tmp_path,
         db_url,
         "timeout_demo",
@@ -356,7 +476,7 @@ async def handle_command(context, host_api):
     )
     assert sent1 == []
 
-    error_executor, sent2, _ = _mk_executor(
+    error_executor, sent2, _, _, _ = _mk_executor(
         tmp_path,
         db_url,
         "error_demo",
@@ -384,7 +504,7 @@ async def handle_command(context, host_api):
 def test_plugin_command_roles_override_replaces_manifest_roles(tmp_path) -> None:
     db_url = f"sqlite:///{tmp_path / 'plugin_runtime_roles_override.db'}"
     init_db(db_url)
-    executor, sent, _ = _mk_executor(
+    executor, sent, _, _, _ = _mk_executor(
         tmp_path,
         db_url,
         "roles_override_demo",
@@ -418,7 +538,7 @@ async def handle_command(context, host_api):
 def test_plugin_command_private_deny_blocks_private_and_inherit_keeps_legacy(tmp_path) -> None:
     db_url = f"sqlite:///{tmp_path / 'plugin_runtime_private_scope.db'}"
     init_db(db_url)
-    executor, sent, _ = _mk_executor(
+    executor, sent, _, _, _ = _mk_executor(
         tmp_path,
         db_url,
         "private_scope_demo",
@@ -474,7 +594,7 @@ def _denied_reason_payload(payload_json: str | None) -> str | None:
 def test_plugin_command_group_allow_mode_empty_denies_all_then_allows_specific_group(tmp_path) -> None:
     db_url = f"sqlite:///{tmp_path / 'plugin_runtime_group_scope.db'}"
     init_db(db_url)
-    executor, sent, _ = _mk_executor(
+    executor, sent, _, _, _ = _mk_executor(
         tmp_path,
         db_url,
         "group_scope_demo",
@@ -523,7 +643,7 @@ async def handle_command(context, host_api):
 def test_plugin_command_group_deny_mode_blocks_group_chat(tmp_path) -> None:
     db_url = f"sqlite:///{tmp_path / 'plugin_runtime_group_deny_scope.db'}"
     init_db(db_url)
-    executor, sent, _ = _mk_executor(
+    executor, sent, _, _, _ = _mk_executor(
         tmp_path,
         db_url,
         "group_deny_scope_demo",
@@ -560,7 +680,7 @@ async def handle_command(context, host_api):
 def test_plugin_command_topic_deny_mode_blocks_topic_messages_only(tmp_path) -> None:
     db_url = f"sqlite:///{tmp_path / 'plugin_runtime_topic_deny_scope.db'}"
     init_db(db_url)
-    executor, sent, _ = _mk_executor(
+    executor, sent, _, _, _ = _mk_executor(
         tmp_path,
         db_url,
         "topic_deny_scope_demo",
@@ -605,7 +725,7 @@ async def handle_command(context, host_api):
 def test_plugin_command_topic_allow_mode_empty_denies_all_then_allows_specific_topic(tmp_path) -> None:
     db_url = f"sqlite:///{tmp_path / 'plugin_runtime_topic_scope.db'}"
     init_db(db_url)
-    executor, sent, _ = _mk_executor(
+    executor, sent, _, _, _ = _mk_executor(
         tmp_path,
         db_url,
         "topic_scope_demo",
@@ -654,7 +774,7 @@ async def handle_command(context, host_api):
 def test_plugin_command_topic_allow_mode_isolated_by_message_thread_id_same_chat(tmp_path) -> None:
     db_url = f"sqlite:///{tmp_path / 'plugin_runtime_topic_thread_isolation.db'}"
     init_db(db_url)
-    executor, sent, _ = _mk_executor(
+    executor, sent, _, _, _ = _mk_executor(
         tmp_path,
         db_url,
         "topic_thread_isolation_demo",
@@ -696,3 +816,138 @@ async def handle_command(context, host_api):
         denied = session.scalars(select(AuditEvent).where(AuditEvent.event_type == "plugin_command_denied")).all()
     assert denied
     assert _denied_reason_payload(denied[-1].payload_json) == "topic_not_allowed"
+
+
+def test_auto_image_enabled_topic_invokes_provider_and_replies(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'plugin_runtime_auto_image.db'}"
+    init_db(db_url)
+    executor, sent, replied, _, _ = _mk_executor(
+        tmp_path,
+        db_url,
+        "unrelated_demo",
+        """
+async def handle_command(context, host_api):
+    await host_api.reply(context.chat_id, context.message_id, "should-not-run")
+""",
+        commands=["plug"],
+    )
+    executor._enable_image_attachments = True
+
+    class _MediaResult:
+        ok = True
+        reason_code = "ok"
+        mime_type = "image/png"
+        bytes_stored = 99
+
+    class _MediaStore:
+        async def download_image(self, *, attachment):
+            return _MediaResult()
+
+    executor._image_media_store = _MediaStore()
+
+    sf = create_session_factory(db_url)
+    with sf() as session:
+        from amo_bot.db.repositories import TopicAgentMemoryRepository
+
+        repo = TopicAgentMemoryRepository(session)
+        repo.upsert_config(scope_type="topic", chat_id=-1002003580909, topic_id=6845, image_analysis_mode="enabled")
+        session.commit()
+
+    handled = asyncio.run(
+        executor.analyze_image_automatically(
+            actor=CommandActor(telegram_user_id=100, role=Role.ADMIN),
+            invocation=CommandInvocation(
+                command_name="auto_image",
+                argument=None,
+                chat_id=-1002003580909,
+                message_id=94,
+                message_thread_id=6845,
+                attachments=(
+                    TelegramAttachment(
+                        source_kind="photo",
+                        type_hint="image",
+                        file_id="f1",
+                        file_unique_id="u1",
+                        width=100,
+                        height=80,
+                        size=123,
+                    ),
+                ),
+            ),
+        )
+    )
+
+    assert handled is True
+    assert sent == []
+    assert replied == [(-1002003580909, 94, "fake image analysis for telegram-file:u1: describe image", 6845)]
+
+    with sf() as session:
+        from amo_bot.db.models import ImageAnalyzeAuditEvent
+
+        audits = session.scalars(select(ImageAnalyzeAuditEvent).order_by(ImageAnalyzeAuditEvent.id)).all()
+    assert audits[-1].command == "auto_image"
+    assert audits[-1].outcome == "allowed"
+
+
+def test_auto_image_inherit_topic_does_not_call_provider_or_reply(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'plugin_runtime_auto_image_inherit.db'}"
+    init_db(db_url)
+    executor, sent, replied, _, _ = _mk_executor(
+        tmp_path,
+        db_url,
+        "unrelated_demo",
+        """
+async def handle_command(context, host_api):
+    await host_api.reply(context.chat_id, context.message_id, "should-not-run")
+""",
+        commands=["plug"],
+    )
+    executor._enable_image_attachments = True
+
+    class _MediaResult:
+        ok = True
+        reason_code = "ok"
+        mime_type = "image/png"
+        bytes_stored = 99
+
+    class _MediaStore:
+        async def download_image(self, *, attachment):
+            return _MediaResult()
+
+    executor._image_media_store = _MediaStore()
+
+    handled = asyncio.run(
+        executor.analyze_image_automatically(
+            actor=CommandActor(telegram_user_id=100, role=Role.ADMIN),
+            invocation=CommandInvocation(
+                command_name="auto_image",
+                argument=None,
+                chat_id=-1002003580909,
+                message_id=94,
+                message_thread_id=6845,
+                attachments=(
+                    TelegramAttachment(
+                        source_kind="photo",
+                        type_hint="image",
+                        file_id="f1",
+                        file_unique_id="u1",
+                        width=100,
+                        height=80,
+                        size=123,
+                    ),
+                ),
+            ),
+        )
+    )
+
+    assert handled is False
+    assert sent == []
+    assert replied == []
+
+    sf = create_session_factory(db_url)
+    with sf() as session:
+        from amo_bot.db.models import ImageAnalyzeAuditEvent
+
+        audits = session.scalars(select(ImageAnalyzeAuditEvent).order_by(ImageAnalyzeAuditEvent.id)).all()
+    assert audits[-1].command == "auto_image"
+    assert audits[-1].outcome == "topic_disabled"

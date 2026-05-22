@@ -234,3 +234,94 @@ def test_dispatcher_passes_image_attachments_to_plugin_invocation() -> None:
     asyncio.run(dispatcher.handle_raw_update(raw_update))
 
     assert recorder.calls == [("admin", 55, "plug", 111, 93, 1)]
+
+class _AutoImageRecorder:
+    def __init__(self) -> None:
+        self.auto_calls: list[tuple[str, int, str, int, int, int | None, int]] = []
+        self.execute_calls: list[object] = []
+
+    async def analyze_image_automatically(self, *, actor, invocation) -> bool:
+        self.auto_calls.append(
+            (
+                actor.role.value,
+                actor.telegram_user_id,
+                invocation.command_name,
+                invocation.chat_id,
+                invocation.message_id,
+                invocation.message_thread_id,
+                len(invocation.attachments),
+            )
+        )
+        return True
+
+    async def execute(self, *, actor, invocation) -> bool:
+        self.execute_calls.append((actor, invocation))
+        return True
+
+
+def test_dispatcher_routes_plain_topic_photo_to_auto_image_analysis() -> None:
+    registry = CommandRegistry()
+    recorder = _AutoImageRecorder()
+    sent: list[tuple[int, str, int | None]] = []
+
+    async def _send(chat_id: int, text: str, message_thread_id: int | None = None):
+        sent.append((chat_id, text, message_thread_id))
+        return {"ok": True}
+
+    dispatcher = Dispatcher(
+        command_registry=registry,
+        role_resolver=StaticRoleResolver(mapping={55: Role.ADMIN}),
+        send_text=_send,
+        plugin_command_executor=recorder,
+    )
+
+    raw_update = {
+        "update_id": 83,
+        "message": {
+            "message_id": 94,
+            "message_thread_id": 6845,
+            "chat": {"id": -1002003580909, "type": "supergroup"},
+            "from": {"id": 55, "is_bot": False, "first_name": "A"},
+            "photo": [
+                {"file_id": "small", "width": 10, "height": 10},
+                {"file_id": "large", "file_unique_id": "uniq-large", "width": 100, "height": 80},
+            ],
+        },
+    }
+
+    asyncio.run(dispatcher.handle_raw_update(raw_update))
+
+    assert sent == []
+    assert recorder.execute_calls == []
+    assert recorder.auto_calls == [("admin", 55, "auto_image", -1002003580909, 94, 6845, 1)]
+
+
+def test_dispatcher_does_not_route_ignore_role_plain_photo_to_auto_image_analysis() -> None:
+    registry = CommandRegistry()
+    recorder = _AutoImageRecorder()
+
+    async def _send(chat_id: int, text: str, message_thread_id: int | None = None):
+        return {"ok": True}
+
+    dispatcher = Dispatcher(
+        command_registry=registry,
+        role_resolver=StaticRoleResolver(mapping={55: Role.IGNORE}),
+        send_text=_send,
+        plugin_command_executor=recorder,
+    )
+
+    raw_update = {
+        "update_id": 84,
+        "message": {
+            "message_id": 95,
+            "message_thread_id": 6845,
+            "chat": {"id": -1002003580909, "type": "supergroup"},
+            "from": {"id": 55, "is_bot": False, "first_name": "A"},
+            "photo": [{"file_id": "large", "file_unique_id": "uniq-large", "width": 100, "height": 80}],
+        },
+    }
+
+    asyncio.run(dispatcher.handle_raw_update(raw_update))
+
+    assert recorder.auto_calls == []
+    assert recorder.execute_calls == []

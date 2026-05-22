@@ -18,6 +18,7 @@ from amo_bot.telegram.client import TelegramClient
 from amo_bot.telegram.commands import create_builtin_registry
 from amo_bot.telegram.chat_topic_persistence import ChatTopicPersistenceService
 from amo_bot.telegram.dispatcher import Dispatcher
+from amo_bot.telegram.image_media_store import TelegramImageMediaStore
 from amo_bot.telegram.owner_notify import OwnerNotifier
 from amo_bot.telegram.polling import OffsetStore, run_polling
 from amo_bot.telegram.role_resolver import DBRoleResolver
@@ -112,6 +113,34 @@ def run(argv: list[str] | None = None) -> None:
             message_thread_id=message_thread_id,
         )
 
+    async def send_photo(
+        chat_id: int,
+        file_path: str,
+        caption: str,
+        message_thread_id: int | None = None,
+    ) -> object:
+        return await tg.send_photo(
+            chat_id=chat_id,
+            photo_path=file_path,
+            caption=caption,
+            message_thread_id=message_thread_id,
+        )
+
+    async def send_document(
+        chat_id: int,
+        file_path: str,
+        caption: str,
+        message_thread_id: int | None = None,
+        mime_type: str | None = None,
+    ) -> object:
+        return await tg.send_document(
+            chat_id=chat_id,
+            document_path=file_path,
+            caption=caption,
+            message_thread_id=message_thread_id,
+            mime_type=mime_type,
+        )
+
     plugin_loader = PluginLoader(settings.amo_plugin_dir)
 
     plugin_command_executor = PluginCommandExecutor(
@@ -119,6 +148,11 @@ def run(argv: list[str] | None = None) -> None:
         session_factory=session_factory,
         send_message=send_text,
         reply=reply_text,
+        send_photo=send_photo,
+        send_document=send_document,
+        image_media_store=TelegramImageMediaStore(bot_token=settings.bot_token),
+        enable_image_attachments=True,
+        image_analyze_provider=ai_service,
     )
 
     scheduled_plugin_executor = ScheduledPluginExecutor(

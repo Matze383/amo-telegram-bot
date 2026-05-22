@@ -77,6 +77,54 @@ class _RecordingHostAPI:
         self._append_op(CommandOp(op="reply", chat_id=chat_id, message_id=message_id, text=text_clean))
         return {"ok": True}
 
+    async def send_photo(
+        self,
+        chat_id: int,
+        file_path: str,
+        caption: str = "",
+        *,
+        message_thread_id: int | None = None,
+        mime_type: str | None = None,
+    ) -> dict[str, object]:
+        self._require_permission("send_message", "send_photo")
+        if not isinstance(chat_id, int):
+            raise ValueError("chat_id must be int")
+        self._append_op(
+            CommandOp(
+                op="send_photo",
+                chat_id=chat_id,
+                text=(caption or "").strip(),
+                message_thread_id=message_thread_id,
+                file_path=file_path,
+                mime_type=mime_type,
+            )
+        )
+        return {"ok": True}
+
+    async def send_document(
+        self,
+        chat_id: int,
+        file_path: str,
+        caption: str = "",
+        *,
+        message_thread_id: int | None = None,
+        mime_type: str | None = None,
+    ) -> dict[str, object]:
+        self._require_permission("send_message", "send_document")
+        if not isinstance(chat_id, int):
+            raise ValueError("chat_id must be int")
+        self._append_op(
+            CommandOp(
+                op="send_document",
+                chat_id=chat_id,
+                text=(caption or "").strip(),
+                message_thread_id=message_thread_id,
+                file_path=file_path,
+                mime_type=mime_type,
+            )
+        )
+        return {"ok": True}
+
     def _append_op(self, op: CommandOp) -> None:
         if len(self._ops) >= self._max_ops:
             raise CommandWorkerError("limits_exceeded", "maximum operation count exceeded")

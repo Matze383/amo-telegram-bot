@@ -5,6 +5,7 @@ import importlib.util
 import inspect
 import json
 import logging
+import mimetypes
 import time
 import uuid
 from dataclasses import asdict, dataclass
@@ -23,11 +24,14 @@ from amo_bot.plugins.manifest import PluginManifest
 from amo_bot.telegram.image_media_store import TelegramImageMediaStore
 from amo_bot.telegram.update_parser import TelegramAttachment
 from amo_bot.plugins.policy_overrides import evaluate_effective_policy, resolve_effective_policy
+from amo_bot.ai.image_analyze_orchestrator import ImageAnalyzeOrchestrator, ImageAnalyzeOrchestratorRequest
 
 logger = logging.getLogger(__name__)
 
 SendMessageFn = Callable[[int, str], Awaitable[object]]
 ReplyFn = Callable[[int, int, str, int | None], Awaitable[object]]
+SendPhotoFn = Callable[[int, str, str, int | None], Awaitable[object]]
+SendDocumentFn = Callable[[int, str, str, int | None, str | None], Awaitable[object]]
 
 
 @dataclass(slots=True, frozen=True)
@@ -109,17 +113,106 @@ class PluginCommandExecutor:
         session_factory: sessionmaker,
         send_message: SendMessageFn,
         reply: ReplyFn,
+        send_photo: SendPhotoFn | None = None,
+        send_document: SendDocumentFn | None = None,
         timeout_seconds: float = 2.0,
         image_media_store: TelegramImageMediaStore | None = None,
         enable_image_attachments: bool = False,
+        image_analyze_provider: Any | None = None,
     ) -> None:
         self._loader = loader
         self._session_factory = session_factory
         self._send_message = send_message
         self._reply = reply
+        self._send_photo = send_photo
+        self._send_document = send_document
         self._timeout_seconds = timeout_seconds
         self._image_media_store = image_media_store
         self._enable_image_attachments = enable_image_attachments
+        self._image_analyze_orchestrator = ImageAnalyzeOrchestrator(
+            provider=image_analyze_provider,
+            session_factory=session_factory,
+            role_daily_quota={
+                Role.IGNORE: 0,
+                Role.OWNER: None,
+                Role.ADMIN: None,
+                Role.VIP: 5,
+                Role.NORMAL: 2,
+            },
+            max_image_bytes=8 * 1024 * 1024,
+            allowed_mime_types={"image/jpeg", "image/png", "image/webp", "image/gif", "image/*"},
+        )
+
+    async def analyze_image_automatically(self, *, actor: CommandActor, invocation: CommandInvocation) -> bool:
+        if not invocation.attachments:
+            logger.info(
+                "auto_image skipped reason=no_attachments chat_id=%s message_thread_id=%s message_id=%s user_id=%s role=%s",
+                invocation.chat_id,
+                invocation.message_thread_id,
+                invocation.message_id,
+                actor.telegram_user_id,
+                actor.role.value,
+            )
+            return False
+
+        attachment_context = await self._build_attachment_context(invocation=invocation)
+        reply_to_image = self._resolve_image_from_attachments(attachments=attachment_context)
+        logger.info(
+            "auto_image gate input chat_id=%s message_thread_id=%s message_id=%s user_id=%s role=%s attachment_count=%s context_count=%s image_ok=%s reason=%s",
+            invocation.chat_id,
+            invocation.message_thread_id,
+            invocation.message_id,
+            actor.telegram_user_id,
+            actor.role.value,
+            len(invocation.attachments),
+            len(attachment_context),
+            bool(reply_to_image and reply_to_image.get("ok") is True),
+            (reply_to_image or {}).get("reason_code"),
+        )
+        logger.info(
+            "auto_image decision=invoked chat_id=%s message_thread_id=%s message_id=%s user_id=%s role=%s attachment_count=%s",
+            invocation.chat_id,
+            invocation.message_thread_id,
+            invocation.message_id,
+            actor.telegram_user_id,
+            actor.role.value,
+            len(invocation.attachments),
+        )
+        gate_result = await self._image_analyze_orchestrator.evaluate_and_maybe_invoke_provider_async(
+            request=ImageAnalyzeOrchestratorRequest(
+                user_id=actor.telegram_user_id,
+                role=actor.role,
+                chat_id=invocation.chat_id,
+                message_thread_id=invocation.message_thread_id,
+                command=invocation.command_name,
+                provider="fake",
+                reply_to_image=reply_to_image,
+                image_ok=bool(reply_to_image and reply_to_image.get("ok") is True),
+                image_reason_code=(reply_to_image or {}).get("reason_code"),
+                prompt=invocation.argument or "",
+            ),
+        )
+        logger.info(
+            "auto_image gate result chat_id=%s message_thread_id=%s message_id=%s user_id=%s allowed=%s outcome=%s provider_called=%s count=%s",
+            invocation.chat_id,
+            invocation.message_thread_id,
+            invocation.message_id,
+            actor.telegram_user_id,
+            gate_result.allowed,
+            gate_result.outcome,
+            gate_result.provider_called,
+            gate_result.count,
+        )
+        if not gate_result.allowed or gate_result.provider_result is None:
+            return False
+
+        await self._reply(
+            invocation.chat_id,
+            invocation.message_id,
+            gate_result.provider_result.summary,
+            invocation.message_thread_id,
+        )
+        return True
 
     async def execute(self, *, actor: CommandActor, invocation: CommandInvocation) -> None:
         manifest = self._find_manifest_for_command(invocation.command_name)
@@ -192,6 +285,34 @@ class PluginCommandExecutor:
             attachments=attachment_context,
             reply_to_image=reply_to_image,
         )
+
+        if self._normalize_command(invocation.command_name) == "analyze_image":
+            gate_result = await self._image_analyze_orchestrator.evaluate_and_maybe_invoke_provider_async(
+                request=ImageAnalyzeOrchestratorRequest(
+                    user_id=actor.telegram_user_id,
+                    role=actor.role,
+                    chat_id=invocation.chat_id,
+                    message_thread_id=invocation.message_thread_id,
+                    command=invocation.command_name,
+                    provider="fake",
+                    reply_to_image=reply_to_image,
+                    image_ok=bool(reply_to_image and reply_to_image.get("ok") is True),
+                    image_reason_code=(reply_to_image or {}).get("reason_code"),
+                    prompt=invocation.argument or "",
+                ),
+            )
+            if not gate_result.allowed:
+                self._write_audit(
+                    event_type="plugin_command_denied",
+                    actor_telegram_user_id=actor.telegram_user_id,
+                    payload={
+                        "plugin_name": manifest.name,
+                        "command": invocation.command_name,
+                        "reason": gate_result.outcome,
+                        "run_id": run_id,
+                    },
+                )
+                return
 
         self._write_audit(
             event_type="plugin_command_start",
@@ -273,6 +394,14 @@ class PluginCommandExecutor:
                 try:
                     media_result = await self._image_media_store.download_image(attachment=attachment)
                 except Exception:
+                    logger.exception(
+                        "auto_image attachment download failed chat_id=%s message_thread_id=%s message_id=%s source_kind=%s type_hint=%s",
+                        invocation.chat_id,
+                        invocation.message_thread_id,
+                        invocation.message_id,
+                        attachment.source_kind,
+                        attachment.type_hint,
+                    )
                     media_result = None
                 if media_result is not None and media_result.ok:
                     context["media_ref"] = {
@@ -280,6 +409,9 @@ class PluginCommandExecutor:
                         "mime_type": media_result.mime_type,
                         "bytes_stored": media_result.bytes_stored,
                     }
+                    file_path = getattr(media_result, "file_path", None)
+                    if isinstance(file_path, str) and file_path:
+                        context["_file_path"] = file_path
                 elif media_result is not None:
                     context["download_reason_code"] = media_result.reason_code
                     if media_result.reason_code in {"deny_attachment_size", "deny_file_size", "deny_stream_size"}:
@@ -295,6 +427,9 @@ class PluginCommandExecutor:
     ) -> dict[str, Any] | None:
         if self._normalize_command(invocation.command_name) != "analyze_image":
             return None
+        return self._resolve_image_from_attachments(attachments=attachments)
+
+    def _resolve_image_from_attachments(self, *, attachments: tuple[dict[str, Any], ...]) -> dict[str, Any]:
         if not attachments:
             return {
                 "ok": False,
@@ -307,6 +442,8 @@ class PluginCommandExecutor:
                 "ok": True,
                 "media_ref": media_ref,
                 "type_hint": first.get("type_hint"),
+                "file_unique_id": first.get("file_unique_id"),
+                "_file_path": first.get("_file_path"),
                 "width": first.get("width"),
                 "height": first.get("height"),
                 "size": first.get("size"),
@@ -316,9 +453,7 @@ class PluginCommandExecutor:
         if isinstance(first, dict):
             if first.get("size_limit_exceeded") is True:
                 reason_code = "oversize"
-            elif first.get("download_reason_code") == "deny_mime":
-                reason_code = "invalid_type"
-            elif isinstance(first.get("mime_type"), str) and first.get("mime_type"):
+            elif str(first.get("download_reason_code") or "").startswith("deny_mime"):
                 reason_code = "invalid_type"
         return {
             "ok": False,
@@ -418,6 +553,37 @@ class PluginCommandExecutor:
                 if op.message_id is None:
                     raise RuntimeError("sandbox reply operation missing message_id")
                 await self._reply(op.chat_id, op.message_id, op.text, None)
+            elif op.op in {"send_photo", "send_document"}:
+                if op.chat_id is None or op.file_path is None:
+                    raise RuntimeError("sandbox file send operation missing fields")
+                safe_path = self._validate_send_file_path(op.file_path)
+                selected = self._select_send_method(op=safe_path, forced_op=op.op, mime_type=op.mime_type)
+                thread_id = op.message_thread_id
+                if selected == "photo":
+                    if self._send_photo is None:
+                        raise RuntimeError("send_photo transport not configured")
+                    await self._send_photo(op.chat_id, str(safe_path), op.text, thread_id)
+                else:
+                    if self._send_document is None:
+                        raise RuntimeError("send_document transport not configured")
+                    await self._send_document(op.chat_id, str(safe_path), op.text, thread_id, op.mime_type)
+
+    def _validate_send_file_path(self, file_path: str) -> Path:
+        candidate = Path(file_path)
+        if not candidate.is_absolute():
+            raise RuntimeError("invalid file path")
+        resolved = candidate.resolve(strict=True)
+        if not resolved.is_file():
+            raise RuntimeError("invalid file path")
+        return resolved
+
+    def _select_send_method(self, *, op: Path, forced_op: str, mime_type: str | None) -> str:
+        if forced_op == "send_photo":
+            return "photo"
+        normalized = (mime_type or mimetypes.guess_type(op.name)[0] or "").lower()
+        if normalized.startswith("image/"):
+            return "photo"
+        return "document"
 
     def _write_audit(self, *, event_type: str, actor_telegram_user_id: int, payload: dict[str, Any]) -> None:
         with self._session_factory() as session:

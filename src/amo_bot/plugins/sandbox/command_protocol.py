@@ -11,7 +11,7 @@ _MAX_ATTACHMENTS = 10
 _MAX_ATTACHMENT_URL_LEN = 2000
 _MAX_ERROR_CODE_LEN = 64
 _MAX_ERROR_MESSAGE_LEN = 240
-_ALLOWED_HOST_OPS = frozenset({"send_message", "reply"})
+_ALLOWED_HOST_OPS = frozenset({"send_message", "reply", "send_photo", "send_document"})
 
 
 class CommandProtocolError(ValueError):
@@ -218,6 +218,9 @@ class CommandOp:
     text: str
     chat_id: int | None = None
     message_id: int | None = None
+    message_thread_id: int | None = None
+    file_path: str | None = None
+    mime_type: str | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any], *, max_text_len: int) -> "CommandOp":
@@ -237,15 +240,41 @@ class CommandOp:
         if message_id is not None:
             message_id = _require_int(message_id, "ops.message_id", min_value=1)
 
-        return cls(op=op, text=text, chat_id=chat_id, message_id=message_id)
+        message_thread_id_raw = data.get("message_thread_id")
+        message_thread_id = None
+        if message_thread_id_raw is not None:
+            message_thread_id = _require_int(message_thread_id_raw, "ops.message_thread_id", min_value=1)
+
+        file_path = None
+        mime_type = None
+        if op in {"send_photo", "send_document"}:
+            file_path = _require_non_empty_str(data.get("file_path"), "ops.file_path", max_len=4096)
+            mime_type_raw = data.get("mime_type")
+            if mime_type_raw is not None:
+                mime_type = _require_non_empty_str(mime_type_raw, "ops.mime_type", max_len=255)
+
+        return cls(
+            op=op,
+            text=text,
+            chat_id=chat_id,
+            message_id=message_id,
+            message_thread_id=message_thread_id,
+            file_path=file_path,
+            mime_type=mime_type,
+        )
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        data: dict[str, Any] = {
             "op": self.op,
             "text": self.text,
             "chat_id": self.chat_id,
             "message_id": self.message_id,
         }
+        if self.op in {"send_photo", "send_document"}:
+            data["message_thread_id"] = self.message_thread_id
+            data["file_path"] = self.file_path
+            data["mime_type"] = self.mime_type
+        return data
 
 
 @dataclass(slots=True, frozen=True)

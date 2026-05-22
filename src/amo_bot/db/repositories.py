@@ -16,6 +16,7 @@ from amo_bot.db.models import (
     ChatSeenUser,
     ChatUserRole,
     DbRole,
+    ImageAnalyzeRoleQuota,
     Plugin,
     PluginActivationRequest,
     PluginPolicyAllowedGroup,
@@ -162,6 +163,126 @@ class PrivateChatPolicyRepository:
             return cls.validate_threshold_role(value)
         except ValueError:
             return default
+
+
+@dataclass(slots=True)
+class ImageAnalyzeRoleQuotaRecord:
+    role: Role
+    mode: str
+    daily_limit: int | None
+    updated_by_telegram_user_id: int | None
+
+
+class ImageAnalyzeRoleQuotaRepository:
+    ALLOWED_MODES = {"disabled", "unlimited", "limited"}
+    DEFAULTS: dict[Role, tuple[str, int | None]] = {
+        Role.OWNER: ("unlimited", None),
+        Role.ADMIN: ("disabled", None),
+        Role.VIP: ("disabled", None),
+        Role.NORMAL: ("disabled", None),
+        Role.IGNORE: ("disabled", None),
+    }
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    @classmethod
+    def _validate_role(cls, role: str | Role) -> Role:
+        try:
+            normalized = role if isinstance(role, Role) else Role(str(role).strip().lower())
+        except ValueError as exc:
+            raise ValueError("invalid role") from exc
+        return normalized
+
+    @classmethod
+    def _validate_mode_and_limit(cls, *, role: Role, mode: str, daily_limit: int | None) -> tuple[str, int | None]:
+        normalized_mode = (mode or "").strip().lower()
+        if normalized_mode not in cls.ALLOWED_MODES:
+            raise ValueError("invalid mode")
+
+        if role is Role.IGNORE and normalized_mode == "unlimited":
+            raise ValueError("ignore role cannot be unlimited")
+
+        if normalized_mode == "limited":
+            if not isinstance(daily_limit, int) or daily_limit < 1:
+                raise ValueError("limited mode requires daily_limit >= 1")
+            return normalized_mode, int(daily_limit)
+
+        return normalized_mode, None
+
+    @classmethod
+    def _to_record(cls, row: ImageAnalyzeRoleQuota) -> ImageAnalyzeRoleQuotaRecord:
+        return ImageAnalyzeRoleQuotaRecord(
+            role=Role(row.role),
+            mode=row.mode,
+            daily_limit=row.daily_limit,
+            updated_by_telegram_user_id=row.updated_by_telegram_user_id,
+        )
+
+    def get_role_quota(self, role: str | Role) -> ImageAnalyzeRoleQuotaRecord:
+        normalized_role = self._validate_role(role)
+        row = self._session.scalar(select(ImageAnalyzeRoleQuota).where(ImageAnalyzeRoleQuota.role == normalized_role.value))
+        if row is None:
+            default_mode, default_limit = self.DEFAULTS[normalized_role]
+            return ImageAnalyzeRoleQuotaRecord(
+                role=normalized_role,
+                mode=default_mode,
+                daily_limit=default_limit,
+                updated_by_telegram_user_id=None,
+            )
+        return self._to_record(row)
+
+    def list_role_quotas(self) -> list[ImageAnalyzeRoleQuotaRecord]:
+        rows = self._session.scalars(select(ImageAnalyzeRoleQuota).order_by(ImageAnalyzeRoleQuota.role.asc())).all()
+        by_role = {Role(row.role): self._to_record(row) for row in rows}
+        result: list[ImageAnalyzeRoleQuotaRecord] = []
+        for role in Role:
+            if role in by_role:
+                result.append(by_role[role])
+            else:
+                default_mode, default_limit = self.DEFAULTS[role]
+                result.append(
+                    ImageAnalyzeRoleQuotaRecord(
+                        role=role,
+                        mode=default_mode,
+                        daily_limit=default_limit,
+                        updated_by_telegram_user_id=None,
+                    )
+                )
+        return result
+
+    def upsert_role_quota(
+        self,
+        *,
+        role: str | Role,
+        mode: str,
+        daily_limit: int | None = None,
+        updated_by_telegram_user_id: int | None = None,
+    ) -> ImageAnalyzeRoleQuotaRecord:
+        normalized_role = self._validate_role(role)
+        normalized_mode, normalized_limit = self._validate_mode_and_limit(
+            role=normalized_role,
+            mode=mode,
+            daily_limit=daily_limit,
+        )
+
+        row = self._session.scalar(select(ImageAnalyzeRoleQuota).where(ImageAnalyzeRoleQuota.role == normalized_role.value))
+        if row is None:
+            row = ImageAnalyzeRoleQuota(
+                role=normalized_role.value,
+                mode=normalized_mode,
+                daily_limit=normalized_limit,
+                updated_by_telegram_user_id=updated_by_telegram_user_id,
+            )
+            self._session.add(row)
+        else:
+            row.mode = normalized_mode
+            row.daily_limit = normalized_limit
+            row.updated_by_telegram_user_id = updated_by_telegram_user_id
+
+        self._session.commit()
+        self._session.refresh(row)
+        return self._to_record(row)
 
 
 class PluginPolicyOverrideRepository:
@@ -1172,6 +1293,7 @@ class TopicAgentConfigRecord:
     topic_soul_text: str | None
     topic_soul_owner_only_edit: bool
     recent_context_window_size: int
+    image_analysis_mode: str
 
 
 @dataclass(slots=True)
@@ -1238,6 +1360,7 @@ class TopicAgentMemoryRepository:
         topic_soul_text: str | None = None,
         topic_soul_owner_only_edit: bool = True,
         recent_context_window_size: int = 20,
+        image_analysis_mode: str = "inherit",
     ) -> TopicAgentConfigRecord:
         row = self._session.scalar(
             select(TopicAgentConfig).where(
@@ -1264,6 +1387,10 @@ class TopicAgentMemoryRepository:
         row.topic_soul_text = topic_soul_text
         row.topic_soul_owner_only_edit = topic_soul_owner_only_edit
         row.recent_context_window_size = max(0, min(recent_context_window_size, 50))
+        normalized_image_analysis_mode = (image_analysis_mode or "inherit").strip().lower()
+        if normalized_image_analysis_mode not in {"inherit", "enabled", "disabled"}:
+            normalized_image_analysis_mode = "inherit"
+        row.image_analysis_mode = normalized_image_analysis_mode
         self._session.commit()
         self._session.refresh(row)
         return self._to_config_record(row)
@@ -1628,6 +1755,7 @@ class TopicAgentMemoryRepository:
             topic_soul_text=row.topic_soul_text,
             topic_soul_owner_only_edit=row.topic_soul_owner_only_edit,
             recent_context_window_size=max(0, min(int(getattr(row, "recent_context_window_size", 20)), 50)),
+            image_analysis_mode=(getattr(row, "image_analysis_mode", "inherit") or "inherit").strip().lower(),
         )
 
     @staticmethod

@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 import logging
+import mimetypes
 
 import httpx
 
@@ -104,6 +106,63 @@ class TelegramClient:
         if reply_markup is not None:
             payload["reply_markup"] = reply_markup
         result = await self._call("sendMessage", payload)
+        return result if isinstance(result, dict) else {}
+
+    async def send_photo(
+        self,
+        *,
+        chat_id: int,
+        photo_path: str,
+        caption: str = "",
+        message_thread_id: int | None = None,
+    ) -> dict[str, Any]:
+        file_path = Path(photo_path)
+        with file_path.open("rb") as fh:
+            files = {"photo": (file_path.name, fh, "application/octet-stream")}
+            payload: dict[str, Any] = {"chat_id": chat_id, "caption": caption[:1024]}
+            if message_thread_id is not None:
+                payload["message_thread_id"] = message_thread_id
+            return await self._call_multipart("sendPhoto", payload=payload, files=files)
+
+    async def send_document(
+        self,
+        *,
+        chat_id: int,
+        document_path: str,
+        caption: str = "",
+        message_thread_id: int | None = None,
+        mime_type: str | None = None,
+    ) -> dict[str, Any]:
+        file_path = Path(document_path)
+        inferred = mime_type or mimetypes.guess_type(file_path.name)[0] or "application/octet-stream"
+        with file_path.open("rb") as fh:
+            files = {"document": (file_path.name, fh, inferred)}
+            payload: dict[str, Any] = {"chat_id": chat_id, "caption": caption[:1024]}
+            if message_thread_id is not None:
+                payload["message_thread_id"] = message_thread_id
+            return await self._call_multipart("sendDocument", payload=payload, files=files)
+
+    async def _call_multipart(self, method: str, *, payload: dict[str, Any], files: dict[str, Any]) -> dict[str, Any]:
+        url = f"{self.api_root}/{method}"
+        timeout = self._timeout_for_method(method=method, payload=payload)
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            response = await client.post(url, data=payload, files=files)
+
+        if response.status_code == 429:
+            retry_after = 1
+            try:
+                retry_after = int(response.json().get("parameters", {}).get("retry_after", 1))
+            except Exception:
+                pass
+            raise TelegramRateLimitError(retry_after=retry_after)
+
+        if response.status_code >= 400:
+            raise TelegramApiError(f"HTTP {response.status_code}: {response.text[:300]}")
+
+        data = response.json()
+        if not data.get("ok", False):
+            raise TelegramApiError(str(data.get("description", "Unknown Telegram error")))
+        result = data.get("result")
         return result if isinstance(result, dict) else {}
 
     async def answer_callback_query(

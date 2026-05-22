@@ -52,6 +52,55 @@
     </form>
   </section>
 
+  <section>
+    <h2>Image analysis role quotas</h2>
+    <p>Source of truth for image analysis role quotas. Modes: disabled, unlimited, limited (requires daily limit).</p>
+    <table>
+      <thead>
+        <tr>
+          <th>Role</th>
+          <th>Mode</th>
+          <th>Daily limit</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for quota in image_analyze_role_quotas %}
+          <tr>
+            <td>{{ quota.role }}</td>
+            <td>{{ quota.mode }}</td>
+            <td>{{ quota.daily_limit if quota.daily_limit is not none else '-' }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+    <h3>Update role quota</h3>
+    <form method="post" action="{{ url_for('ui.update_image_analyze_role_quota') }}">
+      {{ image_analyze_role_quota_form.csrf_token }}
+      <p>
+        <label for="role">Role</label>
+        <select id="role" name="role">
+          {% for role_name in roles %}
+            <option value="{{ role_name }}">{{ role_name }}</option>
+          {% endfor %}
+        </select>
+      </p>
+      <p>
+        <label for="mode">Mode</label>
+        <select id="mode" name="mode">
+          {% for mode_name in image_analyze_modes %}
+            <option value="{{ mode_name }}">{{ mode_name }}</option>
+          {% endfor %}
+        </select>
+      </p>
+      <p>
+        <label for="daily_limit">Daily limit (for limited mode)</label>
+        <input id="daily_limit" name="daily_limit" type="number" min="1" step="1" />
+      </p>
+      <button type="submit" {% if not owner_mutation_enabled %}disabled{% endif %}>Save role quota</button>
+    </form>
+  </section>
+
   {% if users %}
     <table>
       <thead>

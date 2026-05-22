@@ -13,6 +13,7 @@ class TelegramAttachment:
     width: int | None = None
     height: int | None = None
     size: int | None = None
+    mime_type: str | None = None
 
 
 @dataclass(slots=True)
@@ -172,6 +173,7 @@ def _parse_attachments(raw: Any) -> tuple[TelegramAttachment, ...]:
                         width=_safe_int(best_photo.get("width")),
                         height=_safe_int(best_photo.get("height")),
                         size=_safe_int(best_photo.get("file_size")),
+                        mime_type="image/*",
                     )
                 )
 
@@ -195,6 +197,7 @@ def _parse_attachments(raw: Any) -> tuple[TelegramAttachment, ...]:
                         width=_safe_int(document_raw.get("width")),
                         height=_safe_int(document_raw.get("height")),
                         size=_safe_int(document_raw.get("file_size")),
+                        mime_type=mime_type,
                     )
                 )
 

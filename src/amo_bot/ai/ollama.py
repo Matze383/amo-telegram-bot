@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import base64
 import json
 import logging
+from pathlib import Path
 from typing import Any, Literal, TypedDict
 
 import httpx
@@ -66,13 +68,20 @@ class OllamaClient:
             raise ValueError("streaming_mode must be one of: off, collect_only, live_edit")
 
     async def generate(self, prompt: str) -> str:
+        return await self.generate_with_images(prompt, image_paths=())
+
+    async def generate_with_images(self, prompt: str, *, image_paths: tuple[str, ...] = ()) -> str:
         self.last_stream_events = []
         request_prompt = prompt[: self.max_prompt_chars]
+        images_b64 = tuple(_read_image_base64(path) for path in image_paths)
         if self.request_endpoint == "chat":
             stream_enabled = self.streaming_mode == "collect_only"
+            message: dict[str, Any] = {"role": "user", "content": request_prompt}
+            if images_b64:
+                message["images"] = list(images_b64)
             payload = {
                 "model": self.model,
-                "messages": [{"role": "user", "content": request_prompt}],
+                "messages": [message],
                 "stream": stream_enabled,
                 "think": False,
                 "options": {"num_predict": self.max_predict_tokens},
@@ -86,6 +95,8 @@ class OllamaClient:
                 "think": False,
                 "options": {"num_predict": self.max_predict_tokens},
             }
+            if images_b64:
+                payload["images"] = list(images_b64)
             endpoint_path = "/api/generate"
         try:
             async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
@@ -362,3 +373,8 @@ class OllamaClient:
             "cancelled": cancelled,
             "timed_out": timed_out,
         }
+
+
+def _read_image_base64(path: str) -> str:
+    raw = Path(path).read_bytes()
+    return base64.b64encode(raw).decode("ascii")

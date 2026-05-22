@@ -1,7 +1,295 @@
 # Changelog / Änderungsprotokoll
 
-> **HARD STOP:** Kein push/tag/release/publication ohne explizite Matze-Freigabe.  
+> **HARD STOP:** Kein push/tag/release/publication ohne explizite Matze-Freigabe.
 > **HARD STOP:** No push/tag/release/publication without explicit Matze approval.
+
+---
+
+## [Unreleased] – IMG-B8 Runtime Role Quota Enforcement
+
+**Datum / Date:** 2026-05-21
+
+### 🇩🇪 Deutsch
+
+#### Übersicht
+IMG-B8 implementiert die Runtime-Durchsetzung der rollenbasierten Bildanalyse-Quotas aus IMG-B7. Der Orchestrator liest WebUI-Quotas vor dem Provider-Aufruf und wendet Rolling-24h-Semantik an.
+
+#### Neu
+- **Runtime Quota-Prüfung:** Orchestrator liest WebUI-Quotas vor dem Provider-Aufruf.
+- **Rolling 24h-Fenster:** Quota-Zählung verwendet Rolling-24h-Fenster basierend auf Audit-Timestamps (Event bei now-23h59m zählt, now-24h01m nicht).
+- **Prüfreihenfolge:** Bildvalidität → Topic-Gate → Quota-Deny → Provider-Aufruf.
+- **Ignore-Rolle:** Vollständig blockiert, unabhängig von Quota-Konfiguration.
+- **Unbekannte/fehlende Rollen:** Werden als `disabled` behandelt.
+- **Audit-Metadaten:** Quota-Deny schreibt Audit-Eintrag ohne Provider-Aufruf; Bildinhalte werden nicht in Audit gespeichert.
+- **Temporäre Bildverarbeitung:** Heruntergeladene Bilder werden nach Analyse automatisch bereinigt (keine dauerhafte Speicherung).
+
+#### Sicherheitsaspekte
+- **Deny-Before-Provider:** Alle Policy-Prüfungen erfolgen vor dem Provider-Aufruf.
+- **Keine Bildspeicherung:** Audit-Events enthalten nur Metadaten, keine Bildinhalte.
+- **Keine Übertragung:** Rest-Quota wird nicht an Nutzer übermittelt.
+
+### 🇬🇧 English
+
+#### Overview
+IMG-B8 implements runtime enforcement of image analysis role quotas from IMG-B7. The orchestrator reads WebUI quotas before provider invocation and applies rolling 24h window semantics.
+
+#### New
+- **Runtime quota checking:** Orchestrator reads WebUI quotas before provider invocation.
+- **Rolling 24h window:** Quota counting uses rolling 24h window based on audit timestamps (event at now-23h59m counts, now-24h01m does not).
+- **Check order:** Image validity → topic gate → quota deny → provider invocation.
+- **Ignore role:** Completely blocked, regardless of quota configuration.
+- **Unknown/missing roles:** Treated as `disabled`.
+- **Audit metadata:** Quota deny writes audit entry without provider invocation; image content is not stored in audit.
+
+#### Security Aspects
+- **Deny-before-provider:** All policy checks happen before provider invocation.
+- **No image storage:** Audit events contain metadata only, no image content.
+- **No leakage:** Remaining quota is not communicated to users.
+- **Temporary images:** Downloaded images are cleaned up after processing (no persistent storage).
+
+---
+
+## [Unreleased] – IMG-B7 WebUI Image Analysis Role Quotas
+
+**Datum / Date:** 2026-05-21
+
+### 🇩🇪 Deutsch
+
+#### Übersicht
+IMG-B7 implementiert persistente rollenbasierte Limits für Bildanalysen als Source of Truth. Die WebUI-Seite "/users" enthält einen neuen Abschnitt zur Konfiguration von Quotas für jede Rolle.
+
+#### Neu
+- **ImageAnalysisRoleQuota Tabelle:** Neue Datenbanktabelle speichert Quota-Konfiguration pro Rolle (owner, admin, vip, normal, ignore).
+- **WebUI /users – Image analysis role quotas:** Neuer Abschnitt auf der Users-Seite mit Dropdowns für jeden Quota-Modus.
+- **Quota-Modi:** `disabled` (deaktiviert), `unlimited` (nur Owner erlaubt), `limited` (positives Limit).
+- **Konservative Defaults:** Owner = unlimited, Admin/VIP/Normal/Ignore = disabled.
+- **Validierung:** `limited` erfordert positive Ganzzahl; `ignore` kann nicht auf `unlimited` gesetzt werden.
+- **Source of Truth:** Diese Konfiguration ist die persistente Quelle für Runtime-Durchsetzung (IMG-B8).
+
+#### Betriebsnotizen
+- Quotas werden in `image_analysis_role_quotas` Tabelle persistiert.
+- Änderungen wirken sofort auf neue Anfragen (kein Neustart erforderlich).
+- IMG-B8 Runtime-Enforcement verwendet Rolling-24h-Fenster (siehe IMG-B8).
+
+### 🇬🇧 English
+
+#### Overview
+IMG-B7 implements persistent role-based limits for image analysis as the source of truth. The WebUI "/users" page includes a new section for configuring quotas per role.
+
+#### New
+- **ImageAnalysisRoleQuota table:** New database table stores quota configuration per role (owner, admin, vip, normal, ignore).
+- **WebUI /users – Image analysis role quotas:** New section on Users page with dropdowns for each quota mode.
+- **Quota modes:** `disabled` (disabled), `unlimited` (owner only), `limited` (positive limit).
+- **Conservative defaults:** Owner = unlimited, Admin/VIP/Normal/Ignore = disabled.
+- **Validation:** `limited` requires positive integer; `ignore` cannot be set to `unlimited`.
+- **Source of truth:** This configuration is the persistent source for runtime enforcement (IMG-B8).
+
+#### Operational Notes
+- Quotas are persisted in `image_analysis_role_quotas` table.
+- Changes take effect immediately for new requests (no restart required).
+- IMG-B8 runtime enforcement uses rolling 24h window (see IMG-B8).
+
+---
+
+## [Unreleased] – IMG-B5 WebUI Per-Topic Image Recognition Toggle
+
+**Datum / Date:** 2026-05-21
+
+### 🇩🇪 Deutsch
+
+#### Übersicht
+IMG-B5 fügt der WebUI eine pro-Topic-Einstellung für die Bilderkennung hinzu. Admins können in der Gruppendetailseite für jedes Topic festlegen, ob Bildanalyse aktiviert, deaktiviert oder vererbt werden soll.
+
+#### Neu
+- **TopicAgentConfig.image_analysis_mode:** Neue Spalte mit Werten `inherit` (Standard), `enabled`, `disabled`.
+- **WebUI /groups Übersicht:** Zeigt pro Gruppe den effektiven Bildanalyse-Status an (aktiviert/deaktiviert/vererbt).
+- **WebUI /groups/<chat_id> Detail:** Zeigt und erlaubt das Ändern des `image_analysis_mode` pro Topic.
+- **Sicheres Default-Verhalten:** Topics mit `inherit` oder fehlender Konfiguration bleiben effektiv deaktiviert, bis explizit aktiviert.
+
+#### Betriebsnotizen
+- Der Bildanalyse-Modus wird datenbankseitig in `topic_agent_configs.image_analysis_mode` gespeichert.
+- Der effektive Status wird vom WebUI angezeigt (nicht von der Laufzeit-Resolver-Logik, die mit IMG-B6 kommt).
+- Änderungen wirken sofort (kein Neustart erforderlich).
+
+### 🇬🇧 English
+
+#### Overview
+IMG-B5 adds a per-topic image recognition setting to the WebUI. Admins can configure for each topic on the group detail page whether image analysis should be enabled, disabled, or inherited.
+
+#### New
+- **TopicAgentConfig.image_analysis_mode:** New column with values `inherit` (default), `enabled`, `disabled`.
+- **WebUI /groups overview:** Shows effective image analysis status per group (enabled/disabled/inherited).
+- **WebUI /groups/<chat_id> detail:** Displays and allows changing `image_analysis_mode` per topic.
+- **Safe default behavior:** Topics with `inherit` or missing configuration remain effectively disabled until explicitly enabled.
+
+#### Operational Notes
+- Image analysis mode is stored in `topic_agent_configs.image_analysis_mode`.
+- Effective status is displayed by the WebUI (not by runtime resolver logic, which arrives with IMG-B6).
+- Changes take effect immediately (no restart required).
+
+---
+
+## [Unreleased] – IMG-B4 Telegram Image Sending
+
+**Datum / Date:** 2026-05-21
+
+### 🇩🇪 Deutsch
+
+#### Übersicht
+IMG-B4 implementiert das Senden von Bildern über Telegram mit Policy/Role/Topic-Gates und sicherem Datei-Handling.
+
+#### Neu
+- **send_photo/send_document Wrapper:** Vereinfachte APIs zum Senden von Bildern über Telegram.
+- **Topic-sichere message_thread_id:** Automatische Thread-Kontext-Beibehaltung bei Bildantworten in Topics.
+- **MIME-Type-Auswahl:** Intelligente Auswahl zwischen send_photo (Bilder) und send_document (Dokumente/Generische Dateien).
+- **Policy/Role/Topic Gates:** Bildsenden unterliegt denselben Berechtigungsprüfungen wie Textnachrichten.
+- **Plugin/Command Flow:** Plugins können Bilder senden via `send_image` Capability mit vollständigem Audit-Trail.
+
+#### User-Facing Verhalten
+- Bilder werden als Antwort auf Analyseanfragen gesendet (wenn konfiguriert).
+- Deny-Reasons folgen denselben Regeln wie Textnachrichten: `role_forbidden`, `topic_disabled`, `consent_required`.
+- Fehler beim Senden werden generisch an Nutzer kommuniziert (keine technischen Details).
+
+#### Sicherheitsaspekte
+- Bildsenden erfordert `send_message` Capability (oder spezifische `send_image` Capability).
+- Minimale Rollenprüfung analog zu Textnachrichten.
+- Audit-Events für alle Bildsend-Versuche (Metadaten nur: file_id, mime_type, Größe).
+
+### 🇬🇧 English
+
+#### Overview
+IMG-B4 implements sending images via Telegram with policy/role/topic gates and secure file handling.
+
+#### New
+- **send_photo/send_document Wrappers:** Simplified APIs for sending images via Telegram.
+- **Topic-safe message_thread_id:** Automatic thread context preservation for image replies in topics.
+- **MIME-Type Selection:** Intelligent selection between send_photo (images) and send_document (documents/generic files).
+- **Policy/Role/Topic Gates:** Image sending is subject to the same permission checks as text messages.
+- **Plugin/Command Flow:** Plugins can send images via `send_image` capability with full audit trail.
+
+#### User-Facing Behavior
+- Images are sent in response to analysis requests (when configured).
+- Deny reasons follow the same rules as text messages: `role_forbidden`, `topic_disabled`, `consent_required`.
+- Sending errors are communicated generically to users (no technical details).
+
+#### Security Aspects
+- Image sending requires `send_message` capability (or specific `send_image` capability).
+- Minimum role checks analogous to text messages.
+- Audit events for all image send attempts (metadata only: file_id, mime_type, size).
+
+---
+
+## [Unreleased] – IMG-B3 Real analyze_image Provider Path
+
+**Datum / Date:** 2026-05-21
+
+### 🇩🇪 Deutsch
+
+#### Übersicht
+IMG-B3 implementiert den echten Provider-Pfad für Bildanalyse mit Timeout-Handling, Provider-Fehler-Behandlung und sicheren, generischen Fehlermeldungen.
+
+#### Neu
+- **Echter Provider-Pfad:** `analyze_image` Capability verwendet jetzt den echten Vision-Provider statt Stub.
+- **Timeout-Handling:** Konfigurierbare Timeouts für Bild-Download und Provider-Aufruf.
+- **Provider-Fehler-Handling:** Klare Unterscheidung zwischen Provider-Timeout, Provider-Fehler und leeren Antworten.
+- **Sichere Fehlermeldungen:** Provider-Fehler werden für Nutzer generisch/redacted dargestellt (Sicherheit).
+- **MIME-Type-Validierung:** Strikte Validierung erlaubter Bildformate vor Provider-Aufruf.
+- **Größenlimits:** Konfigurierbare Maximallimits für Bilddateien (Standard: 10 MB).
+
+#### User-Facing Deny Reasons (analyse_image)
+Die folgenden Ablehnungsgründe werden explizit an Nutzer kommuniziert:
+- `missing_image` — Kein Bild im Kontext gefunden
+- `invalid_type` — Anhang ist kein unterstütztes Bildformat (JPEG, PNG, WebP, GIF)
+- `oversize` — Bild überschreitet maximale Dateigröße
+- `topic_disabled` — Bildanalyse für dieses Topic deaktiviert
+- `role_disabled` — Rolle hat keine Bildanalyse-Berechtigung
+- `quota_exceeded` — Tageslimit für Bildanalysen erreicht
+- `provider_timeout` — Bildanalyse-Provider nicht erreichbar (Timeout)
+- `provider_error` — Provider-Fehler (generisch/redacted für Sicherheit)
+- `provider_empty` — Provider lieferte leere Antwort (generisch/redacted für Sicherheit)
+
+#### Betriebsnotizen
+- Provider-Fehler enthalten keine technischen Details in Nutzer-Ausgaben (Sicherheit).
+- Audit-Events enthalten Outcome-Codes, aber keine sensiblen Fehlerdetails.
+- Fail-fast: Alle Policy-Prüfungen erfolgen vor Provider-Aufruf.
+
+### 🇬🇧 English
+
+#### Overview
+IMG-B3 implements the real provider path for image analysis with timeout handling, provider error handling, and secure, generic error messages.
+
+#### New
+- **Real Provider Path:** `analyze_image` capability now uses the real vision provider instead of stub.
+- **Timeout Handling:** Configurable timeouts for image download and provider invocation.
+- **Provider Error Handling:** Clear distinction between provider timeout, provider error, and empty responses.
+- **Secure Error Messages:** Provider failures are shown to users as generic/redacted (security).
+- **MIME-Type Validation:** Strict validation of allowed image formats before provider call.
+- **Size Limits:** Configurable maximum limits for image files (default: 10 MB).
+
+#### User-Facing Deny Reasons (analyze_image)
+The following denial reasons are explicitly communicated to users:
+- `missing_image` — No image found in context
+- `invalid_type` — Attachment is not a supported image format (JPEG, PNG, WebP, GIF)
+- `oversize` — Image exceeds maximum file size
+- `topic_disabled` — Image analysis disabled for this topic
+- `role_disabled` — Role has no image analysis permission
+- `quota_exceeded` — Daily image analysis limit reached
+- `provider_timeout` — Image analysis provider unreachable (timeout)
+- `provider_error` — Provider error (generic/redacted for security)
+- `provider_empty` — Provider returned empty response (generic/redacted for security)
+
+#### Operational Notes
+- Provider errors contain no technical details in user-facing output (security).
+- Audit events contain outcome codes but no sensitive error details.
+- Fail-fast: All policy checks happen before provider invocation.
+
+---
+
+## [Unreleased] – IMG-B2b Image Analysis Quota + Topic Gate
+
+**Datum / Date:** 2026-05-21
+
+### 🇩🇪 Deutsch
+
+#### Übersicht
+IMG-B2b führt rollenbasierte Tageslimits, ein Topic-spezifisches Aktivierungs-Gate sowie Audit-Persistenz für die Bildanalyse ein.
+
+#### Neu
+- **Rollenbasierte Tageslimits:** Jede Benutzerrolle hat ein konfigurierbares Tageslimit für Bildanalysen:
+  - `OWNER` / `ADMIN` — unbegrenzt
+  - `VIP` — 5 Analysen pro Tag
+  - `NORMAL` — 2 Analysen pro Tag
+  - `IGNORE` — 0 (deaktiviert)
+- **Topic-Gate:** Bildanalyse kann pro Topic (chat_id, message_thread_id) einzeln aktiviert/deaktiviert werden. Standard: deaktiviert.
+- **Tagesbasierte Reset:** Kontingente werden täglich (UTC) zurückgesetzt.
+- **Audit-Persistenz:** Alle Anfragen werden mit Outcome-Codes protokolliert (z.B. `allowed`, `quota_exceeded`, `topic_disabled`, `role_disabled`).
+- **Deny-Before-Provider:** Alle Policy-Prüfungen (Rolle, Kontingent, Topic-Gate) erfolgen *vor* dem Provider-Aufruf. Keine Kosten für blockierte Anfragen.
+
+#### Betriebsnotizen
+- Topic-Policies werden aktuell datenbankseitig verwaltet (keine `.env`-Konfiguration).
+- Quota-Defaults sind im Orchestrator hinterlegt; spätere Releases können externe Konfiguration ergänzen.
+- Audit-Events enthalten Metadaten (user_id, chat_id, outcome), keine Bildinhalte.
+
+### 🇬🇧 English
+
+#### Overview
+IMG-B2b introduces role-based daily limits, per-topic enable gates, and audit persistence for image analysis.
+
+#### New
+- **Role-Based Daily Limits:** Each user role has a configurable daily limit for image analyses:
+  - `OWNER` / `ADMIN` — unlimited
+  - `VIP` — 5 analyses per day
+  - `NORMAL` — 2 analyses per day
+  - `IGNORE` — 0 (disabled)
+- **Topic Gate:** Image analysis can be enabled/disabled per topic (chat_id, message_thread_id). Default: disabled.
+- **Day-Based Reset:** Quotas reset daily (UTC).
+- **Audit Persistence:** All requests are logged with outcome codes (e.g., `allowed`, `quota_exceeded`, `topic_disabled`, `role_disabled`).
+- **Deny-Before-Provider:** All policy checks (role, quota, topic gate) happen *before* provider invocation. No costs for blocked requests.
+
+#### Operational Notes
+- Topic policies are currently database-managed (no `.env` configuration).
+- Quota defaults are hardcoded in the orchestrator; future releases may add external configuration.
+- Audit events contain metadata (user_id, chat_id, outcome), no image content.
 
 ---
 

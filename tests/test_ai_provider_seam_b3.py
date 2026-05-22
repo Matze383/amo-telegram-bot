@@ -93,3 +93,35 @@ def test_ollama_streaming_mode_invalid_fails_closed() -> None:
 def test_invalid_provider_fails_validation(value: str) -> None:
     with pytest.raises(ValueError):
         _settings(AI_PROVIDER=value)
+
+
+def test_ollama_provider_analyze_uses_image_path(monkeypatch, tmp_path) -> None:
+    settings = _settings(AI_PROVIDER="ollama")
+    provider = build_ai_provider(settings)
+    image_path = tmp_path / "img.png"
+    image_path.write_bytes(b"abc")
+    seen: dict[str, object] = {}
+
+    async def _ask_with_images(self, prompt: str, *, image_paths: tuple[str, ...]):
+        seen["prompt"] = prompt
+        seen["image_paths"] = image_paths
+        return "summary"
+
+    monkeypatch.setattr(AIService, "ask_with_images", _ask_with_images)
+
+    from amo_bot.ai.image_analyze_orchestrator import ImageAnalyzeProviderRequest
+
+    result = provider.analyze(
+        ImageAnalyzeProviderRequest(
+            image_ref="telegram-file:u1",
+            prompt="describe",
+            user_id=1,
+            chat_id=2,
+            message_thread_id=3,
+            image_path=str(image_path),
+        )
+    )
+
+    assert result.provider == "ollama"
+    assert result.summary == "summary"
+    assert seen == {"prompt": "describe", "image_paths": (str(image_path),)}

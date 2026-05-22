@@ -183,6 +183,12 @@ def test_group_detail_page_renders_group_metadata_topics_and_metadata_form(tmp_p
     assert "Topic AI response mode" in html
     assert 'name="ai_enabled"' in html
     assert 'name="response_mode"' in html
+    assert "Topic image recognition mode" in html
+    assert 'name="image_analysis_mode"' in html
+    assert '<option value="inherit" selected>inherit</option>' in html
+    assert '<option value="enabled" >enabled</option>' in html
+    assert '<option value="disabled" >disabled</option>' in html
+    assert "Effective: disabled (inherited; currently effective disabled)" in html
     assert 'name="topic_soul_text"' in html
     assert "Basic metadata" in html
     assert "Topic Soul" in html
@@ -226,6 +232,7 @@ def test_topic_metadata_update_with_owner_id_persists(tmp_path) -> None:
                 "enabled": "",
                 "ai_enabled": "y",
                 "response_mode": "mention_or_reply",
+                "image_analysis_mode": "enabled",
                 "csrf_token": token,
             },
             follow_redirects=False,
@@ -257,6 +264,7 @@ def test_topic_metadata_update_with_owner_id_persists(tmp_path) -> None:
         assert cfg.topic_soul_text == "Topic Soul v1"
         assert cfg.ai_enabled is True
         assert cfg.response_mode == "mention_or_reply"
+        assert cfg.image_analysis_mode == "enabled"
 
 
 def test_topic_metadata_update_without_owner_id_blocked(tmp_path) -> None:

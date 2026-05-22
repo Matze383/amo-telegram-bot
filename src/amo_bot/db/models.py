@@ -240,6 +240,7 @@ class TopicAgentConfig(Base):
     topic_soul_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     topic_soul_owner_only_edit: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="1")
     recent_context_window_size: Mapped[int] = mapped_column(Integer, nullable=False, default=20, server_default="20")
+    image_analysis_mode: Mapped[str] = mapped_column(String(16), nullable=False, default="inherit", server_default="inherit")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
 
@@ -315,3 +316,59 @@ class TopicRecentMessage(Base):
     __table_args__ = (
         UniqueConstraint("id", name="uq_topic_recent_messages_id"),
     )
+
+
+class ImageAnalyzeTopicPolicy(Base):
+    __tablename__ = "image_analyze_topic_policies"
+    __table_args__ = (UniqueConstraint("chat_id", "message_thread_id", name="uq_image_analyze_topic_policy"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    chat_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    message_thread_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="0")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+
+class ImageAnalyzeRoleQuota(Base):
+    __tablename__ = "image_analyze_role_quotas"
+    __table_args__ = (UniqueConstraint("role", name="uq_image_analyze_role_quota_role"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    role: Mapped[str] = mapped_column(String(32), nullable=False)
+    mode: Mapped[str] = mapped_column(String(16), nullable=False, default="disabled", server_default="disabled")
+    daily_limit: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    updated_by_telegram_user_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+
+class ImageAnalyzeQuotaCounter(Base):
+    __tablename__ = "image_analyze_quota_counters"
+    __table_args__ = (UniqueConstraint("user_id", "role", "chat_id", "message_thread_id", "day", name="uq_image_analyze_quota_counter"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    role: Mapped[str] = mapped_column(String(32), nullable=False)
+    chat_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    message_thread_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    day: Mapped[str] = mapped_column(String(10), nullable=False)
+    count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+
+class ImageAnalyzeAuditEvent(Base):
+    __tablename__ = "image_analyze_audit_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    role: Mapped[str] = mapped_column(String(32), nullable=False)
+    chat_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    message_thread_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    day: Mapped[str] = mapped_column(String(10), nullable=False)
+    count: Mapped[int] = mapped_column(Integer, nullable=False)
+    command: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    provider: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    outcome: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())

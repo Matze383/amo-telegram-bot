@@ -695,6 +695,60 @@ Die Seite "Users" im WebUI konfiguriert Rollenschwellen für **private Bot-Chats
 
 ---
 
+## WebUI: Image Analysis Role Quotas (IMG-B7 + IMG-B8)
+
+Die Seite "Users" im WebUI enthält einen Abschnitt **"Image analysis role quotas"** zur Konfiguration rollenbasierter Limits für Bildanalysen. IMG-B8 implementiert die Runtime-Durchsetzung mit Rolling-24h-Fenster.
+
+### Quota-Modi
+
+Jede Rolle (`owner`, `admin`, `vip`, `normal`, `ignore`) kann einen der folgenden Modi haben:
+
+| Modus | Beschreibung |
+|-------|--------------|
+| `disabled` | Bildanalyse für diese Rolle deaktiviert |
+| `unlimited` | Keine Begrenzung (nur für `owner` erlaubt) |
+| `limited` | Limit mit positivem Ganzzahlwert (Rolling-24h-Fenster) |
+
+### Rolling-24h-Semantik (IMG-B8)
+
+- Das Limit gilt für ein **rolling 24h-Fenster** basierend auf Audit-Timestamps
+- Ein Event vor 23 Stunden 59 Minuten zählt für das aktuelle Limit
+- Ein Event vor 24 Stunden 1 Minute zählt nicht mehr
+- Kein harter Tages-Reset um Mitternacht UTC
+
+### Konservative Defaults
+
+- **Owner:** `unlimited` – voller Zugriff
+- **Admin:** `disabled` – muss explizit aktiviert werden
+- **VIP:** `disabled` – muss explizit aktiviert werden
+- **Normal:** `disabled` – muss explizit aktiviert werden
+- **Ignore:** `disabled` – immer blockiert, unabhängig von Quota-Konfiguration
+
+### Deny-Before-Provider (IMG-B8)
+
+- **Prüfreihenfolge:** Bildvalidität → Topic-Gate → Quota-Deny → Provider-Aufruf
+- Bei Quota-Überschreitung wird ein Audit-Eintrag geschrieben, der Provider **nicht** aufgerufen
+- Bildinhalte werden nicht im Audit gespeichert (nur Metadaten: user_id, chat_id, outcome, timestamp)
+
+### Konfiguration
+
+1. Öffne http://127.0.0.1:8080 und melde dich an
+2. Navigiere zur Seite "Users"
+3. Scrolle zum Abschnitt "Image analysis role quotas"
+4. Für jede Rolle wähle den Modus:
+   - `disabled` – Dropdown auf "Disabled" setzen
+   - `unlimited` – Dropdown auf "Unlimited" setzen (nur Owner)
+   - `limited` – Dropdown auf "Limited" setzen und positives Limit eingeben
+5. Klicke "Save quotas"
+
+**Hinweise:**
+- Bei Modus `limited` muss ein positiver Wert (≥ 1) eingegeben werden
+- `ignore` kann nicht auf `unlimited` gesetzt werden (bleibt immer `disabled`)
+- Diese Einstellungen sind die **Source of Truth** für die Runtime-Durchsetzung (IMG-B8)
+- Änderungen wirken sofort auf neue Anfragen (kein Neustart erforderlich)
+
+---
+
 ## WebUI: Plugin AI Tool Toggle (Read-Only)
 
 Die Plugins-Seite zeigt für jedes Plugin einen **AI Tool**-Toggle-Indikator:
@@ -707,9 +761,9 @@ Dies ist ein Transparenz-/Sicherheitsfeature, das Ownern hilft zu verstehen, wel
 
 ---
 
-## Image Analysis Coreplugin (IMG-B4..IMG-B7)
+## Image Analysis Coreplugin (IMG-B4..IMG-B8)
 
-Das `image_analyze`-Coreplugin bietet eine sichere Bildanalyse-Schnittstelle für KI und User-Plugins.
+Das `image_analyse`-Coreplugin bietet eine sichere Bildanalyse-Schnittstelle für KI und User-Plugins.
 
 ### Sicherheitsmodell
 
@@ -723,6 +777,27 @@ Das `image_analyze`-Coreplugin bietet eine sichere Bildanalyse-Schnittstelle fü
 - `min_role` (Standard: admin) — Mindestrolle für Bildanalyse
 - Unterstützte Rollen: `owner` > `admin` > `vip` > `normal` > `ignore`
 
+**Rollenbasierte Limits (IMG-B8):**
+| Rolle | Limit | Beschreibung |
+|-------|-------|--------------|
+| `owner` | unbegrenzt | Keine Begrenzung |
+| `admin` | unbegrenzt | Keine Begrenzung (wenn aktiviert) |
+| `vip` | konfigurierbar | Limit mit Rolling-24h-Fenster |
+| `normal` | konfigurierbar | Limit mit Rolling-24h-Fenster |
+| `ignore` | 0 | Immer blockiert, unabhängig von Quota-Konfiguration |
+
+**Rolling-24h-Semantik (IMG-B8):**
+- Das Limit gilt für ein **rolling 24h-Fenster** basierend auf Audit-Timestamps
+- Ein Event vor 23 Stunden 59 Minuten zählt für das aktuelle Limit
+- Ein Event vor 24 Stunden 1 Minute zählt nicht mehr
+- Kein harter Tages-Reset um Mitternacht UTC
+
+**Topic-Gate (IMG-B2b/IMG-B8):**
+- Bildanalyse kann pro Topic einzeln aktiviert werden
+- Schlüssel: `(chat_id, message_thread_id)`
+- Standard: deaktiviert (keine Bildanalyse ohne explizite Aktivierung)
+- Wird datenbankseitig verwaltet (keine `.env`-Konfiguration)
+
 **Eingabevalidierung:**
 - `image_ref` erforderlich und nicht-leer
 - `prompt` optional, maximal 512 Zeichen
@@ -732,12 +807,45 @@ Das `image_analyze`-Coreplugin bietet eine sichere Bildanalyse-Schnittstelle fü
 - `not_enabled` — Bildanalyse ist deaktiviert
 - `consent_required` — Nutzer hat keinen Consent erteilt
 - `role_forbidden` — Nutzerrolle unzureichend
+- `role_disabled` — Rolle ist `ignore` oder auf `disabled` gesetzt
+- `quota_exceeded` — Rolling-24h-Limit erreicht (nur NORMAL/VIP)
+- `topic_disabled` — Topic-Gate ist deaktiviert für diesen Kontext
 - `network_not_allowed` — Netzwerk-Zugriff nicht erlaubt
 - `provider_not_allowed` — Vision-Provider nicht konfiguriert/erlaubt
 - `not_configured` — Bildanalyse nicht konfiguriert (Stub-Verhalten)
 - `invalid_image_ref` — Ungültige Bildreferenz
 - `invalid_prompt` — Prompt zu lang oder ungültig
 - `invalid_locale` — Ungültiges Locale-Format
+
+**User-Facing Deny Reasons (IMG-B3):**
+Die folgenden Fehler werden explizit an Nutzer kommuniziert:
+- `missing_image` — Kein Bild im Kontext gefunden (z.B. `/analyze_image` ohne Bild-Anhang)
+- `invalid_type` — Anhang ist kein unterstütztes Bildformat (nur JPEG, PNG, WebP, GIF)
+- `oversize` — Bild überschreitet die maximale Dateigröße (konfigurierbar, Standard: 10 MB)
+- `topic_disabled` — Bildanalyse ist für dieses Topic deaktiviert
+- `role_disabled` — Deine Rolle hat keine Berechtigung für Bildanalyse
+- `quota_exceeded` — Limit für Bildanalysen erreicht (Rolling-24h-Fenster)
+- `provider_timeout` — Bildanalyse-Provider nicht erreichbar (Timeout)
+- `provider_error` — Provider-Fehler (technische Details werden aus Sicherheitsgründen nicht angezeigt)
+- `provider_empty` — Provider lieferte keine Antwort (technische Details werden aus Sicherheitsgründen nicht angezeigt)
+
+>Hinweis: Provider-Fehler (`provider_error`, `provider_empty`) werden generisch/redacted dargestellt, um keine internen Details preiszugeben. Audit-Logs enthalten Outcome-Codes für Diagnosezwecke.
+
+**Deny-Before-Provider (IMG-B8):**
+- **Prüfreihenfolge:** Bildvalidität → Topic-Gate → Quota-Deny → Provider-Aufruf
+- Bei Quota-Überschreitung wird ein Audit-Eintrag geschrieben, der Provider **nicht** aufgerufen
+- Blockierte Anfragen verursachen keine Provider-Kosten
+- Fail-fast bei ungültigen Eingaben
+
+**Audit-Persistenz (IMG-B8):**
+- Alle Anfragen werden protokolliert mit:
+  - `user_id`, `chat_id`, `message_thread_id`
+  - `outcome` (z.B. `allowed`, `quota_exceeded`, `topic_disabled`)
+  - Timestamp (UTC)
+- Audit-Events enthalten keine Bildinhalte (nur Metadaten)
+- Persistiert in `image_analyze_audit_events` Tabelle
+- Quota-Deny schreibt Audit ohne Provider-Aufruf
+- **Temporäre Bildverarbeitung:** Heruntergeladene Bilder werden nach Analyse automatisch bereinigt (keine dauerhafte Speicherung)
 
 **Scope-Isolierung:**
 - Bilder werden scope-spezifisch verarbeitet
@@ -787,6 +895,86 @@ Das WebUI zeigt den Bildanalyse-Status an:
 - **Consent Required:** Ist Consent erforderlich?
 
 **Hinweis:** Die Konfiguration erfolgt über Settings/Policy, nicht direkt über WebUI-Toggles.
+
+---
+
+## WebUI: Topic-spezifische Bildanalyse-Einstellung (IMG-B5)
+
+Die WebUI ermöglicht die Konfiguration der Bildanalyse pro Topic über die Gruppendetailseite.
+
+### Bildanalyse-Modus
+
+Für jedes Topic kann ein `image_analysis_mode` konfiguriert werden:
+
+| Modus | Verhalten |
+|-------|-----------|
+| `inherit` (Standard) | Erbt vom globalen Default — effektiv deaktiviert, bis der Runtime-Resolver (IMG-B6) aktiv wird |
+| `enabled` | Bildanalyse explizit für dieses Topic aktiviert |
+| `disabled` | Bildanalyse explizit für dieses Topic deaktiviert |
+
+### WebUI-Konfiguration
+
+1. **Gruppenübersicht:** `/groups` zeigt den effektiven Bildanalyse-Status pro Gruppe an.
+
+2. **Gruppendetails:** `/groups/<chat_id>` zeigt pro Topic:
+   - Aktuellen `image_analysis_mode`
+   - Auswahlmöglichkeiten: inherit / enabled / disabled
+   - Speichern-Button (nur mit konfiguriertem `WEBUI_OWNER_TELEGRAM_ID`)
+
+3. **Sicheres Default:** Topics mit `inherit` oder fehlender Konfiguration bleiben effektiv deaktiviert, bis explizit aktiviert.
+
+### Hinweis
+
+Die Einstellung wird in der Datenbank gespeichert (`topic_agent_configs.image_analysis_mode`). Änderungen wirken sofort (kein Neustart erforderlich). Die tatsächliche Durchsetzung der Bildanalyse-Richtlinien erfolgt durch den Runtime-Resolver (IMG-B6).
+
+---
+
+## Bildsendung (IMG-B4)
+
+Der Bot unterstützt das Senden von Bildern über Telegrams `send_photo`- und `send_document`-APIs mit vollständiger Policy/Role/Topic-Gate-Integration.
+
+### Sicherheitsmodell
+
+**Capability-gated:**
+- Bildsenden erfordert die `send_message`-Capability
+- Spezifische `send_image`-Capability kann für granulare Kontrolle konfiguriert werden
+- Alle Policy-Prüfungen erfolgen vor dem Senden (Deny-Before-Send)
+
+**Topic-sicher:**
+- Bilder respektieren den aktuellen `message_thread_id`-Kontext
+- Antworten in Topics bleiben im korrekten Thread
+- Cross-Topic-Bildsendung ist blockiert
+
+**Dateityp-Handling:**
+- Bilder (JPEG, PNG, WebP, GIF) → `send_photo`
+- Dokumente/Generische Dateien → `send_document`
+- MIME-Type-Validierung vor dem Senden
+
+### Reason Codes
+
+- `role_forbidden` — Nutzerrolle unzureichend zum Senden von Bildern
+- `topic_disabled` — Bildsendung für dieses Topic deaktiviert
+- `consent_required` — Nutzer hat keinen Consent erteilt
+- `rate_limited` — Zu viele Bildsendungen in kurzer Zeit
+- `invalid_file` — Dateityp oder Größe nicht erlaubt
+- `send_failed` — Telegram-API-Fehler (generische Nutzer-Nachricht)
+
+### Plugin-Integration
+
+Plugins können Bilder über die `send_image`-Capability senden:
+
+```json
+{
+  "capability": "send_image",
+  "params": {
+    "file_path": "/pfad/zum/bild.jpg",
+    "caption": "Optionaler Bildtext",
+    "reply_to_message_id": 123
+  }
+}
+```
+
+**Audit:** Alle Bildsendungen werden mit Metadaten only protokolliert (file_id, mime_type, Größe).
 
 ---
 

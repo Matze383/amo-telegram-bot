@@ -3,7 +3,7 @@ from __future__ import annotations
 from sqlalchemy import inspect, select, text
 
 from amo_bot.db.base import Base, create_session_factory
-from amo_bot.db.models import DEFAULT_ROLES, DbRole, PrivateChatPolicy, UpdateOffset
+from amo_bot.db.models import DEFAULT_ROLES, DbRole, ImageAnalyzeRoleQuota, PrivateChatPolicy, UpdateOffset
 
 
 def init_db(database_url: str) -> None:
@@ -27,6 +27,7 @@ def init_db(database_url: str) -> None:
                 memory_retention_days INTEGER NOT NULL DEFAULT 30,
                 tools_enabled BOOLEAN NOT NULL DEFAULT 0,
                 recent_context_window_size INTEGER NOT NULL DEFAULT 20,
+                image_analysis_mode VARCHAR(16) NOT NULL DEFAULT 'inherit',
                 main_soul_text TEXT,
                 topic_soul_text TEXT,
                 topic_soul_owner_only_edit BOOLEAN NOT NULL DEFAULT 1,
@@ -88,12 +89,65 @@ def init_db(database_url: str) -> None:
                 updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
         """,
+        "image_analyze_topic_policies": """
+            CREATE TABLE image_analyze_topic_policies (
+                id INTEGER NOT NULL PRIMARY KEY,
+                chat_id BIGINT NOT NULL,
+                message_thread_id INTEGER,
+                enabled BOOLEAN NOT NULL DEFAULT 0,
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                CONSTRAINT uq_image_analyze_topic_policy UNIQUE (chat_id, message_thread_id)
+            )
+        """,
+        "image_analyze_quota_counters": """
+            CREATE TABLE image_analyze_quota_counters (
+                id INTEGER NOT NULL PRIMARY KEY,
+                user_id BIGINT NOT NULL,
+                role VARCHAR(32) NOT NULL,
+                chat_id BIGINT NOT NULL,
+                message_thread_id INTEGER,
+                day VARCHAR(10) NOT NULL,
+                count INTEGER NOT NULL DEFAULT 0,
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                CONSTRAINT uq_image_analyze_quota_counter UNIQUE (user_id, role, chat_id, message_thread_id, day)
+            )
+        """,
+        "image_analyze_audit_events": """
+            CREATE TABLE image_analyze_audit_events (
+                id INTEGER NOT NULL PRIMARY KEY,
+                user_id BIGINT NOT NULL,
+                role VARCHAR(32) NOT NULL,
+                chat_id BIGINT NOT NULL,
+                message_thread_id INTEGER,
+                day VARCHAR(10) NOT NULL,
+                count INTEGER NOT NULL,
+                command VARCHAR(64),
+                provider VARCHAR(64),
+                outcome VARCHAR(64) NOT NULL,
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+        """,
+        "image_analyze_role_quotas": """
+            CREATE TABLE image_analyze_role_quotas (
+                id INTEGER NOT NULL PRIMARY KEY,
+                role VARCHAR(32) NOT NULL,
+                mode VARCHAR(16) NOT NULL DEFAULT 'disabled',
+                daily_limit INTEGER,
+                updated_by_telegram_user_id BIGINT,
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                CONSTRAINT uq_image_analyze_role_quota_role UNIQUE (role)
+            )
+        """,
     }
 
     table_column_migrations: dict[str, dict[str, str]] = {
         "topic_agent_configs": {
             "main_soul_text": "ALTER TABLE topic_agent_configs ADD COLUMN main_soul_text TEXT",
             "recent_context_window_size": "ALTER TABLE topic_agent_configs ADD COLUMN recent_context_window_size INTEGER NOT NULL DEFAULT 20",
+            "image_analysis_mode": "ALTER TABLE topic_agent_configs ADD COLUMN image_analysis_mode VARCHAR(16) NOT NULL DEFAULT 'inherit'",
         },
         "topic_long_memories": {
             "promotion_status": "ALTER TABLE topic_long_memories ADD COLUMN promotion_status VARCHAR(16) NOT NULL DEFAULT 'none'",
@@ -297,6 +351,30 @@ def init_db(database_url: str) -> None:
             if "ix_plugin_policy_allowed_topics_chat_id" not in existing_indexes:
                 connection.execute(text("CREATE INDEX ix_plugin_policy_allowed_topics_chat_id ON plugin_policy_allowed_topics (chat_id)"))
 
+        if "image_analyze_topic_policies" in existing_tables:
+            existing_indexes = {index["name"] for index in inspector.get_indexes("image_analyze_topic_policies")}
+            if "ix_image_analyze_topic_policies_chat_id" not in existing_indexes:
+                connection.execute(text("CREATE INDEX ix_image_analyze_topic_policies_chat_id ON image_analyze_topic_policies (chat_id)"))
+
+        if "image_analyze_quota_counters" in existing_tables:
+            existing_indexes = {index["name"] for index in inspector.get_indexes("image_analyze_quota_counters")}
+            if "ix_image_analyze_quota_counters_user_id" not in existing_indexes:
+                connection.execute(text("CREATE INDEX ix_image_analyze_quota_counters_user_id ON image_analyze_quota_counters (user_id)"))
+            if "ix_image_analyze_quota_counters_chat_id" not in existing_indexes:
+                connection.execute(text("CREATE INDEX ix_image_analyze_quota_counters_chat_id ON image_analyze_quota_counters (chat_id)"))
+
+        if "image_analyze_audit_events" in existing_tables:
+            existing_indexes = {index["name"] for index in inspector.get_indexes("image_analyze_audit_events")}
+            if "ix_image_analyze_audit_events_user_id" not in existing_indexes:
+                connection.execute(text("CREATE INDEX ix_image_analyze_audit_events_user_id ON image_analyze_audit_events (user_id)"))
+            if "ix_image_analyze_audit_events_chat_id" not in existing_indexes:
+                connection.execute(text("CREATE INDEX ix_image_analyze_audit_events_chat_id ON image_analyze_audit_events (chat_id)"))
+
+        if "image_analyze_role_quotas" in existing_tables:
+            existing_indexes = {index["name"] for index in inspector.get_indexes("image_analyze_role_quotas")}
+            if "ix_image_analyze_role_quotas_role" not in existing_indexes:
+                connection.execute(text("CREATE INDEX ix_image_analyze_role_quotas_role ON image_analyze_role_quotas (role)"))
+
         for table_name, migrations in table_column_migrations.items():
             if table_name not in existing_tables:
                 continue
@@ -340,6 +418,34 @@ def init_db(database_url: str) -> None:
                         """
                     )
                 )
+            if "image_analysis_mode" in existing_columns:
+                connection.execute(
+                    text(
+                        """
+                        UPDATE topic_agent_configs
+                        SET image_analysis_mode = 'inherit'
+                        WHERE image_analysis_mode IS NULL OR TRIM(image_analysis_mode) = ''
+                        """
+                    )
+                )
+                connection.execute(
+                    text(
+                        """
+                        UPDATE topic_agent_configs
+                        SET image_analysis_mode = LOWER(TRIM(image_analysis_mode))
+                        WHERE image_analysis_mode IS NOT NULL
+                        """
+                    )
+                )
+                connection.execute(
+                    text(
+                        """
+                        UPDATE topic_agent_configs
+                        SET image_analysis_mode = 'inherit'
+                        WHERE image_analysis_mode NOT IN ('inherit', 'enabled', 'disabled')
+                        """
+                    )
+                )
 
     with session_factory() as session:
         for role, prio in DEFAULT_ROLES:
@@ -354,5 +460,37 @@ def init_db(database_url: str) -> None:
         private_policy = session.scalar(select(PrivateChatPolicy).where(PrivateChatPolicy.id == 1))
         if private_policy is None:
             session.add(PrivateChatPolicy(id=1))
+
+        role_quota_defaults = {
+            "owner": ("unlimited", None),
+            "admin": ("disabled", None),
+            "vip": ("disabled", None),
+            "normal": ("disabled", None),
+            "ignore": ("disabled", None),
+        }
+        for role_name, (mode, daily_limit) in role_quota_defaults.items():
+            row = session.scalar(select(ImageAnalyzeRoleQuota).where(ImageAnalyzeRoleQuota.role == role_name))
+            if row is None:
+                session.add(ImageAnalyzeRoleQuota(role=role_name, mode=mode, daily_limit=daily_limit))
+                continue
+
+            normalized_mode = (row.mode or "").strip().lower()
+            if normalized_mode not in {"disabled", "unlimited", "limited"}:
+                normalized_mode = mode
+
+            if normalized_mode == "limited":
+                if row.daily_limit is None or int(row.daily_limit) < 1:
+                    normalized_mode = "disabled"
+                    row.daily_limit = None
+                else:
+                    row.daily_limit = int(row.daily_limit)
+            else:
+                row.daily_limit = None
+
+            if role_name == "ignore" and normalized_mode == "unlimited":
+                normalized_mode = "disabled"
+                row.daily_limit = None
+
+            row.mode = normalized_mode
 
         session.commit()

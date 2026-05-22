@@ -684,20 +684,45 @@ The Dashboard includes a **KI Memory** section for inspecting and managing AI me
 
 ---
 
-### Image Analysis Coreplugin (IMG-B4..IMG-B7)
+### Image Analysis Coreplugin (IMG-B4..IMG-B8)
 
 The image analysis coreplugin provides secure, default-off image analysis for AI and plugins.
 
-**Status:** Stub implementation (no real vision provider)
+**Status:** IMG-B8 implements runtime quota enforcement with rolling 24h window
 - Image analysis is disabled by default
-- All requests are denied with `image analysis not configured`
-- Policy and consent checks are still performed
+- All policy checks happen before provider invocation (deny-before-provider)
+- Quota deny writes audit, provider is not called
 
 **Prerequisites:**
-- `vip`, `admin` or `owner` role
+- `vip`, `admin` or `owner` role (`ignore` is always blocked)
 - Consent granted (`/accept`)
 
-**Telegram Test:**
+**Role-Based Limits (IMG-B8):**
+| Role | Limit |
+|------|-------|
+| `owner` | unlimited |
+| `admin` | unlimited (if enabled) |
+| `vip` | configurable (rolling 24h window) |
+| `normal` | configurable (rolling 24h window) |
+| `ignore` | 0 (always blocked) |
+
+**Rolling 24h Semantics (IMG-B8):**
+- The limit applies to a **rolling 24h window** based on audit timestamps
+- An event from 23h59m ago counts toward the current limit
+- An event from 24h01m ago no longer counts
+- No hard daily reset at midnight UTC
+
+**Deny-Before-Provider (IMG-B8):**
+- **Check order:** Image validity → topic gate → quota deny → provider invocation
+- On quota exceeded, an audit entry is written, provider is **not** called
+- Image content is not stored in audit
+
+**Topic Gate (IMG-B2b/IMG-B8):**
+- Image analysis can be enabled per-topic
+- Default: disabled
+- Database-managed
+
+**Telegram Tests:**
 
 1. **Without image (should fail):**
    - Send: `/analyze_image` without an image
@@ -705,20 +730,161 @@ The image analysis coreplugin provides secure, default-off image analysis for AI
 
 2. **With image attachment:**
    - Upload an image with `/analyze_image` as caption
-   - Expected: "image analysis not configured" (stub behavior)
+   - Expected: Image analysis response (when enabled and quota available)
 
 3. **As reply to image:**
    - Reply to an image in chat with `/analyze_image`
-   - Expected: "image analysis not configured" (stub behavior)
+   - Expected: Image analysis response (when enabled and quota available)
 
-**Note:** This feature is a security stub. The policy check (role, consent) works, but actual image analysis is not configured.
+**IMG-B8 Quota Tests (when topic enabled):**
+
+4. **Rolling 24h Limit Test (NORMAL role):**
+   - As NORMAL user: Run `/analyze_image` with image
+   - Expected: Success (or analysis response)
+   - After reaching limit: Expected `quota_exceeded`
+   - No automatic reset at midnight
+
+5. **Rolling 24h Limit Test (VIP role):**
+   - As VIP user: Run `/analyze_image` with image
+   - Expected: Success until limit reached
+   - After limit: Expected `quota_exceeded`
+
+6. **Limit Reset:**
+   - After 24 hours without analysis, limit should reset
+
+**Audit Persistence (IMG-B8):**
+- All requests logged to `image_analyze_audit_events`
+- Outcome codes: `allowed`, `quota_exceeded`, `topic_disabled`, `role_disabled`
+- No image content in audit events (metadata only)
+- Quota deny writes audit without provider invocation
 
 **Security Checklist:**
 - [ ] Image analysis is default-off (no automatic activation)
 - [ ] Minimum role is checked
 - [ ] Consent is checked
+- [ ] Role IGNORE → `role_disabled` (always blocked)
+- [ ] Rolling 24h quota is checked (no hard daily reset)
+- [ ] Topic gate is checked
 - [ ] No raw image data in logs/audit events
 - [ ] Attachment context contains metadata only
+- [ ] Audit events are written (DB check optional)
+- [ ] Quota deny writes audit without provider invocation
+
+---
+
+### Image Sending (IMG-B4)
+
+The bot supports sending images via Telegram with policy/role/topic gates.
+
+**Prerequisites:**
+- `vip`, `admin` or `owner` role
+- Consent granted (`/accept`)
+- Image sending enabled for the topic
+
+**Policy Gates:**
+- Same role checks as text messages (`send_message` capability)
+- Topic-safe: Respects `message_thread_id`
+- Mime-type aware: Uses `send_photo` for images, `send_document` for files
+
+**Test Steps:**
+
+1. **Send via Plugin Command (if available):**
+   - Trigger a plugin that sends an image response
+   - Expected: Image appears in chat (topic-safe)
+
+2. **Topic context preservation:**
+   - In a topic/thread, trigger image send
+   - Expected: Image appears in the same thread (not main chat)
+
+3. **Deny test (insufficient role):**
+   - As `normal` user without consent, try to trigger image send
+   - Expected: `role_forbidden` or `consent_required`
+
+**Security Checklist:**
+- [ ] Image sending requires `send_message` capability
+- [ ] Topic-safe: Images respect `message_thread_id`
+- [ ] Proper MIME-type selection (photo vs document)
+- [ ] Deny reasons communicated generically to users
+- [ ] Audit events written with metadata only
+
+---
+
+**IMG-B5 WebUI Test Steps (Image Analysis per Topic):**
+
+1. **Groups Overview:** Open `/groups` in the WebUI. Verify that an "Image Analysis" column (or similar) is shown per group.
+
+2. **Open Group Details:** Click "Details" for a group.
+
+3. **Image Analysis Setting Display:** Per topic, a dropdown or selection is shown with options:
+   - **Inherit** — Default, effectively disabled until runtime resolver (IMG-B6) is active
+   - **Enabled** — Image analysis explicitly allowed for this topic
+   - **Disabled** — Image analysis explicitly denied for this topic
+
+4. **Change Setting:** Select a topic, change the mode to "enabled", save.
+
+5. **Verify Persistence:** Reload the page. The setting should be preserved.
+
+6. **Safe Default Behavior Test:** Create a new topic (or check an unused topic) — it should show "inherit" and be effectively disabled.
+
+---
+
+**IMG-B7 WebUI Test Steps (Image Analysis Role Quotas):**
+
+1. **Open Users Page:** Open http://127.0.0.1:8080 and log in. Navigate to the "Users" page.
+
+2. **View Image Analysis Role Quotas:** Scroll to the "Image analysis role quotas" section. Configuration fields should be displayed for each role (`owner`, `admin`, `vip`, `normal`, `ignore`).
+
+3. **Check Quota Modes:** For each role, the following modes should be available:
+   - **Disabled** — Image analysis disabled
+   - **Unlimited** — No limit (only allowed for Owner)
+   - **Limited** — Limit with positive integer value (rolling 24h window)
+
+4. **Rolling 24h Semantics (IMG-B8):**
+   - The limit applies to a **rolling 24h window** based on audit timestamps
+   - An event from 23h59m ago counts toward the current limit
+   - An event from 24h01m ago no longer counts
+
+5. **Check Conservative Defaults:**
+   - Owner should be set to `unlimited` (or changeable)
+   - Admin, VIP, Normal should be set to `disabled`
+   - Ignore should be set to `disabled` and cannot be set to `unlimited` (always blocked)
+
+6. **Test Limited Mode:**
+   - Select a role (e.g., VIP) and set to "Limited"
+   - Enter a positive value (e.g., 5)
+   - Save
+   - Expected: Setting is persisted
+
+7. **Test Validation:**
+   - Try to select "Limited" for a role but enter no value or 0
+   - Expected: Validation error, cannot save
+
+8. **Ignore Validation:**
+   - Try to set the "ignore" role to "Unlimited"
+   - Expected: "Unlimited" is not available for Ignore (dropdown disabled or error)
+
+9. **IMG-B8 Runtime Enforcement:**
+   - Changes take effect immediately for new requests
+   - Quota deny writes audit without provider invocation
+   - No image content in audit
+   - **Temporary image handling:** Downloaded images are automatically cleaned up after analysis (no persistent storage)
+
+10. **Verify Persistence:**
+    - Reload the page
+    - Expected: All saved quotas are displayed correctly
+
+**Checklist:**
+- [ ] Image Analysis Role Quotas visible on /users
+- [ ] All 5 roles configurable (owner, admin, vip, normal, ignore)
+- [ ] Modes: disabled, unlimited, limited available
+- [ ] Rolling 24h semantics understood (no hard daily reset)
+- [ ] Owner can be set to unlimited
+- [ ] Ignore is always blocked (regardless of quota)
+- [ ] Limited requires positive integer
+- [ ] Save persists to database
+- [ ] Changes take effect immediately (no restart)
+- [ ] IMG-B8 Runtime Enforcement active (quota deny before provider)
+- [ ] This is the source of truth for runtime enforcement (IMG-B8)
 
 ---
 
@@ -727,6 +893,7 @@ The image analysis coreplugin provides secure, default-off image analysis for AI
 The following features are planned for future releases and are **not available** in the current beta:
 
 - Additional security enhancements — future blocks
+- Video/audio file sending — future enhancement
 
 ---
 
@@ -823,7 +990,21 @@ Use this checklist for your test:
 - [ ] WebUI Topic Soul Editor (owner-only, in Groups): OK / Not tested
 - [ ] WebUI KI Memory Controls (redacted daily, long memory deactivate): OK / Not tested
 - [ ] CP-G2 Memory Privacy: Scope isolation, default-deny policy, redacted outputs verified: OK / Not tested
-- [ ] Image Analysis Coreplugin (default-off, stub behavior): OK / Not tested
+- [ ] Image Analysis Coreplugin (default-off): OK / Not tested
+- [ ] IMG-B8 Rolling-24h Quota (no hard daily reset): OK / Not tested
+- [ ] IMG-B8 Topic Gate: OK / Not tested
+- [ ] IMG-B8 Audit Persistence (quota deny without provider): OK / Not tested
+- [ ] IMG-B8 Ignore role always blocked: OK / Not tested
+- [ ] IMG-B3 Real provider path (vision analysis works): OK / Not tested
+- [ ] IMG-B3 Provider timeout handling: OK / Not tested
+- [ ] IMG-B3 Provider error (generic user output): OK / Not tested
+- [ ] IMG-B3 MIME-Type validation (JPEG/PNG/WebP/GIF only): OK / Not tested
+- [ ] IMG-B3 Size limit (oversize handling): OK / Not tested
+- [ ] IMG-B4 Image sending via Telegram API: OK / Not tested
+- [ ] IMG-B4 Topic-safe image sending (message_thread_id): OK / Not tested
+- [ ] IMG-B4 Deny behavior (role/consent/topic gates): OK / Not tested
+- [ ] IMG-B5 WebUI image analysis per topic (inherit/enabled/disabled): OK / Not tested
+- [ ] IMG-B7 WebUI Image Analysis Role Quotas (/users page, disabled/unlimited/limited): OK / Not tested
 - [ ] Security headers present (check browser dev tools): OK
 
 **Notes:**

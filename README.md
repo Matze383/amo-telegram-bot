@@ -29,6 +29,7 @@ AMO ist ein erweiterbarer Telegram-Bot für Gruppen und private Chats. Er bietet
 | 🌐 **WebUI** | Lokale Flask-Oberfläche für Verwaltung und Konfiguration |
 | 🤖 **KI-Integration** | Optionales `/ask`-Kommando und Auto-Antworten via Ollama oder OpenAI |
 | 🧠 **Memory-System** | Tägliche Langzeitgedächtnis-Kuratierung mit Datenschutz-Defaults |
+| 🖼️ **Bildanalyse & -sendung** | Image-Analysis-Interface (IMG) mit send_photo/send_document Wrappern; WebUI pro-Topic Bilderkennungs-Toggle (inherit/enabled/disabled); WebUI Rollen-Quotas für Bildanalyse (IMG-B7); Runtime Quota-Enforcement mit Rolling-24h-Fenster (IMG-B8) |
 
 ### Schnellstart
 
@@ -122,6 +123,7 @@ AMO is an extensible Telegram bot for groups and private chats. It provides a ro
 | 🌐 **WebUI** | Local Flask interface for management and configuration |
 | 🤖 **AI Integration** | Optional `/ask` command and auto-replies via Ollama or OpenAI |
 | 🧠 **Memory System** | Daily long-term memory curation with privacy-first defaults |
+| 🖼️ **Image Analysis & Sending** | Image Analysis interface (IMG) with send_photo/send_document wrappers; WebUI per-topic image recognition toggle (inherit/enabled/disabled); WebUI role quotas for image analysis (IMG-B7); Runtime quota enforcement with rolling 24h window (IMG-B8) |
 
 ### Quick Start
 

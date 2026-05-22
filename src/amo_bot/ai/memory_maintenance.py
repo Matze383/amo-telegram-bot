@@ -102,6 +102,7 @@ class MemoryMaintenanceService:
             topic_soul_text=scope.topic_soul_text,
             topic_soul_owner_only_edit=scope.topic_soul_owner_only_edit,
             recent_context_window_size=max(0, min(int(getattr(scope, "recent_context_window_size", 0) or 0), 50)),
+            image_analysis_mode=(getattr(scope, "image_analysis_mode", "inherit") or "inherit").strip().lower(),
         )
         rows = self._repository.list_daily_memories(
             scope_type=cfg.scope_type,

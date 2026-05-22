@@ -86,6 +86,16 @@
                     <option value="command" {% if topic.response_mode == 'command' %}selected{% endif %}>command</option>
                   </select>
                 </label>
+                <br>
+                <label>
+                  Topic image recognition mode
+                  <select name="image_analysis_mode">
+                    <option value="inherit" {% if topic.image_analysis_mode == 'inherit' %}selected{% endif %}>inherit</option>
+                    <option value="enabled" {% if topic.image_analysis_mode == 'enabled' %}selected{% endif %}>enabled</option>
+                    <option value="disabled" {% if topic.image_analysis_mode == 'disabled' %}selected{% endif %}>disabled</option>
+                  </select>
+                </label>
+                <p class="mb-05-small"><small>Effective: {{ topic.effective_image_analysis_mode or 'disabled' }}{% if topic.image_analysis_mode == 'inherit' %} (inherited; currently effective disabled){% endif %}</small></p>
               </section>
 
               <button type="submit" {% if not owner_mutation_enabled %}disabled{% endif %}>{{ t('action.save') }}</button>

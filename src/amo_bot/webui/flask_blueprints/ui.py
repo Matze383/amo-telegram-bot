@@ -6,7 +6,7 @@ from typing import Any, Callable, TypeVar, cast
 from flask import Blueprint, abort, current_app, redirect, render_template, request, session, url_for
 from sqlalchemy import select
 from flask_wtf import FlaskForm
-from wtforms import BooleanField, SelectField, StringField, TextAreaField
+from wtforms import BooleanField, IntegerField, SelectField, StringField, TextAreaField
 from wtforms.validators import DataRequired, Length
 
 from amo_bot.auth.roles import Role
@@ -15,6 +15,7 @@ from amo_bot.db.models import GROUP_CHAT_TYPES, TopicAgentConfig, User
 from amo_bot.db.repositories import (
     ChatScopedRoleRepository,
     ChatSeenUserRepository,
+    ImageAnalyzeRoleQuotaRepository,
     PRIVATE_CHAT_THRESHOLD_ROLES,
     PrivateChatPolicyRepository,
     ChatTopicRepository,
@@ -71,6 +72,19 @@ class PrivateChatPolicyForm(FlaskForm):
     )
 
 
+IMAGE_ANALYZE_ROLE_QUOTA_MODES: tuple[str, ...] = ("disabled", "unlimited", "limited")
+
+
+class ImageAnalyzeRoleQuotaForm(FlaskForm):
+    role = SelectField("Role", validators=[DataRequired()], choices=[(r, r) for r in ALLOWED_ROLES])
+    mode = SelectField(
+        "Mode",
+        validators=[DataRequired()],
+        choices=[(m, m) for m in IMAGE_ANALYZE_ROLE_QUOTA_MODES],
+    )
+    daily_limit = IntegerField("Daily limit")
+
+
 class TopicMetadataForm(FlaskForm):
     display_name = StringField("Display Name", validators=[Length(max=255)])
     notes = TextAreaField("Notes", validators=[Length(max=2000)])
@@ -82,6 +96,12 @@ class TopicMetadataForm(FlaskForm):
         validators=[DataRequired()],
         choices=[("mention_or_reply", "mention_or_reply"), ("command", "command")],
         default="mention_or_reply",
+    )
+    image_analysis_mode = SelectField(
+        "Topic image recognition mode",
+        validators=[DataRequired()],
+        choices=[("inherit", "inherit"), ("enabled", "enabled"), ("disabled", "disabled")],
+        default="inherit",
     )
 
 
@@ -176,6 +196,7 @@ def users_page():
     with session_factory() as db_session:
         rows = db_session.query(User).order_by(User.telegram_user_id.asc()).all()
         policy = PrivateChatPolicyRepository(db_session).get_policy()
+        role_quotas = ImageAnalyzeRoleQuotaRepository(db_session).list_role_quotas()
         users = [
             {
                 "telegram_user_id": row.telegram_user_id,
@@ -198,11 +219,52 @@ def users_page():
             "min_general_command_role": policy.min_general_command_role.value,
             "min_plugin_command_role": policy.min_plugin_command_role.value,
         },
+        image_analyze_role_quotas=[
+            {
+                "role": quota.role.value,
+                "mode": quota.mode,
+                "daily_limit": quota.daily_limit,
+            }
+            for quota in role_quotas
+        ],
+        image_analyze_modes=IMAGE_ANALYZE_ROLE_QUOTA_MODES,
         role_form=UserRoleForm(),
         private_chat_policy_form=PrivateChatPolicyForm(),
+        image_analyze_role_quota_form=ImageAnalyzeRoleQuotaForm(),
         owner_mutation_enabled=settings.webui_owner_telegram_id is not None,
         error_message=request.args.get("error", ""),
     ), 200
+
+
+@ui_bp.post("/users/image-analyze-role-quotas")
+@login_required
+def update_image_analyze_role_quota():
+    form = ImageAnalyzeRoleQuotaForm()
+    if not form.validate_on_submit():
+        abort(400, description="invalid image analyze role quota payload")
+
+    settings: Settings = current_app.extensions["amo.settings"]
+    if settings.webui_owner_telegram_id is None:
+        abort(403, description="WEBUI_OWNER_TELEGRAM_ID not configured; image analyze role quota mutation is disabled")
+
+    role_name = (form.role.data or "").strip().lower()
+    mode = (form.mode.data or "").strip().lower()
+    daily_limit = form.daily_limit.data
+
+    session_factory = current_app.extensions["amo.plugin_service"]._session_factory
+    with session_factory() as db_session:
+        repo = ImageAnalyzeRoleQuotaRepository(db_session)
+        try:
+            repo.upsert_role_quota(
+                role=role_name,
+                mode=mode,
+                daily_limit=daily_limit,
+                updated_by_telegram_user_id=settings.webui_owner_telegram_id,
+            )
+        except ValueError as exc:
+            abort(400, description=str(exc))
+
+    return redirect(url_for("ui.users_page"), code=302)
 
 
 @ui_bp.post("/users/private-chat-policy")
@@ -348,6 +410,8 @@ def groups_page():
                             ),
                             "ai_enabled": cfg.ai_enabled if cfg else False,
                             "response_mode": cfg.response_mode if cfg and cfg.response_mode else "mention_or_reply",
+                            "image_analysis_mode": cfg.image_analysis_mode if cfg and cfg.image_analysis_mode else "inherit",
+                            "effective_image_analysis_mode": "disabled" if not cfg or cfg.image_analysis_mode == "inherit" else cfg.image_analysis_mode,
                         }
                         for topic in topics
                     ],
@@ -415,6 +479,8 @@ def group_detail_page(chat_id: str):
                     ),
                     "ai_enabled": cfg.ai_enabled if cfg else False,
                     "response_mode": cfg.response_mode if cfg and cfg.response_mode else "mention_or_reply",
+                    "image_analysis_mode": cfg.image_analysis_mode if cfg and cfg.image_analysis_mode else "inherit",
+                    "effective_image_analysis_mode": "disabled" if not cfg or cfg.image_analysis_mode == "inherit" else cfg.image_analysis_mode,
                 }
                 for topic in topics
             ],
@@ -518,6 +584,7 @@ def update_topic_metadata(chat_id: str, message_thread_id: int):
     notes = (form.notes.data or "").strip() or None
     topic_soul_text = (form.topic_soul_text.data or "").strip() or None
     response_mode = (form.response_mode.data or "").strip() or "mention_or_reply"
+    image_analysis_mode = (form.image_analysis_mode.data or "").strip().lower() or "inherit"
 
     session_factory = current_app.extensions["amo.plugin_service"]._session_factory
     with session_factory() as db_session:
@@ -550,6 +617,7 @@ def update_topic_metadata(chat_id: str, message_thread_id: int):
                 main_soul_text=existing.main_soul_text if existing else None,
                 topic_soul_text=topic_soul_text,
                 topic_soul_owner_only_edit=existing.topic_soul_owner_only_edit if existing else True,
+                image_analysis_mode=image_analysis_mode,
             )
         except ValueError:
             abort(404, description="topic not found")

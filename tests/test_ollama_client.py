@@ -687,3 +687,45 @@ def test_settings_rejects_invalid_ollama_limit_config() -> None:
                 or "OLLAMA_MAX_PREDICT_TOKENS" in text
                 or "greater than 0" in text
             )
+
+
+def test_ollama_generate_with_images_places_base64_top_level_for_generate(monkeypatch, tmp_path) -> None:
+    seen_payload: dict[str, Any] = {}
+    image_path = tmp_path / "img.png"
+    image_path.write_bytes(b"abc")
+
+    async def post_impl(url: str, payload: dict[str, Any]) -> httpx.Response:
+        nonlocal seen_payload
+        seen_payload = payload
+        req = httpx.Request("POST", url)
+        return httpx.Response(200, json={"response": "ok"}, request=req)
+
+    _patch_async_client(monkeypatch, post_impl)
+
+    client = OllamaClient(base_url="http://ollama", model="vision", timeout_seconds=1.0)
+    out = asyncio.run(client.generate_with_images("describe", image_paths=(str(image_path),)))
+
+    assert out == "ok"
+    assert seen_payload["images"] == ["YWJj"]
+    assert "data:image" not in seen_payload["images"][0]
+
+
+def test_ollama_generate_with_images_places_base64_inside_chat_message(monkeypatch, tmp_path) -> None:
+    seen_payload: dict[str, Any] = {}
+    image_path = tmp_path / "img.png"
+    image_path.write_bytes(b"abc")
+
+    async def post_impl(url: str, payload: dict[str, Any]) -> httpx.Response:
+        nonlocal seen_payload
+        seen_payload = payload
+        req = httpx.Request("POST", url)
+        return httpx.Response(200, json={"message": {"role": "assistant", "content": "ok"}, "done": True}, request=req)
+
+    _patch_async_client(monkeypatch, post_impl)
+
+    client = OllamaClient(base_url="http://ollama", model="vision", timeout_seconds=1.0, request_endpoint="chat")
+    out = asyncio.run(client.generate_with_images("describe", image_paths=(str(image_path),)))
+
+    assert out == "ok"
+    assert "images" not in seen_payload
+    assert seen_payload["messages"] == [{"role": "user", "content": "describe", "images": ["YWJj"]}]

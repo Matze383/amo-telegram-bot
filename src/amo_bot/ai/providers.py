@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import asyncio
 from typing import Protocol
+
+from amo_bot.ai.image_analyze_orchestrator import ImageAnalyzeProviderRequest, ImageAnalyzeProviderResult
 
 from amo_bot.ai.ollama import OllamaClient
 from amo_bot.ai.openai_provider import OpenAIProviderConfig, OpenAIRequestClient
@@ -17,8 +20,28 @@ class AIProvider(Protocol):
 class OllamaProvider:
     service: AIService
 
+    @property
+    def name(self) -> str:
+        return "ollama"
+
     async def ask(self, prompt: str) -> str:
         return await self.service.ask(prompt)
+
+    async def analyze_async(self, request: ImageAnalyzeProviderRequest) -> ImageAnalyzeProviderResult:
+        if not request.image_path:
+            raise RuntimeError("missing image path")
+        summary = await self.service.ask_with_images(
+            request.prompt or "Describe this image.",
+            image_paths=(request.image_path,),
+        )
+        return ImageAnalyzeProviderResult(provider=self.name, summary=summary)
+
+    def analyze(self, request: ImageAnalyzeProviderRequest) -> ImageAnalyzeProviderResult:
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return asyncio.run(self.analyze_async(request))
+        raise RuntimeError("OllamaProvider.analyze() cannot run inside an active event loop; use analyze_async()")
 
 
 @dataclass(frozen=True, slots=True)

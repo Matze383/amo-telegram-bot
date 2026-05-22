@@ -25,6 +25,9 @@ class AIService:
     last_stream_events: list[dict[str, Any]] = field(default_factory=list)
 
     async def ask(self, prompt: str) -> str:
+        return await self.ask_with_images(prompt, image_paths=())
+
+    async def ask_with_images(self, prompt: str, *, image_paths: tuple[str, ...] = ()) -> str:
         cleaned = prompt.strip()
         if not cleaned:
             raise ValueError("empty prompt")
@@ -33,7 +36,7 @@ class AIService:
         self.last_stream_events = []
 
         try:
-            response = await self._timed_generate(client=self.client, prompt=cleaned, phase="primary", prompt_len=prompt_len)
+            response = await self._timed_generate(client=self.client, prompt=cleaned, phase="primary", prompt_len=prompt_len, image_paths=image_paths)
             self.last_stream_events = self._normalize_stream_events(getattr(self.client, "last_stream_events", []) or [])
             return response
         except OllamaError as exc:
@@ -44,7 +47,7 @@ class AIService:
             await asyncio.sleep(self.retry_delay_seconds)
 
         try:
-            response = await self._timed_generate(client=self.client, prompt=cleaned, phase="retry", prompt_len=prompt_len)
+            response = await self._timed_generate(client=self.client, prompt=cleaned, phase="retry", prompt_len=prompt_len, image_paths=image_paths)
             self.last_stream_events = self._normalize_stream_events(getattr(self.client, "last_stream_events", []) or [])
             return response
         except OllamaError as retry_exc:
@@ -65,15 +68,18 @@ class AIService:
             max_response_chars=self.client.max_response_chars,
             request_endpoint=request_endpoint,
         )
-        response = await self._timed_generate(client=fallback_client, prompt=cleaned, phase="fallback", prompt_len=prompt_len)
+        response = await self._timed_generate(client=fallback_client, prompt=cleaned, phase="fallback", prompt_len=prompt_len, image_paths=image_paths)
         self.last_stream_events = self._normalize_stream_events(getattr(fallback_client, "last_stream_events", []) or [])
         return response
 
-    async def _timed_generate(self, *, client: OllamaClient, prompt: str, phase: str, prompt_len: int) -> str:
+    async def _timed_generate(self, *, client: OllamaClient, prompt: str, phase: str, prompt_len: int, image_paths: tuple[str, ...] = ()) -> str:
         model = getattr(client, "model", "unknown")
         started = time.perf_counter()
         try:
-            response = await client.generate(prompt)
+            if image_paths:
+                response = await client.generate_with_images(prompt, image_paths=image_paths)
+            else:
+                response = await client.generate(prompt)
         except OllamaError as exc:
             duration_ms = int((time.perf_counter() - started) * 1000)
             logger.info(
