@@ -21,7 +21,10 @@ from amo_bot.telegram.update_parser import TelegramMessage, parse_update
 
 
 AUTOREPLY_ALLOWED_ROLES: set[Role] = {Role.OWNER, Role.ADMIN, Role.VIP}
-AI_AUTOREPLY_ERROR_FALLBACK_TEXT = "Ich konnte gerade keine KI-Antwort erzeugen. Bitte versuch es gleich nochmal."
+AI_AUTOREPLY_ERROR_FALLBACK_TEXT = {
+    "de": "Ich konnte gerade keine KI-Antwort erzeugen. Bitte versuch es gleich nochmal.",
+    "en": "I couldn't generate an AI reply right now. Please try again in a moment.",
+}
 
 SendTextFn = Callable[[int, str, int | None], Awaitable[object]]
 SendMarkupFn = Callable[[int, str, dict[str, Any], int | None], Awaitable[object]]
@@ -206,7 +209,14 @@ class Dispatcher:
             chat_type=message.chat.type,
         ):
             if command is not None:
-                response = self._consent_block_message(chat_type=message.chat.type, blocked_as_unreachable=self._is_user_unreachable(message.from_user.id))
+                response = self._consent_block_message(
+                    chat_type=message.chat.type,
+                    blocked_as_unreachable=self._is_user_unreachable(message.from_user.id),
+                    locale=resolve_locale(
+                        explicit_arg=None,
+                        telegram_language_code=getattr(message.from_user, "language_code", None),
+                    ),
+                )
                 if response:
                     await self._send_text(message.chat.id, response, message.message_thread_id)
             return
@@ -349,12 +359,15 @@ class Dispatcher:
         if data != "test:ok":
             return
 
+        message_locale = self._message_locale_from_callback(callback_query)
+        button_test_ok = {"de": "Button-Test ok", "en": "Button test ok"}[message_locale]
+
         if self.answer_callback is not None:
-            await self.answer_callback(callback_query.id, "Button test ok")
+            await self.answer_callback(callback_query.id, button_test_ok)
             return
 
         if callback_query.message is not None:
-            await self._send_text(callback_query.message.chat.id, "Button test ok", callback_query.message.message_thread_id)
+            await self._send_text(callback_query.message.chat.id, button_test_ok, callback_query.message.message_thread_id)
 
     async def _handle_consent_callback(self, *, callback_query: Any, role: Role, data: str) -> None:
         if self.database_url is None:
@@ -443,12 +456,27 @@ class Dispatcher:
         return f"Unknown command: /{command_name}. Use /help for available commands."
 
     @staticmethod
-    def _consent_block_message(*, chat_type: str | None, blocked_as_unreachable: bool) -> str:
+    def _consent_block_message(*, chat_type: str | None, blocked_as_unreachable: bool, locale: str = "de") -> str:
+        messages = {
+            "group": {
+                "de": "Bitte kläre Consent privat mit dem Bot.",
+                "en": "Please resolve consent privately with the bot.",
+            },
+            "unreachable": {
+                "de": "Bitte starte den Bot privat und bestätige mit /accept.",
+                "en": "Please start the bot in private and confirm with /accept.",
+            },
+            "default": {
+                "de": "Bitte bestätige zuerst mit /accept oder prüfe /consent.",
+                "en": "Please confirm with /accept first or check /consent.",
+            },
+        }
+        resolved_locale = "en" if locale == "en" else "de"
         if chat_type in {"group", "supergroup"}:
-            return "Bitte kläre Consent privat mit dem Bot."
+            return messages["group"][resolved_locale]
         if blocked_as_unreachable:
-            return "Bitte starte den Bot privat und bestätige mit /accept."
-        return "Bitte bestätige zuerst mit /accept oder prüfe /consent."
+            return messages["unreachable"][resolved_locale]
+        return messages["default"][resolved_locale]
 
 
     @staticmethod
@@ -795,7 +823,7 @@ class Dispatcher:
             if is_triggered_path:
                 await self._send_text(
                     message.chat.id,
-                    AI_AUTOREPLY_ERROR_FALLBACK_TEXT,
+                    AI_AUTOREPLY_ERROR_FALLBACK_TEXT[message_locale],
                     message.message_thread_id,
                 )
             return

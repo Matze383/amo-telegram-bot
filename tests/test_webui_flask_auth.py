@@ -591,3 +591,21 @@ def test_login_invalid_password_flash_is_bilingual(tmp_path) -> None:
         bad = client.post("/login", data={"password": "wrong", "csrf_token": token}, follow_redirects=False)
         assert bad.status_code == 401
         assert "Ungültiges Passwort." in bad.get_data(as_text=True)
+
+
+def test_dashboard_contains_expected_text_in_english_after_login(tmp_path) -> None:
+    app = create_flask_app(settings=_make_settings(tmp_path))
+
+    with app.test_client() as client:
+        login = _login(client, "test-secret")
+        assert login.status_code == 302
+
+        dashboard = client.get("/dashboard?lang=en")
+        html = dashboard.get_data(as_text=True)
+
+    assert dashboard.status_code == 200
+    assert "Status: Flask WebUI, local/LAN." in html
+    assert "AI Topic-Agent Status (Read-Only)" in html
+    assert "No AI topic-agent configurations found." in html
+    assert "AI Memory (Read-Only + Deactivate Long Memory)" in html
+    assert "No memory entries found." in html

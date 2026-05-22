@@ -266,8 +266,47 @@ def test_dispatcher_handles_test_callback_with_answer_callback() -> None:
 
     asyncio.run(dispatcher.handle_raw_update(raw_update))
 
-    assert callback_answers == [("cb-1", "Button test ok")]
+    assert callback_answers == [("cb-1", "Button-Test ok")]
 
+
+
+
+def test_dispatcher_handles_test_callback_with_en_locale() -> None:
+    callback_answers: list[tuple[str, str | None]] = []
+
+    async def fake_send(chat_id: int, text: str, message_thread_id: int | None = None) -> object:
+        return {"ok": True}
+
+    async def fake_answer_callback(callback_query_id: str, text: str | None = None) -> object:
+        callback_answers.append((callback_query_id, text))
+        return True
+
+    dispatcher = Dispatcher(
+        command_registry=create_builtin_registry(),
+        role_resolver=InMemoryRoleResolver({42: Role.ADMIN}),
+        send_text=fake_send,
+        answer_callback=fake_answer_callback,
+        bot_username="BotName",
+    )
+
+    raw_update = {
+        "update_id": 811,
+        "callback_query": {
+            "id": "cb-1-en",
+            "from": {"id": 42, "is_bot": False, "first_name": "T", "username": "tester", "language_code": "en"},
+            "message": {
+                "message_id": 20,
+                "chat": {"id": 99, "type": "private"},
+                "from": {"id": 99, "is_bot": True, "first_name": "Bot"},
+                "text": "Inline-Button-Test: Please click.",
+            },
+            "data": "test:ok",
+        },
+    }
+
+    asyncio.run(dispatcher.handle_raw_update(raw_update))
+
+    assert callback_answers == [("cb-1-en", "Button test ok")]
 
 def test_dispatcher_ignores_unknown_callback_data() -> None:
     sent: list[tuple[int, str, int | None]] = []
@@ -1155,3 +1194,9 @@ def test_dispatcher_invokes_auto_image_for_plain_photo_update() -> None:
 
     assert calls == [(-1002003580909, 6845, 95, 900000001, 1)]
     assert sent == []
+
+
+def test_consent_block_message_is_localized() -> None:
+    assert Dispatcher._consent_block_message(chat_type="group", blocked_as_unreachable=False, locale="de") == "Bitte kläre Consent privat mit dem Bot."
+    assert Dispatcher._consent_block_message(chat_type="group", blocked_as_unreachable=False, locale="en") == "Please resolve consent privately with the bot."
+    assert Dispatcher._consent_block_message(chat_type="private", blocked_as_unreachable=True, locale="en") == "Please start the bot in private and confirm with /accept."
