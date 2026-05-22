@@ -472,9 +472,9 @@ class Dispatcher:
 
     @staticmethod
     def _is_reply_to_current_bot(*, message: TelegramMessage, bot_username: str | None) -> bool:
-        if not message.reply_to_is_bot:
+        if not getattr(message, "reply_to_is_bot", False):
             return False
-        if not message.reply_to_user_is_bot:
+        if not getattr(message, "reply_to_user_is_bot", False):
             return False
         if not bot_username:
             return False
@@ -483,17 +483,18 @@ class Dispatcher:
         if not configured:
             return False
 
-        reply_username = (message.reply_to_username or "").strip().lstrip("@").casefold()
+        reply_username = (getattr(message, "reply_to_username", None) or "").strip().lstrip("@").casefold()
         return bool(reply_username) and reply_username == configured
 
 
     def _resolve_reply_context(self, *, message: TelegramMessage) -> TopicRecentMessageRecord | None:
-        reply_to_message_id = message.reply_to_message_id
+        reply_to_message_id = getattr(message, "reply_to_message_id", None)
         if reply_to_message_id is None:
             return None
 
-        inline_text = (message.reply_to_message_text or "").strip()
-        inline_user = message.reply_to_message.from_user if message.reply_to_message is not None else None
+        reply_to_message = getattr(message, "reply_to_message", None)
+        inline_text = (getattr(message, "reply_to_message_text", None) or "").strip()
+        inline_user = reply_to_message.from_user if reply_to_message is not None else None
         inline_record: TopicRecentMessageRecord | None = None
         if inline_text:
             inline_record = TopicRecentMessageRecord(
@@ -504,10 +505,10 @@ class Dispatcher:
                 user_id=None,
                 message_text=inline_text,
                 telegram_message_id=reply_to_message_id,
-                telegram_author_user_id=inline_user.id if inline_user is not None else message.reply_to_user_id,
-                telegram_author_username=inline_user.username if inline_user is not None else message.reply_to_username,
-                telegram_author_is_bot=bool(inline_user.is_bot if inline_user is not None else message.reply_to_user_is_bot),
-                source="bot" if bool(inline_user.is_bot if inline_user is not None else message.reply_to_user_is_bot) else "user",
+                telegram_author_user_id=inline_user.id if inline_user is not None else getattr(message, "reply_to_user_id", None),
+                telegram_author_username=inline_user.username if inline_user is not None else getattr(message, "reply_to_username", None),
+                telegram_author_is_bot=bool(inline_user.is_bot if inline_user is not None else getattr(message, "reply_to_user_is_bot", False)),
+                source="bot" if bool(inline_user.is_bot if inline_user is not None else getattr(message, "reply_to_user_is_bot", False)) else "user",
             )
 
         if self.database_url is None:
