@@ -42,7 +42,7 @@ def test_accept_sets_accepted(tmp_path) -> None:
 
         out = asyncio.run(cmd.handler(_ctx(command_name="accept", user_id=1001, chat_id=1001)))
         assert out is not None
-        assert "accepted" in out
+        assert "akzeptiert" in out.casefold()
 
         with session_factory() as session:
             user = session.query(User).filter_by(telegram_user_id=1001).one()
@@ -73,7 +73,7 @@ def test_decline_sets_declined_and_accept_reactivates(tmp_path) -> None:
 
         decline_out = asyncio.run(decline_cmd.handler(_ctx(command_name="decline", user_id=1002, chat_id=1002)))
         assert decline_out is not None
-        assert "declined" in decline_out
+        assert "abgelehnt" in decline_out.casefold()
 
         with session_factory() as session:
             user = session.query(User).filter_by(telegram_user_id=1002).one()
@@ -81,7 +81,7 @@ def test_decline_sets_declined_and_accept_reactivates(tmp_path) -> None:
 
         accept_out = asyncio.run(accept_cmd.handler(_ctx(command_name="accept", user_id=1002, chat_id=1002)))
         assert accept_out is not None
-        assert "accepted" in accept_out
+        assert "akzeptiert" in accept_out.casefold()
 
         with session_factory() as session:
             user = session.query(User).filter_by(telegram_user_id=1002).one()
@@ -113,7 +113,7 @@ def test_consent_shows_status_private_and_privacy_in_group(tmp_path) -> None:
         asyncio.run(decline_cmd.handler(_ctx(command_name="decline", user_id=1003, chat_id=1003)))
         private_out = asyncio.run(consent_cmd.handler(_ctx(command_name="consent", user_id=1003, chat_id=1003)))
         assert private_out is not None
-        assert "consent status: declined" in private_out
+        assert "Consent-Status: declined" in private_out
 
         group_out = asyncio.run(consent_cmd.handler(_ctx(command_name="consent", user_id=1003, chat_id=-1003, locale="en")))
         assert group_out == "For privacy, please use /consent in a private chat with me."
@@ -184,7 +184,7 @@ def test_start_private_pending_returns_policy_buttons(tmp_path) -> None:
 
         out = asyncio.run(cmd.handler(_ctx(command_name="start", user_id=1101, chat_id=1101)))
         assert isinstance(out, dict)
-        assert out["text"] == ConsentPromptService.build_prompt_text()
+        assert out["text"] == ConsentPromptService.build_prompt_text("de")
         markup = out.get("reply_markup")
         assert isinstance(markup, dict)
         assert markup["inline_keyboard"][0][0]["callback_data"] == "consent:accept"
@@ -215,7 +215,7 @@ def test_start_private_unreachable_resets_to_pending_and_returns_buttons(tmp_pat
 
         out = asyncio.run(cmd.handler(_ctx(command_name="start", user_id=1102, chat_id=1102)))
         assert isinstance(out, dict)
-        assert out["text"] == ConsentPromptService.build_prompt_text()
+        assert out["text"] == ConsentPromptService.build_prompt_text("de")
         markup = out.get("reply_markup")
         assert isinstance(markup, dict)
         assert markup["inline_keyboard"][0][0]["callback_data"] == "consent:accept"
@@ -240,7 +240,7 @@ def test_start_private_unknown_user_creates_profile_and_returns_buttons(tmp_path
 
         out = asyncio.run(cmd.handler(_ctx(command_name="start", user_id=1103, chat_id=1103)))
         assert isinstance(out, dict)
-        assert out["text"] == ConsentPromptService.build_prompt_text()
+        assert out["text"] == ConsentPromptService.build_prompt_text("de")
         markup = out.get("reply_markup")
         assert isinstance(markup, dict)
         assert markup["inline_keyboard"][0][0]["callback_data"] == "consent:accept"
@@ -263,3 +263,34 @@ def test_start_group_returns_short_private_hint(tmp_path) -> None:
 
     out = asyncio.run(cmd.handler(_ctx(command_name="start", user_id=1104, chat_id=-1104)))
     assert out == "Bitte öffne die Policy privat über den Button."
+
+
+def test_start_private_pending_returns_english_prompt_buttons(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'consent_start_pending_en.db'}"
+    init_db(db_url)
+    engine = create_engine(db_url)
+    session_factory = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+    try:
+        with session_factory() as session:
+            user = UserRoleRepository(session).upsert_discovered_user(
+                telegram_user_id=1201,
+                username="u1201",
+                first_name="U",
+                last_name=None,
+            )
+            user.consent_status = "pending"
+            session.commit()
+
+        reg = create_builtin_registry(database_url=db_url)
+        cmd = reg.get("start")
+        assert cmd is not None
+
+        out = asyncio.run(cmd.handler(_ctx(command_name="start", user_id=1201, chat_id=1201, locale="en")))
+        assert isinstance(out, dict)
+        assert out["text"] == ConsentPromptService.build_prompt_text("en")
+        markup = out.get("reply_markup")
+        assert isinstance(markup, dict)
+        assert markup["inline_keyboard"][0][0]["text"] == "✅ Accept"
+        assert markup["inline_keyboard"][0][1]["text"] == "❌ Decline"
+    finally:
+        engine.dispose()

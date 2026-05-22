@@ -135,6 +135,16 @@ def create_builtin_registry(
     def _lang(ctx: CommandContext, de: str, en: str) -> str:
         return de if ctx.locale == "de" else en
 
+    def _consent_status_explanation(status: str, locale: Locale) -> str:
+        messages = {
+            CONSENT_ACCEPTED: {"de": "Du hast zugestimmt.", "en": "You agreed to consent."},
+            CONSENT_DECLINED: {"de": "Du hast abgelehnt.", "en": "You declined consent."},
+            CONSENT_PENDING: {"de": "Consent ist noch ausstehend.", "en": "Consent is still pending."},
+            CONSENT_UNREACHABLE: {"de": "Consent ist als nicht erreichbar markiert.", "en": "Consent marked as unreachable."},
+        }
+        fallback = {"de": "Consent-Status gespeichert.", "en": "Consent status recorded."}
+        return messages.get(status, fallback)[locale]
+
     async def start_handler(ctx: CommandContext) -> dict[str, object] | str:
         if session_factory is None:
             return _lang(ctx, "Consent-Verwaltung ist nicht konfiguriert.", "Consent management is not configured.")
@@ -160,8 +170,8 @@ def create_builtin_registry(
 
         if status == CONSENT_PENDING:
             return {
-                "text": ConsentPromptService.build_prompt_text(),
-                "reply_markup": ConsentPromptService.build_prompt_markup(),
+                "text": ConsentPromptService.build_prompt_text(ctx.locale),
+                "reply_markup": ConsentPromptService.build_prompt_markup(ctx.locale),
             }
 
         if status == CONSENT_ACCEPTED:
@@ -171,8 +181,8 @@ def create_builtin_registry(
             return _lang(ctx, "Consent ist aktuell abgelehnt. Du kannst mit /accept wieder zustimmen.", "Consent is currently declined. You can agree again with /accept.")
 
         return {
-            "text": ConsentPromptService.build_prompt_text(),
-            "reply_markup": ConsentPromptService.build_prompt_markup(),
+            "text": ConsentPromptService.build_prompt_text(ctx.locale),
+            "reply_markup": ConsentPromptService.build_prompt_markup(ctx.locale),
         }
 
     async def role_handler(ctx: CommandContext) -> str:
@@ -269,12 +279,12 @@ def create_builtin_registry(
         with session_factory() as session:
             user = session.query(User).filter(User.telegram_user_id == ctx.user_id).one_or_none()
             if user is None:
-                return "user profile not found yet. send /ping and try again."
+                return _lang(ctx, "Benutzerprofil fehlt noch. Sende /ping und versuche es erneut.", "User profile not found yet. Send /ping and try again.")
             ConsentService().accept(user)
             session.commit()
             if owner_notifier is not None:
                 await owner_notifier.notify_consent_decision(user=user, accepted=True, source="command:/accept")
-        return "consent accepted. thanks — you can use /decline anytime to change this."
+        return _lang(ctx, "Consent akzeptiert. Danke — mit /decline kannst du das jederzeit ändern.", "Consent accepted. Thanks — you can use /decline anytime to change this.")
 
     async def decline_handler(ctx: CommandContext) -> str:
         if session_factory is None:
@@ -282,12 +292,12 @@ def create_builtin_registry(
         with session_factory() as session:
             user = session.query(User).filter(User.telegram_user_id == ctx.user_id).one_or_none()
             if user is None:
-                return "user profile not found yet. send /ping and try again."
+                return _lang(ctx, "Benutzerprofil fehlt noch. Sende /ping und versuche es erneut.", "User profile not found yet. Send /ping and try again.")
             ConsentService().decline(user)
             session.commit()
             if owner_notifier is not None:
                 await owner_notifier.notify_consent_decision(user=user, accepted=False, source="command:/decline")
-        return "consent declined. you can re-enable later with /accept."
+        return _lang(ctx, "Consent abgelehnt. Mit /accept kannst du später wieder zustimmen.", "Consent declined. You can re-enable later with /accept.")
 
     async def consent_handler(ctx: CommandContext) -> str:
         if ctx.chat_type != "private":
@@ -297,19 +307,25 @@ def create_builtin_registry(
         with session_factory() as session:
             user = session.query(User).filter(User.telegram_user_id == ctx.user_id).one_or_none()
             if user is None:
-                return "consent status: unknown\nSend any command in private first, then retry /consent."
+                return _lang(
+                    ctx,
+                    "Consent-Status: unbekannt\nSende zuerst einen beliebigen Befehl im privaten Chat und versuche dann /consent erneut.",
+                    "Consent status: unknown\nSend any command in private first, then retry /consent.",
+                )
             status = ConsentService().get_status(user)
 
-        explanations = {
-            CONSENT_ACCEPTED: "You agreed to consent.",
-            CONSENT_DECLINED: "You declined consent.",
-            CONSENT_PENDING: "Consent is still pending.",
-            CONSENT_UNREACHABLE: "Consent marked as unreachable.",
-        }
-        return (
-            f"consent status: {status}\n"
-            f"{explanations.get(status, 'Consent status recorded.')}\n"
-            "Use /accept or /decline to change your choice."
+        return _lang(
+            ctx,
+            (
+                f"Consent-Status: {status}\n"
+                f"{_consent_status_explanation(status, 'de')}\n"
+                "Nutze /accept oder /decline, um deine Entscheidung zu ändern."
+            ),
+            (
+                f"Consent status: {status}\n"
+                f"{_consent_status_explanation(status, 'en')}\n"
+                "Use /accept or /decline to change your choice."
+            ),
         )
 
     async def ask_handler(ctx: CommandContext) -> str:
