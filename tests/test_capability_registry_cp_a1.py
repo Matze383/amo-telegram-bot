@@ -66,7 +66,7 @@ def test_rss_descriptor_present_in_registry() -> None:
     registry = CapabilityRegistry(
         descriptors=[
             CapabilityDescriptor(
-                id="ki.rss.fetch",
+                id="rss.fetch",
                 version="1.0.0",
                 risk_level="medium",
                 actor_types=("ki",),
@@ -76,11 +76,11 @@ def test_rss_descriptor_present_in_registry() -> None:
         ]
     )
 
-    descriptor = registry.get("KI.RSS.FETCH")
+    descriptor = registry.get("RSS.FETCH")
     assert descriptor is not None
-    assert descriptor.id == "ki.rss.fetch"
+    assert descriptor.id == "rss.fetch"
     assert descriptor.default_enabled is False
 
-    decision = registry.evaluate("ki.rss.fetch")
+    decision = registry.evaluate("rss.fetch")
     assert decision.allowed is False
     assert decision.reason_code == "default_deny"

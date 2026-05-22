@@ -91,7 +91,7 @@ def test_rss_capability_default_denied_for_ai_and_userplugin() -> None:
     denied_ai = evaluate_core_capability_policy(
         CoreCapabilityPolicyRequest(
             actor_type=CapabilityActorType.AI,
-            capability_name="ki.rss.fetch",
+            capability_name="rss.fetch",
             scope_type=CapabilityScopeType.TOPIC,
         )
     )
@@ -101,7 +101,7 @@ def test_rss_capability_default_denied_for_ai_and_userplugin() -> None:
     denied_userplugin = evaluate_core_capability_policy(
         CoreCapabilityPolicyRequest(
             actor_type=CapabilityActorType.USERPLUGIN,
-            capability_name="ki.rss.fetch",
+            capability_name="rss.fetch",
             scope_type=CapabilityScopeType.TOPIC,
         )
     )

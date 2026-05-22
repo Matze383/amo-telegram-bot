@@ -106,3 +106,53 @@ def test_service_secret_binding_is_reference_only() -> None:
     assert lookup.service.auth is not None
     assert lookup.service.auth.secret_ref == "secrets.billing.token"
     assert "token" not in lookup.service.auth.header_name.lower()
+
+
+def test_rss_fetch_capability_denied_without_permission() -> None:
+    registry = _registry()
+
+    result = registry.invoke_api(
+        capability_id="rss.fetch",
+        payload={"feed_url": "https://example.org/feed.xml"},
+        allowed_capabilities=set(),
+    )
+
+    assert result.allowed is False
+    assert result.reason_code == "capability_denied"
+
+
+def test_rss_fetch_capability_allowed_reaches_stub() -> None:
+    registry = _registry()
+
+    result = registry.invoke_api(
+        capability_id="rss.fetch",
+        payload={"feed_url": "https://example.org/feed.xml"},
+        allowed_capabilities={"rss.fetch"},
+    )
+
+    assert result.allowed is True
+    assert result.reason_code == "not_implemented"
+    assert result.data == {
+        "status": "stub",
+        "message": "rss.fetch is registered but not implemented yet",
+    }
+    assert result.audit_summary["capability_id"] == "rss.fetch"
+    assert result.audit_summary["requested_capability_id"] == "rss.fetch"
+    assert result.audit_summary["deprecated_alias_used"] is False
+
+
+def test_legacy_ki_rss_fetch_alias_maps_to_canonical_with_deprecation_audit() -> None:
+    registry = _registry()
+
+    result = registry.invoke_api(
+        capability_id="ki.rss.fetch",
+        payload={},
+        allowed_capabilities={"rss.fetch"},
+    )
+
+    assert result.allowed is True
+    assert result.reason_code == "not_implemented"
+    assert result.audit_summary["capability_id"] == "rss.fetch"
+    assert result.audit_summary["requested_capability_id"] == "ki.rss.fetch"
+    assert result.audit_summary["deprecated_alias_used"] is True
+    assert "deprecated" in result.audit_summary["deprecation"]

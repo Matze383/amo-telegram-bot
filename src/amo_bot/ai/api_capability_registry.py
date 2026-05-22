@@ -7,8 +7,11 @@ _SAFE_REASON_CODES = {
     "ok",
     "unknown_service",
     "unknown_endpoint",
+    "unknown_capability",
+    "capability_denied",
     "raw_url_mode_forbidden",
     "invalid_payload",
+    "not_implemented",
 }
 
 
@@ -57,6 +60,16 @@ class APIPayloadValidationResult:
     reason_code: str
 
 
+@dataclass(frozen=True, slots=True)
+class APIInvocationResult:
+    allowed: bool
+    reason_code: str
+    service_id: str
+    endpoint_key: str
+    data: dict[str, Any] | None
+    audit_summary: dict[str, Any]
+
+
 def _normalize_key(value: str) -> str:
     return value.strip().lower()
 
@@ -76,6 +89,11 @@ class APICapabilityRegistry:
     - No raw URL mode
     - Secret binding by reference only
     """
+
+    RSS_FETCH_SERVICE_ID = "rss"
+    RSS_FETCH_ENDPOINT_KEY = "fetch"
+    RSS_FETCH_CAPABILITY = "rss.fetch"
+    _LEGACY_RSS_FETCH_CAPABILITY = "ki.rss.fetch"
 
     def __init__(
         self,
@@ -168,6 +186,61 @@ class APICapabilityRegistry:
 
         return APIPayloadValidationResult(allowed=True, reason_code="ok")
 
+    def invoke_api(
+        self,
+        *,
+        capability_id: str,
+        payload: Mapping[str, Any] | None,
+        allowed_capabilities: set[str] | frozenset[str],
+    ) -> APIInvocationResult:
+        capability_key = _normalize_key(capability_id)
+        is_legacy_alias = capability_key == self._LEGACY_RSS_FETCH_CAPABILITY
+        canonical_capability = self.RSS_FETCH_CAPABILITY if is_legacy_alias else capability_key
+
+        if canonical_capability != self.RSS_FETCH_CAPABILITY:
+            return APIInvocationResult(
+                allowed=False,
+                reason_code="unknown_capability",
+                service_id=self.RSS_FETCH_SERVICE_ID,
+                endpoint_key=self.RSS_FETCH_ENDPOINT_KEY,
+                data=None,
+                audit_summary={"capability_id": capability_key, "reason_code": "unknown_capability"},
+            )
+
+        allowed = {_normalize_key(item) for item in allowed_capabilities if isinstance(item, str)}
+        if self.RSS_FETCH_CAPABILITY not in allowed:
+            return APIInvocationResult(
+                allowed=False,
+                reason_code="capability_denied",
+                service_id=self.RSS_FETCH_SERVICE_ID,
+                endpoint_key=self.RSS_FETCH_ENDPOINT_KEY,
+                data=None,
+                audit_summary={
+                    "capability_id": canonical_capability,
+                    "requested_capability_id": capability_key,
+                    "reason_code": "capability_denied",
+                    "deprecated_alias_used": is_legacy_alias,
+                },
+            )
+
+        return APIInvocationResult(
+            allowed=True,
+            reason_code="not_implemented",
+            service_id=self.RSS_FETCH_SERVICE_ID,
+            endpoint_key=self.RSS_FETCH_ENDPOINT_KEY,
+            data={
+                "status": "stub",
+                "message": "rss.fetch is registered but not implemented yet",
+            },
+            audit_summary={
+                "capability_id": canonical_capability,
+                "requested_capability_id": capability_key,
+                "reason_code": "not_implemented",
+                "deprecated_alias_used": is_legacy_alias,
+                "deprecation": "ki.rss.fetch is deprecated; use rss.fetch",
+            },
+        )
+
 
 def build_default_api_capability_registry() -> APICapabilityRegistry:
     """Build a deterministic default registry with descriptor-only entries."""
@@ -182,6 +255,12 @@ def build_default_api_capability_registry() -> APICapabilityRegistry:
                     header_name="Authorization",
                     secret_ref="secrets.crm.api_token",
                 ),
+            ),
+            APIServiceDescriptor(
+                service_id="rss",
+                display_name="RSS Service",
+                base_url_ref="services.rss.base_url",
+                auth=None,
             ),
         ),
         endpoints=(
@@ -202,6 +281,15 @@ def build_default_api_capability_registry() -> APICapabilityRegistry:
                 description="Create or update a contact note",
                 required_payload_keys=("contact_id", "note"),
                 optional_payload_keys=("source",),
+            ),
+            APIEndpointDescriptor(
+                service_id="rss",
+                endpoint_key="fetch",
+                method="POST",
+                path_template="/v1/rss/fetch",
+                description="Userplugin RSS fetch capability (stub only)",
+                required_payload_keys=(),
+                optional_payload_keys=("feed_url", "limit", "since"),
             ),
         ),
     )

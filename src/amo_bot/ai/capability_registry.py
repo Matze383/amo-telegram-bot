@@ -30,7 +30,7 @@ _DEFAULT_CAPABILITY_DESCRIPTORS: tuple[CapabilityDescriptor, ...] = (
         default_enabled=False,
     ),
     CapabilityDescriptor(
-        id="ki.rss.fetch",
+        id="rss.fetch",
         version="1.0.0",
         risk_level="medium",
         actor_types=("ki",),

@@ -37,7 +37,7 @@ _SAFE_DENY_REASONS: set[str] = {
 
 _KNOWN_CAPABILITIES: set[str] = {
     "ki.memory.read",
-    "ki.rss.fetch",
+    "rss.fetch",
     "ki.websearch.query",
     "plugin.status.read",
 }
