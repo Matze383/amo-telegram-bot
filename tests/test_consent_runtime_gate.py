@@ -72,7 +72,7 @@ def test_pending_blocks_normal_and_allows_accept_then_ping(tmp_path) -> None:
     assert sender.sent[-1][1] == "Bitte bestätige zuerst mit /accept oder prüfe /consent."
 
     asyncio.run(dispatcher.handle_raw_update(_mk_update(uid=1101, chat_id=1101, text="/accept", update_id=2)))
-    assert "consent accepted" in sender.sent[-1][1]
+    assert "Consent akzeptiert" in sender.sent[-1][1]
 
     asyncio.run(dispatcher.handle_raw_update(_mk_update(uid=1101, chat_id=1101, text="/ping", update_id=3)))
     assert sender.sent[-1] == (1101, "pong", None)
@@ -87,7 +87,7 @@ def test_declined_blocks_normal_but_accept_allows_reactivation(tmp_path) -> None
     assert sender.sent[-1][1] == "Bitte bestätige zuerst mit /accept oder prüfe /consent."
 
     asyncio.run(dispatcher.handle_raw_update(_mk_update(uid=1102, chat_id=1102, text="/accept", update_id=2)))
-    assert "consent accepted" in sender.sent[-1][1]
+    assert "Consent akzeptiert" in sender.sent[-1][1]
 
 
 def test_unreachable_blocks_normal_and_shows_unreachable_hint_but_accept_allowed(tmp_path) -> None:
@@ -99,7 +99,7 @@ def test_unreachable_blocks_normal_and_shows_unreachable_hint_but_accept_allowed
     assert sender.sent[-1][1] == "Bitte starte den Bot privat und bestätige mit /accept."
 
     asyncio.run(dispatcher.handle_raw_update(_mk_update(uid=1103, chat_id=1103, text="/accept", update_id=2)))
-    assert "consent accepted" in sender.sent[-1][1]
+    assert "Consent akzeptiert" in sender.sent[-1][1]
 
 
 def test_accepted_allows_normal_usage(tmp_path) -> None:

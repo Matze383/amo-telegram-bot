@@ -241,11 +241,9 @@ def test_users_page_uses_private_chat_role_wording_and_scope_note(tmp_path) -> N
         response = client.get("/users")
         assert response.status_code == 200
         html = response.get_data(as_text=True)
-        assert "Private bot chat role" in html
-        assert "Change private chat role" in html
-        assert "Owner is the only global role." in html
-        assert "Roles changed here apply to private bot chats." in html
-        assert "Group/topic permissions are managed in their respective context pages." in html
+        assert "Private Chat-Rolle" in html
+        assert "Private Chat-Rolle ändern" in html
+        assert "Owner ist die einzige globale Rolle. Hier geänderte Rollen gelten für private Bot-Chats. Gruppen-/Topic-Berechtigungen werden in den jeweiligen Kontextseiten verwaltet." in html
         assert "Change role" not in html
 
 
@@ -320,9 +318,9 @@ def test_users_page_renders_private_chat_policy_controls_and_excludes_ignore(tmp
         assert response.status_code == 200
         html = response.get_data(as_text=True)
 
-    assert "Minimum private chat role for AI" in html
-    assert "Minimum private chat role for general commands" in html
-    assert "Minimum private chat role for plugin commands" in html
+    assert "Mindestrolle im privaten Chat für KI" in html
+    assert "Mindestrolle im privaten Chat für allgemeine Befehle" in html
+    assert "Mindestrolle im privaten Chat für Plugin-Befehle" in html
     assert 'name="min_ai_role"' in html
     assert 'name="min_general_command_role"' in html
     assert 'name="min_plugin_command_role"' in html
@@ -331,7 +329,7 @@ def test_users_page_renders_private_chat_policy_controls_and_excludes_ignore(tmp
     assert policy_form.count('value="normal" selected') == 2
     assert 'value="ignore"' not in policy_form
     assert '<button type="submit"' in policy_form
-    assert '>Save private thresholds</button>' in policy_form
+    assert '>Private Schwellenwerte speichern</button>' in policy_form
 
 
 def test_private_chat_policy_post_updates_thresholds(tmp_path) -> None:
@@ -410,8 +408,8 @@ def test_private_chat_policy_save_button_disabled_when_owner_mutation_off_and_re
         html = response.get_data(as_text=True)
 
     policy_form = html.split('action="/users/private-chat-policy"', 1)[1].split("</form>", 1)[0]
-    assert '<button type="submit" disabled>Save private thresholds</button>' in policy_form
-    assert "Saving private thresholds is disabled because role mutation is turned off" in policy_form
+    assert '<button type="submit" disabled>Private Schwellenwerte speichern</button>' in policy_form
+    assert "Speichern privater Schwellenwerte ist deaktiviert, weil Rollenmutation aus ist" in policy_form
 
 
 def test_users_language_switch_en(tmp_path) -> None:
