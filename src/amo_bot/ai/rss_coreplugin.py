@@ -150,41 +150,83 @@ def _normalize_url(url: str) -> str:
 
 def _parse_rss_entries(*, root: ET.Element, max_entries: int) -> tuple[RSSFeedEntry, ...]:
     items = list(root.findall("./channel/item"))
+    entries = list(root.findall("./{http://www.w3.org/2005/Atom}entry"))
     seen_keys: set[str] = set()
     normalized: list[RSSFeedEntry] = []
 
     for item in items:
-        title = _text_or_empty(item.find("title"))
-        link = _text_or_empty(item.find("link"))
-        guid = _text_or_empty(item.find("guid"))
-        published = _text_or_empty(item.find("pubDate"))
-        summary = _text_or_empty(item.find("description"))
-
-        if not (title or link or guid):
-            continue
-
-        stable_key = "|".join((guid, link, published)).strip().lower()
-        if not stable_key:
-            continue
-        dedupe_key = sha256(stable_key.encode("utf-8", errors="ignore")).hexdigest()
-        if dedupe_key in seen_keys:
-            continue
-        seen_keys.add(dedupe_key)
-
-        entry_id = guid or dedupe_key
-        normalized.append(
-            RSSFeedEntry(
-                id=entry_id[:256],
-                title=title[:512],
-                link=link[:2048],
-                published=published[:256],
-                summary=summary[:2048],
-            )
-        )
+        parsed = _parse_rss_item(item)
+        _append_entry(parsed=parsed, normalized=normalized, seen_keys=seen_keys)
         if len(normalized) >= max_entries:
             break
 
+    if len(normalized) < max_entries:
+        for entry in entries:
+            parsed = _parse_atom_entry(entry)
+            _append_entry(parsed=parsed, normalized=normalized, seen_keys=seen_keys)
+            if len(normalized) >= max_entries:
+                break
+
     return tuple(normalized)
+
+
+def _parse_rss_item(item: ET.Element) -> tuple[str, str, str, str, str]:
+    title = _text_or_empty(item.find("title"))
+    link = _text_or_empty(item.find("link"))
+    guid = _text_or_empty(item.find("guid"))
+    published = _text_or_empty(item.find("pubDate"))
+    summary = _text_or_empty(item.find("description"))
+    return title, link, guid, published, summary
+
+
+def _parse_atom_entry(entry: ET.Element) -> tuple[str, str, str, str, str]:
+    atom_ns = "{http://www.w3.org/2005/Atom}"
+    title = _text_or_empty(entry.find(f"{atom_ns}title"))
+    entry_id = _text_or_empty(entry.find(f"{atom_ns}id"))
+    published = _text_or_empty(entry.find(f"{atom_ns}published")) or _text_or_empty(entry.find(f"{atom_ns}updated"))
+    summary = _text_or_empty(entry.find(f"{atom_ns}summary")) or _text_or_empty(entry.find(f"{atom_ns}content"))
+
+    link = ""
+    for link_node in entry.findall(f"{atom_ns}link"):
+        href = (link_node.attrib.get("href") or "").strip()
+        if not href:
+            continue
+        rel = (link_node.attrib.get("rel") or "alternate").strip().lower()
+        if rel == "alternate":
+            link = href
+            break
+        if not link:
+            link = href
+
+    return title, link, entry_id, published, summary
+
+
+def _append_entry(
+    *, parsed: tuple[str, str, str, str, str], normalized: list[RSSFeedEntry], seen_keys: set[str]
+) -> None:
+    title, link, source_id, published, summary = parsed
+
+    if not (title or link or source_id):
+        return
+
+    stable_key = "|".join((source_id, link, published)).strip().lower()
+    if not stable_key:
+        return
+    dedupe_key = sha256(stable_key.encode("utf-8", errors="ignore")).hexdigest()
+    if dedupe_key in seen_keys:
+        return
+    seen_keys.add(dedupe_key)
+
+    entry_id = source_id or dedupe_key
+    normalized.append(
+        RSSFeedEntry(
+            id=entry_id[:256],
+            title=title[:512],
+            link=link[:2048],
+            published=published[:256],
+            summary=summary[:2048],
+        )
+    )
 
 
 def _text_or_empty(node: ET.Element | None) -> str:

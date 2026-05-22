@@ -138,3 +138,45 @@ def test_fetch_parses_and_dedupes_entries() -> None:
     assert entry.id == "id-1"
     assert entry.title == "Title 1"
     assert entry.link == "https://example.org/1"
+
+
+ATOM_XML = b"""<?xml version=\"1.0\" encoding=\"utf-8\"?>
+<feed xmlns=\"http://www.w3.org/2005/Atom\">
+  <title>Atom Example</title>
+  <entry>
+    <id>tag:example.org,2026:1</id>
+    <title>Atom Entry 1</title>
+    <updated>2026-05-14T12:00:00Z</updated>
+    <link rel=\"alternate\" href=\"https://example.org/atom/1\" />
+    <summary>Atom Summary 1</summary>
+  </entry>
+  <entry>
+    <id>tag:example.org,2026:1</id>
+    <title>Atom Entry 1 duplicate</title>
+    <updated>2026-05-14T12:00:00Z</updated>
+    <link rel=\"alternate\" href=\"https://example.org/atom/1\" />
+    <summary>Atom Summary duplicate</summary>
+  </entry>
+</feed>
+"""
+
+
+def test_fetch_parses_atom_entries_and_dedupes() -> None:
+    req = _request()
+
+    def fake_http_get(url: str, timeout_seconds: float) -> RSSHTTPResponse:
+        return RSSHTTPResponse(status_code=200, body=ATOM_XML)
+
+    result = execute_rss_fetch(
+        request=req,
+        http_get=fake_http_get,
+        now_monotonic_seconds=2000.0,
+        last_fetch_monotonic_seconds=None,
+    )
+    assert result.result == CapabilityDecisionResult.ALLOW
+    assert result.reason_code == "ok"
+    assert len(result.entries) == 1
+    entry = result.entries[0]
+    assert entry.id == "tag:example.org,2026:1"
+    assert entry.title == "Atom Entry 1"
+    assert entry.link == "https://example.org/atom/1"
