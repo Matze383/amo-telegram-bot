@@ -103,6 +103,11 @@ test(memory): add retention policy tests
 - **Typisierung:** Type Hints wo sinnvoll
 - **Dokstrings:** Für öffentliche APIs
 
+### Plugin-Entwicklung
+
+Für **Userplugin-Entwicklung** siehe die ausführliche Anleitung:
+**[docs/USERPLUGINS.md](docs/USERPLUGINS.md)** — Enthält Manifest-Spezifikation, Capability-Referenz (`rss.fetch` etc.), Do/Don't-Regeln, Minimalbeispiel und KI-Richtlinien.
+
 **Vor dem Commit automatisch prüfen:**
 
 ```bash
@@ -270,6 +275,11 @@ test(memory): add retention policy tests
 - **Import style:** Grouped by stdlib, third-party, local
 - **Typing:** Type hints where sensible
 - **Docstrings:** For public APIs
+
+### Plugin Development
+
+For **userplugin development**, see the comprehensive guide:
+**[docs/USERPLUGINS.md](docs/USERPLUGINS.md)** — Contains manifest specification, capability reference (`rss.fetch` etc.), Do/Don't rules, minimal example, and AI guidelines.
 
 **Auto-check before commit:**
 

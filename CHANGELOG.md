@@ -57,6 +57,56 @@ This release makes image analysis practically usable in enabled Telegram topics 
 
 ---
 
+## [Unreleased] – RSS capability contracts and log redaction
+
+**Datum / Date:** 2026-05-22
+
+### 🇩🇪 Deutsch
+
+#### Übersicht
+Dieses Release verbessert die Audit-Trail-Sicherheit durch härtes Redaktion sensibler Daten in Logs und fügt saubere Capability-Verträge für RSS-Feed-Features hinzu. Neue Plugin-Entwickler-Dokumentation hilft bei der Erstellung sicherer Userplugins.
+
+#### Dokumentation
+- **Userplugin Development Guide:** Neue umfassende Anleitung für Plugin-Entwickler (`docs/USERPLUGINS.md`). Enthält Do/Don't-Struktur, Minimalbeispiel, Capability-Referenz (inkl. `rss.fetch`), Sicherheitsregeln und KI-spezifische Guidelines.
+
+#### Sicherheit & Privacy
+- **Sensitive Log Redaction:** Audit-Logs und Diagnose-Ausgaben enthalten keine sensiblen Daten mehr. Tokens, API-Keys und persönliche Identifikatoren werden automatisch redacted (`***`).
+- **Sichere Fehlerberichterstattung:** Fehler bei externen Aufrufen enthalten keine internen URLs oder Credentials mehr.
+
+#### Architektur / Interna
+- **RSS Capability Rename:** Umbenennung der RSS-Capability von `rss` zu `rss.fetch` für konsistente Namespacing-Semantik.
+- **RSS Core Contract:** Neuer `rss.fetch` Capability-Vertrag mit Request/Response-Validierung und Timeout-Defaults.
+- **RSS Policy Audit:** Policy-Prüfungen für RSS-Feeds mit Audit-Trail-Integration.
+- **RSS Plugin UI Contract:** Plugin-UI-Vertrag für RSS-Konfiguration über die WebUI.
+
+#### Migration
+- Plugins, die die `rss`-Capability verwenden, müssen auf `rss.fetch` migrieren.
+- Keine Breaking Changes für Endnutzer.
+
+### 🇬🇧 English
+
+#### Overview
+This release improves audit trail security through hardened redaction of sensitive data in logs and adds clean capability contracts for RSS feed features. New plugin developer documentation helps create secure userplugins.
+
+#### Documentation
+- **Userplugin Development Guide:** New comprehensive guide for plugin developers (`docs/USERPLUGINS.md`). Includes Do/Don't structure, minimal example, capability reference (including `rss.fetch`), security rules, and AI-specific guidelines.
+
+#### Security & Privacy
+- **Sensitive Log Redaction:** Audit logs and diagnostic outputs no longer contain sensitive data. Tokens, API keys, and personal identifiers are automatically redacted (`***`).
+- **Secure Error Reporting:** External call failures no longer include internal URLs or credentials.
+
+#### Architecture / Internal
+- **RSS Capability Rename:** Renamed RSS capability from `rss` to `rss.fetch` for consistent namespacing semantics.
+- **RSS Core Contract:** New `rss.fetch` capability contract with request/response validation and timeout defaults.
+- **RSS Policy Audit:** Policy checks for RSS feeds with audit trail integration.
+- **RSS Plugin UI Contract:** Plugin UI contract for RSS configuration via WebUI.
+
+#### Migration
+- Plugins using the `rss` capability must migrate to `rss.fetch`.
+- No breaking changes for end users.
+
+---
+
 ## [Unreleased] – IMG-B8 Runtime Role Quota Enforcement
 
 **Datum / Date:** 2026-05-21
