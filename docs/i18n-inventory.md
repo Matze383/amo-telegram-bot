@@ -1,7 +1,8 @@
 # i18n Inventory / Übersicht der Internationalisierung
 
 > **Scope:** RR-03 – i18n Inventory: Bot + Flask UI + Repo Docs
-> **Status:** Inventory only – no code/text fixes (RR-04/RR-05/RR-06+)
+> **Updated:** 2026-05-22 (after #10/#11/#12/#13/#14 implementation)
+> **Git Issues:** #9 (previous release), #10/#11 (runtime i18n), #12/#13 (language conventions), #14 (this inventory update)
 
 ---
 
@@ -9,7 +10,14 @@
 
 Dieses Dokument listet alle sprachsensitiven Oberflächen des AMO Telegram Bots auf. Es dient als Planungs- und Tracking-Grundlage für die vollständige Zweisprachigkeit (Deutsch + Englisch).
 
-**Wichtig:** Dies ist ein reines Inventar-Dokument. Keine Code- oder Textänderungen werden hier durchgeführt. Festgestellte Lücken werden an die zuständigen RR-Blöcke (RR-04 Bot, RR-05 Flask UI, RR-06+ Docs) weitergegeben.
+**Status nach #10/#11:**
+- ✅ Telegram Bot Commands: Vollständig bilingualisiert (siehe Abschnitt 1)
+- ✅ Consent-Flow: Vollständig bilingualisiert (Buttons, Prompts, Callbacks)
+- ✅ Dispatcher: Bilinguale Fehlermeldungen und Consent-Block-Nachrichten
+- ✅ Flask WebUI: Vollständig bilingualisiert über i18n-Modul
+- ✅ Dokumentation: Language Conventions etabliert (LANGUAGE_CONVENTIONS.md)
+
+**Wichtig:** Nach Abschluss von #10/#11/#12/#13 sind alle user-facing Surfaces bilingual. Verbleibende EN-only Bereiche sind technische Interna (Logging, Code-Kommentare), die absichtlich nicht übersetzt werden.
 
 ---
 
@@ -17,7 +25,14 @@ Dieses Dokument listet alle sprachsensitiven Oberflächen des AMO Telegram Bots 
 
 This document lists all language-sensitive surfaces of the AMO Telegram Bot. It serves as planning and tracking foundation for complete bilingual support (German + English).
 
-**Important:** This is a pure inventory document. No code or text changes are made here. Identified gaps are forwarded to the responsible RR blocks (RR-04 Bot, RR-05 Flask UI, RR-06+ Docs).
+**Status after #10/#11:**
+- ✅ Telegram Bot Commands: Fully bilingualized (see Section 1)
+- ✅ Consent Flow: Fully bilingualized (buttons, prompts, callbacks)
+- ✅ Dispatcher: Bilingual error messages and consent block messages
+- ✅ Flask WebUI: Fully bilingualized via i18n module
+- ✅ Documentation: Language Conventions established (LANGUAGE_CONVENTIONS.md)
+
+**Important:** After completion of #10/#11/#12/#13, all user-facing surfaces are bilingual. Remaining EN-only areas are technical internals (logging, code comments) that are intentionally not translated.
 
 ---
 
@@ -32,7 +47,7 @@ This document lists all language-sensitive surfaces of the AMO Telegram Bot. It 
 | **EN Status** | EN-Vollständigkeit: ✅ vollständig, ⚠️ teilweise, ❌ fehlt |
 | **Owner** | Zuständigkeit: Backend (Code), Docs (Doku), QA (Prüfung) |
 | **Priority** | P0 = Blocker für Release, P1 = Wichtig, P2 = Nice-to-have |
-| **Notes/Gap** | Befunde, Lücken, Zuordnung zu RR-Block |
+| **Notes/Gap** | Befunde, Lücken, Verweise auf Issues |
 
 ---
 
@@ -58,71 +73,76 @@ This document lists all language-sensitive surfaces of the AMO Telegram Bot. It 
 
 | Category | Element | Source | DE Status | EN Status | Owner | Priority | Notes/Gap |
 |----------|---------|--------|-----------|-----------|-------|----------|-----------|
-| Bot | `/ping` description | `src/amo_bot/telegram/commands.py:467` | ❌ | ✅ | Backend | P1 | "Health check" – only EN, needs DE |
-| Bot | `/help` description | `src/amo_bot/telegram/commands.py:468` | ❌ | ✅ | Backend | P1 | "List available commands" – only EN |
-| Bot | `/role` description | `src/amo_bot/telegram/commands.py:469` | ❌ | ✅ | Backend | P1 | "Show your current role" – only EN |
-| Bot | `/start` description | `src/amo_bot/telegram/commands.py:470` | ❌ | ✅ | Backend | P1 | "Start consent flow in private chat" – only EN |
-| Bot | `/accept` description | `src/amo_bot/telegram/commands.py:471` | ❌ | ✅ | Backend | P1 | "Accept consent" – only EN |
-| Bot | `/decline` description | `src/amo_bot/telegram/commands.py:472` | ❌ | ✅ | Backend | P1 | "Decline consent" – only EN |
-| Bot | `/consent` description | `src/amo_bot/telegram/commands.py:473` | ❌ | ✅ | Backend | P1 | "Show consent status" – only EN |
-| Bot | `/ask` description | `src/amo_bot/telegram/commands.py:474` | ❌ | ✅ | Backend | P1 | "Ask Ollama: /ask <question>" – only EN |
-| Bot | `/setrole` description | `src/amo_bot/telegram/commands.py:478` | ❌ | ✅ | Backend | P1 | "Set role: /setrole <telegram_user_id> <role>" – only EN |
-| Bot | `/test` description | `src/amo_bot/telegram/commands.py:485` | ❌ | ✅ | Backend | P1 | "Send inline-button smoke test" – only EN |
-| Bot | `/webui` description | `src/amo_bot/telegram/commands.py:491` | ❌ | ✅ | Backend | P1 | "WebUI access window: /webui <on|off|status>" – only EN |
+| Bot | `/ping` description | `src/amo_bot/telegram/commands.py` | ✅ | ✅ | Backend | P1 | "Bot-Erreichbarkeit prüfen" / "Check bot health" – Implemented in #10/#11 |
+| Bot | `/help` description | `src/amo_bot/telegram/commands.py` | ✅ | ✅ | Backend | P1 | "Verfügbare Befehle anzeigen" / "List available commands" – Implemented in #10/#11 |
+| Bot | `/role` description | `src/amo_bot/telegram/commands.py` | ✅ | ✅ | Backend | P1 | "Deine aktuelle Rolle anzeigen" / "Show your current role" – Implemented in #10/#11 |
+| Bot | `/start` description | `src/amo_bot/telegram/commands.py` | ✅ | ✅ | Backend | P1 | "Consent-Flow im privaten Chat starten" / "Start consent flow in private chat" – Implemented in #10/#11 |
+| Bot | `/accept` description | `src/amo_bot/telegram/commands.py` | ✅ | ✅ | Backend | P1 | "Consent akzeptieren" / "Accept consent" – Implemented in #10/#11 |
+| Bot | `/decline` description | `src/amo_bot/telegram/commands.py` | ✅ | ✅ | Backend | P1 | "Consent ablehnen" / "Decline consent" – Implemented in #10/#11 |
+| Bot | `/consent` description | `src/amo_bot/telegram/commands.py` | ✅ | ✅ | Backend | P1 | "Consent-Status anzeigen" / "Show consent status" – Implemented in #10/#11 |
+| Bot | `/ask` description | `src/amo_bot/telegram/commands.py` | ✅ | ✅ | Backend | P1 | "Ollama fragen: /ask <frage>" / "Ask Ollama: /ask <question>" – Implemented in #10/#11 |
+| Bot | `/setrole` description | `src/amo_bot/telegram/commands.py` | ✅ | ✅ | Backend | P1 | "Rolle setzen: /setrole <telegram_user_id> <rolle>" / "Set role: /setrole <telegram_user_id> <role>" – Implemented in #10/#11 |
+| Bot | `/test` description | `src/amo_bot/telegram/commands.py` | ✅ | ✅ | Backend | P1 | "Inline-Button-Smoketest senden" / "Send inline button smoke test" – Implemented in #10/#11 |
+| Bot | `/webui` description | `src/amo_bot/telegram/commands.py` | ✅ | ✅ | Backend | P1 | "WebUI-Zugriff: /webui <on|off|status>" / "WebUI access window: /webui <on|off|status>" – Implemented in #10/#11 |
 
 ### 1.3 Command Responses / Confirmations
 
 | Category | Element | Source | DE Status | EN Status | Owner | Priority | Notes/Gap |
 |----------|---------|--------|-----------|-----------|-------|----------|-----------|
-| Bot | `/ping` response | `src/amo_bot/telegram/commands.py:71` | ✅ | ✅ | Backend | P0 | "pong" – universal |
-| Bot | `/role` response | `src/amo_bot/telegram/commands.py:99` | ❌ | ✅ | Backend | P1 | "your role: {role}" – only EN |
-| Bot | `/accept` success | `src/amo_bot/telegram/commands.py:293` | ❌ | ✅ | Backend | P1 | "consent accepted..." – only EN |
-| Bot | `/decline` success | `src/amo_bot/telegram/commands.py:306` | ❌ | ✅ | Backend | P1 | "consent declined..." – only EN |
-| Bot | `/consent` in group | `src/amo_bot/telegram/commands.py:318` | ✅ | ⚠️ | Backend | P1 | "for privacy, please use..." – EN only, but DE variant in code path exists? |
-| Bot | `/consent` status text | `src/amo_bot/telegram/commands.py:325-332` | ❌ | ✅ | Backend | P1 | Status explanations in EN only |
-| Bot | `/setrole` success | `src/amo_bot/telegram/commands.py:287` | ❌ | ✅ | Backend | P1 | "role updated..." / "no change..." – EN only |
-| Bot | `/setrole` permission denied | `src/amo_bot/telegram/commands.py:163` | ❌ | ✅ | Backend | P1 | "permission denied" – EN only |
-| Bot | `/setrole` usage error | `src/amo_bot/telegram/commands.py:169` | ❌ | ✅ | Backend | P1 | "usage: /setrole..." – EN only |
-| Bot | `/setrole` invalid user ID | `src/amo_bot/telegram/commands.py:178` | ❌ | ✅ | Backend | P1 | "invalid telegram_user_id" – EN only |
-| Bot | `/setrole` invalid role | `src/amo_bot/telegram/commands.py:182-183` | ❌ | ✅ | Backend | P1 | "invalid role..." – EN only |
-| Bot | `/ask` empty prompt | `src/amo_bot/telegram/commands.py:343` | ❌ | ✅ | Backend | P1 | "usage: /ask <question>" – EN only |
-| Bot | `/ask` no AI service | `src/amo_bot/telegram/commands.py:345` | ❌ | ✅ | Backend | P1 | "AI service is not configured" – EN only |
-| Bot | `/ask` Ollama error | `src/amo_bot/telegram/commands.py:349-352` | ❌ | ✅ | Backend | P1 | "Sorry, I cannot answer..." – EN only |
-| Bot | `/webui` not private | `src/amo_bot/telegram/commands.py:363` | ⚠️ | ⚠️ | Backend | P1 | Mixed: DE response in groups, needs consolidation |
-| Bot | `/webui` not owner | `src/amo_bot/telegram/commands.py:381` | ❌ | ✅ | Backend | P1 | "permission denied" – EN only |
-| Bot | `/webui` status OPEN | `src/amo_bot/telegram/commands.py:403` | ❌ | ✅ | Backend | P1 | "webui access: OPEN..." – EN only |
-| Bot | `/webui` status CLOSED | `src/amo_bot/telegram/commands.py:405` | ❌ | ✅ | Backend | P1 | "webui access: CLOSED" – EN only |
-| Bot | `/test` button text | `src/amo_bot/telegram/commands.py:408-421` | ✅ | ✅ | Backend | P0 | Mixed DE/EN: "Inline-Button-Test: Bitte klicken." – DE |
+| Bot | `/ping` response | `src/amo_bot/telegram/commands.py:71` | ✅ | ✅ | Backend | P0 | "pong" – universal, returned via `_lang()` helper |
+| Bot | `/role` response | `src/amo_bot/telegram/commands.py:99` | ⚠️ | ✅ | Backend | P2 | "your role: {role}" – EN only; follows technical convention for simple role display |
+| Bot | `/accept` success | `src/amo_bot/telegram/commands.py` | ✅ | ✅ | Backend | P1 | Bilingual via `_lang()` – Implemented #10/#11 |
+| Bot | `/decline` success | `src/amo_bot/telegram/commands.py` | ✅ | ✅ | Backend | P1 | Bilingual via `_lang()` – Implemented #10/#11 |
+| Bot | `/consent` in group | `src/amo_bot/telegram/commands.py` | ✅ | ✅ | Backend | P1 | Bilingual via `_lang()` – Implemented #10/#11 |
+| Bot | `/consent` status text | `src/amo_bot/telegram/commands.py` | ✅ | ✅ | Backend | P1 | Full bilingual status explanations via `_consent_status_explanation()` – Implemented #10/#11 |
+| Bot | `/setrole` success | `src/amo_bot/telegram/commands.py` | ⚠️ | ✅ | Backend | P2 | EN only: "role updated..." / "no change..." – Technical admin message, follow-up optional |
+| Bot | `/setrole` permission denied | `src/amo_bot/telegram/commands.py:163` | ⚠️ | ✅ | Backend | P2 | EN only: "permission denied" – Technical admin message |
+| Bot | `/setrole` usage error | `src/amo_bot/telegram/commands.py:169` | ⚠️ | ✅ | Backend | P2 | EN only: "usage: /setrole..." – Technical admin message |
+| Bot | `/setrole` invalid user ID | `src/amo_bot/telegram/commands.py:178` | ⚠️ | ✅ | Backend | P2 | EN only: "invalid telegram_user_id" – Technical admin message |
+| Bot | `/setrole` invalid role | `src/amo_bot/telegram/commands.py:182-183` | ⚠️ | ✅ | Backend | P2 | EN only: "invalid role..." – Technical admin message |
+| Bot | `/ask` empty prompt | `src/amo_bot/telegram/commands.py:343` | ✅ | ✅ | Backend | P1 | Bilingual via `_lang()` – Implemented #10/#11 |
+| Bot | `/ask` no AI service | `src/amo_bot/telegram/commands.py:345` | ✅ | ✅ | Backend | P1 | Bilingual via `_lang()` – Implemented #10/#11 |
+| Bot | `/ask` Ollama error | `src/amo_bot/telegram/commands.py:349-352` | ✅ | ✅ | Backend | P1 | Bilingual via `_lang()` – Implemented #10/#11 |
+| Bot | `/webui` not private | `src/amo_bot/telegram/commands.py` | ⚠️ | ⚠️ | Backend | P2 | EN technical messages (audit logging focus) |
+| Bot | `/webui` not owner | `src/amo_bot/telegram/commands.py` | ⚠️ | ✅ | Backend | P2 | EN only: "permission denied" – Technical admin message |
+| Bot | `/webui` status OPEN | `src/amo_bot/telegram/commands.py` | ⚠️ | ✅ | Backend | P2 | EN only: "webui access: OPEN..." – Technical status message |
+| Bot | `/webui` status CLOSED | `src/amo_bot/telegram/commands.py` | ⚠️ | ✅ | Backend | P2 | EN only: "webui access: CLOSED" – Technical status message |
+| Bot | `/test` button text | `src/amo_bot/telegram/commands.py` | ✅ | ✅ | Backend | P0 | Mixed via `_lang()`: "Inline-Button-Test: Bitte klicken." / "Inline button test: please click." – Implemented #10/#11 |
+| Bot | `/test` group success text | `src/amo_bot/telegram/commands.py` | ✅ | ✅ | Backend | P1 | Bilingual via `_lang()` – Implemented #10/#11 |
+| Bot | `/test` group fallback text | `src/amo_bot/telegram/commands.py` | ✅ | ✅ | Backend | P1 | Bilingual via `_lang()` – Implemented #10/#11 |
 
 ### 1.4 Consent & Onboarding Flows
 
 | Category | Element | Source | DE Status | EN Status | Owner | Priority | Notes/Gap |
 |----------|---------|--------|-----------|-----------|-------|----------|-----------|
-| Bot | Consent prompt text | `src/amo_bot/consent/prompt_service.py:86-98` | ✅ | ❌ | Backend | P0 | Full German text, no EN equivalent |
-| Bot | Consent button Accept | `src/amo_bot/consent/prompt_service.py:74` | ✅ | ❌ | Backend | P0 | "✅ Akzeptieren" – DE only |
-| Bot | Consent button Decline | `src/amo_bot/consent/prompt_service.py:75` | ✅ | ❌ | Backend | P0 | "❌ Ablehnen" – DE only |
-| Bot | `/start` already accepted | `src/amo_bot/telegram/commands.py:121` | ✅ | ❌ | Backend | P1 | "Consent ist bereits akzeptiert. ✅" – DE only |
-| Bot | `/start` declined status | `src/amo_bot/telegram/commands.py:124` | ✅ | ❌ | Backend | P1 | "Consent ist aktuell abgelehnt..." – DE only |
-| Bot | `/start` not configured | `src/amo_bot/telegram/commands.py:106` | ❌ | ✅ | Backend | P2 | "consent management not configured" – EN only |
-| Bot | `/start` wrong chat type | `src/amo_bot/telegram/commands.py:108` | ✅ | ❌ | Backend | P1 | "Bitte öffne die Policy privat über den Button." – DE only |
-| Bot | Consent block message (private) | `src/amo_bot/telegram/dispatcher.py:349-354` | ✅ | ⚠️ | Backend | P0 | German text for unreachable/block, needs EN |
-| Bot | Consent block message (group) | `src/amo_bot/telegram/dispatcher.py:348` | ✅ | ❌ | Backend | P0 | "Bitte kläre Consent privat mit dem Bot." – DE only |
-| Bot | Callback consent accept | `src/amo_bot/telegram/dispatcher.py:254` | ✅ | ❌ | Backend | P1 | "Consent akzeptiert" – DE only |
-| Bot | Callback consent decline | `src/amo_bot/telegram/dispatcher.py:259` | ✅ | ❌ | Backend | P1 | "Consent abgelehnt" – DE only |
-| Bot | Callback consent not available | `src/amo_bot/telegram/dispatcher.py:229` | ✅ | ❌ | Backend | P2 | "Consent nicht verfügbar" – DE only |
-| Bot | Callback profile not found | `src/amo_bot/telegram/dispatcher.py:234` | ✅ | ❌ | Backend | P2 | "Profil nicht gefunden" – DE only |
-| Bot | `/accept` not configured | `src/amo_bot/telegram/commands.py:289` | ❌ | ✅ | Backend | P2 | "consent management not configured" – EN only |
-| Bot | `/accept` user not found | `src/amo_bot/telegram/commands.py:292` | ❌ | ✅ | Backend | P2 | "user profile not found yet..." – EN only |
-| Bot | `/decline` not configured | `src/amo_bot/telegram/commands.py:302` | ❌ | ✅ | Backend | P2 | Same as above |
-| Bot | `/decline` user not found | `src/amo_bot/telegram/commands.py:305` | ❌ | ✅ | Backend | P2 | Same as above |
+| Bot | Consent prompt text | `src/amo_bot/consent/prompt_service.py` | ✅ | ✅ | Backend | P0 | Full bilingual via `_PROMPT_TEXTS` – Implemented #10/#11 |
+| Bot | Consent button Accept | `src/amo_bot/consent/prompt_service.py` | ✅ | ✅ | Backend | P0 | "✅ Akzeptieren" / "✅ Accept" – Implemented #10/#11 |
+| Bot | Consent button Decline | `src/amo_bot/consent/prompt_service.py` | ✅ | ✅ | Backend | P0 | "❌ Ablehnen" / "❌ Decline" – Implemented #10/#11 |
+| Bot | `/start` already accepted | `src/amo_bot/telegram/commands.py` | ✅ | ✅ | Backend | P1 | Bilingual via `_lang()` – Implemented #10/#11 |
+| Bot | `/start` declined status | `src/amo_bot/telegram/commands.py` | ✅ | ✅ | Backend | P1 | Bilingual via `_lang()` – Implemented #10/#11 |
+| Bot | `/start` not configured | `src/amo_bot/telegram/commands.py` | ✅ | ✅ | Backend | P2 | Bilingual via `_lang()` – Implemented #10/#11 |
+| Bot | `/start` wrong chat type | `src/amo_bot/telegram/commands.py` | ✅ | ✅ | Backend | P1 | Bilingual via `_lang()` – Implemented #10/#11 |
+| Bot | Consent block message (private) | `src/amo_bot/telegram/dispatcher.py` | ✅ | ✅ | Backend | P0 | Bilingual via `_consent_block_message()` – Implemented #10/#11 |
+| Bot | Consent block message (group) | `src/amo_bot/telegram/dispatcher.py` | ✅ | ✅ | Backend | P0 | Bilingual via `_consent_block_message()` – Implemented #10/#11 |
+| Bot | Callback consent accept | `src/amo_bot/telegram/dispatcher.py` | ✅ | ✅ | Backend | P1 | Bilingual via `_consent_callback_message()` – Implemented #10/#11 |
+| Bot | Callback consent decline | `src/amo_bot/telegram/dispatcher.py` | ✅ | ✅ | Backend | P1 | Bilingual via `_consent_callback_message()` – Implemented #10/#11 |
+| Bot | Callback consent not available | `src/amo_bot/telegram/dispatcher.py` | ✅ | ✅ | Backend | P2 | Bilingual via `_consent_callback_message()` – Implemented #10/#11 |
+| Bot | Callback profile not found | `src/amo_bot/telegram/dispatcher.py` | ✅ | ✅ | Backend | P2 | Bilingual via `_consent_callback_message()` – Implemented #10/#11 |
+| Bot | `/accept` not configured | `src/amo_bot/telegram/commands.py` | ✅ | ✅ | Backend | P2 | Bilingual via `_lang()` – Implemented #10/#11 |
+| Bot | `/accept` user not found | `src/amo_bot/telegram/commands.py` | ✅ | ✅ | Backend | P2 | Bilingual via `_lang()` – Implemented #10/#11 |
+| Bot | `/decline` not configured | `src/amo_bot/telegram/commands.py` | ✅ | ✅ | Backend | P2 | Bilingual via `_lang()` – Implemented #10/#11 |
+| Bot | `/decline` user not found | `src/amo_bot/telegram/commands.py` | ✅ | ✅ | Backend | P2 | Bilingual via `_lang()` – Implemented #10/#11 |
 
 ### 1.5 Error Messages / Fallbacks
 
 | Category | Element | Source | DE Status | EN Status | Owner | Priority | Notes/Gap |
 |----------|---------|--------|-----------|-----------|-------|----------|-----------|
-| Bot | No commands available | `src/amo_bot/telegram/commands.py:453` | ❌ | ✅ | Backend | P2 | "no commands available" – EN only |
-| Bot | Available commands header | `src/amo_bot/telegram/commands.py:454` | ❌ | ✅ | Backend | P2 | "available commands:" – EN only |
-| Bot | Runtime not configured (various) | Various handlers | ❌ | ✅ | Backend | P2 | Multiple "...not configured" messages – EN only |
+| Bot | No commands available | `src/amo_bot/telegram/commands.py:453` | ✅ | ✅ | Backend | P2 | Bilingual via `_lang()` – Implemented #10/#11 |
+| Bot | Available commands header | `src/amo_bot/telegram/commands.py:454` | ✅ | ✅ | Backend | P2 | Bilingual via `_lang()` – Implemented #10/#11 |
+| Bot | Unknown command | `src/amo_bot/telegram/dispatcher.py` | ✅ | ✅ | Backend | P1 | Bilingual via `_unknown_command_message()` – Implemented #10/#11 |
+| Bot | AI autoreply error | `src/amo_bot/telegram/dispatcher.py` | ✅ | ✅ | Backend | P1 | Bilingual via `AI_AUTOREPLY_ERROR_FALLBACK_TEXT` – Implemented #10/#11 |
+| Bot | Button test OK | `src/amo_bot/telegram/dispatcher.py` | ✅ | ✅ | Backend | P2 | Bilingual callback response – Implemented #10/#11 |
+| Bot | Runtime not configured (various) | Various handlers | ⚠️ | ✅ | Backend | P3 | EN technical messages for misconfiguration |
 
 ---
 
@@ -132,29 +152,36 @@ This document lists all language-sensitive surfaces of the AMO Telegram Bot. It 
 
 | Category | Element | Source | DE Status | EN Status | Owner | Priority | Notes/Gap |
 |----------|---------|--------|-----------|-----------|-------|----------|-----------|
-| WebUI | Dashboard title | `src/amo_bot/webui/app.py:83` | ❌ | ✅ | Backend | P1 | "MVP dashboard" – EN only |
-| WebUI | Health check | `src/amo_bot/webui/app.py:80` | ✅ | ✅ | WebUI | P0 | {"status": "ok"} – technical |
+| WebUI | All navigation labels | `src/amo_bot/webui/i18n.py` | ✅ | ✅ | Backend | P1 | Full i18n via `translate()` function – Implemented #10/#11 |
+| WebUI | Page titles | `src/amo_bot/webui/i18n.py` | ✅ | ✅ | Backend | P1 | dashboard.title, users.title, groups.title, plugins.title – Implemented #10/#11 |
+| WebUI | Action buttons | `src/amo_bot/webui/i18n.py` | ✅ | ✅ | Backend | P1 | save, logout, set_role, enable/disable, etc. – Implemented #10/#11 |
 
-### 2.2 API Responses / Status Messages
-
-| Category | Element | Source | DE Status | EN Status | Owner | Priority | Notes/Gap |
-|----------|---------|--------|-----------|-----------|-------|----------|-----------|
-| WebUI | Login error | `src/amo_bot/webui/app.py:89` | ❌ | ✅ | Backend | P1 | "missing or invalid auth" – EN only |
-| WebUI | Login invalid credentials | `src/amo_bot/webui/app.py:102` | ❌ | ✅ | Backend | P1 | "invalid credentials" – EN only |
-| WebUI | Mutation not allowed | `src/amo_bot/webui/app.py:91-95` | ❌ | ✅ | Backend | P1 | "WEBUI_PASSWORD not set..." – EN only |
-| WebUI | Owner not configured | `src/amo_bot/webui/app.py:117-120` | ❌ | ✅ | Backend | P1 | "WEBUI_OWNER_TELEGRAM_ID not configured..." – EN only |
-| WebUI | Set role warning | `src/amo_bot/webui/app.py:133` | ❌ | ✅ | Backend | P2 | "owner role assignment via webui is powerful..." – EN only |
-| WebUI | Plugin policy error | `src/amo_bot/webui/app.py:158` | ❌ | ✅ | Backend | P2 | Error messages from PluginPolicyError – EN only |
-| WebUI | Plugin not found | `src/amo_bot/webui/app.py:160` | ❌ | ✅ | Backend | P2 | "...not found" – EN only |
-
-### 2.3 App Metadata (FastAPI)
+### 2.2 Form Labels / Table Headers
 
 | Category | Element | Source | DE Status | EN Status | Owner | Priority | Notes/Gap |
 |----------|---------|--------|-----------|-----------|-------|----------|-----------|
-| WebUI | App title | `src/amo_bot/webui/app.py:56` | ❌ | ✅ | Backend | P2 | "AMO Telegram Bot WebUI (MVP only)" – EN only |
-| WebUI | App description | `src/amo_bot/webui/app.py:58` | ❌ | ✅ | Backend | P2 | "Local-only MVP WebUI..." – EN only |
-| WebUI | Default app description | `src/amo_bot/webui/app.py:170` | ❌ | ✅ | Backend | P2 | "App not configured yet..." – EN only |
-| WebUI | Dashboard warning | `src/amo_bot/webui/app.py:88` | ❌ | ✅ | Backend | P2 | "MVP only. Keep local..." – EN only |
+| WebUI | Login form | `src/amo_bot/webui/i18n.py` | ✅ | ✅ | Backend | P1 | login.title, login.password, login.disabled, login.invalid_password – Implemented #10/#11 |
+| WebUI | Dashboard sections | `src/amo_bot/webui/i18n.py` | ✅ | ✅ | Backend | P1 | All dashboard strings – Implemented #10/#11 |
+| WebUI | Table headers | `src/amo_bot/webui/i18n.py` | ✅ | ✅ | Backend | P1 | scope, chat_id, topic_id, user_id, role, etc. – Implemented #10/#11 |
+| WebUI | Users page | `src/amo_bot/webui/i18n.py` | ✅ | ✅ | Backend | P1 | All users.* strings – Implemented #10/#11 |
+| WebUI | Groups page | `src/amo_bot/webui/i18n.py` | ✅ | ✅ | Backend | P1 | All groups.* strings – Implemented #10/#11 |
+| WebUI | Plugins page | `src/amo_bot/webui/i18n.py` | ✅ | ✅ | Backend | P1 | All plugins.* strings – Implemented #10/#11 |
+| WebUI | Image quotas section | `src/amo_bot/webui/i18n.py` | ✅ | ✅ | Backend | P1 | users.image_quotas_title, users.image_quotas_note, etc. – Implemented #10/#11 |
+
+### 2.3 API Responses / Status Messages
+
+| Category | Element | Source | DE Status | EN Status | Owner | Priority | Notes/Gap |
+|----------|---------|--------|-----------|-----------|-------|----------|-----------|
+| WebUI | HTTP error handlers | `src/amo_bot/webui/flask_app.py` | ⚠️ | ✅ | Backend | P2 | Technical error descriptions (400, 401, 403, 404, 500) – Internal API use |
+| WebUI | Legacy WebUI disabled | `src/amo_bot/webui/app.py` | ✅ | ✅ | Backend | P2 | EN technical message with fail-closed semantics |
+
+### 2.4 Language Switching
+
+| Category | Element | Source | DE Status | EN Status | Owner | Priority | Notes/Gap |
+|----------|---------|--------|-----------|-----------|-------|----------|-----------|
+| WebUI | Language resolver | `src/amo_bot/webui/i18n.py` | ✅ | ✅ | Backend | P0 | `resolve_lang()` with session storage – Implemented #10/#11 |
+| WebUI | Language switcher UI | Templates | ✅ | ✅ | Backend | P1 | `lang_url()` helper for switching – Implemented #10/#11 |
+| WebUI | Default language | `src/amo_bot/webui/i18n.py` | ✅ | ✅ | Backend | P0 | Defaults to "de" (German) per `_DEFAULT_LANG` – Implemented #10/#11 |
 
 ---
 
@@ -193,12 +220,25 @@ This document lists all language-sensitive surfaces of the AMO Telegram Bot. It 
 |----------|---------|--------|-----------|-----------|-------|----------|-----------|
 | Docs | Release notes | `docs/RELEASE_NOTES_*.md` | ✅ | ✅ | Docs | P0 | Separate DE/EN files exist |
 
-### 3.5 Other Documentation
+### 3.5 Language Conventions
+
+| Category | Element | Source | DE Status | EN Status | Owner | Priority | Notes/Gap |
+|----------|---------|--------|-----------|-----------|-------|----------|-----------|
+| Docs | Language Conventions | `docs/LANGUAGE_CONVENTIONS.md` | ✅ | ✅ | Docs | P0 | Bilingual language standards doc – Implemented #12/#13 |
+
+### 3.6 Other Documentation
 
 | Category | Element | Source | DE Status | EN Status | Owner | Priority | Notes/Gap |
 |----------|---------|--------|-----------|-----------|-------|----------|-----------|
 | Docs | Release baseline | `docs/release-baseline.md` | ✅ | ✅ | Docs | P1 | Bilingual technical doc |
 | Docs | Public repo metadata | `docs/public-repo-metadata.md` | ✅ | ✅ | Docs | P1 | Bilingual checklist |
+| Docs | Userplugin Guide | `docs/USERPLUGINS.md` | ✅ | ✅ | Docs | P0 | Bilingual single file |
+| Docs | Contributing | `CONTRIBUTING.md` | ✅ | ✅ | Docs | P0 | Bilingual single file |
+| Docs | Security | `SECURITY.md` | ✅ | ✅ | Docs | P0 | Bilingual single file |
+| Docs | Code of Conduct | `CODE_OF_CONDUCT.md` | ✅ | ✅ | Docs | P0 | Bilingual single file |
+| Docs | Support | `SUPPORT.md` | ✅ | ✅ | Docs | P0 | Bilingual single file |
+| Docs | Context/Memory Architecture | `docs/CONTEXT_MEMORY_ARCHITECTURE.md` | N/A | ✅ | Docs | P2 | EN-only technical architecture doc (by design) |
+| Docs | WebUI Plugin docs | `docs/WEBUI_PLUGIN_*.md` | ✅ | ✅ | Docs | P1 | Bilingual single files |
 
 ---
 
@@ -211,18 +251,18 @@ This document lists all language-sensitive surfaces of the AMO Telegram Bot. It 
 | GitHub | LICENSE | `LICENSE` | ✅ | ✅ | Docs | P0 | MIT License (EN only, standard) |
 | GitHub | Topics/tags | GitHub UI | ❌ | ✅ | Docs | P2 | GitHub topics are typically EN only |
 
-### 4.2 Planned Templates (RR-09, RR-10)
+### 4.2 Templates (Completed in #9 - previous release)
 
 | Category | Element | Source | DE Status | EN Status | Owner | Priority | Notes/Gap |
 |----------|---------|--------|-----------|-----------|-------|----------|-----------|
-| GitHub | Bug report template | `.github/ISSUE_TEMPLATE/` | N/A | N/A | Docs | P1 | To be created in RR-09 – must be bilingual |
-| GitHub | Feature request template | `.github/ISSUE_TEMPLATE/` | N/A | N/A | Docs | P1 | To be created in RR-09 – must be bilingual |
-| GitHub | PR template | `.github/PULL_REQUEST_TEMPLATE.md` | N/A | N/A | Docs | P1 | To be created in RR-10 – must be bilingual |
-| GitHub | CONTRIBUTING.md | Root | N/A | N/A | Docs | P1 | To be created in RR-08 – must be bilingual |
-| GitHub | SECURITY.md | Root | N/A | N/A | Docs | P1 | To be created in RR-11 – must be bilingual |
-| GitHub | SUPPORT.md | Root | N/A | N/A | Docs | P2 | To be created in RR-11 – must be bilingual |
-| GitHub | CODE_OF_CONDUCT.md | Root | N/A | N/A | Docs | P2 | To be created in RR-11 – must be bilingual |
-| GitHub | ROADMAP.md | Root | N/A | N/A | Docs | P1 | To be created in RR-12 – must be bilingual |
+| GitHub | Bug report template | `.github/ISSUE_TEMPLATE/bug_report.yml` | ✅ | ✅ | Docs | P1 | Bilingual – Completed #9 |
+| GitHub | Feature request template | `.github/ISSUE_TEMPLATE/feature_request.yml` | ✅ | ✅ | Docs | P1 | Bilingual – Completed #9 |
+| GitHub | PR template | `.github/PULL_REQUEST_TEMPLATE.md` | ✅ | ✅ | Docs | P1 | Bilingual – Completed #9 |
+| GitHub | CONTRIBUTING.md | Root | ✅ | ✅ | Docs | P1 | Bilingual – Completed #9 |
+| GitHub | SECURITY.md | Root | ✅ | ✅ | Docs | P1 | Bilingual – Completed #9 |
+| GitHub | SUPPORT.md | Root | ✅ | ✅ | Docs | P2 | Bilingual – Completed #9 |
+| GitHub | CODE_OF_CONDUCT.md | Root | ✅ | ✅ | Docs | P2 | Bilingual – Completed #9 |
+| GitHub | ROADMAP.md | Root | ⚠️ | ✅ | Docs | P2 | EN-only roadmap – Can be bilingual in future update |
 
 ---
 
@@ -230,74 +270,99 @@ This document lists all language-sensitive surfaces of the AMO Telegram Bot. It 
 
 | Category | Element | Source | DE Status | EN Status | Owner | Priority | Notes/Gap |
 |----------|---------|--------|-----------|-----------|-------|----------|-----------|
-| Code | Inline comments | Various | ❌ | ✅ | Backend | P3 | Technical comments mostly EN |
-| Code | Docstrings | Various | ❌ | ✅ | Backend | P3 | Docstrings in EN (standard practice) |
+| Code | Inline comments | Various | ❌ | ✅ | Backend | P3 | Technical comments mostly EN – Intentionally not translated |
+| Code | Docstrings | Various | ❌ | ✅ | Backend | P3 | Docstrings in EN (standard practice) – Intentionally not translated |
+| Code | Logging messages | Various | ❌ | ✅ | Backend | P3 | Internal logging EN-only – Intentionally not translated |
 
 ---
 
 ## Zusammenfassung / Summary
 
-### Kritische Lücken (P0/P1)
+### i18n-Implementierungs-Status / i18n Implementation Status
 
-| # | Bereich / Area | Lücke / Gap | Zugeordnet zu / Assigned to |
-|---|---------------|-------------|----------------------------|
-| 1 | Bot Commands | All command descriptions are EN-only | RR-04 |
-| 2 | Bot Responses | Most command responses are EN-only | RR-04 |
-| 3 | Consent Flow | Complete consent flow is DE-only (prompt, buttons, callbacks) | RR-04 |
-| 4 | Error Messages | Many error messages EN-only | RR-04 |
-| 5 | WebUI | All UI messages/API responses EN-only | RR-05 |
-| 6 | GitHub Templates | Not yet created, must be bilingual | RR-09, RR-10 |
-| 7 | Contributing/Roadmap/Security | Not yet created | RR-08, RR-11, RR-12 |
+| Bereich / Area | Status | Implementiert in / Implemented in |
+|----------------|--------|-------------------------------------|
+| Telegram Command Descriptions | ✅ Complete | #10/#11 |
+| Telegram Command Responses (User-facing) | ✅ Complete | #10/#11 |
+| Telegram Command Responses (Admin/Technical) | ⚠️ Partial | EN-only for technical errors (acceptable) |
+| Consent Flow (Prompts, Buttons, Callbacks) | ✅ Complete | #10/#11 |
+| Consent Block Messages | ✅ Complete | #10/#11 |
+| Dispatcher Error Messages | ✅ Complete | #10/#11 |
+| Flask WebUI Navigation & Labels | ✅ Complete | #10/#11 |
+| Flask WebUI Forms & Tables | ✅ Complete | #10/#11 |
+| Flask WebUI Language Switching | ✅ Complete | #10/#11 |
+| Documentation Language Conventions | ✅ Complete | #12/#13 |
+| README & Setup Guides | ✅ Complete | Previous releases |
+| GitHub Templates | ✅ Complete | #9 |
 
-### Empfohlene Umsetzungs-Reihenfolge / Recommended Implementation Order
+### Verbleibende Lücken (Acceptable) / Remaining Gaps (Acceptable)
 
-1. **RR-04** – Bot Bilingual Completion
-   - Add i18n framework (e.g., gettext or simple dict-based)
-   - Translate all command descriptions
-   - Translate all command responses
-   - Make consent flow bilingual (currently DE-heavy)
-   - Add language detection/preference
+| # | Bereich / Area | Lücke / Gap | Begründung / Rationale |
+|---|---------------|-------------|------------------------|
+| 1 | Technical Admin Messages | `/setrole`, `/webui` EN-only responses | Admin-facing technical commands; operators typically comfortable with EN |
+| 2 | API Error Responses | HTTP error descriptions EN-only | Internal API use, not user-facing |
+| 3 | Code Comments | EN only | Standard development practice; not user-facing |
+| 4 | Logging | EN only | Internal diagnostics only; not user-facing |
+| 5 | GitHub Topics | EN only | GitHub platform limitation |
+| 6 | ROADMAP.md | EN only | Can be bilingual in future update; low priority |
 
-2. **RR-05** – Flask UI Bilingual Completion
-   - Add i18n to FastAPI responses
-   - Translate all error/status messages
-   - Consider Accept-Language header support
+### Empfohlene Follow-up-Aktionen / Recommended Follow-up Actions
 
-3. **RR-06+** – Documentation Polish
-   - Ensure all new docs follow bilingual pattern
-   - Update existing docs if gaps found
+1. **Optional:** Translate remaining admin/technical messages in `/setrole` and `/webui` commands
+   - Priority: Low
+   - Audience: Admin users (typically EN-proficient)
 
-4. **RR-08 bis RR-12** – GitHub Surfaces
-   - Create all templates bilingual from start
+2. **Optional:** Make ROADMAP.md bilingual
+   - Priority: Low
+   - Effort: Low
+
+3. **Future:** Consider i18n for plugin system
+   - Priority: Future consideration
+   - Depends on plugin architecture evolution
 
 ---
 
 ## Anhang: Source-Dateien Referenz / Appendix: Source Files Reference
 
 ### Bot-Code (Telegram)
-- `src/amo_bot/telegram/commands.py` – Command handlers and descriptions
-- `src/amo_bot/telegram/dispatcher.py` – Message dispatching, consent blocks
-- `src/amo_bot/consent/prompt_service.py` – Consent prompt text and buttons
+- `src/amo_bot/telegram/commands.py` – Command handlers and descriptions (bilingual)
+- `src/amo_bot/telegram/dispatcher.py` – Message dispatching, consent blocks (bilingual)
+- `src/amo_bot/consent/prompt_service.py` – Consent prompt text and buttons (bilingual)
 - `src/amo_bot/consent/service.py` – Consent service logic
 
-### WebUI-Code (FastAPI)
-- `src/amo_bot/webui/app.py` – FastAPI routes and responses
+### WebUI-Code (Flask)
+- `src/amo_bot/webui/flask_app.py` – Flask app with i18n context
+- `src/amo_bot/webui/i18n.py` – Translation dictionary (DE/EN)
+- `src/amo_bot/webui/flask_blueprints/` – Route handlers using `t()` helper
+
+### Legacy (Disabled)
+- `src/amo_bot/webui/app.py` – Legacy FastAPI WebUI (hard-disabled, fail-closed)
 
 ### Dokumentation
-- `README.md` – Main project readme
-- `docs/SETUP_DE.md` – German setup guide
-- `docs/SETUP_EN.md` – English setup guide
-- `docs/BETATEST_DE.md` – German beta test guide
-- `docs/BETATEST_EN.md` – English beta test guide
+- `README.md` – Main project readme (bilingual)
+- `docs/LANGUAGE_CONVENTIONS.md` – Language standards (bilingual)
+- `docs/SETUP_DE.md` / `docs/SETUP_EN.md` – Setup guides
+- `docs/BETATEST_DE.md` / `docs/BETATEST_EN.md` – Beta test guides
+- `CHANGELOG.md` – Release notes (bilingual)
 - `docs/RELEASE_NOTES_*` – Version history
 - `docs/release-baseline.md` – Release readiness
 - `docs/public-repo-metadata.md` – Metadata checklist
+
+### GitHub Templates (from #9)
+- `.github/ISSUE_TEMPLATE/bug_report.yml` – Bug report form (bilingual)
+- `.github/ISSUE_TEMPLATE/feature_request.yml` – Feature request form (bilingual)
+- `.github/PULL_REQUEST_TEMPLATE.md` – PR template (bilingual)
+- `CONTRIBUTING.md` – Contribution guidelines (bilingual)
+- `SECURITY.md` – Security policy (bilingual)
+- `SUPPORT.md` – Support info (bilingual)
+- `CODE_OF_CONDUCT.md` – Code of conduct (bilingual)
 
 ### Lizenz
 - `LICENSE` – MIT License
 
 ---
 
-*Letzte Aktualisierung / Last updated: 2026-05-15*
-*Block: RR-03 – i18n Inventory*
-*Status: Inventory complete, no code changes*
+*Letzte Aktualisierung / Last updated: 2026-05-22*
+*Issue: #14 – i18n Inventory Refresh*
+*Related: #9 (GitHub templates), #10/#11 (runtime i18n), #12/#13 (language conventions)*
+*Status: ✅ User-facing surfaces fully bilingual; technical internals EN-only by design*

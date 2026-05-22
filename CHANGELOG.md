@@ -107,6 +107,74 @@ This release improves audit trail security through hardened redaction of sensiti
 
 ---
 
+## [Unreleased] – i18n Completion and Language Conventions
+
+**Datum / Date:** 2026-05-22
+
+### 🇩🇪 Deutsch
+
+#### Übersicht
+Dieses Release vervollständigt die Zweisprachigkeit (Deutsch + Englisch) für alle user-facing Oberflächen des Bots und der WebUI. Es etabliert Language Conventions für zukünftige Dokumentation.
+
+#### Neu
+- **Telegram Bot i18n (#10/#11):** Alle Command-Descriptions und User-facing Responses sind nun bilingual.
+  - Command-Descriptions für alle 11 Commands mit DE/EN Varianten
+  - Consent-Flow komplett bilingual (Prompts, Buttons, Callbacks, Status)
+  - Dispatcher-Fehlermeldungen und Consent-Block-Nachrichten bilingual
+  - AI-Fehlertexte bei Autoreply bilingual
+  - Locale-Detection aus Telegram `language_code` mit Fallback auf DE
+- **Flask WebUI i18n (#10/#11):** Vollständige Internationalisierung der WebUI.
+  - Neues i18n-Modul (`src/amo_bot/webui/i18n.py`) mit DE/EN Übersetzungen
+  - Language Switcher in der UI verfügbar
+  - Alle Navigation-Labels, Formulare, Tabellen und Buttons bilingual
+  - Session-basierte Sprachspeicherung
+- **Language Conventions (#12/#13):** Dokumentierte Standards für mehrsprachige Dokumentation.
+  - `docs/LANGUAGE_CONVENTIONS.md` mit Richtlinien für Dateistruktur, Namenskonventionen, Linkstruktur
+  - Entscheidungsmatrix für Separate Files / Bilingual Single / EN-Only
+  - Checkliste für neue Dokumente
+- **i18n Inventory Refresh (#14):** Aktualisierte Übersicht aller sprachsensitiven Oberflächen.
+  - Vollständige Inventarisierung nach #10/#11/#12/#13
+  - Status: User-facing surfaces ✅ bilingual; technische Interna EN-only (by design)
+
+#### Architektur / Interna
+- `_lang()` Helper für Command-Handler mit kontextbasierter Sprachauflösung
+- `ConsentPromptService` mit `_PROMPT_TEXTS` und `_PROMPT_MARKUP` Dictionaries
+- `Dispatcher._consent_block_message()` und `_consent_callback_message()` mit Locale-Support
+- `resolve_locale()` mit explizitem Argument und Telegram language_code Fallback
+
+### 🇬🇧 English
+
+#### Overview
+This release completes bilingual support (German + English) for all user-facing surfaces of the bot and WebUI. It establishes Language Conventions for future documentation.
+
+#### New
+- **Telegram Bot i18n (#10/#11):** All command descriptions and user-facing responses are now bilingual.
+  - Command descriptions for all 11 commands with DE/EN variants
+  - Consent flow fully bilingual (prompts, buttons, callbacks, status)
+  - Dispatcher error messages and consent block messages bilingual
+  - AI error texts for autoreply bilingual
+  - Locale detection from Telegram `language_code` with DE fallback
+- **Flask WebUI i18n (#10/#11):** Complete WebUI internationalization.
+  - New i18n module (`src/amo_bot/webui/i18n.py`) with DE/EN translations
+  - Language switcher available in UI
+  - All navigation labels, forms, tables, and buttons bilingual
+  - Session-based language storage
+- **Language Conventions (#12/#13):** Documented standards for multilingual documentation.
+  - `docs/LANGUAGE_CONVENTIONS.md` with guidelines for file structure, naming conventions, link structure
+  - Decision matrix for Separate Files / Bilingual Single / EN-Only
+  - Checklist for new documents
+- **i18n Inventory Refresh (#14):** Updated inventory of all language-sensitive surfaces.
+  - Complete inventory after #10/#11/#12/#13
+  - Status: User-facing surfaces ✅ bilingual; technical internals EN-only (by design)
+
+#### Architecture / Internal
+- `_lang()` helper for command handlers with context-based language resolution
+- `ConsentPromptService` with `_PROMPT_TEXTS` and `_PROMPT_MARKUP` dictionaries
+- `Dispatcher._consent_block_message()` and `_consent_callback_message()` with locale support
+- `resolve_locale()` with explicit argument and Telegram language_code fallback
+
+---
+
 ## [Unreleased] – IMG-B8 Runtime Role Quota Enforcement
 
 **Datum / Date:** 2026-05-21
