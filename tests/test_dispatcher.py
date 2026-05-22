@@ -1155,7 +1155,7 @@ def test_dispatcher_ping_uses_locale_neutral_pong_for_de_and_en() -> None:
     ]
 
 
-def test_dispatcher_invokes_auto_image_for_plain_photo_update() -> None:
+def test_dispatcher_does_not_invoke_auto_image_for_plain_photo_without_addressing() -> None:
     sent: list[tuple[int, str, int | None]] = []
     calls: list[tuple[int, int | None, int, int, int]] = []
 
@@ -1192,7 +1192,7 @@ def test_dispatcher_invokes_auto_image_for_plain_photo_update() -> None:
 
     asyncio.run(dispatcher.handle_raw_update(raw_update))
 
-    assert calls == [(-1002003580909, 6845, 95, 900000001, 1)]
+    assert calls == []
     assert sent == []
 
 

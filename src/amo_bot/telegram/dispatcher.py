@@ -114,6 +114,7 @@ class Dispatcher:
         )
 
         if command is None:
+            is_addressed_for_auto_image = self._is_addressed_for_auto_image(message=message, bot_username=self.bot_username)
             if not message.attachments:
                 logger.info(
                     "auto_image decision=skipped_no_attachments update_id=%s chat_id=%s message_thread_id=%s message_id=%s user_id=%s role=%s",
@@ -140,6 +141,19 @@ class Dispatcher:
             elif self.plugin_command_executor is None:
                 logger.info(
                     "auto_image decision=skipped_no_executor update_id=%s chat_id=%s message_thread_id=%s message_id=%s user_id=%s role=%s attachment_count=%s has_photo_attachment=%s has_image_document=%s",
+                    update.update_id,
+                    message.chat.id,
+                    message.message_thread_id,
+                    message.message_id,
+                    message.from_user.id,
+                    role.value,
+                    attachment_count,
+                    has_photo_attachment,
+                    has_image_document,
+                )
+            elif not is_addressed_for_auto_image:
+                logger.info(
+                    "auto_image decision=skipped_not_addressed update_id=%s chat_id=%s message_thread_id=%s message_id=%s user_id=%s role=%s attachment_count=%s has_photo_attachment=%s has_image_document=%s",
                     update.update_id,
                     message.chat.id,
                     message.message_thread_id,
@@ -499,6 +513,27 @@ class Dispatcher:
         return (sanitized or cleaned), mention_removed
 
     @staticmethod
+    def _locale_for_message(message: TelegramMessage) -> str:
+        locale = resolve_locale(
+            explicit_arg=None,
+            telegram_language_code=getattr(message.from_user, "language_code", None),
+        )
+        return "en" if locale == "en" else "de"
+
+    @classmethod
+    def _is_addressed_for_auto_image(cls, *, message: TelegramMessage, bot_username: str | None) -> bool:
+        if cls._is_reply_to_current_bot(message=message, bot_username=bot_username):
+            return True
+
+        normalized = (bot_username or "").strip().lstrip("@")
+        if not normalized:
+            return False
+
+        text = message.text or ""
+        pattern = rf"(?<!\\w)@{re.escape(normalized)}(?![A-Za-z0-9_])"
+        return re.search(pattern, text, flags=re.IGNORECASE) is not None
+
+    @staticmethod
     def _is_reply_to_current_bot(*, message: TelegramMessage, bot_username: str | None) -> bool:
         if not getattr(message, "reply_to_is_bot", False):
             return False
@@ -802,6 +837,8 @@ class Dispatcher:
         decision_reason_value = getattr(decision.reason_code, "value", decision.reason_code)
         explicit_trigger_reason_values = {code.value for code in explicit_trigger_reason_codes}
         is_triggered_path = decision_reason_value in explicit_trigger_reason_values
+
+        message_locale = self._locale_for_message(message)
 
         try:
             response = await self.ai_service.ask(llm_prompt)
