@@ -57,7 +57,7 @@ This release makes image analysis practically usable in enabled Telegram topics 
 
 ---
 
-## [Unreleased] – RSS capability contracts and log redaction
+## [2026.05.22-1] – RSS capability contracts and log redaction
 
 **Datum / Date:** 2026-05-22
 
