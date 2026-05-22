@@ -767,10 +767,11 @@ The `image_analyze` coreplugin provides a secure image analysis interface for AI
 
 ### Security Model
 
-**Default-off:**
+**Default-off with explicit topic enablement:**
 - Image analysis is disabled by default
-- Must be explicitly enabled via settings
-- No automatic image analysis without user trigger
+- Must be explicitly enabled per topic
+- In enabled topics, the bot automatically analyzes Telegram photos and image documents
+- Outside enabled topics, no automatic image analysis is performed
 
 **Usage Policy:**
 - `consent_required` (default: true) — Users must have granted consent
@@ -856,10 +857,13 @@ The following errors are explicitly communicated to users:
 
 **Image Attachment Detection:**
 - `photo` and `document` with image MIME types are recognized as attachments
+- Telegram photos and image documents are considered for automatic analysis in enabled topics
+- `application/octet-stream` is accepted only on the trusted Telegram photo path when the file path has an allowed image suffix
 - Metadata only: `file_id`, `file_unique_id`, dimensions, file size
-- No automatic download without explicit trigger
+- Downloads are limited to allowed image types and stored in a short-lived temp directory with TTL cleanup
 
-**Explicit Triggers:**
+**Triggers:**
+- Automatic: Telegram photo or image document in a topic with image analysis enabled
 - `/analyze_image` — Analyzes an image in the current context
 - Reply-to-image — Reply to an image with bot mention
 

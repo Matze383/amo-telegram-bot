@@ -690,6 +690,7 @@ Das Bildanalyse-Coreplugin bietet eine sichere, default-off Bildanalyse für KI 
 
 **Status:** IMG-B8 implementiert Runtime Quota-Enforcement mit Rolling-24h-Fenster
 - Bildanalyse ist standardmäßig deaktiviert
+- In aktivierten Topics werden Telegram-Fotos und Bild-Dokumente automatisch analysiert
 - Alle Policy-Prüfungen erfolgen vor dem Provider-Aufruf (Deny-Before-Provider)
 - Quota-Deny schreibt Audit, Provider wird nicht aufgerufen
 
@@ -728,28 +729,37 @@ Das Bildanalyse-Coreplugin bietet eine sichere, default-off Bildanalyse für KI 
    - Sende: `/analyze_image` ohne Bild
    - Erwartet: Fehlermeldung oder Hinweis, dass kein Bild gefunden wurde
 
-2. **Mit Bild als Anhang:**
+2. **Automatische Analyse in aktiviertem Topic:**
+   - Aktiviere Bildanalyse für das Test-Topic in der WebUI
+   - Lade ein Telegram-Foto oder Bild-Dokument in dieses Topic hoch
+   - Erwartet: Bildanalyse-Antwort (wenn Rolle, Consent und Quota passen)
+
+3. **Mit Bild als Anhang:**
    - Lade ein Bild hoch mit `/analyze_image` als Caption
    - Erwartet: Bildanalyse-Antwort (wenn aktiviert und Quota vorhanden)
 
-3. **Als Antwort auf Bild:**
+4. **Als Antwort auf Bild:**
    - Antworte auf ein Bild im Chat mit `/analyze_image`
    - Erwartet: Bildanalyse-Antwort (wenn aktiviert und Quota vorhanden)
 
+5. **Trusted Telegram-Photo-Octet-Stream-Hotfix:**
+   - Lade ein normales Telegram-Foto hoch, dessen Telegram-Download als `application/octet-stream` geliefert wird
+   - Erwartet: Foto wird nur akzeptiert, wenn der vertrauenswürdige Telegram-Photo-Pfad eine erlaubte Bild-Endung hat; andere Octet-Stream-Dokumente bleiben abgelehnt
+
 **IMG-B8 Quota-Tests (wenn Topic aktiviert):**
 
-4. **Rolling-24h-Limit-Test (NORMAL-Rolle):**
+6. **Rolling-24h-Limit-Test (NORMAL-Rolle):**
    - Als NORMAL-User: `/analyze_image` mit Bild ausführen
    - Erwartet: Erfolg (oder Analyse-Antwort)
    - Nach Erreichen des Limits: Erwartet `quota_exceeded`
    - Keine automatische Rücksetzung um Mitternacht
 
-5. **Rolling-24h-Limit-Test (VIP-Rolle):**
+7. **Rolling-24h-Limit-Test (VIP-Rolle):**
    - Als VIP-User: `/analyze_image` mit Bild ausführen
    - Erwartet: Erfolg bis Limit erreicht
    - Nach Limit: Erwartet `quota_exceeded`
 
-6. **Limit-Reset:**
+8. **Limit-Reset:**
    - Nach 24 Stunden ohne Analyse sollte das Limit zurückgesetzt sein
 
 **Audit-Persistenz (IMG-B8):**

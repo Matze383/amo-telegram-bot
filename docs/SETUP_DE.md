@@ -767,10 +767,11 @@ Das `image_analyse`-Coreplugin bietet eine sichere Bildanalyse-Schnittstelle fü
 
 ### Sicherheitsmodell
 
-**Default-off:**
+**Default-off mit expliziter Topic-Freigabe:**
 - Bildanalyse ist standardmäßig deaktiviert
-- Muss explizit via Settings aktiviert werden
-- Keine automatische Bildanalyse ohne Nutzer-Trigger
+- Muss explizit pro Topic aktiviert werden
+- In aktivierten Topics analysiert der Bot Telegram-Fotos und Bild-Dokumente automatisch
+- Außerhalb aktivierter Topics erfolgt keine automatische Bildanalyse
 
 **Nutzungs-Policy:**
 - `consent_required` (Standard: true) — Nutzer müssen Consent erteilt haben
@@ -856,10 +857,13 @@ Die folgenden Fehler werden explizit an Nutzer kommuniziert:
 
 **Bildanhang-Erkennung:**
 - `photo` und `document` mit Bild-MIME-Types werden als Anhänge erkannt
+- Telegram-Fotos und Bild-Dokumente werden in aktivierten Topics automatisch zur Analyse berücksichtigt
+- `application/octet-stream` wird nur im vertrauenswürdigen Telegram-Photo-Pfad akzeptiert, wenn der Dateipfad eine erlaubte Bild-Endung hat
 - Metadaten nur: `file_id`, `file_unique_id`, Dimensionen, Dateigröße
-- Kein automatischer Download ohne expliziten Trigger
+- Downloads erfolgen nur für erlaubte Bildtypen und werden in einem kurzlebigen Temp-Verzeichnis mit TTL-Cleanup gespeichert
 
-**Explizite Trigger:**
+**Trigger:**
+- Automatisch: Telegram-Foto oder Bild-Dokument in einem Topic mit aktivierter Bildanalyse
 - `/analyze_image` — Analysiert ein Bild im aktuellen Kontext
 - Reply-to-image — Antwort auf ein Bild mit Bot-Erwähnung
 

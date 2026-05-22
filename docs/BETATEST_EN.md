@@ -690,6 +690,7 @@ The image analysis coreplugin provides secure, default-off image analysis for AI
 
 **Status:** IMG-B8 implements runtime quota enforcement with rolling 24h window
 - Image analysis is disabled by default
+- In enabled topics, Telegram photos and image documents are analyzed automatically
 - All policy checks happen before provider invocation (deny-before-provider)
 - Quota deny writes audit, provider is not called
 
@@ -728,28 +729,37 @@ The image analysis coreplugin provides secure, default-off image analysis for AI
    - Send: `/analyze_image` without an image
    - Expected: Error message or notice that no image was found
 
-2. **With image attachment:**
+2. **Automatic analysis in enabled topic:**
+   - Enable image analysis for the test topic in the WebUI
+   - Upload a Telegram photo or image document to that topic
+   - Expected: Image analysis response (when role, consent, and quota allow it)
+
+3. **With image attachment:**
    - Upload an image with `/analyze_image` as caption
    - Expected: Image analysis response (when enabled and quota available)
 
-3. **As reply to image:**
+4. **As reply to image:**
    - Reply to an image in chat with `/analyze_image`
    - Expected: Image analysis response (when enabled and quota available)
 
+5. **Trusted Telegram photo octet-stream hotfix:**
+   - Upload a normal Telegram photo whose Telegram download is returned as `application/octet-stream`
+   - Expected: The photo is accepted only when the trusted Telegram photo path has an allowed image suffix; other octet-stream documents remain rejected
+
 **IMG-B8 Quota Tests (when topic enabled):**
 
-4. **Rolling 24h Limit Test (NORMAL role):**
+6. **Rolling 24h Limit Test (NORMAL role):**
    - As NORMAL user: Run `/analyze_image` with image
    - Expected: Success (or analysis response)
    - After reaching limit: Expected `quota_exceeded`
    - No automatic reset at midnight
 
-5. **Rolling 24h Limit Test (VIP role):**
+7. **Rolling 24h Limit Test (VIP role):**
    - As VIP user: Run `/analyze_image` with image
    - Expected: Success until limit reached
    - After limit: Expected `quota_exceeded`
 
-6. **Limit Reset:**
+8. **Limit Reset:**
    - After 24 hours without analysis, limit should reset
 
 **Audit Persistence (IMG-B8):**
