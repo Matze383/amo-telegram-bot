@@ -5,9 +5,19 @@ from typing import Any
 _TELEGRAM_BOT_URL_RE = re.compile(r"(/bot)([^/\s]+)(/)")
 _REDACTED_BOT_SEGMENT = r"\1***REDACTED***\3"
 
+_BEARER_RE = re.compile(r"(?i)(\bAuthorization\s*:\s*Bearer\s+)([^\s,;]+)")
+_KEYVALUE_SECRET_RE = re.compile(
+    r"(?i)(\b(?:api_key|token|password|cookie|session)\b\s*[:=]\s*)([^\s,;]+)"
+)
+_PREFIX_SECRET_RE = re.compile(r"\b(?:sk-[A-Za-z0-9_-]{8,}|ghp_[A-Za-z0-9]{8,})\b")
+
 
 def _mask_sensitive_text(value: str) -> str:
-    return _TELEGRAM_BOT_URL_RE.sub(_REDACTED_BOT_SEGMENT, value)
+    redacted = _TELEGRAM_BOT_URL_RE.sub(_REDACTED_BOT_SEGMENT, value)
+    redacted = _BEARER_RE.sub(r"\1***REDACTED***", redacted)
+    redacted = _KEYVALUE_SECRET_RE.sub(r"\1***REDACTED***", redacted)
+    redacted = _PREFIX_SECRET_RE.sub("***REDACTED***", redacted)
+    return redacted
 
 
 class SensitiveLogFilter(logging.Filter):
@@ -33,6 +43,12 @@ class SensitiveLogFilter(logging.Filter):
     def _mask(self, value: Any) -> Any:
         if isinstance(value, str):
             return _mask_sensitive_text(value)
+        if isinstance(value, dict):
+            return {k: self._mask(v) for k, v in value.items()}
+        if isinstance(value, list):
+            return [self._mask(v) for v in value]
+        if isinstance(value, tuple):
+            return tuple(self._mask(v) for v in value)
         return value
 
 
