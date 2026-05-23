@@ -43,53 +43,97 @@ def test_state_repository_add_delete_duplicate_and_topic_isolation(tmp_path) -> 
     assert repo.add_subscription(
         chat_id=1,
         thread_id=None,
-        channel_key="@alpha",
-        source_url="https://www.youtube.com/@Alpha",
+        channel_key="UCabc",
+        source_url="https://www.youtube.com/channel/UCabc",
+        canonical_channel_url="https://www.youtube.com/channel/UCabc",
+        rss_url="https://www.youtube.com/feeds/videos.xml?channel_id=UCabc",
+        added_by_user_id=7,
     )
     assert not repo.add_subscription(
         chat_id=1,
         thread_id=None,
-        channel_key="@alpha",
-        source_url="https://www.youtube.com/@Alpha",
+        channel_key="UCabc",
+        source_url="https://www.youtube.com/channel/UCabc",
+        canonical_channel_url="https://www.youtube.com/channel/UCabc",
+        rss_url="https://www.youtube.com/feeds/videos.xml?channel_id=UCabc",
+        added_by_user_id=7,
     )
 
     assert repo.add_subscription(
         chat_id=1,
         thread_id=22,
-        channel_key="@alpha",
-        source_url="https://www.youtube.com/@Alpha",
-    )
-    assert repo.add_subscription(
-        chat_id=2,
-        thread_id=None,
-        channel_key="@alpha",
-        source_url="https://www.youtube.com/@Alpha",
+        channel_key="UCabc",
+        source_url="https://www.youtube.com/channel/UCabc",
+        canonical_channel_url="https://www.youtube.com/channel/UCabc",
+        rss_url="https://www.youtube.com/feeds/videos.xml?channel_id=UCabc",
+        added_by_user_id=7,
     )
 
     root_items = repo.list_subscriptions(chat_id=1, thread_id=None)
     topic_items = repo.list_subscriptions(chat_id=1, thread_id=22)
-    other_chat_items = repo.list_subscriptions(chat_id=2, thread_id=None)
 
-    assert [item.channel_key for item in root_items] == ["@alpha"]
-    assert [item.channel_key for item in topic_items] == ["@alpha"]
-    assert [item.channel_key for item in other_chat_items] == ["@alpha"]
+    assert [item.channel_key for item in root_items] == ["UCabc"]
+    assert [item.channel_key for item in topic_items] == ["UCabc"]
 
-    repo.set_cursor(chat_id=1, thread_id=None, channel_key="@alpha", cursor="etag:1", dedupe=["a", "b"])
-    cursor = repo.get_cursor(chat_id=1, thread_id=None, channel_key="@alpha")
-    assert cursor.cursor == "etag:1"
-    assert cursor.dedupe == ["a", "b"]
+    assert repo.delete_subscription(chat_id=1, thread_id=None, channel_key="UCabc")
+    assert not repo.delete_subscription(chat_id=1, thread_id=None, channel_key="UCabc")
 
-    assert repo.delete_subscription(chat_id=1, thread_id=None, channel_key="@alpha")
-    assert not repo.delete_subscription(chat_id=1, thread_id=None, channel_key="@alpha")
+
+def test_parser_accepts_direct_channel_urls_and_uc_id() -> None:
+    plugin_main = _load_plugin_main()
+
+    parsed = plugin_main.parse_youtube_channel_input("https://www.youtube.com/channel/UC123")
+    assert parsed["channel_key"] == "UC123"
+    assert parsed["canonical_channel_url"] == "https://www.youtube.com/channel/UC123"
+    assert parsed["rss_url"] == "https://www.youtube.com/feeds/videos.xml?channel_id=UC123"
+
+    parsed2 = plugin_main.parse_youtube_channel_input("https://youtube.com/channel/UCXYZ")
+    assert parsed2["channel_key"] == "UCXYZ"
+
+    parsed3 = plugin_main.parse_youtube_channel_input("UCraw")
+    assert parsed3["channel_key"] == "UCraw"
+
+
+def test_parser_rejects_unsupported_inputs() -> None:
+    plugin_main = _load_plugin_main()
+
+    for value in [
+        "https://youtu.be/abc",
+        "https://www.youtube.com/watch?v=abc",
+        "https://www.youtube.com/playlist?list=abc",
+        "https://www.youtube.com/shorts/abc",
+        "https://www.youtube.com/@handle",
+        "https://www.youtube.com/c/name",
+        "https://www.youtube.com/user/name",
+    ]:
+        try:
+            plugin_main.parse_youtube_channel_input(value)
+            assert False, f"expected ValueError for {value}"
+        except ValueError:
+            pass
 
 
 class _Context:
-    def __init__(self, *, command_name: str, argument: str | None, chat_id: int = 1, message_id: int = 10, message_thread_id: int | None = None):
+    def __init__(
+        self,
+        *,
+        command_name: str,
+        argument: str | None,
+        chat_id: int = 1,
+        message_id: int = 10,
+        message_thread_id: int | None = None,
+        user_id: int = 99,
+        user_is_admin: bool = True,
+        user_is_owner: bool = False,
+    ):
         self.command_name = command_name
         self.argument = argument
         self.chat_id = chat_id
         self.message_id = message_id
         self.message_thread_id = message_thread_id
+        self.user_id = user_id
+        self.user_is_admin = user_is_admin
+        self.user_is_owner = user_is_owner
 
 
 class _Host:
@@ -100,48 +144,46 @@ class _Host:
         self.replies.append((chat_id, message_id, text))
 
 
-def test_command_handler_skeleton_responses_and_routing(tmp_path, monkeypatch) -> None:
+def test_command_add_delete_duplicate_and_topic_isolation(tmp_path, monkeypatch) -> None:
     plugin_main = _load_plugin_main()
     repo_module = _load_repo_module()
     test_repo = repo_module.YtRssStateRepository(tmp_path / "state")
-
     monkeypatch.setattr(plugin_main, "_repo_for_context", lambda context: test_repo)
 
     host = _Host()
-    asyncio.run(plugin_main.handle_command(_Context(command_name="addYT", argument=None), host))
-    assert "usage /addYT" in host.replies[-1][2]
 
-    asyncio.run(plugin_main.handle_command(_Context(command_name="addYT", argument="not-a-url"), host))
-    assert "Resolver comes in B3" in host.replies[-1][2]
+    ctx_t1 = _Context(command_name="addYT", argument="https://www.youtube.com/channel/UC111", message_thread_id=1)
+    asyncio.run(plugin_main.handle_command(ctx_t1, host))
+    assert "Added channel UC111" in host.replies[-1][2]
 
-    asyncio.run(
-        plugin_main.handle_command(
-            _Context(command_name="addYT", argument="https://www.youtube.com/@OpenAI"),
-            host,
-        )
-    )
-    assert "Added (skeleton)" in host.replies[-1][2]
+    asyncio.run(plugin_main.handle_command(ctx_t1, host))
+    assert "Already subscribed in this topic" in host.replies[-1][2]
 
-    asyncio.run(
-        plugin_main.handle_command(
-            _Context(command_name="addYT", argument="https://www.youtube.com/@OpenAI"),
-            host,
-        )
-    )
-    assert "Already subscribed" in host.replies[-1][2]
+    ctx_t2 = _Context(command_name="addYT", argument="https://www.youtube.com/channel/UC111", message_thread_id=2)
+    asyncio.run(plugin_main.handle_command(ctx_t2, host))
+    assert "Added channel UC111" in host.replies[-1][2]
 
-    asyncio.run(
-        plugin_main.handle_command(
-            _Context(command_name="delYT", argument="https://www.youtube.com/@OpenAI"),
-            host,
-        )
-    )
-    assert "Removed (skeleton)" in host.replies[-1][2]
+    asyncio.run(plugin_main.handle_command(_Context(command_name="delYT", argument="UC111", message_thread_id=1), host))
+    assert "Removed channel UC111 from this topic." == host.replies[-1][2]
 
-    asyncio.run(
-        plugin_main.handle_command(
-            _Context(command_name="unknown", argument="x"),
-            host,
-        )
-    )
-    assert "command not implemented" in host.replies[-1][2]
+    asyncio.run(plugin_main.handle_command(_Context(command_name="delYT", argument="UC111", message_thread_id=1), host))
+    assert "No matching subscription found in this topic." == host.replies[-1][2]
+
+    remaining_t2 = test_repo.list_subscriptions(chat_id=1, thread_id=2)
+    assert [x.channel_key for x in remaining_t2] == ["UC111"]
+
+
+def test_command_permission_denied_and_invalid_url(tmp_path, monkeypatch) -> None:
+    plugin_main = _load_plugin_main()
+    repo_module = _load_repo_module()
+    test_repo = repo_module.YtRssStateRepository(tmp_path / "state")
+    monkeypatch.setattr(plugin_main, "_repo_for_context", lambda context: test_repo)
+    host = _Host()
+
+    denied = _Context(command_name="addYT", argument="https://www.youtube.com/channel/UC1", user_is_admin=False, user_is_owner=False)
+    asyncio.run(plugin_main.handle_command(denied, host))
+    assert "Permission denied" in host.replies[-1][2]
+
+    bad = _Context(command_name="addYT", argument="https://www.youtube.com/@x")
+    asyncio.run(plugin_main.handle_command(bad, host))
+    assert "Handle/vanity URLs are not supported yet" in host.replies[-1][2]

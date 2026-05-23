@@ -11,6 +11,9 @@ class SubscriptionRecord:
     thread_id: int | None
     channel_key: str
     source_url: str
+    canonical_channel_url: str
+    rss_url: str
+    added_by_user_id: int | None
     added_at: str
 
 
@@ -43,7 +46,17 @@ class YtRssStateRepository:
     def _topic_key(chat_id: int, thread_id: int | None, channel_key: str) -> str:
         return f"{chat_id}:{thread_id if thread_id is not None else 'root'}:{channel_key}"
 
-    def add_subscription(self, *, chat_id: int, thread_id: int | None, channel_key: str, source_url: str) -> bool:
+    def add_subscription(
+        self,
+        *,
+        chat_id: int,
+        thread_id: int | None,
+        channel_key: str,
+        source_url: str,
+        canonical_channel_url: str,
+        rss_url: str,
+        added_by_user_id: int | None,
+    ) -> bool:
         state = self._load()
         key = self._topic_key(chat_id, thread_id, channel_key)
         if key in state["subscriptions"]:
@@ -54,6 +67,9 @@ class YtRssStateRepository:
                 thread_id=thread_id,
                 channel_key=channel_key,
                 source_url=source_url,
+                canonical_channel_url=canonical_channel_url,
+                rss_url=rss_url,
+                added_by_user_id=added_by_user_id,
                 added_at=datetime.now(timezone.utc).isoformat(),
             )
         )
