@@ -210,6 +210,71 @@ def _user_can_manage(context) -> bool:
     return user_role in {"owner", "admin"}
 
 
+def webui_list_subscriptions(context) -> list[dict[str, object]]:
+    if not _user_can_manage(context):
+        raise PermissionError("permission_denied")
+    repo = _repo_for_context(context)
+    items = repo.list_subscriptions(chat_id=context.chat_id, thread_id=context.message_thread_id)
+    return [
+        {
+            "chat_id": item.chat_id,
+            "thread_id": item.thread_id,
+            "channel_key": item.channel_key,
+            "source_url": item.source_url,
+            "canonical_channel_url": item.canonical_channel_url,
+            "rss_url": item.rss_url,
+            "added_by_user_id": item.added_by_user_id,
+            "added_at": item.added_at,
+        }
+        for item in items
+    ]
+
+
+def webui_add_subscription(context, channel_input: str) -> dict[str, object]:
+    if not _user_can_manage(context):
+        raise PermissionError("permission_denied")
+    parsed = parse_youtube_channel_input(channel_input)
+    repo = _repo_for_context(context)
+    created = repo.add_subscription(
+        chat_id=context.chat_id,
+        thread_id=context.message_thread_id,
+        channel_key=parsed["channel_key"],
+        source_url=channel_input,
+        canonical_channel_url=parsed["canonical_channel_url"],
+        rss_url=parsed["rss_url"],
+        added_by_user_id=getattr(context, "user_id", None),
+    )
+    if not created:
+        raise ValueError("duplicate_subscription")
+    return parsed
+
+
+def webui_delete_subscription(context, channel_input: str) -> bool:
+    if not _user_can_manage(context):
+        raise PermissionError("permission_denied")
+    parsed = parse_youtube_channel_input(channel_input)
+    repo = _repo_for_context(context)
+    return repo.delete_subscription(
+        chat_id=context.chat_id,
+        thread_id=context.message_thread_id,
+        channel_key=parsed["channel_key"],
+    )
+
+
+def webui_get_poll_interval_seconds(context) -> int:
+    if not _user_can_manage(context):
+        raise PermissionError("permission_denied")
+    repo = _repo_for_context(context)
+    return repo.get_poll_interval_seconds()
+
+
+def webui_set_poll_interval_seconds(context, value: int) -> int:
+    if not _user_can_manage(context):
+        raise PermissionError("permission_denied")
+    repo = _repo_for_context(context)
+    return repo.set_poll_interval_seconds(value)
+
+
 async def handle_command(context, host_api):
     repo = _repo_for_context(context)
     command = (context.command_name or "").strip().lower()

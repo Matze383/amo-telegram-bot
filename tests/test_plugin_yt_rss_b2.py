@@ -369,6 +369,77 @@ def test_schedule_duplicate_entries_not_reposted(tmp_path, monkeypatch) -> None:
     assert host.sent == []
 
 
+def test_webui_list_add_delete_topic_local_and_permissions(tmp_path, monkeypatch) -> None:
+    plugin_main = _load_plugin_main()
+    repo_module = _load_repo_module()
+    repo = repo_module.YtRssStateRepository(tmp_path / "state")
+    monkeypatch.setattr(plugin_main, "_repo_for_context", lambda context: repo)
+
+    def fake_http(url: str):
+        if url == "https://www.youtube.com/@handle":
+            return 200, '"channelId":"UCWEB1"'
+        raise AssertionError(url)
+
+    monkeypatch.setattr(plugin_main, "_http_get_text", fake_http)
+
+    ctx_t1 = _Context(command_name="addYT", argument=None, message_thread_id=11, user_is_admin=True)
+    ctx_t2 = _Context(command_name="addYT", argument=None, message_thread_id=22, user_is_admin=True)
+
+    added = plugin_main.webui_add_subscription(ctx_t1, "https://www.youtube.com/@handle")
+    assert added["channel_key"] == "UCWEB1"
+
+    items_t1 = plugin_main.webui_list_subscriptions(ctx_t1)
+    assert [x["channel_key"] for x in items_t1] == ["UCWEB1"]
+
+    items_t2 = plugin_main.webui_list_subscriptions(ctx_t2)
+    assert items_t2 == []
+
+    try:
+        plugin_main.webui_add_subscription(ctx_t1, "https://www.youtube.com/@handle")
+        assert False, "expected duplicate"
+    except ValueError as exc:
+        assert str(exc) == "duplicate_subscription"
+
+    assert plugin_main.webui_delete_subscription(ctx_t2, "https://www.youtube.com/@handle") is False
+    assert plugin_main.webui_delete_subscription(ctx_t1, "https://www.youtube.com/@handle") is True
+
+    denied = _Context(command_name="addYT", argument=None, message_thread_id=11, user_is_admin=False, user_is_owner=False)
+    for fn, args in [
+        (plugin_main.webui_list_subscriptions, (denied,)),
+        (plugin_main.webui_add_subscription, (denied, "https://www.youtube.com/channel/UCx")),
+        (plugin_main.webui_delete_subscription, (denied, "https://www.youtube.com/channel/UCx")),
+        (plugin_main.webui_get_poll_interval_seconds, (denied,)),
+        (plugin_main.webui_set_poll_interval_seconds, (denied, 600)),
+    ]:
+        try:
+            fn(*args)
+            assert False, "expected permission error"
+        except PermissionError as exc:
+            assert str(exc) == "permission_denied"
+
+
+def test_webui_poll_interval_get_set_validation_and_persistence(tmp_path, monkeypatch) -> None:
+    plugin_main = _load_plugin_main()
+    repo_module = _load_repo_module()
+    repo = repo_module.YtRssStateRepository(tmp_path / "state")
+    monkeypatch.setattr(plugin_main, "_repo_for_context", lambda context: repo)
+
+    ctx = _Context(command_name="addYT", argument=None, user_is_admin=True)
+    assert plugin_main.webui_get_poll_interval_seconds(ctx) == 300
+    assert plugin_main.webui_set_poll_interval_seconds(ctx, 900) == 900
+    assert plugin_main.webui_get_poll_interval_seconds(ctx) == 900
+
+    repo2 = repo_module.YtRssStateRepository(tmp_path / "state")
+    assert repo2.get_poll_interval_seconds() == 900
+
+    for bad in [0, 29, 86401, -1, "abc"]:
+        try:
+            plugin_main.webui_set_poll_interval_seconds(ctx, bad)  # type: ignore[arg-type]
+            assert False, "expected invalid_interval"
+        except ValueError as exc:
+            assert str(exc) == "invalid_interval"
+
+
 def test_schedule_failure_isolated_per_subscription(tmp_path, monkeypatch) -> None:
     plugin_main = _load_plugin_main()
     repo_module = _load_repo_module()

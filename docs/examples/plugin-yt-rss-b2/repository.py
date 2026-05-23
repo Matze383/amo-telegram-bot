@@ -38,6 +38,10 @@ class YtRssStateRepository:
         raw.setdefault("subscriptions", {})
         raw.setdefault("cursors", {})
         raw.setdefault("errors", {})
+        raw.setdefault("config", {"poll_interval_seconds": 300})
+        if not isinstance(raw.get("config"), dict):
+            raw["config"] = {"poll_interval_seconds": 300}
+        raw["config"].setdefault("poll_interval_seconds", 300)
         return raw
 
     def _save(self, state: dict[str, Any]) -> None:
@@ -122,3 +126,22 @@ class YtRssStateRepository:
         key = self._topic_key(chat_id, thread_id, channel_key)
         state["errors"][key] = {"error": error}
         self._save(state)
+
+    def get_poll_interval_seconds(self) -> int:
+        state = self._load()
+        raw = state.get("config", {}).get("poll_interval_seconds", 300)
+        try:
+            value = int(raw)
+        except (TypeError, ValueError):
+            value = 300
+        return value if value > 0 else 300
+
+    def set_poll_interval_seconds(self, value: int) -> int:
+        if not isinstance(value, int):
+            raise ValueError("invalid_interval")
+        if value < 30 or value > 86400:
+            raise ValueError("invalid_interval")
+        state = self._load()
+        state.setdefault("config", {})["poll_interval_seconds"] = value
+        self._save(state)
+        return value
