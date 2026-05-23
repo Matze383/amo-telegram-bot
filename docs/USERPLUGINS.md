@@ -1,37 +1,679 @@
-# Userplugin Development Guide
+# Userplugin Development Guide / Entwicklungsanleitung für Userplugins
 
-> **DE:** Anleitung für Entwickler, die eigene Userplugins für AMO schreiben wollen.
+> **DE:** Anleitung für Entwickler, die eigene Userplugins für AMO schreiben möchten.
 > **EN:** Guide for developers who want to write custom userplugins for AMO.
 
-**Target Audience:**
-- Human developers building userplugins
+**Zielgruppe / Target Audience:**
+- Menschliche Entwickler, die Userplugins erstellen
+- Menschliche developers building userplugins
+- KI-Agenten/Subagenten, die Userplugins aus dieser Anleitung generieren
 - AI agents/subagents generating userplugins from this guide
 
 **Version:** 2026.05.23
-**Required AMO Version:** 2026.05.22 or later
+**Erforderliche AMO-Version / Required AMO Version:** 2026.05.22 or later
 
 ---
 
-## Table of Contents
+## 🇩🇪 Deutsch
 
-1. [Quick Overview](#quick-overview)
-2. [File Structure](#file-structure)
-3. [Manifest Specification](#manifest-specification)
-4. [Do's and Don'ts](#dos-and-donts)
-5. [Minimal Working Example](#minimal-working-example)
-6. [Host API Reference](#host-api-reference)
-7. [Security Rules](#security-rules)
-8. [UI/Config Integration](#uiconfig-integration)
-9. [Testing Requirements](#testing-requirements)
-10. [AI-Specific Guidelines](#ai-specific-guidelines)
+### Inhaltsverzeichnis
+
+1. [Übersicht](#übersicht-de)
+2. [Dateistruktur](#dateistruktur-de)
+3. [Manifest-Spezifikation](#manifest-spezifikation-de)
+4. [Dos und Don'ts](#dos-und-donts-de)
+5. [Minimales funktionierendes Beispiel](#minimales-funktionierendes-beispiel-de)
+6. [Host-API-Referenz](#host-api-referenz-de)
+7. [Sicherheitsregeln](#sicherheitsregeln-de)
+8. [UI/Konfigurations-Integration](#uikonfigurations-integration-de)
+9. [Testanforderungen](#testanforderungen-de)
+10. [KI-spezifische Richtlinien](#ki-spezifische-richtlinien-de)
 
 ---
 
-## Quick Overview
+### Übersicht {#übersicht-de}
+
+**Was ist ein Userplugin?**
+
+Ein Userplugin erweitert die Funktionalität von AMO, ohne den Core-Code zu verändern. Es läuft in einer sandboxed Umgebung mit explizit deklarierten Fähigkeiten.
+
+**Verantwortlichkeiten: Core vs. Userplugin**
+
+| Aspekt | Core (AMO) | Userplugin |
+|--------|------------|------------|
+| Telegram-API-Zugriff | ✅ Direkt | ❌ Nur via host_api |
+| Datenbankzugriff | ✅ Direkt | ❌ Kein direkter Zugriff |
+| HTTP-Anfragen | ✅ Direkt | ❌ Via Berechtigungen (rss.fetch) |
+| Dateisystem | ✅ Direkt | ❌ Kein direkter Zugriff |
+| Secrets-Management | ✅ Nur Core | ❌ Nie Secrets behandeln |
+| Logging | ✅ Strukturiert | ✅ Nur via logging-Modul |
+
+---
+
+### Dateistruktur {#dateistruktur-de}
+
+Ein gültiges Userplugin benötigt genau diese Dateien:
+
+```
+my_plugin/
+├── plugin.yaml          # ERFORDERLICH: Manifest (YAML oder JSON)
+└── main.py              # ERFORDERLICH: Implementierung (muss main.py heißen)
+```
+
+**Unterstützte Manifest-Formate:** `plugin.yaml`, `plugin.yml`, `plugin.json`, oder `manifest.json`
+
+**Optionale Dateien:**
+
+```
+my_plugin/
+├── plugin.yaml
+├── main.py
+└── README.md            # OPTIONAL: Plugin-Dokumentation
+```
+
+**Plugin-Verzeichnis-Standort:**
+- Konfiguriert via `AMO_PLUGIN_DIR` in `.env` (Standard: `./plugins`)
+- Jedes Plugin liegt in seinem eigenen Unterverzeichnis
+
+---
+
+### Manifest-Spezifikation {#manifest-spezifikation-de}
+
+Das Manifest ist **verpflichtend** und muss gültiges YAML oder JSON sein.
+
+#### Erforderliche Felder
+
+```yaml
+name: my_plugin
+version: "1.0.0"
+description: Was dieses Plugin tut (max. 200 Zeichen)
+commands:
+  - mycommand
+required_permissions:
+  - send_message
+```
+
+ODER mit Schedule:
+
+```yaml
+name: my_plugin
+version: "1.0.0"
+description: Was dieses Plugin tut (max. 200 Zeichen)
+schedule:
+  interval_seconds: 60
+required_permissions: []
+```
+
+#### Feld-Referenz
+
+| Feld | Typ | Erforderlich | Beschreibung |
+|------|-----|--------------|--------------|
+| `name` | string | ✅ | Eindeutiger Plugin-Name: Kleinbuchstaben, alphanumerisch + Unterstrich/Bindestrich, 3-50 Zeichen. Pattern: `^[a-z][a-z0-9_-]{2,49}$`. Nicht reserviert: `core`, `system`, `internal`, `builtin` |
+| `version` | string | ✅ | Plugin-Versionsstring (beliebiges Format) |
+| `description` | string | ❌ | Kurze Beschreibung |
+| `commands` | array | ❌* | Liste von Befehlsnamen (z.B. `["rss", "weather"]`). Erforderlich, wenn kein schedule oder worker |
+| `schedule` | object | ❌* | Schedule-Konfig mit `interval_seconds` (≥10) ODER `cron` (5-Feld Cron-Ausdruck). Erforderlich, wenn keine commands oder worker |
+| `worker` | object | ❌* | Worker-Konfig mit `restart_backoff_seconds`. Erforderlich, wenn keine commands oder schedule |
+| `required_roles` | array | ✅* | Liste erlaubter Rollen. Mindestens eine von `required_roles` ODER `required_permissions` muss definiert sein. |
+| `required_permissions` | array | ✅* | Liste erforderlicher Capability-Berechtigungen. Mindestens eine von `required_roles` ODER `required_permissions` muss definiert sein. |
+| `settings_schema` | object | ❌ | Schema für WebUI-Konfigurationseinstellungen |
+
+*Hinweis: Mindestens eine von `commands`, `schedule`, oder `worker` muss definiert sein.*
+
+*Hinweis: Mindestens eine von `required_roles` oder `required_permissions` muss definiert sein.*
+
+#### Berechtigungsdeklaration
+
+**Regel:** Deklariere NUR Berechtigungen, die du tatsächlich im Plugin-Code verwendest.
+
+```yaml
+required_permissions:
+  - rss.fetch
+  - send_message
+```
+
+**Verfügbare Berechtigungen:**
+
+| Berechtigung | Zweck |
+|--------------|-------|
+| `rss.fetch` | RSS-Feeds abrufen und parsen |
+| `send_message` | Telegram-Nachrichten senden/antworten; auch erforderlich für `send_photo`/`send_document` in Sandbox |
+
+**Hinweis:** Die Runtime validiert, dass Plugins mit RSS-bezogenen Einstellungen die `rss.fetch`-Berechtigung deklariert haben. Siehe `service.py` `_uses_rss_behavior()` für Details.
+
+**Sandbox-only Operationen:** `send_photo` und `send_document` sind nur in der Sandbox-Command-Host-API verfügbar und werden durch die `send_message`-Berechtigung geregelt. Sie sind nicht in der Non-Sandbox-Runtime verfügbar.
+
+**NICHT** Berechtigungen "für alle Fälle" deklarieren. Nicht deklarierte Berechtigungsaufrufe schlagen zur Laufzeit fehl.
+
+---
+
+### Dos und Don'ts {#dos-und-donts-de}
+
+#### ✅ DO (Empfohlen)
+
+- ✅ **Async/await** für alle Host-API-Aufrufe verwenden
+- ✅ Alle Eingaben vor der Verarbeitung validieren
+- ✅ Timeouts und Netzwerkfehler elegant behandeln
+- ✅ Strukturiertes Logging via `logging`-Modul verwenden
+- ✅ Exakte Berechtigungen in `required_permissions` deklarieren
+- ✅ Zuerst mit minimalen Berechtigungen testen
+- ✅ Klare Fehlermeldungen an User zurückgeben
+- ✅ Einstellungen in `settings_schema` dokumentieren
+- ✅ Temporäre Ressourcen in `finally`-Blöcken aufräumen
+- ✅ Type Hints im Python-Code verwenden
+
+#### ❌ DON'T (Verboten)
+
+- ❌ **Nie** Secrets, Token oder User-Daten loggen
+- ❌ **Nie** private Artefakte ins Repo committen
+- ❌ **Nie** Sandbox via direktem Netzwerk/FS-Zugriff umgehen
+- ❌ **Nie** relative Pfade wie `./data` oder `../config` verwenden
+- ❌ **Nie** Berechtigungen deklarieren, die du nicht nutzt
+- ❌ **Nie** Secrets im Plugin-Code oder Config speichern
+- ❌ **Nie** blockierende Aufrufe ohne Timeouts machen
+- ❌ **Nie** auf Dateien außerhalb des Plugin-Verzeichnisses zugreifen
+- ❌ **Nie** User-provided Code/Strings ausführen
+- ❌ **Nie** annehmen, dass das Plugin-Verzeichnis beschreibbar ist
+
+---
+
+### Minimales funktionierendes Beispiel {#minimales-funktionierendes-beispiel-de}
+
+#### `plugin.yaml`
+
+```yaml
+name: rss_notifier
+version: "1.0.0"
+description: Überwacht RSS-Feeds und sendet neue Einträge an Telegram
+commands:
+  - rss
+required_roles:
+  - normal
+  - vip
+  - admin
+  - owner
+required_permissions:
+  - rss.fetch
+  - send_message
+settings_schema:
+  feed_url:
+    type: text
+    required: true
+    description: Zu überwachende RSS-Feed-URL
+  check_interval_minutes:
+    type: number
+    required: false
+    default: 60
+    min: 5
+    max: 1440
+    description: Überprüfungsintervall in Minuten
+```
+
+#### `main.py`
+
+```python
+"""
+RSS Notifier Plugin für AMO Telegram Bot.
+
+Dies ist ein minimales funktionierendes Beispiel eines Userplugins, das:
+1. Befehlsaufrufe vom Core empfängt
+2. Die Host-API zum Senden von Nachrichten nutzt
+3. Attachments für Bildanalyse verwendet
+"""
+
+from typing import Dict, Any
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+async def handle_command(context: Dict[str, Any], host_api: Any) -> None:
+    """
+    Haupt-Einstiegspunkt für Befehlsausführung.
+
+    Args:
+        context: Befehlskontext mit Schlüsseln:
+            - plugin_id: Plugin-Name
+            - run_id: Eindeutige Ausführungs-ID
+            - chat_id: Telegram Chat-ID
+            - message_id: Nachrichten-ID
+            - message_thread_id: Thread-ID (optional)
+            - user_id: Telegram User-ID
+            - role: User-Rolle (ignore/normal/vip/admin/owner)
+            - command_name: Aufgerufener Befehl
+            - argument: Befehlsargument-Text
+            - attachments: Liste von Attachment-Dicts
+            - reply_to_image: Bildkontext für Analyse
+        host_api: API-Objekt für Interaktion mit Telegram
+
+    Raises:
+        Jede Ausnahme wird von der Runtime abgefangen und geloggt.
+    """
+    command = context.get("command_name", "")
+    argument = context.get("argument", "")
+    chat_id = context.get("chat_id")
+    message_id = context.get("message_id")
+
+    if command == "rss":
+        if not argument:
+            await host_api.reply(chat_id, message_id, "Verwendung: /rss <feed_url>")
+            return
+        await host_api.reply(chat_id, message_id, f"Wird überprüft: {argument}")
+    else:
+        await host_api.reply(chat_id, message_id, "Unbekannter Befehl")
+```
+
+---
+
+### Host-API-Referenz {#host-api-referenz-de}
+
+#### Host-API-Methoden
+
+Das `host_api`-Objekt bietet diese async-Methoden:
+
+**`await host_api.send_message(chat_id: int, text: str)`**
+- Sendet eine Nachricht an den angegebenen Chat
+- Benötigt `send_message`-Berechtigung
+- Text wird auf 4000 Zeichen gekürzt
+- Wirft `PluginCapabilityError`, wenn Berechtigung nicht gewährt
+
+**`await host_api.reply(chat_id: int, message_id: int, text: str)`**
+- Antwortet auf eine spezifische Nachricht
+- Benötigt `send_message`-Berechtigung
+- Text wird auf 4000 Zeichen gekürzt
+
+**`await host_api.send_photo(chat_id: int, file_path: str, caption: str = "", *, message_thread_id: int | None = None, mime_type: str | None = None)`** (Nur Sandbox)
+- Sendet ein Foto an den angegebenen Chat
+- Benötigt `send_message`-Berechtigung (geregelt durch `send_message`)
+- Nur in Sandbox-Command-Runtime verfügbar
+
+**`await host_api.send_document(chat_id: int, file_path: str, caption: str = "", *, message_thread_id: int | None = None, mime_type: str | None = None)`** (Nur Sandbox)
+- Sendet ein Dokument an den angegebenen Chat
+- Benötigt `send_message`-Berechtigung (geregelt durch `send_message`)
+- Nur in Sandbox-Command-Runtime verfügbar
+
+**Context-Attachments** (`context["attachments"]`):
+Liste von Attachment-Dicts mit Schlüsseln:
+- `source_kind`: Quelltyp
+- `type_hint`: "image" oder "image_document"
+- `file_id`: Telegram file ID
+- `file_unique_id`: Eindeutiger Datei-Identifier
+- `width`, `height`: Bildabmessungen
+- `size`: Dateigröße in Bytes
+- `mime_type`: MIME-Typ
+- `media_ref`: Heruntergeladene Media-Referenz (falls verfügbar)
+
+**Kontext für Bildanalyse** (`context["reply_to_image"]`):
+Dict mit Bildkontext beim Antworten auf ein Bild, mit Schlüsseln:
+- `ok`: Boolean, ob Bild gültig ist
+- `media_ref`: Media-Referenz für Analyse
+- `reason_code`: Fehlercode, falls nicht gültig
+
+**Hinweis:** Plugins laufen in einem sandboxed Subprozess. Operationen sind limitiert und überwacht.
+
+---
+
+### Sicherheitsregeln {#sicherheitsregeln-de}
+
+#### 1. Secret-Handling
+
+**ABSOLUT VERBOTEN:**
+
+```python
+# ❌ NIE MACHEN
+token = "my-secret-token"  # Hardcoded
+logger.info(f"Token: {user_token}")  # Secrets loggen
+return {"error": f"Fehlgeschlagen mit Token {api_key}"}  # Secrets zurückgeben
+```
+
+**Korrekter Ansatz:**
+
+Secrets werden via `settings_schema` mit `type: secret` konfiguriert. Der Core handhabt Secret-Speicherung und -Validierung. Plugins sehen nie die tatsächlichen Secret-Werte.
+
+#### 2. Private Artefakte
+
+**NICHT commiten:**
+- `.env` Dateien
+- `__pycache__/` Verzeichnisse
+- `.pyc` Dateien
+- Testdaten mit echten User-Infos
+- Debug-Logs
+- IDE-Konfigurationsdateien
+
+**Immer in `.gitignore` aufnehmen:**
+
+```gitignore
+# Plugin-spezifisch
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.env
+*.log
+```
+
+#### 3. Netzwerkzugriff
+
+**VERBOTEN:** Direkter Netzwerkzugriff
+
+```python
+# ❌ NIE MACHEN
+import requests
+response = requests.get("https://api.example.com")  # BYPASST SANDBOX
+```
+
+**Hinweis:** RSS/Netzwerk-Operationen müssen von der Runtime gehandhabt werden. Plugins mit RSS-bezogenen Einstellungen müssen `rss.fetch` in `required_permissions` deklarieren.
+
+#### 4. Dateisystemzugriff
+
+**VERBOTEN:** Direkter Dateisystemzugriff außerhalb Plugin-Dir
+
+```python
+# ❌ NIE MACHEN
+open("/etc/passwd")  # Absolute Escape
+open("../../config.json")  # Relativer Escape
+open(os.environ["HOME"] + "/.secrets")  # Home-Directory-Escape
+```
+
+**ERLAUBT:** Nur Plugin-Verzeichnis (read-only)
+
+```python
+# ✅ KORREKT: Nur aus Plugin-Verzeichnis lesen
+import os
+plugin_dir = os.path.dirname(os.path.abspath(__file__))
+config_path = os.path.join(plugin_dir, "data.json")
+```
+
+---
+
+### UI/Konfigurations-Integration {#uikonfigurations-integration-de}
+
+#### Settings Schema
+
+Das `settings_schema`-Feld in `plugin.yaml` definiert WebUI-Konfigurationsoptionen.
+
+**Unterstützte Einstellungstypen:** `text`, `number`, `bool`, `select`, `secret`
+
+**YAML-Format:**
+
+```yaml
+settings_schema:
+  enabled:
+    type: bool
+    required: false
+    default: true
+    description: Dieses Plugin aktivieren
+  api_key:
+    type: secret
+    required: false
+    description: API-Key (sicher vom Core gespeichert)
+  interval:
+    type: number
+    required: false
+    default: 5
+    min: 1
+    max: 60
+    description: Überprüfungsintervall in Minuten
+  mode:
+    type: select
+    required: false
+    default: basic
+    options:
+      - basic
+      - advanced
+      - expert
+    description: Plugin-Modus
+  webhook_url:
+    type: text
+    required: false
+    pattern: "^https?://.*"
+    description: Webhook-URL (muss HTTP/HTTPS sein)
+```
+
+**Einstellungstyp-Constraints:**
+- `number`: `default`, `min`, `max` müssen numerisch sein; `min` muss ≤ `max` sein
+- `bool`: `default` muss true/false sein
+- `select`: `options` müssen nicht-leere Strings sein; `default` muss in options sein
+- `text`/`secret`: `default` muss String sein; `pattern` muss gültiger Regex sein
+
+#### UI-Verhalten
+
+- Einstellungen werden in WebUI bearbeitet und vom Core persistiert
+- Plugin empfängt Einstellungen via `settings_schema`-Validierung
+- Schema-Validierung passiert, bevor das Plugin die Daten sieht
+- Ungültige Einstellungen erreichen das Plugin nie
+- Plugins können nicht in ihr Verzeichnis schreiben; aller State muss via Host-API verwaltet werden
+
+#### Was gehört in UI-Config
+
+| Gehört in UI | Gehört NICHT in UI |
+|--------------|-------------------|
+| Feature-Toggles | Secrets (verwende secret type in settings_schema) |
+| Numerische Schwellenwerte | Dateipfade |
+| Kanal-Listen | Rohe Credentials |
+| Boolean-Flags | Interner State |
+| Text-Templates | Abgeleitete/berechnete Werte |
+
+**Einstellungen werden in `settings_schema` mit Typen definiert:** `text`, `number`, `bool`, `select`, `secret`
+
+---
+
+### Testanforderungen {#testanforderungen-de}
+
+#### Minimale Testabdeckung
+
+Jedes Userplugin MUSS haben:
+
+1. **Manifest-Validierungs-Test**
+   ```python
+   def test_manifest_valid_yaml():
+       import yaml
+       with open("plugin.yaml") as f:
+           manifest = yaml.safe_load(f)
+       assert "name" in manifest
+       assert "version" in manifest
+       assert "required_permissions" in manifest or "required_roles" in manifest
+   ```
+
+2. **Plugin lädt ohne Fehler**
+   ```python
+   def test_plugin_imports():
+       # main.py muss handle_command definieren
+       import importlib.util
+       spec = importlib.util.spec_from_file_location("main", "main.py")
+       module = importlib.util.module_from_spec(spec)
+       spec.loader.exec_module(module)
+       assert callable(getattr(module, "handle_command", None))
+   ```
+
+3. **Keine direkten Netzwerkaufrufe**
+   ```python
+   def test_no_direct_requests():
+       import ast
+       with open("main.py") as f:
+           tree = ast.parse(f.read())
+       for node in ast.walk(tree):
+           if isinstance(node, ast.Import):
+               for alias in node.names:
+                   assert alias.name != "requests"
+   ```
+
+4. **Keine Secrets im Code**
+   ```python
+   def test_no_hardcoded_secrets():
+       import re
+       with open("main.py") as f:
+           code = f.read()
+       # Auf gängige Secret-Patterns prüfen
+       assert not re.search(r'[a-zA-Z0-9]{32,}', code)  # API-Keys
+   ```
+
+#### QA-Checkliste vor Submission
+
+- [ ] Plugin lädt ohne Fehler in AMO
+- [ ] Alle deklarierten Berechtigungen werden tatsächlich verwendet
+- [ ] Es werden keine nicht-deklarierten Berechtigungen verwendet
+- [ ] Settings-Schema validiert korrekt
+- [ ] Umgang mit fehlenden/ungültigen Einstellungen
+- [ ] Keine Secrets im Code oder Logs
+- [ ] Kein direkter Netzwerk/FS-Zugriff
+- [ ] Nur absolute Pfade verwendet
+- [ ] Ordentliches Error-Handling
+- [ ] Tests bestehen mit `pytest -q`
+
+---
+
+### KI-spezifische Richtlinien {#ki-spezifische-richtlinien-de}
+
+**Für KI-Agenten, die Userplugins generieren:**
+
+#### Nur absolute Pfade
+
+```python
+# ❌ NIE
+data_file = "./data/items.json"
+config = "../config.json"
+
+# ✅ IMMER
+import os
+plugin_dir = os.path.dirname(os.path.abspath(__file__))
+data_file = os.path.join(plugin_dir, "data", "items.json")
+```
+
+#### Keine OpenClaw-Artefakte
+
+**ENTFERNEN vor dem Generieren:**
+- Referenzen zu OpenClaw-Pfaden (z.B. `/home/claw/.openclaw/`)
+- Sitzungsspezifische Daten
+- Interne Tooling-Referenzen
+- Debug-Prints aus der Generierung
+
+#### Kein Scope Creep
+
+**Bleibe bei der Anfrage:**
+- Wenn nach RSS-Plugin gefragt, füge keine Weather-API hinzu
+- Wenn nach 3 Befehlen gefragt, füge nicht 10 hinzu
+- Minimale viable Implementierung zuerst
+
+#### Keine öffentlichen Aktionen ohne Genehmigung
+
+**VERBOTEN:**
+- In Repository pushen
+- Öffentliche Issues erstellen
+- In soziale Medien posten
+- Jede externe Netzwerkaktion außerhalb von Capability-Aufrufen
+
+**ERFORDERLICH:**
+- Generierten Code zum Review an User zurückgeben
+- User über Submission/Deployment entscheiden lassen
+- Nie auto-commit oder auto-push
+
+#### Code-Generierungs-Template
+
+Wenn ein Plugin generiert werden soll, verwende diese Struktur:
+
+**plugin.yaml:**
+
+```yaml
+name: my_plugin
+version: "1.0.0"
+description: Kurze Beschreibung, was dieses Plugin tut
+commands:
+  - mycommand
+required_roles:
+  - normal
+required_permissions:
+  - send_message
+```
+
+**main.py:**
+
+```python
+"""
+[Plugin-Name] für AMO Telegram Bot.
+
+Generiert: [Datum]
+Zweck: [Kurzbeschreibung]
+Erforderliche Berechtigungen: [Liste deklarierter Berechtigungen]
+"""
+
+from typing import Dict, Any
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+async def handle_command(context: Dict[str, Any], host_api: Any) -> None:
+    """Haupt-Einstiegspunkt für Befehlsausführung."""
+    command = context.get("command_name", "")
+    argument = context.get("argument", "")
+    chat_id = context.get("chat_id")
+    message_id = context.get("message_id")
+
+    # Befehlslogik hier
+    await host_api.reply(chat_id, message_id, "Hallo von meinem Plugin!")
+```
+
+---
+
+### Schnell-Referenz-Karte (DE)
+
+```
+MANIFEST (plugin.yaml)
+├── name: Kleinbuchstaben, alphanumerisch+Unterstrich/Bindestrich, 3-50 Zeichen
+├── version: Beliebiges Format
+├── commands: [] ← Befehlsnamen
+├── schedule: {interval_seconds: N} oder {cron: "..."}
+├── worker: {restart_backoff_seconds: N}
+├── required_roles: ["normal", "vip", "admin", "owner"]
+└── required_permissions: ["rss.fetch", "send_message"]
+
+CODE (main.py)
+├── async def handle_command(context, host_api)
+├── context: dict mit chat_id, message_id, command_name, argument, attachments, etc.
+├── host_api.send_message(chat_id, text)
+└── host_api.reply(chat_id, message_id, text)
+
+SETTINGS_SCHEMA
+├── text: String mit optionalem Pattern-Regex
+├── number: Integer mit min/max
+├── bool: true/false
+├── select: Liste von Optionen
+└── secret: String (sicher gespeichert)
+
+SICHERHEIT
+├── KEINE Secrets im Code/Logs
+├── KEIN direktes Netzwerk (verwende Capabilities)
+├── KEIN Filesystem-Escape
+└── KEINE öffentlichen Aktionen ohne Genehmigung
+```
+
+---
+
+## 🇬🇧 English
+
+### Table of Contents
+
+1. [Quick Overview](#quick-overview-en)
+2. [File Structure](#file-structure-en)
+3. [Manifest Specification](#manifest-specification-en)
+4. [Do's and Don'ts](#dos-and-donts-en)
+5. [Minimal Working Example](#minimal-working-example-en)
+6. [Host API Reference](#host-api-reference-en)
+7. [Security Rules](#security-rules-en)
+8. [UI/Config Integration](#uiconfig-integration-en)
+9. [Testing Requirements](#testing-requirements-en)
+10. [AI-Specific Guidelines](#ai-specific-guidelines-en)
+
+---
+
+### Quick Overview {#quick-overview-en}
 
 **What is a Userplugin?**
 
-A userplugin extends AMO's functionality without modifying core code. It runs in a sandboxed environment with explicitly declared capabilities.
+A userplugin extends AMO's functionality without modifying core code. It runs in a sandboxed environment with explicitly declared permissions.
 
 **Core vs. Userplugin Responsibility:**
 
@@ -46,7 +688,7 @@ A userplugin extends AMO's functionality without modifying core code. It runs in
 
 ---
 
-## File Structure
+### File Structure {#file-structure-en}
 
 A valid userplugin requires exactly these files:
 
@@ -73,11 +715,11 @@ my_plugin/
 
 ---
 
-## Manifest Specification
+### Manifest Specification {#manifest-specification-en}
 
 The manifest is **mandatory** and must be valid YAML or JSON.
 
-### Required Fields
+#### Required Fields
 
 ```yaml
 name: my_plugin
@@ -100,7 +742,7 @@ schedule:
 required_permissions: []
 ```
 
-### Field Reference
+#### Field Reference
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
@@ -118,7 +760,7 @@ required_permissions: []
 
 *Note: At least one of `required_roles` or `required_permissions` must be defined.*
 
-### Permission Declaration
+#### Permission Declaration
 
 **Rule:** Declare ONLY permissions you actually use in your plugin code.
 
@@ -143,9 +785,9 @@ required_permissions:
 
 ---
 
-## Do's and Don'ts
+### Do's and Don'ts {#dos-and-donts-en}
 
-### ✅ DO
+#### ✅ DO
 
 - ✅ Use **async/await** for all host API calls
 - ✅ Validate all inputs before processing
@@ -158,7 +800,7 @@ required_permissions:
 - ✅ Clean up temporary resources in `finally` blocks
 - ✅ Use type hints in Python code
 
-### ❌ DON'T
+#### ❌ DON'T
 
 - ❌ **Never** log secrets, tokens, or user data
 - ❌ **Never** commit private artifacts to the repo
@@ -173,9 +815,9 @@ required_permissions:
 
 ---
 
-## Minimal Working Example
+### Minimal Working Example {#minimal-working-example-en}
 
-### `plugin.yaml`
+#### `plugin.yaml`
 
 ```yaml
 name: rss_notifier
@@ -205,7 +847,7 @@ settings_schema:
     description: Check interval in minutes
 ```
 
-### `main.py`
+#### `main.py`
 
 ```python
 """
@@ -261,9 +903,9 @@ async def handle_command(context: Dict[str, Any], host_api: Any) -> None:
 
 ---
 
-## Host API Reference
+### Host API Reference {#host-api-reference-en}
 
-### Host API Methods
+#### Host API Methods
 
 The `host_api` object provides these async methods:
 
@@ -309,9 +951,9 @@ Dict with image context when replying to an image, with keys:
 
 ---
 
-## Security Rules
+### Security Rules {#security-rules-en}
 
-### 1. Secret Handling
+#### 1. Secret Handling
 
 **ABSOLUTELY FORBIDDEN:**
 
@@ -325,9 +967,8 @@ return {"error": f"Failed with token {api_key}"}  # Returning secrets
 **Correct approach:**
 
 Secrets are configured via `settings_schema` with `type: secret`. The core handles secret storage and validation. Plugins never see the actual secret values.
-```
 
-### 2. Private Artifacts
+#### 2. Private Artifacts
 
 **DO NOT commit:**
 - `.env` files
@@ -351,7 +992,7 @@ build/
 *.log
 ```
 
-### 3. Network Access
+#### 3. Network Access
 
 **FORBIDDEN:** Direct network access
 
@@ -363,7 +1004,7 @@ response = requests.get("https://api.example.com")  # BYPASSES SANDBOX
 
 **Note:** RSS/network operations must be handled by the runtime. Plugins with RSS-related settings must declare `rss.fetch` in `required_permissions`.
 
-### 4. Filesystem Access
+#### 4. Filesystem Access
 
 **FORBIDDEN:** Direct filesystem access outside plugin dir
 
@@ -385,9 +1026,9 @@ config_path = os.path.join(plugin_dir, "data.json")
 
 ---
 
-## UI/Config Integration
+### UI/Config Integration {#uiconfig-integration-en}
 
-### Settings Schema
+#### Settings Schema
 
 The `settings_schema` field in `plugin.yaml` defines WebUI configuration options.
 
@@ -435,7 +1076,7 @@ settings_schema:
 - `select`: `options` must be non-empty strings; `default` must be in options
 - `text`/`secret`: `default` must be string; `pattern` must be valid regex
 
-### UI Behavior
+#### UI Behavior
 
 - Settings are edited in WebUI and persisted by core
 - Plugin receives settings via the `settings_schema` validation
@@ -443,7 +1084,7 @@ settings_schema:
 - Invalid settings never reach the plugin
 - Plugins cannot write to their directory; all state must be managed via host API
 
-### What Belongs in UI Config
+#### What Belongs in UI Config
 
 | Belongs in UI | Does NOT Belong |
 |--------------|-----------------|
@@ -457,9 +1098,9 @@ settings_schema:
 
 ---
 
-## Testing Requirements
+### Testing Requirements {#testing-requirements-en}
 
-### Minimum Test Coverage
+#### Minimum Test Coverage
 
 Every userplugin MUST have:
 
@@ -507,7 +1148,7 @@ Every userplugin MUST have:
        assert not re.search(r'[a-zA-Z0-9]{32,}', code)  # API keys
    ```
 
-### QA Checklist Before Submission
+#### QA Checklist Before Submission
 
 - [ ] Plugin loads without errors in AMO
 - [ ] All declared permissions are actually used
@@ -522,11 +1163,11 @@ Every userplugin MUST have:
 
 ---
 
-## AI-Specific Guidelines
+### AI-Specific Guidelines {#ai-specific-guidelines-en}
 
 **For AI agents generating userplugins:**
 
-### Absolute Paths Only
+#### Absolute Paths Only
 
 ```python
 # ❌ NEVER
@@ -539,7 +1180,7 @@ plugin_dir = os.path.dirname(os.path.abspath(__file__))
 data_file = os.path.join(plugin_dir, "data", "items.json")
 ```
 
-### No OpenClaw Artifacts
+#### No OpenClaw Artifacts
 
 **REMOVE before generating:**
 - References to OpenClaw paths (e.g., `/home/claw/.openclaw/`)
@@ -547,14 +1188,14 @@ data_file = os.path.join(plugin_dir, "data", "items.json")
 - Internal tooling references
 - Debug prints from generation
 
-### No Scope Creep
+#### No Scope Creep
 
 **Stick to the request:**
 - If asked for RSS plugin, don't add weather API
 - If asked for 3 commands, don't add 10
 - Minimal viable implementation first
 
-### No Public Actions Without Approval
+#### No Public Actions Without Approval
 
 **FORBIDDEN:**
 - Pushing to repository
@@ -567,7 +1208,7 @@ data_file = os.path.join(plugin_dir, "data", "items.json")
 - Let user decide on submission/deployment
 - Never auto-commit or auto-push
 
-### Code Generation Template
+#### Code Generation Template
 
 When asked to generate a plugin, use this structure:
 
@@ -612,11 +1253,10 @@ async def handle_command(context: Dict[str, Any], host_api: Any) -> None:
     # Handle your command logic here
     await host_api.reply(chat_id, message_id, "Hello from my plugin!")
 ```
-```
 
 ---
 
-## Quick Reference Card
+### Quick Reference Card (EN)
 
 ```
 MANIFEST (plugin.yaml)
@@ -643,18 +1283,18 @@ SETTINGS_SCHEMA
 
 SECURITY
 ├── NO secrets in code/logs
-├── NO direct network (use capabilities)
+├── NO direct network (use host-provided permissions such as rss.fetch)
 ├── NO filesystem escape
 └── NO public actions without approval
 ```
 
 ---
 
-## Related Documentation
+## Related Documentation / Verwandte Dokumentation
 
-- [CONTRIBUTING.md](../CONTRIBUTING.md) — General contribution guidelines
-- [SETUP_EN.md](SETUP_EN.md) — Setup instructions
-- [CHANGELOG.md](../CHANGELOG.md) — Version history
+- [CONTRIBUTING.md](../CONTRIBUTING.md) — Allgemeine Mitwirkungsrichtlinien / General contribution guidelines
+- [SETUP_EN.md](SETUP_EN.md) — Setup instructions (EN)
+- [CHANGELOG.md](../CHANGELOG.md) — Versionshistorie / Version history
 
 ---
 
