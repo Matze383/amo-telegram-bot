@@ -101,6 +101,7 @@ python main.py
 | [🧪 Beta-Test (DE)](docs/BETATEST_DE.md) | Schritt-für-Schritt Testanleitung |
 | [🧪 Beta Test (EN)](docs/BETATEST_EN.md) | Step-by-step testing guide |
 | [🔌 Userplugin Guide](docs/USERPLUGINS.md) | Plugin-Entwicklung mit Do/Don't-Regeln (bilingual) |
+| [📺 YT-RSS Plugin](docs/YT-RSS.md) | YouTube-Kanal-RSS-Abonnements (topic-scoped) |
 | [📝 Changelog](CHANGELOG.md) | Änderungsprotokoll / Changelog (bilingual) |
 | [🚀 Release Baseline](docs/release-baseline.md) | Support-Matrix und Release-Status |
 | [🗺️ Roadmap](ROADMAP.md) | Projekt-Richtung und geplante Features |
@@ -196,6 +197,7 @@ python main.py
 | [🧪 Beta Test (EN)](docs/BETATEST_EN.md) | Step-by-step testing guide |
 | [🧪 Beta-Test (DE)](docs/BETATEST_DE.md) | German testing guide |
 | [🔌 Userplugin Guide](docs/USERPLUGINS.md) | Plugin development with Do/Don't rules (bilingual) |
+| [📺 YT-RSS Plugin](docs/YT-RSS.md) | YouTube channel RSS subscriptions (topic-scoped) |
 | [📝 Changelog](CHANGELOG.md) | Changelog and version history (bilingual) |
 | [🚀 Release Baseline](docs/release-baseline.md) | Support matrix and release status |
 | [🗺️ Roadmap](ROADMAP.md) | Project direction and planned features |
