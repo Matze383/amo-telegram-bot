@@ -1,16 +1,21 @@
 # Plugin Manifest - Command Plugin with Secret
+# Human-readable title: "Command Plugin with Secret"
 # See docs/PLUGIN_CONTRACT.md for manifest specification
 
-id: example.command.with_secret
-name: Command Plugin with Secret
+name: example_command_with_secret
 version: "1.0.0"
 description: Example plugin demonstrating secret configuration usage
-entrypoint: main.py
 min_bot_version: "1.0.0"
-triggers:
-  - user-triggered
 
 author: AMO Team
+
+commands:
+  - weather
+
+required_roles:
+  - normal
+required_permissions:
+  - send_message
 
 settings_schema:
   api_key:

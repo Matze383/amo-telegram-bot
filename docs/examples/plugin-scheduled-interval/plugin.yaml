@@ -1,16 +1,21 @@
 # Plugin Manifest - Scheduled Interval Plugin
+# Human-readable title: "Scheduled Interval Plugin"
 # See docs/PLUGIN_CONTRACT.md for manifest specification
 
-id: example.scheduled.interval
-name: Scheduled Interval Plugin
+name: example_scheduled_interval
 version: "1.0.0"
 description: A scheduled plugin that runs at fixed intervals
-entrypoint: main.py
 min_bot_version: "1.0.0"
-triggers:
-  - interval
 
 author: AMO Team
+
+schedule:
+  interval_seconds: 300
+
+required_roles:
+  - admin
+required_permissions:
+  - send_message
 
 settings_schema:
   target_group:
@@ -27,9 +32,3 @@ settings_schema:
     required: false
     default: true
     description: Whether to send messages on schedule
-  interval_seconds:
-    type: number
-    required: false
-    default: 300
-    min: 60
-    description: Interval between executions in seconds (minimum 60s in production)

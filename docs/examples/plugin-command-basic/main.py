@@ -3,44 +3,17 @@ Basic Command Plugin Example
 Demonstrates a simple user-triggered command plugin.
 """
 
-from typing import Dict, Any
 
-class Plugin:
-    """Basic command plugin that responds to /hello command."""
-    
-    def __init__(self, context: Dict[str, Any]):
-        self.context = context
-        self.settings = context.get("settings", {})
-        self.logger = context.get("logger")
-    
-    def execute(self, trigger_data: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Execute the plugin command.
-        
-        Args:
-            trigger_data: Contains user info, chat context, etc.
-        
-        Returns:
-            Response data with message to send
-        """
-        # Get greeting from settings or use default
-        greeting = self.settings.get("greeting_message", "Hello from AMO!")
-        
-        # Log execution for audit trail
-        self.logger.info(f"Command /hello executed by user {trigger_data.get('user_id')}")
-        
-        return {
-            "status": "success",
-            "message": greeting,
-            "type": "text"
-        }
-    
-    def get_help(self) -> str:
-        """Return help text for this command."""
-        return "/hello - Sends a greeting message to the chat"
+async def handle_command(context, host_api):
+    """
+    Handle command invocation.
 
+    Args:
+        context: Contains command_name, chat_id, message_id, user_id, settings, etc.
+        host_api: Provides send_message, reply methods
+    """
+    # Get greeting from settings or use default
+    greeting = context.settings.get("greeting_message", "Hello from AMO!")
 
-# Plugin entry point
-def create_plugin(context: Dict[str, Any]) -> Plugin:
-    """Factory function to create plugin instance."""
-    return Plugin(context)
+    # Reply to the command
+    await host_api.reply(context.chat_id, context.message_id, greeting)
