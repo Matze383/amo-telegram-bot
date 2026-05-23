@@ -31,12 +31,13 @@ class YtRssStateRepository:
 
     def _load(self) -> dict[str, Any]:
         if not self._state_path.exists():
-            return {"subscriptions": {}, "cursors": {}}
+            return {"subscriptions": {}, "cursors": {}, "errors": {}}
         raw = json.loads(self._state_path.read_text(encoding="utf-8"))
         if not isinstance(raw, dict):
             return {"subscriptions": {}, "cursors": {}}
         raw.setdefault("subscriptions", {})
         raw.setdefault("cursors", {})
+        raw.setdefault("errors", {})
         return raw
 
     def _save(self, state: dict[str, Any]) -> None:
@@ -93,6 +94,13 @@ class YtRssStateRepository:
                 out.append(SubscriptionRecord(**value))
         return sorted(out, key=lambda item: item.channel_key)
 
+    def list_all_subscriptions(self) -> list[SubscriptionRecord]:
+        state = self._load()
+        out: list[SubscriptionRecord] = []
+        for value in state["subscriptions"].values():
+            out.append(SubscriptionRecord(**value))
+        return sorted(out, key=lambda item: (item.chat_id, item.thread_id or -1, item.channel_key))
+
     def get_cursor(self, *, chat_id: int, thread_id: int | None, channel_key: str) -> CursorRecord:
         state = self._load()
         key = self._topic_key(chat_id, thread_id, channel_key)
@@ -106,4 +114,11 @@ class YtRssStateRepository:
         state = self._load()
         key = self._topic_key(chat_id, thread_id, channel_key)
         state["cursors"][key] = asdict(CursorRecord(cursor=cursor, dedupe=dedupe))
+        state["errors"].pop(key, None)
+        self._save(state)
+
+    def set_last_error(self, *, chat_id: int, thread_id: int | None, channel_key: str, error: str) -> None:
+        state = self._load()
+        key = self._topic_key(chat_id, thread_id, channel_key)
+        state["errors"][key] = {"error": error}
         self._save(state)

@@ -260,6 +260,104 @@ async def handle_command(context, host_api):
         await host_api.reply(context.chat_id, context.message_id, "No matching subscription found in this topic.")
 
 
+def _entry_key(entry: dict) -> str | None:
+    for key in ("dedupe_key", "id", "link"):
+        value = entry.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def _entry_title(entry: dict) -> str:
+    title = entry.get("title")
+    if isinstance(title, str) and title.strip():
+        return title.strip()
+    return "(untitled)"
+
+
+def _entry_link(entry: dict) -> str:
+    for key in ("link", "url"):
+        value = entry.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
+async def _send_topic_message(host_api, *, chat_id: int, thread_id: int | None, text: str):
+    if thread_id is None:
+        await host_api.send_message(chat_id, text)
+    else:
+        await host_api.send_message(chat_id, text, message_thread_id=thread_id)
+
+
 async def handle_schedule(context, host_api):
-    # B2/B3 scope guard: no real polling/send implementation yet.
+    repo = _repo_for_context(context)
+
+    list_all = getattr(repo, "list_all_subscriptions", None)
+    subscriptions = list_all() if callable(list_all) else []
+
+    for sub in subscriptions:
+        try:
+            rss_result = await host_api.rss_fetch(sub.rss_url)
+            entries = rss_result.get("entries") if isinstance(rss_result, dict) else []
+            if not isinstance(entries, list):
+                entries = []
+
+            cursor = repo.get_cursor(chat_id=sub.chat_id, thread_id=sub.thread_id, channel_key=sub.channel_key)
+            dedupe_seen = set(cursor.dedupe or [])
+
+            seen_keys = []
+            for entry in entries:
+                if isinstance(entry, dict):
+                    key = _entry_key(entry)
+                    if key:
+                        seen_keys.append(key)
+
+            latest_cursor = seen_keys[0] if seen_keys else None
+
+            if cursor.cursor is None and not dedupe_seen:
+                repo.set_cursor(
+                    chat_id=sub.chat_id,
+                    thread_id=sub.thread_id,
+                    channel_key=sub.channel_key,
+                    cursor=latest_cursor,
+                    dedupe=seen_keys[:100],
+                )
+                continue
+
+            new_entries = []
+            for entry in entries:
+                if not isinstance(entry, dict):
+                    continue
+                key = _entry_key(entry)
+                if not key:
+                    continue
+                if key == cursor.cursor or key in dedupe_seen:
+                    break
+                new_entries.append(entry)
+
+            for entry in reversed(new_entries):
+                title = _entry_title(entry)
+                link = _entry_link(entry)
+                text = f"📺 {sub.channel_key}: {title}"
+                if link:
+                    text = f"{text}\n{link}"
+                await _send_topic_message(host_api, chat_id=sub.chat_id, thread_id=sub.thread_id, text=text)
+
+            dedupe_out = seen_keys[:100] if seen_keys else list(dedupe_seen)[:100]
+            repo.set_cursor(
+                chat_id=sub.chat_id,
+                thread_id=sub.thread_id,
+                channel_key=sub.channel_key,
+                cursor=latest_cursor or cursor.cursor,
+                dedupe=dedupe_out,
+            )
+        except Exception as exc:
+            repo.set_last_error(
+                chat_id=sub.chat_id,
+                thread_id=sub.thread_id,
+                channel_key=sub.channel_key,
+                error=f"rss_fetch_failed:{type(exc).__name__}",
+            )
+
     return None

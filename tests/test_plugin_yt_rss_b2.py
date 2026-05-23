@@ -183,9 +183,20 @@ class _Context:
 class _Host:
     def __init__(self) -> None:
         self.replies: list[tuple[int, int, str]] = []
+        self.sent: list[tuple[int, int | None, str]] = []
+        self.feed_map: dict[str, object] = {}
 
     async def reply(self, chat_id: int, message_id: int, text: str):
         self.replies.append((chat_id, message_id, text))
+
+    async def send_message(self, chat_id: int, text: str, message_thread_id: int | None = None):
+        self.sent.append((chat_id, message_thread_id, text))
+
+    async def rss_fetch(self, rss_url: str):
+        value = self.feed_map[rss_url]
+        if isinstance(value, Exception):
+            raise value
+        return value
 
 
 def test_command_add_delete_duplicate_and_topic_isolation(tmp_path, monkeypatch) -> None:
@@ -268,3 +279,131 @@ def test_command_permission_denied_and_invalid_url(tmp_path, monkeypatch) -> Non
     bad = _Context(command_name="addYT", argument="notaurl")
     asyncio.run(plugin_main.handle_command(bad, host))
     assert "Invalid URL." in host.replies[-1][2]
+
+
+def test_schedule_first_poll_baselines_without_posting(tmp_path, monkeypatch) -> None:
+    plugin_main = _load_plugin_main()
+    repo_module = _load_repo_module()
+    repo = repo_module.YtRssStateRepository(tmp_path / "state")
+    monkeypatch.setattr(plugin_main, "_repo_for_context", lambda context: repo)
+
+    repo.add_subscription(
+        chat_id=100,
+        thread_id=200,
+        channel_key="UC1",
+        source_url="https://www.youtube.com/channel/UC1",
+        canonical_channel_url="https://www.youtube.com/channel/UC1",
+        rss_url="rss://uc1",
+        added_by_user_id=1,
+    )
+
+    host = _Host()
+    host.feed_map["rss://uc1"] = {
+        "entries": [
+            {"id": "v3", "title": "new", "link": "https://x/3"},
+            {"id": "v2", "title": "mid", "link": "https://x/2"},
+            {"id": "v1", "title": "old", "link": "https://x/1"},
+        ]
+    }
+
+    asyncio.run(plugin_main.handle_schedule(object(), host))
+    assert host.sent == []
+    cursor = repo.get_cursor(chat_id=100, thread_id=200, channel_key="UC1")
+    assert cursor.cursor == "v3"
+    assert cursor.dedupe == ["v3", "v2", "v1"]
+
+
+def test_schedule_second_poll_posts_only_new_and_correct_topic(tmp_path, monkeypatch) -> None:
+    plugin_main = _load_plugin_main()
+    repo_module = _load_repo_module()
+    repo = repo_module.YtRssStateRepository(tmp_path / "state")
+    monkeypatch.setattr(plugin_main, "_repo_for_context", lambda context: repo)
+
+    repo.add_subscription(
+        chat_id=100,
+        thread_id=321,
+        channel_key="UC1",
+        source_url="https://www.youtube.com/channel/UC1",
+        canonical_channel_url="https://www.youtube.com/channel/UC1",
+        rss_url="rss://uc1",
+        added_by_user_id=1,
+    )
+
+    host = _Host()
+    host.feed_map["rss://uc1"] = {"entries": [{"id": "v2", "title": "two", "link": "https://x/2"}, {"id": "v1", "title": "one", "link": "https://x/1"}]}
+    asyncio.run(plugin_main.handle_schedule(object(), host))
+
+    host.feed_map["rss://uc1"] = {"entries": [{"id": "v3", "title": "three", "link": "https://x/3"}, {"id": "v2", "title": "two", "link": "https://x/2"}]}
+    asyncio.run(plugin_main.handle_schedule(object(), host))
+
+    assert len(host.sent) == 1
+    chat_id, thread_id, text = host.sent[0]
+    assert chat_id == 100
+    assert thread_id == 321
+    assert "UC1" in text and "three" in text and "https://x/3" in text
+
+
+def test_schedule_duplicate_entries_not_reposted(tmp_path, monkeypatch) -> None:
+    plugin_main = _load_plugin_main()
+    repo_module = _load_repo_module()
+    repo = repo_module.YtRssStateRepository(tmp_path / "state")
+    monkeypatch.setattr(plugin_main, "_repo_for_context", lambda context: repo)
+
+    repo.add_subscription(
+        chat_id=100,
+        thread_id=None,
+        channel_key="UC1",
+        source_url="https://www.youtube.com/channel/UC1",
+        canonical_channel_url="https://www.youtube.com/channel/UC1",
+        rss_url="rss://uc1",
+        added_by_user_id=1,
+    )
+
+    host = _Host()
+    host.feed_map["rss://uc1"] = {"entries": [{"id": "v2", "title": "two", "link": "https://x/2"}, {"id": "v1", "title": "one", "link": "https://x/1"}]}
+    asyncio.run(plugin_main.handle_schedule(object(), host))
+
+    host.feed_map["rss://uc1"] = {"entries": [{"id": "v2", "title": "two", "link": "https://x/2"}, {"id": "v1", "title": "one", "link": "https://x/1"}]}
+    asyncio.run(plugin_main.handle_schedule(object(), host))
+
+    assert host.sent == []
+
+
+def test_schedule_failure_isolated_per_subscription(tmp_path, monkeypatch) -> None:
+    plugin_main = _load_plugin_main()
+    repo_module = _load_repo_module()
+    repo = repo_module.YtRssStateRepository(tmp_path / "state")
+    monkeypatch.setattr(plugin_main, "_repo_for_context", lambda context: repo)
+
+    repo.add_subscription(
+        chat_id=100,
+        thread_id=1,
+        channel_key="UCFAIL",
+        source_url="https://www.youtube.com/channel/UCFAIL",
+        canonical_channel_url="https://www.youtube.com/channel/UCFAIL",
+        rss_url="rss://fail",
+        added_by_user_id=1,
+    )
+    repo.add_subscription(
+        chat_id=100,
+        thread_id=2,
+        channel_key="UCGOOD",
+        source_url="https://www.youtube.com/channel/UCGOOD",
+        canonical_channel_url="https://www.youtube.com/channel/UCGOOD",
+        rss_url="rss://good",
+        added_by_user_id=1,
+    )
+
+    host = _Host()
+    host.feed_map["rss://fail"] = RuntimeError("boom")
+    host.feed_map["rss://good"] = {"entries": [{"id": "g1", "title": "good", "link": "https://x/g1"}]}
+
+    asyncio.run(plugin_main.handle_schedule(object(), host))
+    assert host.sent == []  # first good poll baselines
+
+    host.feed_map["rss://fail"] = RuntimeError("boom")
+    host.feed_map["rss://good"] = {"entries": [{"id": "g2", "title": "good2", "link": "https://x/g2"}, {"id": "g1", "title": "good", "link": "https://x/g1"}]}
+    asyncio.run(plugin_main.handle_schedule(object(), host))
+
+    assert len(host.sent) == 1
+    assert host.sent[0][0] == 100 and host.sent[0][1] == 2
