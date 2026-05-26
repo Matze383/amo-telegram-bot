@@ -106,6 +106,22 @@ TELEGRAM_TEXTS: dict[str, dict[Locale, str]] = {
     "dispatcher.consent.block.group": {"de": "Bitte kläre Consent privat mit dem Bot.", "en": "Please resolve consent privately with the bot."},
     "dispatcher.consent.block.unreachable": {"de": "Bitte starte den Bot privat und bestätige mit /accept.", "en": "Please start the bot in private and confirm with /accept."},
     "dispatcher.consent.block.default": {"de": "Bitte bestätige zuerst mit /accept oder prüfe /consent.", "en": "Please confirm with /accept first or check /consent."},
+    "role.current": {"de": "deine rolle: {role}", "en": "your role: {role}"},
+    "setrole.permission_denied": {"de": "keine berechtigung", "en": "permission denied"},
+    "setrole.usage": {"de": "nutzung: /setrole <telegram_user_id> <rolle>", "en": "usage: /setrole <telegram_user_id> <role>"},
+    "setrole.invalid_user_id": {"de": "ungültige telegram_user_id", "en": "invalid telegram_user_id"},
+    "setrole.invalid_role": {"de": "ungültige rolle. erlaubt: {allowed}", "en": "invalid role. allowed: {allowed}"},
+    "setrole.admin_assign_restricted": {
+        "de": "keine berechtigung. admin darf nur zuweisen: {allowed}",
+        "en": "permission denied. admin may only assign: {allowed}"
+    },
+    "setrole.owner_assignment_disabled": {
+        "de": "owner-zuweisung via telegram ist im MVP deaktiviert (nutze webui)",
+        "en": "owner assignment via telegram is disabled in MVP (use webui)"
+    },
+    "setrole.not_configured": {"de": "rollenverwaltung ist nicht konfiguriert", "en": "role management not configured"},
+    "setrole.updated": {"de": "rolle aktualisiert: {target_user_id} {prev} -> {new_role}", "en": "role updated: {target_user_id} {prev} -> {new_role}"},
+    "setrole.no_change": {"de": "keine änderung: {target_user_id} bereits {new_role}", "en": "no change: {target_user_id} already {new_role}"},
 }
 
 
@@ -232,44 +248,42 @@ def create_builtin_registry(
         }
 
     async def role_handler(ctx: CommandContext) -> str:
-        return f"your role: {ctx.role.value}"
-
-
+        return t_text("role.current", ctx.locale, role=ctx.role.value)
 
     async def setrole_handler(ctx: CommandContext) -> str:
         if ctx.role not in {Role.OWNER, Role.ADMIN}:
-            return "permission denied"
+            return t_text("setrole.permission_denied", ctx.locale)
 
         if not ctx.argument:
-            return "usage: /setrole <telegram_user_id> <role>"
+            return t_text("setrole.usage", ctx.locale)
 
         parts = ctx.argument.split()
         if len(parts) != 2:
-            return "usage: /setrole <telegram_user_id> <role>"
+            return t_text("setrole.usage", ctx.locale)
 
         user_raw, role_raw = parts
         try:
             target_user_id = int(user_raw)
         except ValueError:
-            return "invalid telegram_user_id"
+            return t_text("setrole.invalid_user_id", ctx.locale)
 
         try:
             target_role = Role(role_raw.casefold())
         except ValueError:
             allowed = ", ".join(r.value for r in Role)
-            return f"invalid role. allowed: {allowed}"
+            return t_text("setrole.invalid_role", ctx.locale, allowed=allowed)
 
         if not can_assign_role(ctx.role, target_role):
             if ctx.role == Role.ADMIN:
                 allowed = ", ".join(sorted(r.value for r in ADMIN_ASSIGNABLE_ROLES))
-                return f"permission denied. admin may only assign: {allowed}"
-            return "permission denied"
+                return t_text("setrole.admin_assign_restricted", ctx.locale, allowed=allowed)
+            return t_text("setrole.permission_denied", ctx.locale)
 
         if ctx.role == Role.OWNER and target_role == Role.OWNER:
-            return "owner assignment via telegram is disabled in MVP (use webui)"
+            return t_text("setrole.owner_assignment_disabled", ctx.locale)
 
         if session_factory is None:
-            return "role management not configured"
+            return t_text("setrole.not_configured", ctx.locale)
 
         with session_factory() as session:
             if ctx.chat_id < 0:
@@ -316,8 +330,8 @@ def create_builtin_registry(
 
         if result.changed:
             prev = result.previous_role.value if result.previous_role else "<new>"
-            return f"role updated: {target_user_id} {prev} -> {result.new_role.value}"
-        return f"no change: {target_user_id} already {result.new_role.value}"
+            return t_text("setrole.updated", ctx.locale, target_user_id=target_user_id, prev=prev, new_role=result.new_role.value)
+        return t_text("setrole.no_change", ctx.locale, target_user_id=target_user_id, new_role=result.new_role.value)
 
     async def accept_handler(ctx: CommandContext) -> str:
         if session_factory is None:

@@ -39,7 +39,7 @@ def test_owner_can_set_roles(tmp_path) -> None:
 
     out = asyncio.run(cmd.handler(_ctx(user_id=1, role=Role.OWNER, argument="200 vip")))
     assert out is not None
-    assert "role updated" in out
+    assert "rolle aktualisiert" in out
     assert "-> vip" in out
 
 
@@ -73,8 +73,8 @@ def test_admin_cannot_set_admin_or_owner(tmp_path) -> None:
     out_admin = asyncio.run(cmd.handler(_ctx(user_id=10, role=Role.ADMIN, argument="202 admin")))
     out_owner = asyncio.run(cmd.handler(_ctx(user_id=10, role=Role.ADMIN, argument="202 owner")))
 
-    assert out_admin == "permission denied. admin may only assign: ignore, normal, vip"
-    assert out_owner == "permission denied. admin may only assign: ignore, normal, vip"
+    assert out_admin == "keine berechtigung. admin darf nur zuweisen: ignore, normal, vip"
+    assert out_owner == "keine berechtigung. admin darf nur zuweisen: ignore, normal, vip"
 
 
 def test_normal_and_vip_cannot_set_roles(tmp_path) -> None:
@@ -89,8 +89,8 @@ def test_normal_and_vip_cannot_set_roles(tmp_path) -> None:
     out_normal = asyncio.run(cmd.handler(_ctx(user_id=11, role=Role.NORMAL, argument="300 vip")))
     out_vip = asyncio.run(cmd.handler(_ctx(user_id=12, role=Role.VIP, argument="300 normal")))
 
-    assert out_normal == "permission denied"
-    assert out_vip == "permission denied"
+    assert out_normal == "keine berechtigung"
+    assert out_vip == "keine berechtigung"
 
 
 def test_audit_event_written_on_role_change(tmp_path) -> None:
@@ -139,7 +139,7 @@ def test_group_setrole_in_group_writes_group_audit_event(tmp_path) -> None:
     assert cmd is not None
 
     out = asyncio.run(cmd.handler(_ctx(user_id=77, role=Role.OWNER, argument="401 vip", chat_id=-100001)))
-    assert out is not None and "role updated" in out
+    assert out is not None and "rolle aktualisiert" in out
 
     with sf() as session:
         events = session.scalars(select(AuditEvent).where(AuditEvent.event_type == "group_role_set")).all()
@@ -175,7 +175,7 @@ def test_group_setrole_normal_in_group_writes_group_clear_audit_event(tmp_path) 
 
     _ = asyncio.run(cmd.handler(_ctx(user_id=77, role=Role.OWNER, argument="402 vip", chat_id=-100002)))
     out = asyncio.run(cmd.handler(_ctx(user_id=77, role=Role.OWNER, argument="402 normal", chat_id=-100002)))
-    assert out == "role updated: 402 vip -> normal"
+    assert out == "rolle aktualisiert: 402 vip -> normal"
 
     with sf() as session:
         events = session.scalars(select(AuditEvent).where(AuditEvent.event_type == "group_role_clear")).all()
@@ -206,7 +206,7 @@ def test_group_setrole_normal_without_existing_group_role_returns_clean_no_chang
     assert cmd is not None
 
     out = asyncio.run(cmd.handler(_ctx(user_id=77, role=Role.OWNER, argument="403 normal", chat_id=-100003)))
-    assert out == "no change: 403 already normal"
+    assert out == "keine änderung: 403 bereits normal"
 
 
 def test_bootstrap_owner_from_settings_empty_db_creates_owner(tmp_path) -> None:

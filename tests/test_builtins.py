@@ -31,7 +31,7 @@ def test_role_command() -> None:
             CommandContext(chat_id=1, user_id=1, role=Role.VIP, command_name="role", argument=None)
         )
     )
-    assert out == "your role: vip"
+    assert out == "deine rolle: vip"
 
 
 def test_ignore_blocked_on_registry_level() -> None:

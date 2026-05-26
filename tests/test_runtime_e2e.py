@@ -104,12 +104,12 @@ def test_dispatcher_e2e_ping_role_help_setrole_and_ask_ignore_is_silent(tmp_path
     assert "/setrole" in help_admin
 
     asyncio.run(dispatcher.handle_raw_update(_mk_update(uid=3000, chat_id=30, text="/role", update_id=4)))
-    assert sender.sent[-1] == (30, "your role: vip", None)
+    assert sender.sent[-1] == (30, "deine rolle: vip", None)
 
     asyncio.run(
         dispatcher.handle_raw_update(_mk_update(uid=2000, chat_id=20, text="/setrole 4000 vip", update_id=5))
     )
-    assert sender.sent[-1][1].startswith("role updated: 4000")
+    assert sender.sent[-1][1].startswith("rolle aktualisiert: 4000")
 
     sf = create_session_factory(db_url)
     with sf() as session:
