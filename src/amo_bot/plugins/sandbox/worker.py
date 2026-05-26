@@ -7,8 +7,11 @@ import json
 import os
 import sys
 from dataclasses import dataclass
+from time import monotonic
 from pathlib import Path
 from typing import Any
+
+from amo_bot.ai import CapabilityDecisionResult, RSSFetchRequest, RSSHTTPResponse, execute_rss_fetch
 
 
 def _load_sandbox_types():
@@ -102,14 +105,19 @@ class _RecordingHostAPI:
         if permission not in self._permissions:
             raise _PluginRuntimeError(f"operation '{operation}' requires capability '{permission}'")
 
-    async def send_message(self, chat_id: int, text: str) -> dict[str, object]:
+    async def send_message(self, chat_id: int, text: str, message_thread_id: int | None = None) -> dict[str, object]:
         self._require_permission("send_message", "send_message")
         if not isinstance(chat_id, int):
             raise ValueError("chat_id must be int")
+        if message_thread_id is not None and (not isinstance(message_thread_id, int) or message_thread_id < 1):
+            raise ValueError("message_thread_id must be positive int")
         text_clean = (text or "").strip()
         if not text_clean:
             raise ValueError("text must not be empty")
-        self._append({"op": "send_message", "chat_id": chat_id, "text": text_clean[: self._max_text_len]})
+        op: dict[str, object] = {"op": "send_message", "chat_id": chat_id, "text": text_clean[: self._max_text_len]}
+        if message_thread_id is not None:
+            op["message_thread_id"] = message_thread_id
+        self._append(op)
         return {"ok": True}
 
     async def reply(self, chat_id: int, message_id: int, text: str) -> dict[str, object]:
@@ -123,6 +131,62 @@ class _RecordingHostAPI:
             {"op": "reply", "chat_id": chat_id, "message_id": message_id, "text": text_clean[: self._max_text_len]}
         )
         return {"ok": True}
+
+    async def rss_fetch(self, rss_url: str) -> dict[str, object]:
+        self._require_permission("rss.fetch", "rss_fetch")
+        if not isinstance(rss_url, str) or not rss_url.strip():
+            raise ValueError("rss_url must be non-empty str")
+
+        request = RSSFetchRequest(
+            feed_id="sandbox",
+            url=rss_url.strip(),
+            allowed_urls=frozenset({rss_url.strip()}),
+            min_interval_seconds=1,
+            timeout_seconds=10.0,
+            max_response_bytes=2_000_000,
+            max_entries=20,
+            plugin_id="sandbox",
+        )
+
+        def _http_get(url: str, timeout_seconds: float) -> RSSHTTPResponse:
+            import urllib.request
+
+            req = urllib.request.Request(url, headers={"User-Agent": "AMO-SandboxRSS/1.0"}, method="GET")
+            with urllib.request.urlopen(req, timeout=timeout_seconds) as resp:  # nosec B310
+                status = int(getattr(resp, "status", 200))
+                body = resp.read()
+                return RSSHTTPResponse(status_code=status, body=body, redirects=0)
+
+        result = execute_rss_fetch(
+            request=request,
+            http_get=_http_get,
+            now_monotonic_seconds=monotonic(),
+            last_fetch_monotonic_seconds=None,
+        )
+        if result.result is not CapabilityDecisionResult.ALLOW:
+            reason = str(result.reason_code or "unknown")
+            policy_denied_reasons = {
+                "url_not_allowlisted",
+                "host_not_allowlisted",
+                "ssrf_blocked",
+                "scheme_not_allowed",
+            }
+            if reason.startswith("invalid_") or reason in policy_denied_reasons:
+                raise _PluginRuntimeError(f"rss_fetch denied: {reason}")
+            raise _PluginRuntimeError(f"rss_fetch_error:{reason}")
+
+        entries = [
+            {
+                "id": entry.id,
+                "title": entry.title,
+                "link": entry.link,
+                "published": entry.published,
+                "updated": getattr(entry, "updated", None),
+                "summary": entry.summary,
+            }
+            for entry in result.entries
+        ]
+        return {"entries": entries, "audit": result.audit, "entry_count": len(entries)}
 
     def _append(self, op: dict[str, object]) -> None:
         if len(self._ops) >= self._max_ops:
@@ -198,11 +262,20 @@ async def _execute_plugin(request: SandboxRequest) -> SandboxResponse:
     )
     host_api = _RecordingHostAPI(permissions=permissions)
     handler = _load_handler(module_path, str(trigger))
-    await handler(context, host_api)
+    handler_result = await handler(context, host_api)
+    response_result: dict[str, object] = {
+        "plugin_id": request.plugin_id,
+        "action": request.action,
+        "ops": host_api.ops,
+    }
+    if isinstance(handler_result, dict):
+        schedule_diagnostics = handler_result.get("schedule_diagnostics")
+        if isinstance(schedule_diagnostics, list):
+            response_result["schedule_diagnostics"] = schedule_diagnostics
     return SandboxResponse(
         request_id=request.request_id,
         ok=True,
-        result={"plugin_id": request.plugin_id, "action": request.action, "ops": host_api.ops},
+        result=response_result,
     )
 
 

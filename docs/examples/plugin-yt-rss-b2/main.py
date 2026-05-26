@@ -1,7 +1,10 @@
 from pathlib import Path
+from types import SimpleNamespace
 from urllib.parse import urlparse
+from datetime import datetime
 import importlib.util
 import json
+import logging
 import re
 import urllib.error
 import urllib.request
@@ -18,6 +21,7 @@ def _load_repo_class():
 
 
 YtRssStateRepository = _load_repo_class()
+LOGGER = logging.getLogger("amo.plugins.yt_rss")
 
 
 def _repo_for_context(context) -> YtRssStateRepository:
@@ -30,6 +34,9 @@ def _normalize_host(host: str) -> str:
 
 
 _UC_ID_RE = re.compile(r"\bUC[0-9A-Za-z_-]{2,}\b")
+_CANONICAL_CHANNEL_RE = re.compile(r'"canonicalBaseUrl"\s*:\s*"/channel/(UC[0-9A-Za-z_-]{2,})"')
+_META_CHANNEL_ID_RE = re.compile(r'<meta[^>]+itemprop=["\']channelId["\'][^>]+content=["\'](UC[0-9A-Za-z_-]{2,})["\']', re.IGNORECASE)
+_CANONICAL_LINK_RE = re.compile(r'<link[^>]+rel=["\']canonical["\'][^>]+href=["\']https?://(?:www\.)?youtube\.com/channel/(UC[0-9A-Za-z_-]{2,})["\']', re.IGNORECASE)
 
 
 def _build_channel_payload(uc_id: str) -> dict[str, str]:
@@ -43,6 +50,11 @@ def _build_channel_payload(uc_id: str) -> dict[str, str]:
 def _extract_uc_id_from_text(body: str) -> str | None:
     if not body:
         return None
+
+    for rx in (_CANONICAL_CHANNEL_RE, _META_CHANNEL_ID_RE, _CANONICAL_LINK_RE):
+        m = rx.search(body)
+        if m:
+            return m.group(1)
 
     for marker in [
         '"channelId":"',
@@ -63,8 +75,7 @@ def _extract_uc_id_from_text(body: str) -> str | None:
                 return m.group(0)
             start = idx + 1
 
-    m = _UC_ID_RE.search(body)
-    return m.group(0) if m else None
+    return None
 
 
 def _extract_uc_id_from_ytcfg(body: str) -> str | None:
@@ -175,7 +186,7 @@ def parse_youtube_channel_input(raw: str) -> dict[str, str]:
 
 def _format_parse_error(code: str) -> str:
     if code == "missing_input":
-        return "Usage: /addYT <https://www.youtube.com/channel/UC...>"
+        return "Usage: /addyt <https://www.youtube.com/channel/UC...>"
     if code == "invalid_url":
         return "Invalid URL. Use https://www.youtube.com/channel/UC..., https://www.youtube.com/@handle, /c/<name>, or /user/<name>."
     if code in {"unsupported_video_url", "unsupported_channel_url"}:
@@ -195,9 +206,17 @@ def _format_parse_error(code: str) -> str:
     return "Could not parse input. Use https://www.youtube.com/channel/UC..."
 
 
+def _role_name(value) -> str:
+    if value is None:
+        return ""
+    role_value = getattr(value, "value", value)
+    return str(role_value).strip().lower()
+
+
 def _user_can_manage(context) -> bool:
     # Adapter for runtime field variance:
-    # supports owner/admin flags in either context.user_* or top-level helpers.
+    # supports owner/admin flags in either context.user_* or top-level helpers,
+    # plus role fields used by the command runtime.
     if bool(getattr(context, "is_owner", False)):
         return True
     if bool(getattr(context, "is_admin", False)):
@@ -206,8 +225,10 @@ def _user_can_manage(context) -> bool:
         return True
     if bool(getattr(context, "user_is_admin", False)):
         return True
-    user_role = str(getattr(context, "user_role", "")).lower()
-    return user_role in {"owner", "admin"}
+    for attr in ("user_role", "role"):
+        if _role_name(getattr(context, attr, None)) in {"owner", "admin"}:
+            return True
+    return False
 
 
 def webui_list_subscriptions(context) -> list[dict[str, object]]:
@@ -348,6 +369,97 @@ def _entry_link(entry: dict) -> str:
     return ""
 
 
+def _entry_channel_title(entry: dict) -> str:
+    value = entry.get("channel_title")
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return ""
+
+
+def _subscription_label(sub) -> str:
+    source_url = getattr(sub, "source_url", "") or ""
+    parsed = urlparse(source_url)
+    parts = [part for part in (parsed.path or "").split("/") if part]
+    if parts:
+        if parts[0].startswith("@"):
+            return parts[0].lstrip("@") or getattr(sub, "channel_key", "")
+        if len(parts) >= 2 and parts[0] in {"c", "user"}:
+            return parts[1]
+    return getattr(sub, "channel_key", "")
+
+
+def _post_label(sub, entry: dict) -> str:
+    return _entry_channel_title(entry) or _subscription_label(sub) or getattr(sub, "channel_key", "")
+
+
+def _parse_entry_time(entry: dict):
+    for key in ("published", "updated"):
+        value = entry.get(key)
+        if isinstance(value, str) and value.strip():
+            raw = value.strip().replace("Z", "+00:00")
+            try:
+                return datetime.fromisoformat(raw)
+            except ValueError:
+                return None
+    return None
+
+
+def _entries_newest_first(entries: list) -> list[dict]:
+    typed = [entry for entry in entries if isinstance(entry, dict)]
+    if not typed:
+        return []
+    dated = [(idx, entry, _parse_entry_time(entry)) for idx, entry in enumerate(typed)]
+    if all(stamp is not None for _, _, stamp in dated):
+        return [entry for _, entry, _ in sorted(dated, key=lambda item: item[2], reverse=True)]
+    return typed
+
+
+def _legacy_handle_needs_resolution(sub) -> bool:
+    values = [getattr(sub, "channel_key", ""), getattr(sub, "rss_url", ""), getattr(sub, "canonical_channel_url", "")]
+    return any(isinstance(value, str) and "@" in value for value in values)
+
+
+def _subscription_from_payload(sub, parsed: dict[str, str]):
+    return SimpleNamespace(
+        chat_id=sub.chat_id,
+        thread_id=sub.thread_id,
+        channel_key=parsed["channel_key"],
+        source_url=sub.source_url,
+        canonical_channel_url=parsed["canonical_channel_url"],
+        rss_url=parsed["rss_url"],
+        added_by_user_id=getattr(sub, "added_by_user_id", None),
+        added_at=getattr(sub, "added_at", None),
+    )
+
+
+def _resolve_legacy_subscription(repo, sub):
+    if not _legacy_handle_needs_resolution(sub):
+        return sub
+    try:
+        parsed = parse_youtube_channel_input(sub.source_url)
+    except ValueError as exc:
+        repo.set_last_error(
+            chat_id=sub.chat_id,
+            thread_id=sub.thread_id,
+            channel_key=sub.channel_key,
+            error=f"resolver_failed:ValueError:{exc}",
+        )
+        raise
+    created = repo.add_subscription(
+        chat_id=sub.chat_id,
+        thread_id=sub.thread_id,
+        channel_key=parsed["channel_key"],
+        source_url=sub.source_url,
+        canonical_channel_url=parsed["canonical_channel_url"],
+        rss_url=parsed["rss_url"],
+        added_by_user_id=getattr(sub, "added_by_user_id", None),
+    )
+    repo.delete_subscription(chat_id=sub.chat_id, thread_id=sub.thread_id, channel_key=sub.channel_key)
+    if not created:
+        return None
+    return _subscription_from_payload(sub, parsed)
+
+
 async def _send_topic_message(host_api, *, chat_id: int, thread_id: int | None, text: str):
     if thread_id is None:
         await host_api.send_message(chat_id, text)
@@ -355,28 +467,47 @@ async def _send_topic_message(host_api, *, chat_id: int, thread_id: int | None, 
         await host_api.send_message(chat_id, text, message_thread_id=thread_id)
 
 
+def _failure_category(exc: Exception) -> str:
+    msg = str(exc).lower()
+    if "policy" in msg or "denied" in msg:
+        return "policy_denied"
+    return type(exc).__name__
+
+
 async def handle_schedule(context, host_api):
     repo = _repo_for_context(context)
 
     list_all = getattr(repo, "list_all_subscriptions", None)
     subscriptions = list_all() if callable(list_all) else []
+    LOGGER.info("yt_rss schedule run start", extra={"subscriptions_count": len(subscriptions)})
 
-    for sub in subscriptions:
+    checked_count = 0
+    posted_total = 0
+    failed_count = 0
+
+    for original_sub in subscriptions:
+        sub = original_sub
+        checked_count += 1
         try:
+            resolved = _resolve_legacy_subscription(repo, sub)
+            if resolved is None:
+                continue
+            sub = resolved
+
             rss_result = await host_api.rss_fetch(sub.rss_url)
             entries = rss_result.get("entries") if isinstance(rss_result, dict) else []
             if not isinstance(entries, list):
                 entries = []
 
+            ordered_entries = _entries_newest_first(entries)
             cursor = repo.get_cursor(chat_id=sub.chat_id, thread_id=sub.thread_id, channel_key=sub.channel_key)
             dedupe_seen = set(cursor.dedupe or [])
 
             seen_keys = []
-            for entry in entries:
-                if isinstance(entry, dict):
-                    key = _entry_key(entry)
-                    if key:
-                        seen_keys.append(key)
+            for entry in ordered_entries:
+                key = _entry_key(entry)
+                if key:
+                    seen_keys.append(key)
 
             latest_cursor = seen_keys[0] if seen_keys else None
 
@@ -388,12 +519,21 @@ async def handle_schedule(context, host_api):
                     cursor=latest_cursor,
                     dedupe=seen_keys[:100],
                 )
+                LOGGER.info(
+                    "yt_rss subscription checked",
+                    extra={
+                        "channel_key": sub.channel_key,
+                        "success": True,
+                        "item_count": len(ordered_entries),
+                        "new_item_count": 0,
+                        "posted_count": 0,
+                        "cursor_advanced": latest_cursor is not None,
+                    },
+                )
                 continue
 
             new_entries = []
-            for entry in entries:
-                if not isinstance(entry, dict):
-                    continue
+            for entry in ordered_entries:
                 key = _entry_key(entry)
                 if not key:
                     continue
@@ -401,14 +541,17 @@ async def handle_schedule(context, host_api):
                     break
                 new_entries.append(entry)
 
+            posted_count = 0
             for entry in reversed(new_entries):
                 title = _entry_title(entry)
                 link = _entry_link(entry)
-                text = f"📺 {sub.channel_key}: {title}"
+                text = f"📺 {_post_label(sub, entry)}: {title}"
                 if link:
                     text = f"{text}\n{link}"
                 await _send_topic_message(host_api, chat_id=sub.chat_id, thread_id=sub.thread_id, text=text)
+                posted_count += 1
 
+            posted_total += posted_count
             dedupe_out = seen_keys[:100] if seen_keys else list(dedupe_seen)[:100]
             repo.set_cursor(
                 chat_id=sub.chat_id,
@@ -417,12 +560,60 @@ async def handle_schedule(context, host_api):
                 cursor=latest_cursor or cursor.cursor,
                 dedupe=dedupe_out,
             )
+            LOGGER.info(
+                "yt_rss subscription checked",
+                extra={
+                    "channel_key": sub.channel_key,
+                    "success": True,
+                    "item_count": len(ordered_entries),
+                    "new_item_count": len(new_entries),
+                    "posted_count": posted_count,
+                    "cursor_advanced": (latest_cursor or cursor.cursor) != cursor.cursor,
+                },
+            )
+        except ValueError as exc:
+            failed_count += 1
+            if _legacy_handle_needs_resolution(original_sub):
+                # _resolve_legacy_subscription already stored the retryable resolver error.
+                reason = f"resolver_failed:ValueError:{exc}"
+            else:
+                reason = f"rss_fetch_failed:ValueError"
+                repo.set_last_error(
+                    chat_id=original_sub.chat_id,
+                    thread_id=original_sub.thread_id,
+                    channel_key=original_sub.channel_key,
+                    error=reason,
+                )
+            LOGGER.info(
+                "yt_rss subscription check failed",
+                extra={
+                    "channel_key": original_sub.channel_key,
+                    "success": False,
+                    "reason_code": str(exc),
+                    "error_category": reason,
+                },
+            )
         except Exception as exc:
+            failed_count += 1
+            category = _failure_category(exc)
             repo.set_last_error(
-                chat_id=sub.chat_id,
-                thread_id=sub.thread_id,
-                channel_key=sub.channel_key,
+                chat_id=original_sub.chat_id,
+                thread_id=original_sub.thread_id,
+                channel_key=original_sub.channel_key,
                 error=f"rss_fetch_failed:{type(exc).__name__}",
             )
+            LOGGER.info(
+                "yt_rss subscription check failed",
+                extra={
+                    "channel_key": original_sub.channel_key,
+                    "success": False,
+                    "reason_code": category,
+                    "error_category": category,
+                },
+            )
 
+    LOGGER.info(
+        "yt_rss schedule run end",
+        extra={"checked_count": checked_count, "posted_count": posted_total, "failed_count": failed_count},
+    )
     return None

@@ -67,14 +67,31 @@ class Dispatcher:
     async def handle_raw_update(self, raw_update: object) -> None:
         update = parse_update(raw_update)
         if update is None:
+            logger.warning("telegram update parse failed: raw_type=%s", type(raw_update).__name__)
             return
 
         callback_query = update.callback_query
         if callback_query is not None:
+            logger.info(
+                "telegram callback parsed update_id=%s kind=%s callback_id=%s data_prefix=%s data_len=%s has_message=%s has_maybe_inaccessible=%s",
+                update.update_id,
+                update.top_level_kind,
+                callback_query.id,
+                (callback_query.data or "")[:32],
+                len(callback_query.data or ""),
+                callback_query.message is not None,
+                isinstance(raw_update, dict) and isinstance(raw_update.get("callback_query"), dict) and raw_update.get("callback_query", {}).get("maybe_inaccessible_message") is not None,
+            )
             await self._handle_callback_query(callback_query)
             return
 
         if update.message is None:
+            logger.warning(
+                "telegram update ignored update_id=%s kind=%s keys=%s",
+                update.update_id,
+                update.top_level_kind,
+                sorted(list(raw_update.keys())) if isinstance(raw_update, dict) else None,
+            )
             return
 
         message = update.message
@@ -369,6 +386,50 @@ class Dispatcher:
         if data in {"consent:accept", "consent:decline"}:
             await self._handle_consent_callback(callback_query=callback_query, role=role, data=data)
             return
+
+        if data.startswith("yt_rss:") and self.plugin_command_executor is not None:
+            message = callback_query.message
+            logger.info(
+                "telegram callback routing candidate update_kind=callback_query callback_id=%s data_prefix=%s data_len=%s has_message=%s chat_id=%s thread_id=%s message_id=%s",
+                callback_query.id,
+                data[:32],
+                len(data),
+                message is not None,
+                message.chat.id if message is not None else None,
+                message.message_thread_id if message is not None else None,
+                message.message_id if message is not None else None,
+            )
+            if message is None:
+                logger.warning(
+                    "telegram callback routing skipped reason=no_message callback_id=%s data_prefix=%s data_len=%s",
+                    callback_query.id,
+                    data[:32],
+                    len(data),
+                )
+                if self.answer_callback is not None:
+                    await self.answer_callback(callback_query.id, "Callback expired")
+                return
+            plugin_handled = await self.plugin_command_executor.execute_callback(
+                actor=CommandActor(telegram_user_id=callback_query.from_user.id, role=role),
+                callback_data=data,
+                callback_query_id=callback_query.id,
+                chat_id=message.chat.id,
+                user_id=callback_query.from_user.id,
+                message_id=message.message_id,
+                message_thread_id=message.message_thread_id,
+                answer_callback=self.answer_callback,
+            )
+            logger.info(
+                "telegram callback routing result callback_id=%s command_prefix=%s handled=%s chat_id=%s thread_id=%s message_id=%s",
+                callback_query.id,
+                data.split(":", 1)[0],
+                plugin_handled,
+                message.chat.id,
+                message.message_thread_id,
+                message.message_id,
+            )
+            if plugin_handled:
+                return
 
         if data != "test:ok":
             return

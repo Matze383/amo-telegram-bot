@@ -171,7 +171,11 @@ class CommandExecuteRequestV1:
         argument_raw = data.get("argument")
         argument = None
         if argument_raw is not None:
-            argument = _require_non_empty_str(argument_raw, "argument", max_len=_MAX_ARGUMENT_LEN)
+            if not isinstance(argument_raw, str):
+                raise CommandProtocolError("argument")
+            if len(argument_raw) > _MAX_ARGUMENT_LEN:
+                raise CommandProtocolError("argument")
+            argument = argument_raw
 
         permissions_raw = data.get("permissions", [])
         if not isinstance(permissions_raw, list):
@@ -219,6 +223,7 @@ class CommandOp:
     chat_id: int | None = None
     message_id: int | None = None
     message_thread_id: int | None = None
+    reply_markup: dict[str, Any] | None = None
     file_path: str | None = None
     mime_type: str | None = None
 
@@ -245,6 +250,13 @@ class CommandOp:
         if message_thread_id_raw is not None:
             message_thread_id = _require_int(message_thread_id_raw, "ops.message_thread_id", min_value=1)
 
+        reply_markup = None
+        reply_markup_raw = data.get("reply_markup")
+        if reply_markup_raw is not None:
+            if op not in {"send_message", "reply"} or not isinstance(reply_markup_raw, dict):
+                raise CommandProtocolError("ops.reply_markup")
+            reply_markup = reply_markup_raw
+
         file_path = None
         mime_type = None
         if op in {"send_photo", "send_document"}:
@@ -259,6 +271,7 @@ class CommandOp:
             chat_id=chat_id,
             message_id=message_id,
             message_thread_id=message_thread_id,
+            reply_markup=reply_markup,
             file_path=file_path,
             mime_type=mime_type,
         )
@@ -270,8 +283,11 @@ class CommandOp:
             "chat_id": self.chat_id,
             "message_id": self.message_id,
         }
-        if self.op in {"send_photo", "send_document"}:
+        if self.op in {"send_message", "send_photo", "send_document", "reply"} and self.message_thread_id is not None:
             data["message_thread_id"] = self.message_thread_id
+        if self.op in {"send_message", "reply"} and self.reply_markup is not None:
+            data["reply_markup"] = self.reply_markup
+        if self.op in {"send_photo", "send_document"}:
             data["file_path"] = self.file_path
             data["mime_type"] = self.mime_type
         return data

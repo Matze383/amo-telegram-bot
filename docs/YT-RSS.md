@@ -32,7 +32,7 @@ The YT-RSS plugin allows owners and admins to subscribe Telegram topics (threads
 
 ## Telegram Commands
 
-### `/addYT <channel_url>`
+### `/addyt <channel_url>`
 
 Subscribe the current topic to a YouTube channel.
 
@@ -45,10 +45,10 @@ Subscribe the current topic to a YouTube channel.
 
 **Examples:**
 ```
-/addYT https://www.youtube.com/channel/UC_x5XG1OV2P6uZZ5FSM9Ttw
-/addYT https://www.youtube.com/@GoogleDevelopers
-/addYT @GoogleDevelopers
-/addYT UC_x5XG1OV2P6uZZ5FSM9Ttw
+/addyt https://www.youtube.com/channel/UC_x5XG1OV2P6uZZ5FSM9Ttw
+/addyt https://www.youtube.com/@GoogleDevelopers
+/addyt @GoogleDevelopers
+/addyt UC_x5XG1OV2P6uZZ5FSM9Ttw
 ```
 
 **Responses:**
@@ -57,15 +57,15 @@ Subscribe the current topic to a YouTube channel.
 - `Permission denied. Only owner/admin can manage YT subscriptions.` — Insufficient role
 - Resolver/network error messages for URL resolution failures
 
-### `/delYT <channel_url>`
+### `/delyt <channel_url>`
 
 Remove a YouTube channel subscription from the current topic.
 
 **Usage:**
 ```
-/delYT https://www.youtube.com/channel/UC...
-/delYT @handle
-/delYT UC...
+/delyt https://www.youtube.com/channel/UC...
+/delyt @handle
+/delyt UC...
 ```
 
 **Responses:**
@@ -119,7 +119,7 @@ The default poll interval is 300 seconds (5 minutes). This can be adjusted via t
 
 ### Authorization
 
-- Only users with role `admin` or `owner` can execute `/addYT` and `/delYT`
+- Only users with role `admin` or `owner` can execute `/addyt` and `/delyt`
 - Normal users, VIPs, and ignored users receive "Permission denied"
 - The check uses both `context.role` and legacy `is_owner`/`is_admin` flags
 
@@ -168,7 +168,7 @@ This means you will **not** receive historical videos when first subscribing—o
 
 | Error Code | User-Facing Message |
 |------------|---------------------|
-| `missing_input` | "Usage: /addYT <https://www.youtube.com/channel/UC...>" |
+| `missing_input` | "Usage: /addyt <https://www.youtube.com/channel/UC...>" |
 | `invalid_url` | "Invalid URL. Use https://www.youtube.com/channel/UC..., https://www.youtube.com/@handle, /c/<name>, or /user/<name>." |
 | `unsupported_video_url` | "Unsupported YouTube URL. Please provide a channel URL (UC..., @handle, /c/<name>, or /user/<name>)." |
 | `unsupported_channel_url` | Same as above |
@@ -206,7 +206,7 @@ This means you will **not** receive historical videos when first subscribing—o
 
 ### Duplicate subscriptions
 - The same channel cannot be added twice in the same topic
-- To re-add after deletion, use `/delYT` first, then `/addYT`
+- To re-add after deletion, use `/delyt` first, then `/addyt`
 
 ---
 

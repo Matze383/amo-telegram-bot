@@ -2,8 +2,8 @@ name: yt_rss
 version: "0.1.0"
 description: Topic-scoped YouTube channel RSS subscriptions (skeleton)
 commands:
-  - addYT
-  - delYT
+  - addyt
+  - delyt
 schedule:
   interval_seconds: 300
 required_roles:

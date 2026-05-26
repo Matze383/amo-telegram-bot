@@ -4,6 +4,7 @@ import asyncio
 import importlib.util
 import inspect
 from dataclasses import asdict
+import json
 from pathlib import Path
 from typing import Any
 
@@ -48,10 +49,11 @@ def _resolve_plugin_entry(*, plugins_root: Path, plugin_entry: str) -> Path:
 
 
 class _RecordingHostAPI:
-    def __init__(self, *, permissions: set[str], max_ops: int, max_text_len: int) -> None:
+    def __init__(self, *, permissions: set[str], max_ops: int, max_text_len: int, request_context: CommandExecuteRequestV1 | None = None) -> None:
         self._permissions = permissions
         self._max_ops = max_ops
         self._max_text_len = max_text_len
+        self._request_context = request_context
         self._ops: list[CommandOp] = []
 
     def _require_permission(self, permission: str, operation: str) -> None:
@@ -61,20 +63,73 @@ class _RecordingHostAPI:
                 f"operation '{operation}' requires capability '{permission}'",
             )
 
-    async def send_message(self, chat_id: int, text: str) -> dict[str, object]:
+    async def send_message(self, chat_id: int, text: str | dict[str, object]) -> dict[str, object]:
         self._require_permission("send_message", "send_message")
         if not isinstance(chat_id, int):
             raise ValueError("chat_id must be int")
-        text_clean = (text or "").strip()
-        self._append_op(CommandOp(op="send_message", chat_id=chat_id, text=text_clean))
+        message_thread_id: int | None = None
+        reply_markup: dict[str, object] | None = None
+        if isinstance(text, dict):
+            body = text.get("text")
+            text_clean = str(body or "").strip()
+            raw_thread_id = text.get("message_thread_id")
+            if raw_thread_id is not None:
+                if not isinstance(raw_thread_id, int) or raw_thread_id < 1:
+                    raise ValueError("message_thread_id must be positive int")
+                message_thread_id = raw_thread_id
+            raw_markup = text.get("reply_markup")
+            if raw_markup is not None:
+                if not isinstance(raw_markup, dict):
+                    raise ValueError("reply_markup must be dict")
+                reply_markup = raw_markup
+        else:
+            text_clean = str(text or "").strip()
+        op = CommandOp(op="send_message", chat_id=chat_id, text=text_clean, message_thread_id=message_thread_id)
+        if reply_markup is not None:
+            payload = asdict(op)
+            payload["reply_markup"] = reply_markup
+            payload["text"] = op.text
+            self._append_op_payload(payload)
+            return {"ok": True}
+        self._append_op(op)
         return {"ok": True}
 
-    async def reply(self, chat_id: int, message_id: int, text: str) -> dict[str, object]:
+    async def reply(self, chat_id: int, message_id: int, text: str | dict[str, object]) -> dict[str, object]:
         self._require_permission("send_message", "reply")
         if not isinstance(chat_id, int) or not isinstance(message_id, int):
             raise ValueError("chat_id and message_id must be int")
-        text_clean = (text or "").strip()
-        self._append_op(CommandOp(op="reply", chat_id=chat_id, message_id=message_id, text=text_clean))
+
+        reply_markup: dict[str, object] | None = None
+        if isinstance(text, dict):
+            raw_text = text.get("text")
+            if not isinstance(raw_text, str) or not raw_text.strip():
+                alt = text.get("message")
+                raw_text = alt if isinstance(alt, str) else ""
+            text_clean = raw_text.strip()
+            raw_markup = text.get("reply_markup")
+            if raw_markup is not None:
+                if not isinstance(raw_markup, dict):
+                    raise ValueError("reply_markup must be dict")
+                reply_markup = raw_markup
+        else:
+            text_clean = (text or "").strip()
+
+        message_thread_id = self._request_context.context.message_thread_id if self._request_context is not None else None
+        op = CommandOp(
+            op="reply",
+            chat_id=chat_id,
+            message_id=message_id,
+            text=text_clean,
+            message_thread_id=message_thread_id,
+        )
+        if reply_markup is not None:
+            payload = asdict(op)
+            payload["reply_markup"] = reply_markup
+            payload["text"] = op.text
+            self._append_op_payload(payload)
+            return {"ok": True}
+
+        self._append_op(op)
         return {"ok": True}
 
     async def send_photo(
@@ -126,13 +181,25 @@ class _RecordingHostAPI:
         return {"ok": True}
 
     def _append_op(self, op: CommandOp) -> None:
+        self._append_op_payload(asdict(op))
+
+    def _append_op_payload(self, payload: dict[str, object]) -> None:
         if len(self._ops) >= self._max_ops:
             raise CommandWorkerError("limits_exceeded", "maximum operation count exceeded")
-        if not op.text:
+        text_value = str(payload.get("text") or "")
+        if not text_value:
             raise ValueError("text must not be empty")
-        if len(op.text) > self._max_text_len:
+        if len(text_value) > self._max_text_len:
             raise CommandWorkerError("limits_exceeded", "maximum text length exceeded")
-        self._ops.append(op)
+        payload["text"] = text_value
+        if "reply_markup" in payload:
+            try:
+                encoded = json.dumps(payload["reply_markup"], ensure_ascii=False)
+            except (TypeError, ValueError) as exc:
+                raise ValueError("reply_markup must be JSON-serializable") from exc
+            if len(encoded) > self._max_text_len * 4:
+                raise CommandWorkerError("limits_exceeded", "reply markup payload too large")
+        self._ops.append(CommandOp.from_dict(payload, max_text_len=self._max_text_len))
 
     @property
     def ops(self) -> tuple[CommandOp, ...]:
@@ -202,6 +269,7 @@ async def execute_command_request(
             permissions=set(request.permissions),
             max_ops=request.limits.max_ops,
             max_text_len=request.limits.max_text_len,
+            request_context=request,
         )
         await handler(context, host_api)
         response = CommandExecuteResponseV1(

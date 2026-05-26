@@ -108,6 +108,7 @@ class TelegramUpdate:
     update_id: int
     message: TelegramMessage | None
     callback_query: TelegramCallbackQuery | None
+    top_level_kind: str | None = None
 
 
 def _parse_user(raw: Any) -> TelegramUser | None:
@@ -332,6 +333,8 @@ def _parse_callback_query(raw: Any) -> TelegramCallbackQuery | None:
         return None
 
     message = _parse_message(raw.get("message"))
+    if message is None:
+        message = _parse_message(raw.get("maybe_inaccessible_message"))
     data_raw = raw.get("data")
     data = data_raw if isinstance(data_raw, str) else None
     return TelegramCallbackQuery(
@@ -351,8 +354,19 @@ def parse_update(raw: Any) -> TelegramUpdate | None:
     except (KeyError, TypeError, ValueError):
         return None
 
+    message = _parse_message(raw.get("message"))
+    callback_query = _parse_callback_query(raw.get("callback_query"))
+
+    top_level_kind: str | None = None
+    for key in raw.keys():
+        if key == "update_id":
+            continue
+        top_level_kind = str(key)
+        break
+
     return TelegramUpdate(
         update_id=update_id,
-        message=_parse_message(raw.get("message")),
-        callback_query=_parse_callback_query(raw.get("callback_query")),
+        message=message,
+        callback_query=callback_query,
+        top_level_kind=top_level_kind,
     )

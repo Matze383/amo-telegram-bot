@@ -217,6 +217,7 @@ class PluginSandboxRunner:
         worker_module: str = "amo_bot.plugins.sandbox.worker",
         *,
         base_timeout_ms: int = 3000,
+        max_timeout_ms: int | None = None,
         max_memory_bytes: int = 128 * 1024 * 1024,
         max_file_descriptors: int = 64,
         max_processes: int = 32,
@@ -227,6 +228,7 @@ class PluginSandboxRunner:
     ) -> None:
         self._worker_module = worker_module
         self._base_timeout_ms = base_timeout_ms
+        self._max_timeout_ms = max_timeout_ms if max_timeout_ms is not None else base_timeout_ms
         self._max_memory_bytes = max_memory_bytes
         self._max_file_descriptors = max_file_descriptors
         self._max_processes = max_processes
@@ -236,7 +238,7 @@ class PluginSandboxRunner:
         self._plugins_dir = Path(plugins_dir).expanduser().resolve() if plugins_dir else None
 
     def _validate_request(self, request: SandboxRequest) -> None:
-        if request.timeout_ms > self._base_timeout_ms:
+        if request.timeout_ms > self._max_timeout_ms:
             raise SandboxRunnerError(
                 code=SandboxErrorCode.INVALID_REQUEST,
                 message="timeout_exceeds_base_limit",
@@ -420,8 +422,13 @@ class PluginSandboxRunner:
         finally:
             proc.stdin.close()
 
+        effective_timeout_ms = max(
+            1,
+            min(request.timeout_ms, self._max_timeout_ms) + self._worker_timeout_grace_ms,
+        )
+
         try:
-            stdout, stderr = self._read_streams_with_limits(proc, timeout_s=request.timeout_ms / 1000)
+            stdout, stderr = self._read_streams_with_limits(proc, timeout_s=effective_timeout_ms / 1000)
         except SandboxRunnerError as exc:
             self._terminate_process_group(proc)
             try:

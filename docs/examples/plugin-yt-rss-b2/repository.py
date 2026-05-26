@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 import json
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qs, urlparse
 
 
 @dataclass(slots=True)
@@ -24,6 +25,119 @@ class CursorRecord:
 
 
 class YtRssStateRepository:
+    @staticmethod
+    def topic_key_for(chat_id: int, thread_id: int | None, channel_key: str) -> str:
+        return f"{chat_id}:{thread_id if thread_id is not None else 'root'}:{channel_key}"
+
+    @staticmethod
+    def _derive_channel_key(source: dict[str, Any], topic_key: str) -> str | None:
+        channel_key = source.get("channel_key")
+        if isinstance(channel_key, str) and channel_key.strip():
+            return channel_key.strip()
+
+        source_url = source.get("source_url")
+        if isinstance(source_url, str) and source_url.strip():
+            parsed = urlparse(source_url.strip())
+            path_parts = [part for part in (parsed.path or "").split("/") if part]
+            if len(path_parts) >= 2 and path_parts[0] == "channel":
+                candidate = path_parts[1].strip()
+                if candidate:
+                    return candidate
+            if source_url.strip().upper().startswith("UC"):
+                return source_url.strip()
+
+        key_parts = topic_key.split(":", 2)
+        if len(key_parts) == 3 and key_parts[2].strip():
+            return key_parts[2].strip()
+        return None
+
+    @staticmethod
+    def _derive_canonical_channel_url(channel_key: str, source_url: str) -> str:
+        canonical = f"https://www.youtube.com/channel/{channel_key}"
+        if source_url:
+            parsed = urlparse(source_url)
+            path_parts = [part for part in (parsed.path or "").split("/") if part]
+            if len(path_parts) >= 2 and path_parts[0] == "channel":
+                return source_url.strip()
+        return canonical
+
+    @staticmethod
+    def _derive_rss_url(channel_key: str, source_url: str) -> str:
+        parsed = urlparse(source_url)
+        query = parse_qs(parsed.query or "")
+        q_channel = query.get("channel_id", [])
+        if q_channel:
+            candidate = q_channel[0].strip()
+            if candidate:
+                return f"https://www.youtube.com/feeds/videos.xml?channel_id={candidate}"
+        return f"https://www.youtube.com/feeds/videos.xml?channel_id={channel_key}"
+
+    @staticmethod
+    def _coerce_subscription(topic_key: str, value: Any) -> tuple[SubscriptionRecord | None, dict[str, str] | None]:
+        if not isinstance(value, dict):
+            return None, {"error": "invalid_subscription_record:not_dict"}
+
+        try:
+            chat_id = int(value.get("chat_id"))
+        except (TypeError, ValueError):
+            return None, {"error": "invalid_subscription_record:chat_id"}
+
+        thread_raw = value.get("thread_id")
+        if thread_raw is None:
+            thread_id = None
+        else:
+            try:
+                thread_id = int(thread_raw)
+            except (TypeError, ValueError):
+                return None, {"error": "invalid_subscription_record:thread_id"}
+
+        source_url = value.get("source_url")
+        source_url = source_url.strip() if isinstance(source_url, str) else ""
+
+        channel_key = YtRssStateRepository._derive_channel_key(value, topic_key)
+        if not channel_key:
+            return None, {"error": "invalid_subscription_record:missing_channel_key"}
+
+        canonical_channel_url = value.get("canonical_channel_url")
+        if not isinstance(canonical_channel_url, str) or not canonical_channel_url.strip():
+            canonical_channel_url = YtRssStateRepository._derive_canonical_channel_url(channel_key, source_url)
+        else:
+            canonical_channel_url = canonical_channel_url.strip()
+
+        rss_url = value.get("rss_url")
+        if not isinstance(rss_url, str) or not rss_url.strip():
+            rss_url = YtRssStateRepository._derive_rss_url(channel_key, source_url)
+        else:
+            rss_url = rss_url.strip()
+
+        added_by = value.get("added_by_user_id")
+        if added_by is None:
+            added_by_user_id = None
+        else:
+            try:
+                added_by_user_id = int(added_by)
+            except (TypeError, ValueError):
+                added_by_user_id = None
+
+        added_at = value.get("added_at")
+        if not isinstance(added_at, str) or not added_at.strip():
+            added_at = datetime.now(timezone.utc).isoformat()
+        else:
+            added_at = added_at.strip()
+
+        return (
+            SubscriptionRecord(
+                chat_id=chat_id,
+                thread_id=thread_id,
+                channel_key=channel_key,
+                source_url=source_url or canonical_channel_url,
+                canonical_channel_url=canonical_channel_url,
+                rss_url=rss_url,
+                added_by_user_id=added_by_user_id,
+                added_at=added_at,
+            ),
+            None,
+        )
     def __init__(self, base_dir: str | Path) -> None:
         self._base_dir = Path(base_dir)
         self._base_dir.mkdir(parents=True, exist_ok=True)
@@ -49,7 +163,7 @@ class YtRssStateRepository:
 
     @staticmethod
     def _topic_key(chat_id: int, thread_id: int | None, channel_key: str) -> str:
-        return f"{chat_id}:{thread_id if thread_id is not None else 'root'}:{channel_key}"
+        return YtRssStateRepository.topic_key_for(chat_id, thread_id, channel_key)
 
     def add_subscription(
         self,
@@ -93,16 +207,44 @@ class YtRssStateRepository:
     def list_subscriptions(self, *, chat_id: int, thread_id: int | None) -> list[SubscriptionRecord]:
         state = self._load()
         out: list[SubscriptionRecord] = []
-        for value in state["subscriptions"].values():
-            if value.get("chat_id") == chat_id and value.get("thread_id") == thread_id:
-                out.append(SubscriptionRecord(**value))
+        changed = False
+        for key, value in list(state["subscriptions"].items()):
+            record, error = self._coerce_subscription(key, value)
+            if record is None:
+                state["subscriptions"].pop(key, None)
+                if error:
+                    state.setdefault("errors", {})[key] = error
+                changed = True
+                continue
+            if record.chat_id == chat_id and record.thread_id == thread_id:
+                out.append(record)
+            normalized = asdict(record)
+            if value != normalized:
+                state["subscriptions"][key] = normalized
+                changed = True
+        if changed:
+            self._save(state)
         return sorted(out, key=lambda item: item.channel_key)
 
     def list_all_subscriptions(self) -> list[SubscriptionRecord]:
         state = self._load()
         out: list[SubscriptionRecord] = []
-        for value in state["subscriptions"].values():
-            out.append(SubscriptionRecord(**value))
+        changed = False
+        for key, value in list(state["subscriptions"].items()):
+            record, error = self._coerce_subscription(key, value)
+            if record is None:
+                state["subscriptions"].pop(key, None)
+                if error:
+                    state.setdefault("errors", {})[key] = error
+                changed = True
+                continue
+            out.append(record)
+            normalized = asdict(record)
+            if value != normalized:
+                state["subscriptions"][key] = normalized
+                changed = True
+        if changed:
+            self._save(state)
         return sorted(out, key=lambda item: (item.chat_id, item.thread_id or -1, item.channel_key))
 
     def get_cursor(self, *, chat_id: int, thread_id: int | None, channel_key: str) -> CursorRecord:

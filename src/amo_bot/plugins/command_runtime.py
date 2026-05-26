@@ -30,8 +30,10 @@ logger = logging.getLogger(__name__)
 
 SendMessageFn = Callable[[int, str], Awaitable[object]]
 ReplyFn = Callable[[int, int, str, int | None], Awaitable[object]]
+ReplyMarkupFn = Callable[[int, int, str, dict[str, Any], int | None], Awaitable[object]]
 SendPhotoFn = Callable[[int, str, str, int | None], Awaitable[object]]
 SendDocumentFn = Callable[[int, str, str, int | None, str | None], Awaitable[object]]
+AnswerCallbackFn = Callable[[str, str | None], Awaitable[object]]
 
 
 @dataclass(slots=True, frozen=True)
@@ -65,6 +67,13 @@ class PluginCommandContext:
     attachments: tuple[dict[str, Any], ...] = ()
     reply_to_image: dict[str, Any] | None = None
 
+    callback_data: str | None = None
+    callback_query_id: str | None = None
+
+    @property
+    def thread_id(self) -> int | None:
+        return self.message_thread_id
+
 
 class PluginCapabilityError(RuntimeError):
     pass
@@ -76,10 +85,12 @@ class PluginHostAPI:
         *,
         send_message: SendMessageFn,
         reply: ReplyFn,
+        answer_callback: AnswerCallbackFn | None = None,
         required_permissions: set[str] | None = None,
     ) -> None:
         self._send_message = send_message
         self._reply = reply
+        self._answer_callback = answer_callback
         self._required_permissions = required_permissions
 
     def _require_permission(self, permission: str, operation: str) -> None:
@@ -95,14 +106,36 @@ class PluginHostAPI:
             raise ValueError("text must not be empty")
         return await self._send_message(chat_id, text_clean[:4000])
 
-    async def reply(self, chat_id: int, message_id: int, text: str) -> object:
+    async def reply(self, chat_id: int, message_id: int, text: str | dict[str, Any]) -> object:
         self._require_permission("send_message", "reply")
         if not isinstance(chat_id, int) or not isinstance(message_id, int):
             raise ValueError("chat_id and message_id must be int")
-        text_clean = (text or "").strip()
+
+        text_payload: str | None = None
+        if isinstance(text, dict):
+            text_payload = text.get("text")
+            if not isinstance(text_payload, str) or not text_payload.strip():
+                alt = text.get("message")
+                text_payload = alt if isinstance(alt, str) else None
+        elif isinstance(text, str):
+            text_payload = text
+
+        text_clean = (text_payload or "").strip()
         if not text_clean:
             raise ValueError("text must not be empty")
         return await self._reply(chat_id, message_id, text_clean[:4000], None)
+
+    async def answer_callback_query(self, callback_query_id: str, text: str | None = None) -> object:
+        self._require_permission("send_message", "answer_callback_query")
+        if self._answer_callback is None:
+            raise RuntimeError("answer_callback transport not configured")
+        callback_id_clean = (callback_query_id or "").strip()
+        if not callback_id_clean:
+            raise ValueError("callback_query_id must not be empty")
+        text_clean = (text or "").strip() or None
+        if isinstance(text_clean, str):
+            text_clean = text_clean[:200]
+        return await self._answer_callback(callback_id_clean, text_clean)
 
 
 class PluginCommandExecutor:
@@ -115,6 +148,7 @@ class PluginCommandExecutor:
         reply: ReplyFn,
         send_photo: SendPhotoFn | None = None,
         send_document: SendDocumentFn | None = None,
+        reply_markup: ReplyMarkupFn | None = None,
         timeout_seconds: float = 2.0,
         image_media_store: TelegramImageMediaStore | None = None,
         enable_image_attachments: bool = False,
@@ -126,6 +160,7 @@ class PluginCommandExecutor:
         self._reply = reply
         self._send_photo = send_photo
         self._send_document = send_document
+        self._reply_markup = reply_markup
         self._timeout_seconds = timeout_seconds
         self._image_media_store = image_media_store
         self._enable_image_attachments = enable_image_attachments
@@ -214,10 +249,10 @@ class PluginCommandExecutor:
         )
         return True
 
-    async def execute(self, *, actor: CommandActor, invocation: CommandInvocation) -> None:
+    async def execute(self, *, actor: CommandActor, invocation: CommandInvocation) -> bool:
         manifest = self._find_manifest_for_command(invocation.command_name)
         if manifest is None:
-            return
+            return False
 
         run_id = str(uuid.uuid4())
         try:
@@ -226,7 +261,7 @@ class PluginCommandExecutor:
                 status = repo.get_status(manifest.name)
         except Exception:
             logger.exception("plugin status lookup failed plugin=%s", manifest.name)
-            return
+            return True
 
         if status is None or not status.enabled:
             self._write_audit(
@@ -239,14 +274,14 @@ class PluginCommandExecutor:
                     "run_id": run_id,
                 },
             )
-            return
+            return True
 
         try:
             with self._session_factory() as session:
                 override = PluginPolicyOverrideRepository(session).get_snapshot(plugin_name=manifest.name)
         except Exception:
             logger.exception("plugin policy override lookup failed plugin=%s", manifest.name)
-            return
+            return True
 
         effective_policy = resolve_effective_policy(manifest=manifest, override=override)
         policy_eval = evaluate_effective_policy(
@@ -266,7 +301,7 @@ class PluginCommandExecutor:
                     "run_id": run_id,
                 },
             )
-            return
+            return True
 
         attachment_context = await self._build_attachment_context(invocation=invocation)
         reply_to_image = self._resolve_reply_to_image(invocation=invocation, attachments=attachment_context)
@@ -312,7 +347,7 @@ class PluginCommandExecutor:
                         "run_id": run_id,
                     },
                 )
-                return
+                return True
 
         self._write_audit(
             event_type="plugin_command_start",
@@ -338,7 +373,7 @@ class PluginCommandExecutor:
                     "timeout_seconds": self._timeout_seconds,
                 },
             )
-            return
+            return True
         except Exception as exc:
             logger.exception("plugin command failed plugin=%s command=%s", manifest.name, invocation.command_name)
             payload = {
@@ -355,7 +390,7 @@ class PluginCommandExecutor:
                 actor_telegram_user_id=actor.telegram_user_id,
                 payload=payload,
             )
-            return
+            return True
 
         duration_ms = int((time.monotonic() - start) * 1000)
         self._write_audit(
@@ -368,6 +403,7 @@ class PluginCommandExecutor:
                 "duration_ms": duration_ms,
             },
         )
+        return True
 
 
     async def _build_attachment_context(self, *, invocation: CommandInvocation) -> tuple[dict[str, Any], ...]:
@@ -466,12 +502,102 @@ class PluginCommandExecutor:
             return ""
         return normalized[1:] if normalized.startswith("/") else normalized
 
+    async def execute_callback(
+        self,
+        *,
+        actor: CommandActor,
+        callback_data: str,
+        callback_query_id: str,
+        chat_id: int,
+        user_id: int,
+        message_id: int | None = None,
+        message_thread_id: int | None = None,
+        answer_callback: AnswerCallbackFn | None = None,
+    ) -> bool:
+        if not callback_data.startswith("yt_rss:"):
+            return False
+
+        manifest = self._find_manifest_for_callback(callback_data)
+        if manifest is None:
+            return False
+
+        run_id = str(uuid.uuid4())
+        context_payload: dict[str, Any] = {
+            "chat_id": chat_id,
+            "message_thread_id": message_thread_id,
+            "message_id": message_id,
+            "user_id": user_id,
+            "role": actor.role,
+            "callback_data": callback_data,
+            "callback_query_id": callback_query_id,
+            "trigger_type": "callback",
+            "run_id": run_id,
+            "plugin_id": manifest.name,
+            "command_name": "callback",
+            "argument": None,
+            "attachments": (),
+            "reply_to_image": None,
+        }
+
+        plugin_dir = Path(self._loader.plugins_dir) / manifest.name
+        module_path = plugin_dir / "main.py"
+        if not module_path.exists():
+            logger.warning("plugin callback entrypoint missing plugin=%s", manifest.name)
+            return True
+
+        module_name = f"amo_plugin_{manifest.name}_callback"
+        spec = importlib.util.spec_from_file_location(module_name, module_path)
+        if spec is None or spec.loader is None:
+            logger.warning("plugin callback load failed plugin=%s", manifest.name)
+            return True
+
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        callback_handler = getattr(module, "handle_callback", None)
+        if callback_handler is None or not callable(callback_handler):
+            logger.info("plugin callback missing handler plugin=%s", manifest.name)
+            return True
+        if not inspect.iscoroutinefunction(callback_handler):
+            logger.warning("plugin callback handler must be async plugin=%s", manifest.name)
+            return True
+
+        host_api = PluginHostAPI(
+            send_message=self._send_message,
+            reply=self._reply,
+            answer_callback=answer_callback,
+            required_permissions=set(manifest.required_permissions),
+        )
+
+        callback_context = PluginCommandContext(**context_payload)
+
+        try:
+            handled = await asyncio.wait_for(callback_handler(callback_context, host_api), timeout=self._timeout_seconds)
+        except asyncio.TimeoutError:
+            logger.warning("plugin callback timeout plugin=%s callback=%s", manifest.name, callback_data)
+            return True
+        except Exception:
+            logger.exception("plugin callback failed plugin=%s callback=%s", manifest.name, callback_data)
+            return True
+
+        if handled is None:
+            return True
+        return bool(handled)
+
     def _find_manifest_for_command(self, command_name: str) -> PluginManifest | None:
         discovery = self._loader.discover()
         command = self._normalize_command(command_name)
         for manifest in discovery.valid:
             commands = {self._normalize_command(item) for item in manifest.commands}
             if command and command in commands:
+                return manifest
+        return None
+
+    def _find_manifest_for_callback(self, callback_data: str) -> PluginManifest | None:
+        if not callback_data.startswith("yt_rss:"):
+            return None
+        discovery = self._loader.discover()
+        for manifest in discovery.valid:
+            if manifest.name == "yt_rss":
                 return manifest
         return None
 
@@ -552,7 +678,20 @@ class PluginCommandExecutor:
             elif op.op == "reply":
                 if op.message_id is None:
                     raise RuntimeError("sandbox reply operation missing message_id")
-                await self._reply(op.chat_id, op.message_id, op.text, None)
+                if op.reply_markup is not None and self._reply_markup is not None:
+                    await self._reply_markup(
+                        op.chat_id,
+                        op.text,
+                        op.reply_markup,
+                        op.message_thread_id,
+                    )
+                else:
+                    await self._reply(
+                        op.chat_id,
+                        op.message_id,
+                        op.text,
+                        op.message_thread_id,
+                    )
             elif op.op in {"send_photo", "send_document"}:
                 if op.chat_id is None or op.file_path is None:
                     raise RuntimeError("sandbox file send operation missing fields")

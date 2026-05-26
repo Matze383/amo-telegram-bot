@@ -1,5 +1,9 @@
 import asyncio
 
+import pytest
+
+from amo_bot.telegram.commands import CommandRegistry, StaticRoleResolver
+
 from amo_bot.auth.roles import Role
 from amo_bot.db.base import create_session_factory
 from amo_bot.db.init_db import init_db
@@ -307,6 +311,112 @@ def test_dispatcher_handles_test_callback_with_en_locale() -> None:
     asyncio.run(dispatcher.handle_raw_update(raw_update))
 
     assert callback_answers == [("cb-1-en", "Button test ok")]
+
+def test_dispatcher_routes_yt_rss_callback_to_plugin_executor() -> None:
+    callback_answers: list[tuple[str, str | None]] = []
+    callback_calls: list[dict[str, object]] = []
+
+    async def fake_send(chat_id: int, text: str, message_thread_id: int | None = None) -> object:
+        raise AssertionError("send should not be called when plugin handles callback")
+
+    async def fake_answer_callback(callback_query_id: str, text: str | None = None) -> object:
+        callback_answers.append((callback_query_id, text))
+        return {"ok": True}
+
+    class _PluginExecutor:
+        async def execute_callback(self, **kwargs: object) -> bool:
+            callback_calls.append(kwargs)
+            return True
+
+    dispatcher = Dispatcher(
+        command_registry=create_builtin_registry(),
+        role_resolver=InMemoryRoleResolver({321: Role.OWNER}),
+        send_text=fake_send,
+        answer_callback=fake_answer_callback,
+        plugin_command_executor=_PluginExecutor(),
+    )
+
+    raw_update = {
+        "update_id": 66,
+        "callback_query": {
+            "id": "cb-yt-1",
+            "from": {"id": 321, "is_bot": False, "language_code": "de"},
+            "message": {
+                "message_id": 78,
+                "message_thread_id": 456,
+                "chat": {"id": -100200300, "type": "supergroup"},
+                "date": 1700000000,
+                "from": {"id": 99, "is_bot": True, "first_name": "Bot"},
+                "text": "menu",
+            },
+            "data": "yt_rss:delyt:deadbeef",
+        },
+    }
+
+    asyncio.run(dispatcher.handle_raw_update(raw_update))
+
+    assert callback_answers == []
+    assert len(callback_calls) == 1
+    call = callback_calls[0]
+    assert call["callback_data"] == "yt_rss:delyt:deadbeef"
+    assert call["callback_query_id"] == "cb-yt-1"
+    assert call["chat_id"] == -100200300
+    assert call["message_thread_id"] == 456
+    assert call["message_id"] == 78
+    assert call["user_id"] == 321
+    assert call["answer_callback"] is fake_answer_callback
+
+
+def test_dispatcher_routes_yt_rss_callback_with_maybe_inaccessible_message() -> None:
+    callback_answers: list[tuple[str, str | None]] = []
+    callback_calls: list[dict[str, object]] = []
+
+    async def fake_send(chat_id: int, text: str, message_thread_id: int | None = None) -> object:
+        raise AssertionError("send should not be called")
+
+    async def fake_answer_callback(callback_query_id: str, text: str | None = None) -> object:
+        callback_answers.append((callback_query_id, text))
+        return {"ok": True}
+
+    class _PluginExecutor:
+        async def execute_callback(self, **kwargs: object) -> bool:
+            callback_calls.append(kwargs)
+            return True
+
+    dispatcher = Dispatcher(
+        command_registry=create_builtin_registry(),
+        role_resolver=InMemoryRoleResolver({321: Role.OWNER}),
+        send_text=fake_send,
+        answer_callback=fake_answer_callback,
+        plugin_command_executor=_PluginExecutor(),
+    )
+
+    raw_update = {
+        "update_id": 67,
+        "callback_query": {
+            "id": "cb-yt-missing-msg",
+            "from": {"id": 321, "is_bot": False, "language_code": "de"},
+            "maybe_inaccessible_message": {
+                "message_id": 78,
+                "message_thread_id": 9936,
+                "chat": {"id": -1002003580909, "type": "supergroup"},
+                "date": 1700000000,
+                "from": {"id": 99, "is_bot": True, "first_name": "Bot"},
+                "text": "menu",
+            },
+            "data": "yt_rss:delyt:deadbeef",
+        },
+    }
+
+    asyncio.run(dispatcher.handle_raw_update(raw_update))
+
+    assert callback_answers == []
+    assert len(callback_calls) == 1
+    call = callback_calls[0]
+    assert call["chat_id"] == -1002003580909
+    assert call["message_thread_id"] == 9936
+    assert call["message_id"] == 78
+
 
 def test_dispatcher_ignores_unknown_callback_data() -> None:
     sent: list[tuple[int, str, int | None]] = []
@@ -851,7 +961,7 @@ def test_dispatcher_sends_unknown_fallback_for_falsey_plugin_result() -> None:
 
     class _FalseyPluginExecutor:
         async def execute(self, *, actor, invocation):
-            return None
+            return False
 
     dispatcher = Dispatcher(
         command_registry=create_builtin_registry(),
@@ -1200,3 +1310,65 @@ def test_consent_block_message_is_localized() -> None:
     assert Dispatcher._consent_block_message(chat_type="group", blocked_as_unreachable=False, locale="de") == "Bitte kläre Consent privat mit dem Bot."
     assert Dispatcher._consent_block_message(chat_type="group", blocked_as_unreachable=False, locale="en") == "Please resolve consent privately with the bot."
     assert Dispatcher._consent_block_message(chat_type="private", blocked_as_unreachable=True, locale="en") == "Please start the bot in private and confirm with /accept."
+
+
+def test_dispatcher_logs_unhandled_update_kind(caplog: pytest.LogCaptureFixture) -> None:
+    sent: list[tuple[int, str, int | None]] = []
+
+    async def fake_send_text(chat_id: int, text: str, message_thread_id: int | None = None) -> object:
+        sent.append((chat_id, text, message_thread_id))
+        return {}
+
+    dispatcher = Dispatcher(
+        command_registry=CommandRegistry(),
+        role_resolver=StaticRoleResolver(),
+        send_text=fake_send_text,
+    )
+
+    with caplog.at_level("WARNING"):
+        asyncio.run(dispatcher.handle_raw_update({
+            "update_id": 42,
+            "chat_member": {"chat": {"id": -100, "type": "supergroup"}},
+        }))
+
+    assert sent == []
+    assert any("telegram update ignored" in rec.message for rec in caplog.records)
+
+
+def test_dispatcher_parses_callback_with_inaccessible_message(caplog: pytest.LogCaptureFixture) -> None:
+    callback_answers: list[tuple[str, str | None]] = []
+
+    async def fake_send_text(chat_id: int, text: str, message_thread_id: int | None = None) -> object:
+        return {}
+
+    async def fake_answer_callback(callback_query_id: str, text: str | None = None) -> object:
+        callback_answers.append((callback_query_id, text))
+        return {}
+
+    dispatcher = Dispatcher(
+        command_registry=CommandRegistry(),
+        role_resolver=StaticRoleResolver(),
+        send_text=fake_send_text,
+        answer_callback=fake_answer_callback,
+    )
+
+    with caplog.at_level("INFO"):
+        asyncio.run(
+            dispatcher.handle_raw_update(
+                {
+                    "update_id": 43,
+                    "callback_query": {
+                        "id": "cb-inacc",
+                        "from": {"id": 7, "is_bot": False, "first_name": "User"},
+                        "data": "test:ok",
+                        "maybe_inaccessible_message": {
+                            "message_id": 123,
+                            "chat": {"id": -1002003580909, "type": "supergroup", "title": "grp"},
+                        },
+                    },
+                }
+            )
+        )
+
+    assert callback_answers == [("cb-inacc", "Button-Test ok")]
+    assert any("telegram callback parsed" in rec.message for rec in caplog.records)

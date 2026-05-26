@@ -192,3 +192,40 @@ def test_run_wires_topic_aware_send_functions(monkeypatch, tmp_path) -> None:
         "reply_to_message_id": 44,
         "message_thread_id": 123,
     }
+
+
+def test_run_wires_plugin_command_executor_reply_markup(monkeypatch, tmp_path) -> None:
+    _set_env(monkeypatch, tmp_path)
+
+    captured: dict[str, object] = {}
+
+    class _DummyPCE:
+        def __init__(self, **kwargs) -> None:  # noqa: ANN003
+            captured["reply_markup"] = kwargs.get("reply_markup")
+
+    class _DummySPE:
+        def __init__(self, **kwargs) -> None:  # noqa: ANN003
+            pass
+
+        async def run_due_once(self) -> None:
+            return None
+
+    class _DummyDispatcher:
+        def __init__(self, **kwargs) -> None:  # noqa: ANN003
+            pass
+
+    async def _fake_run_polling(*args, **kwargs):  # noqa: ANN002,ANN003
+        raise _StopFlow()
+
+    monkeypatch.setattr(main_module, "PluginCommandExecutor", _DummyPCE)
+    monkeypatch.setattr(main_module, "ScheduledPluginExecutor", _DummySPE)
+    monkeypatch.setattr(main_module, "Dispatcher", _DummyDispatcher)
+    monkeypatch.setattr(main_module, "run_polling", _fake_run_polling)
+
+    try:
+        main_module.run([])
+    except _StopFlow:
+        pass
+
+    assert "reply_markup" in captured
+    assert captured["reply_markup"] is not None

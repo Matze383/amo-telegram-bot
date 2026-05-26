@@ -6,17 +6,17 @@ import json
 from amo_bot.plugins.sandbox.command_worker import execute_command_request
 
 
-def _request(plugin_entry: str) -> dict[str, object]:
+def _request(plugin_entry: str, *, argument: str = "x", message_thread_id: int | None = None) -> dict[str, object]:
     return {
         "action": "command.execute.v1",
         "request_id": "req-1",
         "plugin_entry": plugin_entry,
-        "command_name": "plug",
-        "argument": "x",
+        "command_name": "delyt",
+        "argument": argument,
         "context": {
             "chat_id": 123,
             "message_id": 456,
-            "message_thread_id": None,
+            "message_thread_id": message_thread_id,
             "user_id": 42,
             "role": "admin",
             "trigger_type": "command",
@@ -92,6 +92,58 @@ async def handle_command(context, host_api):
     assert response["ok"] is False
     assert response["error"]["code"] == "runtime_error"
     assert response["error"]["message"] == "command execution failed"
+
+
+def test_worker_allows_dict_send_message_payload_with_reply_markup_for_delyt_menu(tmp_path) -> None:
+    pdir = tmp_path / "plugins" / "yt_rss"
+    pdir.mkdir(parents=True)
+    (pdir / "main.py").write_text(
+        '''
+async def handle_command(context, host_api):
+    if context.command_name.lower() != "delyt" or (context.argument or "").strip():
+        await host_api.send_message(context.chat_id, "unexpected")
+        return
+    await host_api.send_message(
+        context.chat_id,
+        {
+            "text": "🗑 Welches Abo möchtest du löschen?",
+            "reply_markup": {
+                "inline_keyboard": [
+                    [{"text": "Channel One", "callback_data": "yt_rss:delyt:UC111"}],
+                    [{"text": "❌ Abbrechen", "callback_data": "yt_rss:delyt:cancel"}],
+                ]
+            },
+            "message_thread_id": context.message_thread_id,
+        },
+    )
+''',
+        encoding="utf-8",
+    )
+
+    response = asyncio.run(
+        execute_command_request(
+            _request("yt_rss/main.py", argument="", message_thread_id=9936),
+            plugins_root=tmp_path / "plugins",
+        )
+    )
+
+    assert response["ok"] is True
+    assert response["error"] is None
+    assert response["ops"] == [
+        {
+            "op": "send_message",
+            "text": "🗑 Welches Abo möchtest du löschen?",
+            "chat_id": 123,
+            "message_id": None,
+            "message_thread_id": 9936,
+            "reply_markup": {
+                "inline_keyboard": [
+                    [{"text": "Channel One", "callback_data": "yt_rss:delyt:UC111"}],
+                    [{"text": "❌ Abbrechen", "callback_data": "yt_rss:delyt:cancel"}],
+                ]
+            },
+        }
+    ]
 
 
 def test_worker_rejects_path_traversal_and_absolute_entry(tmp_path) -> None:

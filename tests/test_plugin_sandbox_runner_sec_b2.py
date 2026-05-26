@@ -37,6 +37,14 @@ def test_reject_request_timeout_over_base_limit() -> None:
     assert exc.value.message == "timeout_exceeds_base_limit"
 
 
+def test_runner_accepts_explicitly_bounded_max_timeout_override() -> None:
+    runner = PluginSandboxRunner(base_timeout_ms=100, max_timeout_ms=300)
+    response = runner.run(_request(timeout_ms=250))
+
+    assert response.ok is True
+    assert response.request_id == "req-1"
+
+
 def test_malformed_worker_response_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
     runner = PluginSandboxRunner(base_timeout_ms=500)
 

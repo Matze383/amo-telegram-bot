@@ -190,6 +190,7 @@ def run(argv: list[str] | None = None) -> None:
         session_factory=session_factory,
         send_message=send_text,
         reply=reply_text,
+        reply_markup=send_markup,
         send_photo=send_photo,
         send_document=send_document,
         image_media_store=TelegramImageMediaStore(bot_token=settings.bot_token),
@@ -202,6 +203,7 @@ def run(argv: list[str] | None = None) -> None:
         session_factory=session_factory,
         send_message=send_text,
         reply=reply_text,
+        timeout_seconds=30.0,
     )
 
     message_persistence = ChatTopicPersistenceService(

@@ -5,6 +5,52 @@
 
 ---
 
+## [2026.05.26] – YT-RSS plugin and sandbox runtime hardening
+
+**Datum / Date:** 2026-05-26
+
+### 🇩🇪 Deutsch
+
+#### Übersicht
+Dieses Release härtet den YouTube-RSS-Plugin-Stack und die Sandbox-Runtime ab. Neue Kommandos `/addyt` und `/delyt` zum Hinzufügen und Entfernen von YouTube-RSS-Feeds. Der Handle-/Channel-ID-Resolver wurde robuster gemacht, der Scheduler verbessert seine Cursor- und Backlog-Verarbeitung, und die Diagnose-Ausgaben bleiben privacy-safe (keine Callback-UI-Reintro, keine sensitiven Logs).
+
+#### Neu
+- **YT-RSS Commands:** `/addyt` und `/delyt` zum Hinzufügen und Entfernen von YouTube-RSS-Feeds.
+- **YouTube Handle/Channel-ID Resolver Härtung:** Verbesserte Auflösung von YouTube-Handles und Channel-IDs mit robusterer Fehlerbehandlung.
+- **Scheduler Cursor & Backlog:** Verbessertes Cursor-Verhalten und Backlog-Verarbeitung für zuverlässigere Feed-Updates.
+- **Legacy Handle Migration & Deduplizierung:** Automatische Migration und Deduplizierung von Legacy-Handles.
+
+#### Sicherheit & Privacy
+- **Safe Diagnostics & Log Redaction:** Diagnose-Ausgaben enthalten keine sensiblen Daten; automatische Redaktion von Tokens und persönlichen Identifikatoren.
+- **No Callback/UI Reintro:** Keine Re-Introduktion von Callback- oder UI-Code; alle Interaktionen über Sandbox-Runtime geregelt.
+- **Sandbox/Runtime RSS Support:** RSS-Fetching läuft vollständig innerhalb der Sandbox mit Capability-Gating.
+
+#### Architektur / Interna
+- **Sandbox Runtime Tests:** Erweiterte Tests für die Sandbox-Runtime mit RSS-Feed-Handling.
+- **Capability-Gating:** Alle RSS-Operationen unterliegen strikter Capability-Prüfung (`rss.fetch`).
+
+### 🇬🇧 English
+
+#### Overview
+This release hardens the YouTube RSS plugin stack and sandbox runtime. New commands `/addyt` and `/delyt` to add and remove YouTube RSS feeds. The handle/channel ID resolver is more robust, the scheduler improves cursor and backlog handling, and diagnostic outputs remain privacy-safe (no callback/UI reintro, no sensitive logs).
+
+#### New
+- **YT-RSS commands:** `/addyt` and `/delyt` to add and remove YouTube RSS feeds.
+- **YouTube handle/channel ID resolver hardening:** Improved resolution of YouTube handles and channel IDs with more robust error handling.
+- **Scheduler cursor & backlog:** Improved cursor behavior and backlog processing for more reliable feed updates.
+- **Legacy handle migration & deduplication:** Automatic migration and deduplication of legacy handles.
+
+#### Security & Privacy
+- **Safe diagnostics & log redaction:** Diagnostic outputs contain no sensitive data; automatic redaction of tokens and personal identifiers.
+- **No callback/UI reintro:** No re-introduction of callback or UI code; all interactions governed through sandbox runtime.
+- **Sandbox/runtime RSS support:** RSS fetching runs entirely within the sandbox with capability gating.
+
+#### Architecture / Internal
+- **Sandbox runtime tests:** Extended tests for sandbox runtime with RSS feed handling.
+- **Capability gating:** All RSS operations subject to strict capability checking (`rss.fetch`).
+
+---
+
 ## [2026.05.22] – Image analysis runtime and Telegram reply fixes
 
 **Datum / Date:** 2026-05-22

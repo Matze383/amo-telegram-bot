@@ -418,6 +418,50 @@ async def handle_command(context, host_api):
     assert replied == [(77, 9, "sandbox-ack", None)]
 
 
+def test_plugin_command_delyt_without_arg_structured_reply_payload_is_handled_via_worker(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'plugin_runtime_delyt_structured_reply.db'}"
+    init_db(db_url)
+
+    executor, sent, replied, _, _ = _mk_executor(
+        tmp_path,
+        db_url,
+        "yt_rss_structured_reply_demo",
+        """
+async def handle_command(context, host_api):
+    await host_api.reply(
+        context.chat_id,
+        context.message_id,
+        {
+            "text": "🗑️ Welchen Kanal möchtest du entfernen?",
+            "reply_markup": {
+                "inline_keyboard": [
+                    [{"text": "Channel One", "callback_data": "yt_rss:delyt:UC111"}],
+                    [{"text": "❌ Abbrechen", "callback_data": "yt_rss:delyt:cancel"}],
+                ]
+            },
+        },
+    )
+""",
+        commands=["delyt"],
+    )
+
+    asyncio.run(
+        executor.execute(
+            actor=CommandActor(telegram_user_id=100, role=Role.ADMIN),
+            invocation=CommandInvocation(command_name="/delyt", argument=None, chat_id=77, message_id=9, message_thread_id=9936),
+        )
+    )
+
+    assert sent == []
+    assert replied == [(77, 9, "🗑️ Welchen Kanal möchtest du entfernen?", 9936)]
+
+    sf = create_session_factory(db_url)
+    with sf() as session:
+        events = [row.event_type for row in session.scalars(select(AuditEvent)).all()]
+    assert "plugin_command_error" not in events
+    assert "plugin_command_success" in events
+
+
 def test_plugin_command_sandbox_runtime_error_is_safely_mapped(tmp_path) -> None:
     db_url = f"sqlite:///{tmp_path / 'plugin_runtime_sandbox_error.db'}"
     init_db(db_url)
@@ -450,6 +494,53 @@ async def handle_command(context, host_api):
     assert payload.get("error") == "command execution failed"
     assert payload.get("error_code") == "runtime_error"
     assert "Traceback" not in (rows[-1].payload_json or "")
+
+
+def test_plugin_callback_context_builds_runtime_dataclass_and_handles_delyt(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'plugin_runtime_callback_ctx.db'}"
+    init_db(db_url)
+    executor, sent, replied, _, _ = _mk_executor(
+        tmp_path,
+        db_url,
+        "yt_rss",
+        """
+async def handle_command(context, host_api):
+    return None
+
+async def handle_callback(context, host_api):
+    assert context.trigger_type == "callback"
+    assert context.command_name == "callback"
+    assert context.callback_data.startswith("yt_rss:delyt:")
+    assert context.callback_query_id == "cbq-1"
+    await host_api.reply(context.chat_id, context.message_id, "callback-ok")
+    return True
+""",
+        commands=["delyt"],
+    )
+
+    answered: list[tuple[str, str | None]] = []
+
+    async def _answer(callback_query_id: str, text: str | None = None):
+        answered.append((callback_query_id, text))
+        return {"ok": True}
+
+    handled = asyncio.run(
+        executor.execute_callback(
+            actor=CommandActor(telegram_user_id=100, role=Role.ADMIN),
+            callback_data="yt_rss:delyt:ddd8c363eeaa972f",
+            callback_query_id="cbq-1",
+            chat_id=-1002003580909,
+            user_id=100,
+            message_id=10744,
+            message_thread_id=9936,
+            answer_callback=_answer,
+        )
+    )
+
+    assert handled is True
+    assert sent == []
+    assert replied == [(-1002003580909, 10744, "callback-ok", None)]
+    assert answered == []
 
 
 def test_plugin_command_timeout_and_error_are_isolated(tmp_path) -> None:
