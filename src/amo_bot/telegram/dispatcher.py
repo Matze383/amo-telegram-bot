@@ -515,13 +515,13 @@ class Dispatcher:
     @classmethod
     def _consent_callback_message(cls, key: str, callback_query: Any) -> str:
         locale = cls._message_locale_from_callback(callback_query)
-        messages = {
-            "unavailable": {"de": "Consent nicht verfügbar", "en": "Consent unavailable"},
-            "profile_missing": {"de": "Profil nicht gefunden", "en": "Profile not found"},
-            "accepted": {"de": "Consent akzeptiert", "en": "Consent accepted"},
-            "declined": {"de": "Consent abgelehnt", "en": "Consent declined"},
+        key_map = {
+            "unavailable": "dispatcher.consent.callback.unavailable",
+            "profile_missing": "dispatcher.consent.callback.profile_missing",
+            "accepted": "dispatcher.consent.callback.accepted",
+            "declined": "dispatcher.consent.callback.declined",
         }
-        return messages.get(key, messages["unavailable"])[locale]
+        return t_text(key_map.get(key, "dispatcher.consent.callback.unavailable"), locale)
 
     @staticmethod
     def _unknown_command_message(*, message: TelegramMessage, command_name: str) -> str:
@@ -530,26 +530,12 @@ class Dispatcher:
 
     @staticmethod
     def _consent_block_message(*, chat_type: str | None, blocked_as_unreachable: bool, locale: str = "de") -> str:
-        messages = {
-            "group": {
-                "de": "Bitte kläre Consent privat mit dem Bot.",
-                "en": "Please resolve consent privately with the bot.",
-            },
-            "unreachable": {
-                "de": "Bitte starte den Bot privat und bestätige mit /accept.",
-                "en": "Please start the bot in private and confirm with /accept.",
-            },
-            "default": {
-                "de": "Bitte bestätige zuerst mit /accept oder prüfe /consent.",
-                "en": "Please confirm with /accept first or check /consent.",
-            },
-        }
         resolved_locale = "en" if locale == "en" else "de"
         if chat_type in {"group", "supergroup"}:
-            return messages["group"][resolved_locale]
+            return t_text("dispatcher.consent.block.group", resolved_locale)
         if blocked_as_unreachable:
-            return messages["unreachable"][resolved_locale]
-        return messages["default"][resolved_locale]
+            return t_text("dispatcher.consent.block.unreachable", resolved_locale)
+        return t_text("dispatcher.consent.block.default", resolved_locale)
 
 
     @staticmethod

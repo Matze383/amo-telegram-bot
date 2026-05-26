@@ -78,6 +78,34 @@ TELEGRAM_TEXTS: dict[str, dict[Locale, str]] = {
         "de": "Unbekannter Befehl: /{command_name}. Nutze /help für verfügbare Befehle.",
         "en": "Unknown command: /{command_name}. Use /help for available commands.",
     },
+    "consent.status.accepted": {"de": "Du hast zugestimmt.", "en": "You agreed to consent."},
+    "consent.status.declined": {"de": "Du hast abgelehnt.", "en": "You declined consent."},
+    "consent.status.pending": {"de": "Consent ist noch ausstehend.", "en": "Consent is still pending."},
+    "consent.status.unreachable": {"de": "Consent ist als nicht erreichbar markiert.", "en": "Consent marked as unreachable."},
+    "consent.status.fallback": {"de": "Consent-Status gespeichert.", "en": "Consent status recorded."},
+    "consent.unavailable": {"de": "Consent-Verwaltung ist nicht konfiguriert.", "en": "Consent management is not configured."},
+    "consent.start.group": {"de": "Bitte öffne die Policy privat über den Button.", "en": "Please open the policy in a private chat via the button."},
+    "consent.start.accepted": {"de": "Consent ist bereits akzeptiert. ✅", "en": "Consent has already been accepted. ✅"},
+    "consent.start.declined": {"de": "Consent ist aktuell abgelehnt. Du kannst mit /accept wieder zustimmen.", "en": "Consent is currently declined. You can agree again with /accept."},
+    "consent.user_missing": {"de": "Benutzerprofil fehlt noch. Sende /ping und versuche es erneut.", "en": "User profile not found yet. Send /ping and try again."},
+    "consent.accept.ok": {"de": "Consent akzeptiert. Danke — mit /decline kannst du das jederzeit ändern.", "en": "Consent accepted. Thanks — you can use /decline anytime to change this."},
+    "consent.decline.ok": {"de": "Consent abgelehnt. Mit /accept kannst du später wieder zustimmen.", "en": "Consent declined. You can re-enable later with /accept."},
+    "consent.private_only": {"de": "Aus Datenschutzgründen nutze bitte /consent im privaten Chat mit mir.", "en": "For privacy, please use /consent in a private chat with me."},
+    "consent.status.unknown": {
+        "de": "Consent-Status: unbekannt\nSende zuerst einen beliebigen Befehl im privaten Chat und versuche dann /consent erneut.",
+        "en": "Consent status: unknown\nSend any command in private first, then retry /consent.",
+    },
+    "consent.status.template": {
+        "de": "Consent-Status: {status}\n{explanation}\nNutze /accept oder /decline, um deine Entscheidung zu ändern.",
+        "en": "Consent status: {status}\n{explanation}\nUse /accept or /decline to change your choice.",
+    },
+    "dispatcher.consent.callback.unavailable": {"de": "Consent nicht verfügbar", "en": "Consent unavailable"},
+    "dispatcher.consent.callback.profile_missing": {"de": "Profil nicht gefunden", "en": "Profile not found"},
+    "dispatcher.consent.callback.accepted": {"de": "Consent akzeptiert", "en": "Consent accepted"},
+    "dispatcher.consent.callback.declined": {"de": "Consent abgelehnt", "en": "Consent declined"},
+    "dispatcher.consent.block.group": {"de": "Bitte kläre Consent privat mit dem Bot.", "en": "Please resolve consent privately with the bot."},
+    "dispatcher.consent.block.unreachable": {"de": "Bitte starte den Bot privat und bestätige mit /accept.", "en": "Please start the bot in private and confirm with /accept."},
+    "dispatcher.consent.block.default": {"de": "Bitte bestätige zuerst mit /accept oder prüfe /consent.", "en": "Please confirm with /accept first or check /consent."},
 }
 
 
@@ -155,20 +183,19 @@ def create_builtin_registry(
         return de if ctx.locale == "de" else en
 
     def _consent_status_explanation(status: str, locale: Locale) -> str:
-        messages = {
-            CONSENT_ACCEPTED: {"de": "Du hast zugestimmt.", "en": "You agreed to consent."},
-            CONSENT_DECLINED: {"de": "Du hast abgelehnt.", "en": "You declined consent."},
-            CONSENT_PENDING: {"de": "Consent ist noch ausstehend.", "en": "Consent is still pending."},
-            CONSENT_UNREACHABLE: {"de": "Consent ist als nicht erreichbar markiert.", "en": "Consent marked as unreachable."},
+        key_map = {
+            CONSENT_ACCEPTED: "consent.status.accepted",
+            CONSENT_DECLINED: "consent.status.declined",
+            CONSENT_PENDING: "consent.status.pending",
+            CONSENT_UNREACHABLE: "consent.status.unreachable",
         }
-        fallback = {"de": "Consent-Status gespeichert.", "en": "Consent status recorded."}
-        return messages.get(status, fallback)[locale]
+        return t_text(key_map.get(status, "consent.status.fallback"), locale)
 
     async def start_handler(ctx: CommandContext) -> dict[str, object] | str:
         if session_factory is None:
-            return _lang(ctx, "Consent-Verwaltung ist nicht konfiguriert.", "Consent management is not configured.")
+            return t_text("consent.unavailable", ctx.locale)
         if ctx.chat_type != "private":
-            return _lang(ctx, "Bitte öffne die Policy privat über den Button.", "Please open the policy in a private chat via the button.")
+            return t_text("consent.start.group", ctx.locale)
 
         with session_factory() as session:
             user = session.query(User).filter(User.telegram_user_id == ctx.user_id).one_or_none()
@@ -194,10 +221,10 @@ def create_builtin_registry(
             }
 
         if status == CONSENT_ACCEPTED:
-            return _lang(ctx, "Consent ist bereits akzeptiert. ✅", "Consent has already been accepted. ✅")
+            return t_text("consent.start.accepted", ctx.locale)
 
         if status == CONSENT_DECLINED:
-            return _lang(ctx, "Consent ist aktuell abgelehnt. Du kannst mit /accept wieder zustimmen.", "Consent is currently declined. You can agree again with /accept.")
+            return t_text("consent.start.declined", ctx.locale)
 
         return {
             "text": ConsentPromptService.build_prompt_text(ctx.locale),
@@ -294,57 +321,46 @@ def create_builtin_registry(
 
     async def accept_handler(ctx: CommandContext) -> str:
         if session_factory is None:
-            return _lang(ctx, "Consent-Verwaltung ist nicht konfiguriert.", "Consent management is not configured.")
+            return t_text("consent.unavailable", ctx.locale)
         with session_factory() as session:
             user = session.query(User).filter(User.telegram_user_id == ctx.user_id).one_or_none()
             if user is None:
-                return _lang(ctx, "Benutzerprofil fehlt noch. Sende /ping und versuche es erneut.", "User profile not found yet. Send /ping and try again.")
+                return t_text("consent.user_missing", ctx.locale)
             ConsentService().accept(user)
             session.commit()
             if owner_notifier is not None:
                 await owner_notifier.notify_consent_decision(user=user, accepted=True, source="command:/accept")
-        return _lang(ctx, "Consent akzeptiert. Danke — mit /decline kannst du das jederzeit ändern.", "Consent accepted. Thanks — you can use /decline anytime to change this.")
+        return t_text("consent.accept.ok", ctx.locale)
 
     async def decline_handler(ctx: CommandContext) -> str:
         if session_factory is None:
-            return _lang(ctx, "Consent-Verwaltung ist nicht konfiguriert.", "Consent management is not configured.")
+            return t_text("consent.unavailable", ctx.locale)
         with session_factory() as session:
             user = session.query(User).filter(User.telegram_user_id == ctx.user_id).one_or_none()
             if user is None:
-                return _lang(ctx, "Benutzerprofil fehlt noch. Sende /ping und versuche es erneut.", "User profile not found yet. Send /ping and try again.")
+                return t_text("consent.user_missing", ctx.locale)
             ConsentService().decline(user)
             session.commit()
             if owner_notifier is not None:
                 await owner_notifier.notify_consent_decision(user=user, accepted=False, source="command:/decline")
-        return _lang(ctx, "Consent abgelehnt. Mit /accept kannst du später wieder zustimmen.", "Consent declined. You can re-enable later with /accept.")
+        return t_text("consent.decline.ok", ctx.locale)
 
     async def consent_handler(ctx: CommandContext) -> str:
         if ctx.chat_type != "private":
-            return _lang(ctx, "Aus Datenschutzgründen nutze bitte /consent im privaten Chat mit mir.", "For privacy, please use /consent in a private chat with me.")
+            return t_text("consent.private_only", ctx.locale)
         if session_factory is None:
-            return _lang(ctx, "Consent-Verwaltung ist nicht konfiguriert.", "Consent management is not configured.")
+            return t_text("consent.unavailable", ctx.locale)
         with session_factory() as session:
             user = session.query(User).filter(User.telegram_user_id == ctx.user_id).one_or_none()
             if user is None:
-                return _lang(
-                    ctx,
-                    "Consent-Status: unbekannt\nSende zuerst einen beliebigen Befehl im privaten Chat und versuche dann /consent erneut.",
-                    "Consent status: unknown\nSend any command in private first, then retry /consent.",
-                )
+                return t_text("consent.status.unknown", ctx.locale)
             status = ConsentService().get_status(user)
 
-        return _lang(
-            ctx,
-            (
-                f"Consent-Status: {status}\n"
-                f"{_consent_status_explanation(status, 'de')}\n"
-                "Nutze /accept oder /decline, um deine Entscheidung zu ändern."
-            ),
-            (
-                f"Consent status: {status}\n"
-                f"{_consent_status_explanation(status, 'en')}\n"
-                "Use /accept or /decline to change your choice."
-            ),
+        return t_text(
+            "consent.status.template",
+            ctx.locale,
+            status=status,
+            explanation=_consent_status_explanation(status, ctx.locale),
         )
 
     async def ask_handler(ctx: CommandContext) -> str:
