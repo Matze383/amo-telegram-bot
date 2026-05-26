@@ -423,14 +423,14 @@ def test_plugins_shows_runtime_history_fields(tmp_path) -> None:
     assert response.status_code == 200
     assert "Laufhistorie" in html
     assert "Worker-Status" in html
-    assert "last_run_at: 2030-01-01 09:00:00" in html
-    assert "last_status: error" in html
-    assert "next_run_at: 2030-01-01 09:05:00" in html
-    assert "state: crashed" in html
-    assert "restart_count: 3" in html
-    assert "next_restart_at: 2030-01-01 09:10:00" in html
-    assert "last_heartbeat_at: 2030-01-01 08:59:00" in html
-    assert "last_error: boom" in html
+    assert "letzter Lauf um: 2030-01-01 09:00:00" in html
+    assert "letzter Status: error" in html
+    assert "nächster Lauf um: 2030-01-01 09:05:00" in html
+    assert "Status: crashed" in html
+    assert "Neustart-Anzahl: 3" in html
+    assert "nächster Neustart um: 2030-01-01 09:10:00" in html
+    assert "letzter Heartbeat um: 2030-01-01 08:59:00" in html
+    assert "letzter Fehler: boom" in html
 
 
 def test_plugins_policy_section_shows_defaults(tmp_path) -> None:

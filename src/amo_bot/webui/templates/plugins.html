@@ -35,16 +35,16 @@
             <td>{{ plugin.schedule if plugin.schedule else "-" }}</td>
             <td>{{ plugin.worker if plugin.worker else "-" }}</td>
             <td>
-              last_run_at: {{ plugin.last_run_at if plugin.last_run_at else "-" }}<br>
-              last_status: {{ plugin.last_status if plugin.last_status else "-" }}<br>
-              next_run_at: {{ plugin.next_run_at if plugin.next_run_at else "-" }}
+              {{ t('plugins.run.last_run_at') }}: {{ plugin.last_run_at if plugin.last_run_at else "-" }}<br>
+              {{ t('plugins.run.last_status') }}: {{ plugin.last_status if plugin.last_status else "-" }}<br>
+              {{ t('plugins.run.next_run_at') }}: {{ plugin.next_run_at if plugin.next_run_at else "-" }}
             </td>
             <td>
-              state: {{ plugin.worker_state if plugin.worker_state else "-" }}<br>
-              restart_count: {{ plugin.worker_restart_count if plugin.worker_restart_count is not none else 0 }}<br>
-              next_restart_at: {{ plugin.worker_next_restart_at if plugin.worker_next_restart_at else "-" }}<br>
-              last_heartbeat_at: {{ plugin.worker_last_heartbeat_at if plugin.worker_last_heartbeat_at else "-" }}<br>
-              last_error: {{ plugin.worker_last_error if plugin.worker_last_error else "-" }}
+              {{ t('plugins.worker.state') }}: {{ plugin.worker_state if plugin.worker_state else "-" }}<br>
+              {{ t('plugins.worker.restart_count') }}: {{ plugin.worker_restart_count if plugin.worker_restart_count is not none else 0 }}<br>
+              {{ t('plugins.worker.next_restart_at') }}: {{ plugin.worker_next_restart_at if plugin.worker_next_restart_at else "-" }}<br>
+              {{ t('plugins.worker.last_heartbeat_at') }}: {{ plugin.worker_last_heartbeat_at if plugin.worker_last_heartbeat_at else "-" }}<br>
+              {{ t('plugins.worker.last_error') }}: {{ plugin.worker_last_error if plugin.worker_last_error else "-" }}
             </td>
             <td>{{ plugin.required_roles | join(", ") if plugin.required_roles else "-" }}</td>
             <td>{{ plugin.required_permissions | join(", ") if plugin.required_permissions else "-" }}</td>
@@ -57,7 +57,7 @@
               {% set has_rss_config = (rss_keys | select('in', settings_schema.keys() | list) | list | length) > 0 %}
               {% if settings_schema %}
                 <details>
-                  <summary>{{ settings_schema | length }} Feld(er)</summary>
+                  <summary>{{ t('plugins.settings_summary_fields').replace('{count}', (settings_schema | length) | string) }}</summary>
                   <ul>
                     {% for key, schema in settings_schema.items() %}
                       {% set field_type = schema.type if schema.type else "text" %}
@@ -82,7 +82,7 @@
               {% elif has_rss_config and not has_rss_fetch %}
                 <em>{{ t('plugins.rss_config_unavailable') }}</em>
               {% else %}
-                -
+                <em>{{ t('plugins.no_value') }}</em>
               {% endif %}
             </td>
             <td>
@@ -187,7 +187,7 @@
                   </form>
                 {% endif %}
               {% else %}
-                {{ t('plugins.mutation_off') }}
+                {{ t('plugins.no_actions') }}
               {% endif %}
             </td>
           </tr>
