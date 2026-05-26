@@ -96,6 +96,7 @@ def test_groups_with_login_renders_page_and_empty_state(tmp_path) -> None:
     assert response.status_code == 200
     assert "Groups" in html
     assert "Keine Gruppen vorhanden." in html
+    assert "(ohne Titel)" not in html
 
 
 def test_groups_lists_seeded_chat_and_topic(tmp_path) -> None:
@@ -562,7 +563,7 @@ def test_group_roles_only_show_seen_users_per_chat_and_keep_assigned_not_seen(tm
         assert "7102" not in group1_html
         assert "7103" not in group1_html
         assert "7104" in group1_html
-        assert "assigned/not seen" in group1_html
+        assert "[zugewiesen/nicht gesehen]" in group1_html
 
         page = client.get("/groups")
         token = _extract_csrf_token(page.get_data(as_text=True))
@@ -854,3 +855,57 @@ def test_groups_language_switch_en(tmp_path) -> None:
         html = response.get_data(as_text=True)
         assert "Language:" in html
         assert "Topic management disabled: WEBUI_OWNER_TELEGRAM_ID is not set." in html
+
+
+def test_groups_overview_labels_and_statuses_localized_de_and_en(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'groups_i18n_labels.db'}"
+    init_db(db_url)
+
+    sf = create_session_factory(db_url)
+    with sf() as s:
+        s.add(
+            TelegramChat(
+                chat_id=-100451,
+                chat_type="supergroup",
+                title=None,
+                username="labeltest",
+            )
+        )
+        s.add(
+            TelegramTopic(
+                chat_id=-100451,
+                message_thread_id=451,
+                telegram_topic_name="Alpha",
+                enabled=True,
+            )
+        )
+        s.commit()
+
+    settings = _make_settings(db_url, owner_id=777)
+    app = create_flask_app(settings=settings)
+
+    with app.test_client() as client:
+        _login(client, "test-secret")
+
+        de_response = client.get("/groups")
+        de_html = de_response.get_data(as_text=True)
+        assert de_response.status_code == 200
+        assert "(ohne Titel)" in de_html
+        assert "<li><strong>chat_id:</strong> -100451</li>" in de_html
+        assert "<li><strong>chat_type:</strong> supergroup</li>" in de_html
+        assert "<li><strong>username:</strong> labeltest</li>" in de_html
+        assert "<th>message_thread_id</th>" in de_html
+        assert "<th>telegram_topic_name</th>" in de_html
+        assert '<a href="/groups/-100451">Details</a>' in de_html
+        assert "[zugewiesen/nicht gesehen]" not in de_html
+
+        en_response = client.get("/groups?lang=en")
+        en_html = en_response.get_data(as_text=True)
+        assert en_response.status_code == 200
+        assert "(no title)" in en_html
+        assert "<li><strong>chat_id:</strong> -100451</li>" in en_html
+        assert "<li><strong>chat_type:</strong> supergroup</li>" in en_html
+        assert "<li><strong>username:</strong> labeltest</li>" in en_html
+        assert "<th>message_thread_id</th>" in en_html
+        assert "<th>telegram_topic_name</th>" in en_html
+        assert '<a href="/groups/-100451">Details</a>' in en_html

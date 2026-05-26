@@ -192,7 +192,7 @@ def test_plugins_rss_config_unavailable_message_without_rss_fetch_permission(tmp
     assert "rss_missing_perm" in html
     assert "<code>feed_sources</code>" in html
     assert "<code>poll_interval_seconds</code>" in html
-    assert "RSS config unavailable: plugin lacks rss.fetch permission." in html
+    assert "RSS-Konfiguration nicht verfügbar: Plugin hat keine rss.fetch-Berechtigung." in html
 
 
 def test_plugin_enable_disable_requires_owner_id_and_audits(tmp_path) -> None:
