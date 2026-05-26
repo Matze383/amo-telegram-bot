@@ -154,7 +154,7 @@ def test_groups_topic_overview_declutter_keeps_roles_section_and_role_form_actio
     assert 'name="telegram_user_id"' in html
     assert 'name="role"' in html
 
-def test_group_detail_page_renders_group_metadata_topics_and_metadata_form(tmp_path) -> None:
+def test_group_detail_page_renders_group_metadata_topics_and_metadata_form_de(tmp_path) -> None:
     db_url = f"sqlite:///{tmp_path / 'groups_detail1.db'}"
     init_db(db_url)
     _seed_chat_topic(db_url, -100401, 201)
@@ -168,32 +168,32 @@ def test_group_detail_page_renders_group_metadata_topics_and_metadata_form(tmp_p
         html = response.get_data(as_text=True)
 
     assert response.status_code == 200
-    assert "Group Detail" in html
+    assert "Gruppendetails" in html
     assert "Test Group" in html
     assert "-100401" in html
     assert "Topics" in html
     assert "201" in html
     assert "General" in html
-    assert "Back to Groups" in html
+    assert "Zurück zu Gruppen" in html
     assert 'action="/groups/-100401/topics/201"' in html
     assert 'name="display_name"' in html
     assert 'name="notes"' in html
     assert 'name="enabled"' in html
-    assert "Topic AI enabled" in html
-    assert "Topic AI response mode" in html
+    assert "Topic-AI aktiviert" in html
+    assert "Topic-Antwortmodus" in html
     assert 'name="ai_enabled"' in html
     assert 'name="response_mode"' in html
-    assert "Topic image recognition mode" in html
+    assert "Topic-Bilderkennungsmodus" in html
     assert 'name="image_analysis_mode"' in html
     assert '<option value="inherit" selected>inherit</option>' in html
     assert '<option value="enabled" >enabled</option>' in html
     assert '<option value="disabled" >disabled</option>' in html
-    assert "Effective: disabled (inherited; currently effective disabled)" in html
+    assert "Effektiv: disabled (geerbt; aktuell effektiv disabled)" in html
     assert 'name="topic_soul_text"' in html
-    assert "Basic metadata" in html
+    assert "Basis-Metadaten" in html
     assert "Topic Soul" in html
-    assert "Advanced" in html
-    assert "Owner-only mutation. Escaping is enforced on render." in html
+    assert "Erweitert" in html
+    assert "Nur Owner-Mutation. Escaping wird beim Rendern erzwungen." in html
     assert 'maxlength="4000"' in html
 
 
@@ -812,6 +812,34 @@ def test_topic_metadata_topic_soul_text_max_length_validation(tmp_path) -> None:
         )
 
     assert response.status_code == 400
+
+
+def test_group_detail_page_renders_group_metadata_topics_and_metadata_form_en(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'groups_detail1_en.db'}"
+    init_db(db_url)
+    _seed_chat_topic(db_url, -100402, 202)
+
+    settings = _make_settings(db_url)
+    app = create_flask_app(settings=settings)
+
+    with app.test_client() as client:
+        _login(client, "test-secret")
+        response = client.get("/groups/-100402?lang=en")
+        html = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    assert "Group Detail" in html
+    assert "Back to Groups" in html
+    assert "Group Info" in html
+    assert "Topics" in html
+    assert "Basic metadata" in html
+    assert "Topic Soul" in html
+    assert "Advanced" in html
+    assert "Owner-only mutation. Escaping is enforced on render." in html
+    assert "Topic AI enabled" in html
+    assert "Topic AI response mode" in html
+    assert "Topic image recognition mode" in html
+    assert "Effective: disabled (inherited; currently effective disabled)" in html
 
 
 def test_groups_language_switch_en(tmp_path) -> None:

@@ -1,12 +1,12 @@
 {% extends "base.html" %}
-{% block title %}Group Detail{% endblock %}
+{% block title %}{{ t('group_detail.title') }}{% endblock %}
 {% block content %}
-  <h1>Group Detail</h1>
-  <p><a href="{{ url_for('ui.groups_page') }}">Back to Groups</a></p>
+  <h1>{{ t('group_detail.title') }}</h1>
+  <p><a href="{{ url_for('ui.groups_page') }}">{{ t('group_detail.back') }}</a></p>
 
   <section aria-labelledby="group-info-heading" class="card-muted">
-    <h2 id="group-info-heading" class="mt-0">Group Info</h2>
-    <h3 class="mb-075">{{ group.title or "(ohne Titel)" }}</h3>
+    <h2 id="group-info-heading" class="mt-0">{{ t('group_detail.info') }}</h2>
+    <h3 class="mb-075">{{ group.title or t('group_detail.no_title') }}</h3>
     <dl class="dl-grid">
       <dt><strong>chat_id</strong></dt>
       <dd class="dd-reset">{{ group.chat_id }}</dd>
@@ -22,13 +22,13 @@
   </section>
 
   <section aria-labelledby="topics-heading">
-    <h2 id="topics-heading" class="mb-1">Topics</h2>
+    <h2 id="topics-heading" class="mb-1">{{ t('group_detail.topics') }}</h2>
     {% if group.topics %}
       <div class="topics-grid">
         {% for topic in group.topics %}
           <article aria-labelledby="topic-{{ topic.message_thread_id }}-heading" class="topic-card">
             <h3 id="topic-{{ topic.message_thread_id }}-heading" class="mt-0 mb-075">
-              {{ topic.display_name or topic.telegram_topic_name or ('Topic #' ~ topic.message_thread_id) }}
+              {{ topic.display_name or topic.telegram_topic_name or (t('group_detail.topic_prefix') ~ topic.message_thread_id) }}
             </h3>
             <dl class="dl-grid-wide">
               <dt><strong>message_thread_id</strong></dt>
@@ -40,21 +40,21 @@
               <dt><strong>notes</strong></dt>
               <dd class="dd-reset">{{ topic.notes or "-" }}</dd>
               <dt><strong>enabled</strong></dt>
-              <dd class="dd-reset">{{ 'yes' if lang == 'en' and topic.enabled else 'no' if lang == 'en' else 'ja' if topic.enabled else 'nein' }}</dd>
+              <dd class="dd-reset">{{ t('group_detail.yes') if topic.enabled else t('group_detail.no') }}</dd>
             </dl>
 
             <form method="post" action="{{ url_for('ui.update_topic_metadata', chat_id=group.chat_id, message_thread_id=topic.message_thread_id) }}">
               {{ topic_form.csrf_token }}
               <section aria-labelledby="topic-{{ topic.message_thread_id }}-basic-heading" class="mb-1">
-                <h4 id="topic-{{ topic.message_thread_id }}-basic-heading" class="mb-05">Basic metadata</h4>
+                <h4 id="topic-{{ topic.message_thread_id }}-basic-heading" class="mb-05">{{ t('group_detail.basic_metadata') }}</h4>
                 <label>
                   display_name
-                  <input type="text" name="display_name" value="{{ topic.display_name or '' }}" maxlength="255" placeholder="Display Name">
+                  <input type="text" name="display_name" value="{{ topic.display_name or '' }}" maxlength="255" placeholder="{{ t('group_detail.placeholder.display_name') }}">
                 </label>
                 <br>
                 <label>
                   notes
-                  <textarea name="notes" rows="3" cols="40" maxlength="2000" placeholder="Notes">{{ topic.notes or '' }}</textarea>
+                  <textarea name="notes" rows="3" cols="40" maxlength="2000" placeholder="{{ t('group_detail.placeholder.notes') }}">{{ topic.notes or '' }}</textarea>
                 </label>
                 <br>
                 <label>
@@ -64,23 +64,23 @@
               </section>
 
               <section aria-labelledby="topic-{{ topic.message_thread_id }}-soul-heading" class="topic-divider">
-                <h4 id="topic-{{ topic.message_thread_id }}-soul-heading" class="mb-05">Topic Soul</h4>
-                <p class="mb-05-small"><small>Owner-only mutation. Escaping is enforced on render.</small></p>
+                <h4 id="topic-{{ topic.message_thread_id }}-soul-heading" class="mb-05">{{ t('group_detail.topic_soul') }}</h4>
+                <p class="mb-05-small"><small>{{ t('group_detail.topic_soul_help') }}</small></p>
                 <label>
                   topic_soul_text
-                  <textarea name="topic_soul_text" rows="5" cols="60" maxlength="4000" placeholder="Topic Soul text">{{ topic.topic_soul_text or '' }}</textarea>
+                  <textarea name="topic_soul_text" rows="5" cols="60" maxlength="4000" placeholder="{{ t('group_detail.placeholder.topic_soul_text') }}">{{ topic.topic_soul_text or '' }}</textarea>
                 </label>
               </section>
 
               <section aria-labelledby="topic-{{ topic.message_thread_id }}-advanced-heading" class="topic-divider">
-                <h4 id="topic-{{ topic.message_thread_id }}-advanced-heading" class="mb-05">Advanced</h4>
+                <h4 id="topic-{{ topic.message_thread_id }}-advanced-heading" class="mb-05">{{ t('group_detail.advanced') }}</h4>
                 <label>
                   <input type="checkbox" name="ai_enabled" value="y" {% if topic.ai_enabled %}checked{% endif %}>
-                  Topic AI enabled
+                  {{ t('group_detail.ai_enabled') }}
                 </label>
                 <br>
                 <label>
-                  Topic AI response mode
+                  {{ t('group_detail.ai_response_mode') }}
                   <select name="response_mode">
                     <option value="mention_or_reply" {% if topic.response_mode == 'mention_or_reply' %}selected{% endif %}>mention_or_reply</option>
                     <option value="command" {% if topic.response_mode == 'command' %}selected{% endif %}>command</option>
@@ -88,14 +88,14 @@
                 </label>
                 <br>
                 <label>
-                  Topic image recognition mode
+                  {{ t('group_detail.image_recognition_mode') }}
                   <select name="image_analysis_mode">
                     <option value="inherit" {% if topic.image_analysis_mode == 'inherit' %}selected{% endif %}>inherit</option>
                     <option value="enabled" {% if topic.image_analysis_mode == 'enabled' %}selected{% endif %}>enabled</option>
                     <option value="disabled" {% if topic.image_analysis_mode == 'disabled' %}selected{% endif %}>disabled</option>
                   </select>
                 </label>
-                <p class="mb-05-small"><small>Effective: {{ topic.effective_image_analysis_mode or 'disabled' }}{% if topic.image_analysis_mode == 'inherit' %} (inherited; currently effective disabled){% endif %}</small></p>
+                <p class="mb-05-small"><small>{{ t('group_detail.effective') }}: {{ topic.effective_image_analysis_mode or 'disabled' }}{% if topic.image_analysis_mode == 'inherit' %} ({{ t('group_detail.inherited_effective_disabled') }}){% endif %}</small></p>
               </section>
 
               <button type="submit" {% if not owner_mutation_enabled %}disabled{% endif %}>{{ t('action.save') }}</button>
