@@ -609,3 +609,29 @@ def test_dashboard_contains_expected_text_in_english_after_login(tmp_path) -> No
     assert "No AI topic-agent configurations found." in html
     assert "AI Memory (Read-Only + Deactivate Long Memory)" in html
     assert "No memory entries found." in html
+
+
+def test_plugins_page_policy_text_is_translated(tmp_path) -> None:
+    app = create_flask_app(settings=_make_settings(tmp_path, webui_owner_telegram_id=777))
+
+    with app.test_client() as client:
+        login = _login(client, "test-secret")
+        assert login.status_code == 302
+
+        page_en = client.get("/plugins?lang=en")
+        html_en = page_en.get_data(as_text=True)
+        assert page_en.status_code == 200
+        assert "Run history" in html_en
+        assert "Policy override" in html_en
+        assert "AI tool allowed" in html_en
+        assert "Role mode" in html_en
+        assert "Allowed topics" in html_en
+
+        page_de = client.get("/plugins?lang=de")
+        html_de = page_de.get_data(as_text=True)
+        assert page_de.status_code == 200
+        assert "Laufhistorie" in html_de
+        assert "Policy-Überschreibung" in html_de
+        assert "KI-Tool erlaubt" in html_de
+        assert "Rollenmodus" in html_de
+        assert "Erlaubte Topics" in html_de

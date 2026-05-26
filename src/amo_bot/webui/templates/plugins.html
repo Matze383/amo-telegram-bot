@@ -8,20 +8,20 @@
     <table>
       <thead>
         <tr>
-          <th>Name</th>
-          <th>Version</th>
-          <th>Typ(en)</th>
-          <th>Status (DB)</th>
-          <th>Commands</th>
-          <th>Schedule</th>
-          <th>Worker</th>
-          <th>Laufhistorie</th>
-          <th>Worker-Status</th>
-          <th>Rollen</th>
-          <th>Capabilities</th>
-          <th>Settings</th>
-          <th>Policy Override</th>
-          <th>Aktionen</th>
+          <th>{{ t('plugins.col_name') }}</th>
+          <th>{{ t('plugins.col_version') }}</th>
+          <th>{{ t('plugins.col_types') }}</th>
+          <th>{{ t('plugins.col_status_db') }}</th>
+          <th>{{ t('plugins.col_commands') }}</th>
+          <th>{{ t('plugins.col_schedule') }}</th>
+          <th>{{ t('plugins.col_worker') }}</th>
+          <th>{{ t('plugins.col_run_history') }}</th>
+          <th>{{ t('plugins.col_worker_status') }}</th>
+          <th>{{ t('plugins.col_roles') }}</th>
+          <th>{{ t('plugins.col_capabilities') }}</th>
+          <th>{{ t('plugins.col_settings') }}</th>
+          <th>{{ t('plugins.col_policy_override') }}</th>
+          <th>{{ t('plugins.col_actions') }}</th>
         </tr>
       </thead>
       <tbody>
@@ -77,10 +77,10 @@
                   </ul>
                 </details>
                 {% if has_rss_config and not has_rss_fetch %}
-                  <em>RSS config unavailable: plugin lacks rss.fetch permission.</em>
+                  <em>{{ t('plugins.rss_config_unavailable') }}</em>
                 {% endif %}
               {% elif has_rss_config and not has_rss_fetch %}
-                <em>RSS config unavailable: plugin lacks rss.fetch permission.</em>
+                <em>{{ t('plugins.rss_config_unavailable') }}</em>
               {% else %}
                 -
               {% endif %}
@@ -91,12 +91,12 @@
                 <form method="post" action="{{ url_for('plugins.save_plugin_policy', plugin_name=plugin.name) }}">
                   {{ mutation_form.hidden_tag() }}
                   <fieldset>
-                    <legend>Policy</legend>
-                    <label>AI Tool erlaubt
+                    <legend>{{ t('plugins.policy.legend') }}</legend>
+                    <label>{{ t('plugins.policy.ai_tool_allowed') }}
                       <input type="checkbox" name="ai_tool_enabled" value="1" disabled {% if ai_tool_toggles.get(plugin.name, false) %}checked{% endif %}>
                     </label><br>
-                    <small>Default-off (read-only in KI-F4 scope): disabled bleibt zur Laufzeit denied.</small><br>
-                    <label>Rollenmodus
+                    <small>{{ t('plugins.policy.default_off_hint') }}</small><br>
+                    <label>{{ t('plugins.policy.roles_mode') }}
                       <select name="roles_mode">
                         <option value="inherit" {% if override.roles_mode == 'inherit' %}selected{% endif %}>inherit</option>
                         <option value="override" {% if override.roles_mode == 'override' %}selected{% endif %}>override</option>
@@ -106,21 +106,21 @@
                     <label><input type="checkbox" name="required_roles" value="admin" {% if 'admin' in override.required_roles %}checked{% endif %}> admin</label>
                     <label><input type="checkbox" name="required_roles" value="vip" {% if 'vip' in override.required_roles %}checked{% endif %}> vip</label>
                     <label><input type="checkbox" name="required_roles" value="normal" {% if 'normal' in override.required_roles %}checked{% endif %}> normal</label><br>
-                    <label>Private mode
+                    <label>{{ t('plugins.policy.private_mode') }}
                       <select name="private_mode">
                         <option value="inherit" {% if override.private_mode == 'inherit' %}selected{% endif %}>inherit</option>
                         <option value="allow" {% if override.private_mode == 'allow' %}selected{% endif %}>allow</option>
                         <option value="deny" {% if override.private_mode == 'deny' %}selected{% endif %}>deny</option>
                       </select>
                     </label><br>
-                    <label>Group mode
+                    <label>{{ t('plugins.policy.group_mode') }}
                       <select name="groups_mode">
                         <option value="inherit" {% if override.groups_mode == 'inherit' %}selected{% endif %}>inherit</option>
                         <option value="allow" {% if override.groups_mode == 'allow' %}selected{% endif %}>allow</option>
                         <option value="deny" {% if override.groups_mode == 'deny' %}selected{% endif %}>deny</option>
                       </select>
                     </label><br>
-                    <label>Allowed groups</label><br>
+                    <label>{{ t('plugins.policy.allowed_groups') }}</label><br>
                     {% if known_groups %}
                       {% for group in known_groups %}
                         <label>
@@ -131,15 +131,15 @@
                     {% else %}
                       <em>{{ t('plugins.none_known_groups') }}</em><br>
                     {% endif %}
-                    <small>groups_mode=allow + keine Gruppe ausgewählt =&gt; deny all.</small><br>
-                    <label>Topic mode
+                    <small>{{ t('plugins.policy.groups_allow_hint') }}</small><br>
+                    <label>{{ t('plugins.policy.topic_mode') }}
                       <select name="topics_mode">
                         <option value="inherit" {% if override.topics_mode == 'inherit' %}selected{% endif %}>inherit</option>
                         <option value="allow" {% if override.topics_mode == 'allow' %}selected{% endif %}>allow</option>
                         <option value="deny" {% if override.topics_mode == 'deny' %}selected{% endif %}>deny</option>
                       </select>
                     </label><br>
-                    <label>Allowed topics</label><br>
+                    <label>{{ t('plugins.policy.allowed_topics') }}</label><br>
                     {% if known_topics %}
                       {% for topic in known_topics %}
                         {% set topic_value = topic.chat_id ~ ':' ~ topic.message_thread_id %}
@@ -151,7 +151,7 @@
                     {% else %}
                       <em>{{ t('plugins.none_known_topics') }}</em><br>
                     {% endif %}
-                    <small>topics_mode=allow + keine Topics ausgewählt =&gt; deny all.</small><br>
+                    <small>{{ t('plugins.policy.topics_allow_hint') }}</small><br>
                     <button type="submit">{{ t('action.save_policy') }}</button>
                   </fieldset>
                 </form>
@@ -203,10 +203,10 @@
     <table>
       <thead>
         <tr>
-          <th>Plugin-Verzeichnis</th>
-          <th>Datei</th>
-          <th>Status</th>
-          <th>Grund</th>
+          <th>{{ t('plugins.invalid.col_plugin_dir') }}</th>
+          <th>{{ t('plugins.invalid.col_file') }}</th>
+          <th>{{ t('plugins.invalid.col_status') }}</th>
+          <th>{{ t('plugins.invalid.col_reason') }}</th>
         </tr>
       </thead>
       <tbody>
@@ -214,7 +214,7 @@
           <tr>
             <td>{{ item.plugin_dir }}</td>
             <td>{{ item.file_name }}</td>
-            <td>fehlerhaft</td>
+            <td>{{ t('plugins.invalid.status_invalid') }}</td>
             <td>{{ item.error }}</td>
           </tr>
         {% endfor %}
