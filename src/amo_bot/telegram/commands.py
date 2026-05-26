@@ -70,6 +70,25 @@ def resolve_locale(*, explicit_arg: str | None, telegram_language_code: str | No
     return "de"
 
 
+TELEGRAM_TEXTS: dict[str, dict[Locale, str]] = {
+    "ask.usage": {"de": "Nutzung: /ask <frage>", "en": "usage: /ask <question>"},
+    "help.header": {"de": "Verfügbare Befehle:", "en": "available commands:"},
+    "help.none": {"de": "Keine Befehle verfügbar.", "en": "no commands available"},
+    "dispatcher.unknown_command": {
+        "de": "Unbekannter Befehl: /{command_name}. Nutze /help für verfügbare Befehle.",
+        "en": "Unknown command: /{command_name}. Use /help for available commands.",
+    },
+}
+
+
+def t_text(key: str, locale: Locale = "de", **kwargs: object) -> str:
+    entry = TELEGRAM_TEXTS.get(key)
+    if entry is None:
+        raise KeyError(f"unknown telegram text key: {key}")
+    value = entry["en" if locale == "en" else "de"]
+    return value.format(**kwargs) if kwargs else value
+
+
 class CommandRegistry:
     def __init__(self) -> None:
         self._commands: dict[str, Command] = {}
@@ -330,7 +349,7 @@ def create_builtin_registry(
 
     async def ask_handler(ctx: CommandContext) -> str:
         if not ctx.argument or not ctx.argument.strip():
-            return _lang(ctx, "Nutzung: /ask <frage>", "usage: /ask <question>")
+            return t_text("ask.usage", ctx.locale)
         if ai_service is None:
             return _lang(ctx, "AI-Service ist nicht konfiguriert.", "AI service is not configured")
 
@@ -476,8 +495,8 @@ def create_builtin_registry(
     async def help_handler(ctx: CommandContext) -> str:
         allowed = registry.list_allowed(ctx.role)
         if not allowed:
-            return _lang(ctx, "Keine Befehle verfügbar.", "no commands available")
-        lines = [_lang(ctx, "Verfügbare Befehle:", "available commands:")]
+            return t_text("help.none", ctx.locale)
+        lines = [t_text("help.header", ctx.locale)]
         for cmd in allowed:
             description = cmd.description_de if ctx.locale == "de" else cmd.description_en
             if not description:

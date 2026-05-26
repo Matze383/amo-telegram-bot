@@ -14,7 +14,7 @@ from amo_bot.db.base import create_session_factory
 from amo_bot.db.repositories import PrivateChatPolicyRepository, TopicAgentMemoryRepository, TopicRecentMessageRecord
 from amo_bot.db.models import AuditEvent, User
 from amo_bot.plugins.command_runtime import CommandActor, CommandInvocation, PluginCommandExecutor
-from amo_bot.telegram.commands import CommandContext, CommandRegistry, RoleResolver, resolve_locale
+from amo_bot.telegram.commands import CommandContext, CommandRegistry, RoleResolver, resolve_locale, t_text
 from amo_bot.telegram.live_edit_adapter import DisabledTelegramLiveEditAdapter, TelegramLiveEditAdapter
 from amo_bot.telegram.owner_notify import OwnerNotifier
 from amo_bot.telegram.update_parser import TelegramMessage, parse_update
@@ -526,9 +526,7 @@ class Dispatcher:
     @staticmethod
     def _unknown_command_message(*, message: TelegramMessage, command_name: str) -> str:
         locale = resolve_locale(explicit_arg=None, telegram_language_code=getattr(message.from_user, "language_code", None))
-        if locale == "de":
-            return f"Unbekannter Befehl: /{command_name}. Nutze /help für verfügbare Befehle."
-        return f"Unknown command: /{command_name}. Use /help for available commands."
+        return t_text("dispatcher.unknown_command", locale, command_name=command_name)
 
     @staticmethod
     def _consent_block_message(*, chat_type: str | None, blocked_as_unreachable: bool, locale: str = "de") -> str:
