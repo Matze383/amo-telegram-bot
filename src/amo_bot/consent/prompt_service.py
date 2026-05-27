@@ -17,53 +17,46 @@ SendPrivateMessageFn = Callable[[int, str], Awaitable[object]]
 SendPrivateMessageWithMarkupFn = Callable[[int, str, dict[str, object]], Awaitable[object]]
 
 
-class ConsentPromptService:
-    _PROMPT_TEXTS: dict[str, str] = {
-        "de": (
-            "Hallo! Bevor ich dir antworten oder deine Nachrichten verarbeiten darf, "
-            "brauche ich kurz dein Einverständnis.\n\n"
-            "Wenn du zustimmst, kann der Bot deine Telegram-Nutzerinformationen "
-            "speichern und verwenden, um Rollen, Gruppenfunktionen und Bot-Antworten "
-            "bereitzustellen.\n\n"
-            "Du kannst zustimmen mit:\n"
-            "/accept\n\n"
-            "Du kannst ablehnen mit:\n"
-            "/decline\n\n"
-            "Deinen aktuellen Status siehst du mit:\n"
-            "/consent"
-        ),
-        "en": (
-            "Hi! Before I can reply to you or process your messages, "
-            "I need your consent first.\n\n"
-            "If you agree, the bot can store and use your Telegram user information "
-            "to provide roles, group features, and bot replies.\n\n"
-            "You can accept with:\n"
-            "/accept\n\n"
-            "You can decline with:\n"
-            "/decline\n\n"
-            "You can check your current status with:\n"
-            "/consent"
-        ),
-    }
+_PROMPT_TEXTS: dict[str, str] = {
+    "de": (
+        "Hi! 👋\n\n"
+        "bevor wir schreiben, brauche ich kurz dein Okay zu unseren Nutzungsbedingungen.\n\n"
+        "Bitte bestätige mit den Buttons unten:\n"
+        "• ✅ /accept = akzeptieren\n"
+        "• ❌ /decline = ablehnen\n\n"
+        "Danke!"
+    ),
+    "en": (
+        "Hi! 👋\n\n"
+        "before we chat, I need your quick consent to our terms.\n\n"
+        "Please confirm using the buttons below:\n"
+        "• ✅ /accept = accept\n"
+        "• ❌ /decline = decline\n\n"
+        "Thanks!"
+    ),
+}
 
-    _PROMPT_MARKUP: dict[str, dict[str, object]] = {
-        "de": {
-            "inline_keyboard": [
-                [
-                    {"text": "✅ Akzeptieren", "callback_data": "consent:accept"},
-                    {"text": "❌ Ablehnen", "callback_data": "consent:decline"},
-                ]
+_PROMPT_MARKUP: dict[str, dict[str, object]] = {
+    "de": {
+        "inline_keyboard": [
+            [
+                {"text": "✅ Akzeptieren", "callback_data": "consent:accept"},
+                {"text": "❌ Ablehnen", "callback_data": "consent:decline"},
             ]
-        },
-        "en": {
-            "inline_keyboard": [
-                [
-                    {"text": "✅ Accept", "callback_data": "consent:accept"},
-                    {"text": "❌ Decline", "callback_data": "consent:decline"},
-                ]
+        ]
+    },
+    "en": {
+        "inline_keyboard": [
+            [
+                {"text": "✅ Accept", "callback_data": "consent:accept"},
+                {"text": "❌ Decline", "callback_data": "consent:decline"},
             ]
-        },
-    }
+        ]
+    },
+}
+
+
+class ConsentPromptService:
     def __init__(
         self,
         *,
@@ -167,8 +160,8 @@ class ConsentPromptService:
 
     @classmethod
     def build_prompt_markup(cls, locale: str | None = None) -> dict[str, object]:
-        return cls._PROMPT_MARKUP[cls._normalize_locale(locale)]
+        return _PROMPT_MARKUP[cls._normalize_locale(locale)]
 
     @classmethod
     def build_prompt_text(cls, locale: str | None = None) -> str:
-        return cls._PROMPT_TEXTS[cls._normalize_locale(locale)]
+        return _PROMPT_TEXTS[cls._normalize_locale(locale)]

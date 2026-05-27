@@ -122,6 +122,14 @@ TELEGRAM_TEXTS: dict[str, dict[Locale, str]] = {
     "setrole.not_configured": {"de": "rollenverwaltung ist nicht konfiguriert", "en": "role management not configured"},
     "setrole.updated": {"de": "rolle aktualisiert: {target_user_id} {prev} -> {new_role}", "en": "role updated: {target_user_id} {prev} -> {new_role}"},
     "setrole.no_change": {"de": "keine änderung: {target_user_id} bereits {new_role}", "en": "no change: {target_user_id} already {new_role}"},
+    "webui.not_configured": {"de": "webui access control not configured", "en": "webui access control not configured"},
+    "webui.usage": {"de": "usage: /webui <on|off|status>", "en": "usage: /webui <on|off|status>"},
+    "webui.permission_denied": {"de": "permission denied", "en": "permission denied"},
+    "webui.open_until": {"de": "webui access: OPEN (~60m, until {time_utc})", "en": "webui access: OPEN (~60m, until {time_utc})"},
+    "webui.closed": {"de": "webui access: CLOSED", "en": "webui access: CLOSED"},
+    "webui.open_remaining": {"de": "webui access: OPEN (remaining: {remaining_minutes}m)", "en": "webui access: OPEN (remaining: {remaining_minutes}m)"},
+    "test.inline_button_prompt": {"de": "Inline-Button-Test: Bitte klicken.", "en": "Inline button test: please click."},
+    "test.inline_button": {"de": "✅ Test Button", "en": "✅ Test button"},
 }
 
 
@@ -394,11 +402,11 @@ def create_builtin_registry(
 
     async def webui_handler(ctx: CommandContext) -> str:
         if session_factory is None:
-            return "webui access control not configured"
+            return t_text("webui.not_configured", ctx.locale)
 
         subcommand = (ctx.argument or "status").strip().casefold()
         if subcommand not in {"on", "off", "status"}:
-            return "usage: /webui <on|off|status>"
+            return t_text("webui.usage", ctx.locale)
 
         if ctx.chat_type != "private":
             with session_factory() as session:
@@ -417,7 +425,7 @@ def create_builtin_registry(
                     )
                 )
                 session.commit()
-            return "permission denied"
+            return t_text("webui.permission_denied", ctx.locale)
 
         if ctx.role != Role.OWNER:
             with session_factory() as session:
@@ -436,7 +444,7 @@ def create_builtin_registry(
                     )
                 )
                 session.commit()
-            return "permission denied"
+            return t_text("webui.permission_denied", ctx.locale)
 
         service = WebuiAccessWindowService(session_factory)
         now = datetime.now(UTC)
@@ -458,7 +466,7 @@ def create_builtin_registry(
                     )
                 )
                 session.commit()
-            return f"webui access: OPEN (~60m, until {enabled_until.strftime('%H:%M UTC')})"
+            return t_text("webui.open_until", ctx.locale, time_utc=enabled_until.strftime('%H:%M UTC'))
 
         if subcommand == "off":
             service.disable(actor_id=ctx.user_id, now_utc=now)
@@ -476,7 +484,7 @@ def create_builtin_registry(
                     )
                 )
                 session.commit()
-            return "webui access: CLOSED"
+            return t_text("webui.closed", ctx.locale)
 
         status = service.get_status(now_utc=now)
         remaining_minutes = max(0, status.remaining_seconds // 60)
@@ -499,17 +507,17 @@ def create_builtin_registry(
             session.commit()
 
         if status.open:
-            return f"webui access: OPEN (remaining: {remaining_minutes}m)"
-        return "webui access: CLOSED"
+            return t_text("webui.open_remaining", ctx.locale, remaining_minutes=remaining_minutes)
+        return t_text("webui.closed", ctx.locale)
 
     async def test_handler(ctx: CommandContext) -> dict[str, object]:
         payload: dict[str, object] = {
-            "text": "Inline-Button-Test: Bitte klicken.",
+            "text": t_text("test.inline_button_prompt", ctx.locale),
             "reply_markup": {
                 "inline_keyboard": [
                     [
                         {
-                            "text": "✅ Test Button",
+                            "text": t_text("test.inline_button", ctx.locale),
                             "callback_data": "test:ok",
                         }
                     ]

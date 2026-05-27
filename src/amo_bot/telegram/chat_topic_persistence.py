@@ -11,6 +11,24 @@ from amo_bot.telegram.owner_notify import OwnerNotifier
 from amo_bot.telegram.update_parser import TelegramMessage, TelegramUser
 
 
+GROUP_CONSENT_TEXTS: dict[str, str] = {
+    "welcome.with_mention": (
+        "Willkommen {mention} in {group_label}. "
+        "Ich bin der KI-Bot der Gruppe. "
+        "Damit du mich nutzen kannst und ich mit dir interagieren kann, "
+        "musst du den Nutzungsbedingungen zustimmen."
+    ),
+    "welcome.no_mention": (
+        "Willkommen in {group_label}. "
+        "Ich bin der KI-Bot der Gruppe. "
+        "Damit du mich nutzen kannst und ich mit dir interagieren kann, "
+        "musst du den Nutzungsbedingungen zustimmen."
+    ),
+    "group_label.fallback": "der Gruppe",
+    "button.open_policy_private": "Policy privat öffnen",
+}
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -220,18 +238,11 @@ class ChatTopicPersistenceService:
         mention = self._render_user_mention(message=message)
         group_label = self._render_group_label(message=message)
         if mention:
-            return (
-                f"Willkommen {mention} in {group_label}. "
-                "Ich bin der KI-Bot der Gruppe. "
-                "Damit du mich nutzen kannst und ich mit dir interagieren kann, "
-                "musst du den Nutzungsbedingungen zustimmen."
+            return GROUP_CONSENT_TEXTS["welcome.with_mention"].format(
+                mention=mention,
+                group_label=group_label,
             )
-        return (
-            f"Willkommen in {group_label}. "
-            "Ich bin der KI-Bot der Gruppe. "
-            "Damit du mich nutzen kannst und ich mit dir interagieren kann, "
-            "musst du den Nutzungsbedingungen zustimmen."
-        )
+        return GROUP_CONSENT_TEXTS["welcome.no_mention"].format(group_label=group_label)
 
     def _render_user_mention(self, *, message: TelegramMessage) -> str:
         if message.from_user.username:
@@ -241,7 +252,7 @@ class ChatTopicPersistenceService:
     def _render_group_label(self, *, message: TelegramMessage) -> str:
         if message.chat.title:
             return message.chat.title
-        return "der Gruppe"
+        return GROUP_CONSENT_TEXTS["group_label.fallback"]
 
     def _build_group_unreachable_markup(self) -> dict[str, object] | None:
         bot_username = (self._bot_username or "").strip().lstrip("@")
@@ -251,7 +262,7 @@ class ChatTopicPersistenceService:
             "inline_keyboard": [
                 [
                     {
-                        "text": "Policy privat öffnen",
+                        "text": GROUP_CONSENT_TEXTS["button.open_policy_private"],
                         "url": f"https://t.me/{bot_username}?start=consent",
                     }
                 ]
