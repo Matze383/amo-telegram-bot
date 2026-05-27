@@ -1,8 +1,8 @@
 # i18n Inventory / Übersicht der Internationalisierung
 
 > **Scope:** RR-03 – i18n Inventory: Bot + Flask UI + Repo Docs
-> **Updated:** 2026-05-27 (after GH-I18N-10, GH-I18N-11, GH-DOCS-12, GH-DOCS-13 completion; inventory refresh for GH-QA-DOCS-14)
-> **Git Issues:** #9 (previous release), #10 (WebUI i18n), #11 (Telegram bot DE/EN), #12 (README/CHANGELOG cleanup), #13 (DE/EN doc counterparts), #14 (this inventory update)
+> **Updated:** 2026-05-27 (after GH-I18N-10, GH-I18N-11, GH-DOCS-12, GH-DOCS-13, GH-DOCS-18 completion)
+> **Git Issues:** #9 (previous release), #10 (WebUI i18n), #11 (Telegram bot DE/EN), #12 (README/CHANGELOG cleanup), #13 (DE/EN doc counterparts), #14 (this inventory update), #18 (YT-RSS exception)
 
 ---
 
@@ -17,7 +17,7 @@ Dieses Dokument listet alle sprachsensitiven Oberflächen des AMO Telegram Bots 
 - ✅ Flask WebUI: Vollständig bilingualisiert über i18n-Modul – Implemented #10
 - ✅ Dokumentation: Language Conventions etabliert (LANGUAGE_CONVENTIONS.md) – Implemented #12/#13
 
-**Wichtig:** Nach Abschluss von #10/#11/#12/#13 sind alle user-facing Surfaces bilingual. Verbleibende EN-only Bereiche sind technische Interna (Logging, Code-Kommentare), die absichtlich nicht übersetzt werden.
+**Wichtig:** Nach Abschluss von #10/#11/#12/#13/#18 sind alle user-facing Surfaces bilingual. Verbleibende EN-only Bereiche sind technische Interna (Logging, Code-Kommentare) oder dokumentierte Ausnahmen (YT-RSS.md: EN-primary mit DE-Headers), die absichtlich nicht vollständig übersetzt werden.
 
 ---
 
@@ -32,7 +32,7 @@ This document lists all language-sensitive surfaces of the AMO Telegram Bot. It 
 - ✅ Flask WebUI: Fully bilingualized via i18n module – Implemented #10
 - ✅ Documentation: Language Conventions established (LANGUAGE_CONVENTIONS.md) – Implemented #12/#13
 
-**Important:** After completion of #10/#11/#12/#13, all user-facing surfaces are bilingual. Remaining EN-only areas are technical internals (logging, code comments) that are intentionally not translated.
+**Important:** After completion of #10/#11/#12/#13/#18, all user-facing surfaces are bilingual. Remaining EN-only areas are technical internals (logging, code comments) or documented exceptions (YT-RSS.md: EN-primary with DE headers) that are intentionally not fully translated.
 
 ---
 
@@ -237,6 +237,7 @@ This document lists all language-sensitive surfaces of the AMO Telegram Bot. It 
 | Docs | Security | `SECURITY.md` | ✅ | ✅ | Docs | P0 | Bilingual single file |
 | Docs | Code of Conduct | `CODE_OF_CONDUCT.md` | ✅ | ✅ | Docs | P0 | Bilingual single file |
 | Docs | Support | `SUPPORT.md` | ✅ | ✅ | Docs | P0 | Bilingual single file |
+| Docs | YT-RSS Guide | `docs/YT-RSS.md` | ⚠️ | ✅ | Docs | P1 | EN-primary with DE headers only — documented exception (GH-DOCS-18) |
 | Docs | Context/Memory Architecture | `docs/CONTEXT_MEMORY_ARCHITECTURE.md` | N/A | ✅ | Docs | P2 | EN-only technical architecture doc (by design) |
 | Docs | WebUI Plugin docs | `docs/WEBUI_PLUGIN_*.md` | ✅ | ✅ | Docs | P1 | Bilingual single files |
 
@@ -292,6 +293,7 @@ This document lists all language-sensitive surfaces of the AMO Telegram Bot. It 
 | Flask WebUI Forms & Tables | ✅ Complete | #10 (GH-I18N-10) |
 | Flask WebUI Language Switching | ✅ Complete | #10 (GH-I18N-10) |
 | Documentation Language Conventions | ✅ Complete | #12/#13 (GH-DOCS-12/GH-DOCS-13) |
+| YT-RSS Guide | ⚠️ Documented Exception | #18 (GH-DOCS-18) — EN-primary, DE headers only |
 | README & Setup Guides | ✅ Complete | #12 (GH-DOCS-12), Previous releases |
 | GitHub Templates | ✅ Complete | #9 |
 
@@ -305,6 +307,7 @@ This document lists all language-sensitive surfaces of the AMO Telegram Bot. It 
 | 4 | Logging | EN only | Internal diagnostics only; not user-facing |
 | 5 | GitHub Topics | EN only | GitHub platform limitation |
 | 6 | ROADMAP.md | Bilingual | ✅ DE/EN inline – Updated in GH-DOCS-13 |
+| 7 | YT-RSS.md | EN-primary with DE headers only | Plugin-Example; command syntax universal; exception documented (GH-DOCS-18) |
 
 ### Empfohlene Follow-up-Aktionen / Recommended Follow-up Actions
 
@@ -373,7 +376,7 @@ Dieser Abschnitt dokumentiert die Entscheidungen zu bilingualen Dokumenten-Count
 | SETUP_DE.md / SETUP_EN.md | ✅ | ✅ | Separate Files | Umfangreich; separate Sprachversionen erforderlich |
 | BETATEST_DE.md / BETATEST_EN.md | ✅ | ✅ | Separate Files | Umfangreich; parallele Test-Anleitungen |
 | USERPLUGINS.md | ✅ (inline) | ✅ (inline) | Bilingual Single | Plugin-Entwicklung; Zielgruppe bilingual |
-| YT-RSS.md | ✅ (inline) | ✅ (inline) | Bilingual Single | EN-primary (Plugin-Beispiel), DE-Inline-Headers vorhanden |
+| YT-RSS.md | ⚠️ (headers) | ✅ | Bilingual Single | Plugin-Example / Plugin-Beispiel; EN-primary with DE section headers only — documented exception (GH-DOCS-18) |
 | LANGUAGE_CONVENTIONS.md | ✅ (inline) | ✅ (inline) | Bilingual Single | Selbst-dokumentierend bilingual |
 | CONTEXT_MEMORY_ARCHITECTURE.md | ❌ (N/A) | ✅ | EN-Only | Technische Architektur-Spezifikation; Lingua Franca |
 | ROADMAP.md | ✅ (inline) | ✅ (inline) | Bilingual Single | Projekt-Richtung; Community-Update |
@@ -405,16 +408,24 @@ Dieser Abschnitt dokumentiert die Entscheidungen zu bilingualen Dokumenten-Count
 5. [ ] In LANGUAGE_CONVENTIONS.md Tabelle aktualisiert
 6. [ ] In i18n-inventory.md Decision Matrix aktualisiert
 
-### Status: GH-DOCS-13
+### Status: GH-DOCS-13 + GH-DOCS-18
 
-✅ **Complete** – Alle Core-Dokumente klassifiziert und strukturiert.
-- Bilingual Single: 13 Dokumente
-- Separate Files: 2 Dokument-Paare (SETUP, BETATEST)
-- EN-Only: 1 Dokument (CONTEXT_MEMORY_ARCHITECTURE.md)
+✅ **Complete with Exceptions** – Alle Core-Dokumente klassifiziert und strukturiert.
+- **Bilingual Single:** 13 Dokumente (1 mit dokumentierter Ausnahme: YT-RSS.md)
+- **Separate Files:** 2 Dokument-Paare (SETUP, BETATEST)
+- **EN-Only:** 1 Dokument (CONTEXT_MEMORY_ARCHITECTURE.md)
+
+### Dokumentierte Ausnahmen / Documented Exceptions
+
+| Dokument | Ausnahme / Exception | Begründung / Rationale |
+|----------|---------------------|------------------------|
+| YT-RSS.md | DE content = headers only (not full parallel sections) | Plugin-Example; command syntax universal; EN-primary sufficient for technical users; section headers give DE orientation |
+
+*Ausnahme genehmigt in / Exception approved in: GH-DOCS-18*
 
 ---
 
-*Letzte Aktualisierung / Last updated: 2026-05-27 (GH-QA-DOCS-14 inventory refresh after GH-I18N-10, GH-I18N-11, GH-DOCS-12, GH-DOCS-13 completion)*
+*Letzte Aktualisierung / Last updated: 2026-05-27 (GH-DOCS-18 — YT-RSS.md documented exception; inventory update complete)*
 *Issue: #14 – i18n Inventory Refresh*
-*Related: #9 (GitHub templates), #10 (WebUI i18n), #11 (Telegram bot DE/EN), #12 (README/CHANGELOG cleanup), #13 (DE/EN doc counterparts)*
+*Related: #9 (GitHub templates), #10 (WebUI i18n), #11 (Telegram bot DE/EN), #12 (README/CHANGELOG cleanup), #13 (DE/EN doc counterparts), #18 (YT-RSS exception)*
 *Status: ✅ User-facing surfaces fully bilingual; technical internals EN-only by design*

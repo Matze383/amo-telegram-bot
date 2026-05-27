@@ -211,7 +211,7 @@ status: "pending_translation"  # oder "complete"
 | SETUP_DE/EN.md | Separate Files | ✅ | ✅ | ✅ Complete |
 | BETATEST_DE/EN.md | Separate Files | ✅ | ✅ | ✅ Complete |
 | USERPLUGINS.md | Bilingual Single | ✅ | ✅ | ✅ Complete |
-| YT-RSS.md | Bilingual Single | ✅ | ✅ | ✅ Complete |
+| YT-RSS.md | Bilingual Single | ⚠️ | ✅ | ✅ Complete (EN-primary; DE headers only — exception documented) |
 | WEBUI_PLUGIN_DETAIL.md | Bilingual Single | ✅ | ✅ | ✅ Complete |
 | WEBUI_PLUGIN_OVERVIEW.md | Bilingual Single | ✅ | ✅ | ✅ Complete |
 | CONTRIBUTING.md | Bilingual Single | ✅ | ✅ | ✅ Complete |
@@ -238,8 +238,8 @@ status: "pending_translation"  # oder "complete"
 
 ---
 
-**Letzte Aktualisierung / Last Updated:** 2026-05-27 (GH-DOCS-13 completion)
-**Version:** 1.1.0
+**Letzte Aktualisierung / Last Updated:** 2026-05-27 (GH-DOCS-18 — YT-RSS.md documented exception)
+**Version:** 1.2.0
 **Git Commit:** [wird nach Commit eingetragen]
 
 ---
@@ -259,7 +259,7 @@ status: "pending_translation"  # oder "complete"
 | SETUP_DE.md / SETUP_EN.md | ✅ | ✅ | Separate Files | Umfangreich; separate Versionen |
 | BETATEST_DE.md / BETATEST_EN.md | ✅ | ✅ | Separate Files | Umfangreich; parallele Anleitungen |
 | USERPLUGINS.md | ✅ (inline) | ✅ (inline) | Bilingual Single | Plugin-Dev-Guide; Zielgruppe bilingual |
-| YT-RSS.md | ✅ (inline) | ✅ (inline) | Bilingual Single | Plugin-Beispiel; parallele Abschnitte |
+| YT-RSS.md | ⚠️ (headers) | ✅ | Bilingual Single | Plugin-Example / Plugin-Beispiel; EN-primary with DE section headers only — documented exception (GH-DOCS-18) |
 | LANGUAGE_CONVENTIONS.md | ✅ (inline) | ✅ (inline) | Bilingual Single | Meta-Dokument; bilingual by design |
 | CONTEXT_MEMORY_ARCHITECTURE.md | ❌ (N/A) | ✅ | EN-Only | Technische Architektur; Lingua Franca |
 | ROADMAP.md | ✅ (inline) | ✅ (inline) | Bilingual Single | Projekt-Richtung; Community-Update |
