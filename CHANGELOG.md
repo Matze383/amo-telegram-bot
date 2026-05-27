@@ -5,6 +5,72 @@
 
 ---
 
+## [2026.05.27] – Memory scoping, C2 review service, and image follow-up analysis
+
+**Datum / Date:** 2026-05-27
+
+### 🇩🇪 Deutsch
+
+#### Übersicht
+Dieses Release bringt ein neues Scoped-Memory-System mit C2-Review-Service für verbesserte Datenschutzkontrolle, Follow-up-Bildanalyse für natürlichere Konversationen, sowie weitere Härtung des YT-RSS-Plugins und der Sandbox-Runtime.
+
+#### Neu
+- **Scoped Memory mit C2-Review-Service:** Neues Speicher-Architektur-Modell mit kontextspezifischem Scoping (Topic/Gruppe/Privat) und internem C2-Review-Service als Foundation für Datenschutz-Workflows. Memory-Antworten unterliegen "Effectiveness Gates" für verbesserte Qualitätssicherung.
+- **Image Follow-up Analysis:** Bilder können nun im Kontext einer laufenden Konversation analysiert werden — natürliche Fortführung von Dialogen mit visuellem Bezug.
+- **AI Session Lifecycle Management:** Verbessertes Session-Management mit klar definierten Zustandsübergängen und automatischer Bereinigung.
+- **Memory Answer-Effectiveness Gates:** Automatische Qualitätsprüfung von Memory-Antworten vor der Auslieferung.
+
+#### Verbessert
+- **YT-RSS Plugin Härtung:** Robusterer Handle-/Channel-ID-Resolver mit verbesserter Fehlerbehandlung und resilienterem Scheduler-Verhalten bei Netzwerkproblemen.
+- **Sandbox Runtime Stabilität:** Verbesserte Isolation und Fehlerbehandlung in Plugin-Sandbox-Workern.
+
+#### Sicherheit & Privacy
+- **C2 Review/Dreaming Service:** Interner C2-Service für Memory-Review und -Kuratierung (Foundation für zukünftige Datenschutz-Workflows; noch nicht als automatischer Runtime-Review für Endnutzer freigeschaltet).
+- **Scoped Memory Privacy:** Speicherdaten sind nun strikt nach Kontext (Topic, Gruppe, Privat) getrennt — keine ungewollte Quer-Verbindung von Informationen.
+- **Verbesserte Memory-Gates:** Strengere Prüfung von Memory-Antworten auf Relevanz und Qualität.
+
+#### Architektur / Interna
+- **Memory C2 Service:** Neuer dedizierter Service für Memory-Review und -Kuratierung.
+- **AI Session Lifecycle:** Klare Zustandsmaschine für AI-Sessions mit definierten Übergängen.
+- **Effectiveness Gates:** Modularer Gate-System für Memory-Antwort-Validierung.
+
+#### Qualitätssicherung
+- **QA:** ⚠️ Partial — Core Memory-System getestet; C2-Service Foundation validiert; Image Follow-up Tests durchgeführt (C2 Tests/Router Proofs/relevante Suite); vollständige Release-QA ausstehend.
+- **Hinweis:** Vollständige QA-Gates für Production-Release in Progress.
+
+---
+
+### 🇬🇧 English
+
+#### Overview
+This release brings a new scoped memory system with C2 review service for enhanced privacy control, follow-up image analysis for more natural conversations, plus further hardening of the YT-RSS plugin and sandbox runtime.
+
+#### New
+- **Scoped memory with C2 review service:** New memory architecture model with context-specific scoping (topic/group/private) and internal C2 review service as foundation for privacy workflows. Memory responses undergo "effectiveness gates" for improved quality assurance.
+- **Image follow-up analysis:** Images can now be analyzed within the context of an ongoing conversation — natural continuation of dialogues with visual reference.
+- **AI session lifecycle management:** Improved session management with clearly defined state transitions and automatic cleanup.
+- **Memory answer-effectiveness gates:** Automatic quality checking of memory responses before delivery.
+
+#### Improved
+- **YT-RSS plugin hardening:** More robust handle/channel ID resolver with improved error handling and more resilient scheduler behavior during network issues.
+- **Sandbox runtime stability:** Enhanced isolation and error handling in plugin sandbox workers.
+
+#### Security & Privacy
+- **C2 review/dreaming service:** Internal C2 service for memory review and curation (foundation for future privacy workflows; not yet enabled as automatic runtime review for end users).
+- **Scoped memory privacy:** Memory data is now strictly separated by context (topic, group, private) — no unwanted cross-connection of information.
+- **Improved memory gates:** Stricter validation of memory responses for relevance and quality.
+
+#### Architecture / Internal
+- **Memory C2 service:** New dedicated service for memory review and curation.
+- **AI session lifecycle:** Clear state machine for AI sessions with defined transitions.
+- **Effectiveness gates:** Modular gate system for memory response validation.
+
+#### Quality Assurance
+- **QA:** ⚠️ Partial — Core memory system tested; C2 service foundation validated; Image follow-up tests performed (C2 tests/router proofs/relevant suite); full release QA pending.
+- **Note:** Full QA gates for production release in progress.
+
+---
+
 ## [2026.05.26] – YT-RSS plugin and sandbox runtime hardening
 
 **Datum / Date:** 2026-05-26

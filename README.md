@@ -1,7 +1,7 @@
 # AMO Telegram Bot
 
-> **DE:** Ein modularer, rollenbasierter Telegram-Bot mit Plugin-Unterstützung, WebUI-Verwaltung und optionaler KI-Integration.
-> **EN:** A modular, role-based Telegram bot with plugin support, WebUI management, and optional AI integration.
+> **DE:** Ein modularer, rollenbasierter Telegram-Bot mit Plugin-Unterstützung, WebUI-Verwaltung, optionaler KI-Integration — jetzt mit erweitertem Speicher-Management und sicherem Plugin-Sandboxing.
+> **EN:** A modular, role-based Telegram bot with plugin support, WebUI management, optional AI integration — now with extended memory management and secure plugin sandboxing.
 
 ---
 
@@ -18,7 +18,7 @@
 
 ### Übersicht
 
-AMO ist ein erweiterbarer Telegram-Bot für Gruppen und private Chats. Er bietet ein rollenbasiertes Berechtigungssystem, eine lokale WebUI zur Verwaltung und optionale KI-Funktionen über Ollama.
+AMO ist ein erweiterbarer Telegram-Bot für Gruppen und private Chats. Er bietet ein rollenbasiertes Berechtigungssystem, eine lokale WebUI zur Verwaltung und optionale KI-Funktionen über Ollama oder OpenAI.
 
 **Status:** Beta / MVP — Nicht für den Produktivbetrieb geeignet.
 
@@ -37,8 +37,10 @@ AMO ist ein erweiterbarer Telegram-Bot für Gruppen und private Chats. Er bietet
 | ✅ **Consent-Management** | Nutzer müssen explizit zustimmen, bevor der Bot aktiv wird |
 | 🌐 **WebUI** | Lokale Flask-Oberfläche für Verwaltung und Konfiguration |
 | 🤖 **KI-Integration** | Optionales `/ask`-Kommando mit gescopten Sessions, `/new` und `/reset` für Session-Management, Auto-Antworten via Ollama oder OpenAI |
-| 🧠 **Memory-System** | Tägliche Langzeitgedächtnis-Kuratierung mit Datenschutz-Defaults |
-| 🖼️ **Bildanalyse & -sendung** | Image-Analysis-Interface (IMG) mit send_photo/send_document Wrappern; WebUI pro-Topic Bilderkennungs-Toggle (inherit/enabled/disabled); WebUI Rollen-Quotas für Bildanalyse (IMG-B7); Runtime Quota-Enforcement mit Rolling-24h-Fenster (IMG-B8) |
+| 🧠 **Memory-System** | Tägliche Langzeitgedächtnis-Kuratierung mit Datenschutz-Defaults; **Neu:** Scoped Memory mit C2-Review-Service für verbesserte Datenschutzkontrolle |
+| 🖼️ **Bildanalyse & -sendung** | Image-Analysis-Interface (IMG) mit send_photo/send_document Wrappern; WebUI pro-Topic Bilderkennungs-Toggle (inherit/enabled/disabled); WebUI Rollen-Quotas für Bildanalyse (IMG-B7); Runtime Quota-Enforcement mit Rolling-24h-Fenster (IMG-B8); **Neu:** Follow-up Bildanalyse für Kontext-Fortführung |
+| 🔒 **Sandbox-Runtime** | **Neu:** Plugin-Ausführung über Sandbox-Worker mit Capability-Gating für Commands, Scheduled- und Worker-Plugins (Command/Scheduled/Worker-Runtime isoliert) |
+| 📺 **YT-RSS Plugin** | YouTube-Kanal-Abos via RSS mit verbesserter Handle/Channel-ID-Auflösung und robusterem Scheduler |
 
 ### Schnellstart
 
@@ -114,7 +116,7 @@ python main.py
 
 ### Overview
 
-AMO is an extensible Telegram bot for groups and private chats. It provides a role-based permission system, a local WebUI for management, and optional AI features via Ollama.
+AMO is an extensible Telegram bot for groups and private chats. It provides a role-based permission system, a local WebUI for management, and optional AI features via Ollama or OpenAI.
 
 **Status:** Beta / MVP — Not production-ready.
 
@@ -133,8 +135,10 @@ AMO is an extensible Telegram bot for groups and private chats. It provides a ro
 | ✅ **Consent Management** | Users must explicitly opt-in before the bot becomes active |
 | 🌐 **WebUI** | Local Flask interface for management and configuration |
 | 🤖 **AI Integration** | Optional `/ask` command with scoped sessions, `/new` and `/reset` for session management, auto-replies via Ollama or OpenAI |
-| 🧠 **Memory System** | Daily long-term memory curation with privacy-first defaults |
-| 🖼️ **Image Analysis & Sending** | Image Analysis interface (IMG) with send_photo/send_document wrappers; WebUI per-topic image recognition toggle (inherit/enabled/disabled); WebUI role quotas for image analysis (IMG-B7); Runtime quota enforcement with rolling 24h window (IMG-B8) |
+| 🧠 **Memory System** | Daily long-term memory curation with privacy-first defaults; **New:** Scoped memory with C2 review service for enhanced privacy control |
+| 🖼️ **Image Analysis & Sending** | Image Analysis interface (IMG) with send_photo/send_document wrappers; WebUI per-topic image recognition toggle (inherit/enabled/disabled); WebUI role quotas for image analysis (IMG-B7); Runtime quota enforcement with rolling 24h window (IMG-B8); **New:** Follow-up image analysis for context continuation |
+| 🔒 **Sandbox Runtime** | **New:** Plugin execution via sandbox workers with capability gating for commands, scheduled, and worker plugins (command/scheduled/worker runtime isolated) |
+| 📺 **YT-RSS Plugin** | YouTube channel subscriptions via RSS with improved handle/channel ID resolution and more robust scheduler |
 
 ### Quick Start
 
@@ -213,12 +217,16 @@ python main.py
 - `BOT_TOKEN` niemals in Chats, Logs oder Repositories teilen
 - `.env` ist in `.gitignore` — Secrets niemals committen
 - Für öffentliche Deployments: Reverse Proxy (nginx, Caddy) mit HTTPS verwenden
+- **Sandbox-Runtime:** Commands, Scheduled- und Worker-Plugins laufen isoliert mit Capability-Prüfung
+- **Memory-C2-Review:** Scoped Memory mit internem C2-Review-Service (Foundation für zukünftige Datenschutz-Workflows)
 
 **EN:**
 - WebUI is **local-only** (`127.0.0.1`) — never expose to the internet
 - Never share `BOT_TOKEN` in chats, logs, or repositories
 - `.env` is in `.gitignore` — never commit secrets
 - For public deployments: Use a reverse proxy (nginx, Caddy) with HTTPS
+- **Sandbox Runtime:** Commands, scheduled, and worker plugins run isolated with capability checking
+- **Memory C2 Review:** Scoped memory with internal C2 review service (foundation for future privacy workflows)
 
 ---
 
@@ -253,7 +261,8 @@ python main.py
 | RR-01..RR-05 | ✅ Complete — Core Bot, WebUI, Consent, Security, AI Features |
 | RR-06        | ✅ Complete — README Polish |
 | RR-07        | ✅ Complete — Cross-Platform Setup Docs (Windows, macOS, Linux) |
-| RR-08        | ⏳ Planned — Contribution Guide |
+| RR-08        | ✅ Complete — Contribution Guide |
+| RR-09..RR-15 | ⚠️ Partial — Templates, Security Docs, Roadmap, CI, Release Notes vorhanden; RR-13 Cross-Platform Smoke Tests ausstehend (nur Linux validiert) |
 
 ---
 
