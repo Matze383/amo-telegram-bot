@@ -106,6 +106,19 @@ def init_db(database_url: str) -> None:
                 updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
         """,
+        "user_memory_profiles": """
+            CREATE TABLE user_memory_profiles (
+                id INTEGER NOT NULL PRIMARY KEY,
+                scope_type VARCHAR(32) NOT NULL,
+                chat_id BIGINT,
+                topic_id BIGINT,
+                user_id BIGINT,
+                profile_json TEXT NOT NULL DEFAULT '{}',
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                CONSTRAINT uq_user_memory_profiles_scope UNIQUE (scope_type, chat_id, topic_id, user_id)
+            )
+        """,
         "image_analyze_topic_policies": """
             CREATE TABLE image_analyze_topic_policies (
                 id INTEGER NOT NULL PRIMARY KEY,

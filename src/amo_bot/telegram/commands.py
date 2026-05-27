@@ -7,14 +7,16 @@ import logging
 from typing import Awaitable, Callable, Literal
 
 
+from amo_bot.ai.memory_c2_service import MemoryC2Service, MemoryScope
 from amo_bot.ai.service import AIService, OllamaError
 from amo_bot.auth.permissions import ADMIN_ASSIGNABLE_ROLES, can_assign_role, can_use_bot
 from amo_bot.auth.roles import ROLE_PRIORITY, Role
 from amo_bot.db.base import create_session_factory
+from amo_bot.db.init_db import init_db
 from amo_bot.db.models import GROUP_CHAT_TYPES, AuditEvent, TelegramChat, User
 from amo_bot.consent import CONSENT_ACCEPTED, CONSENT_DECLINED, CONSENT_PENDING, CONSENT_UNREACHABLE, ConsentService
 from amo_bot.consent.prompt_service import ConsentPromptService
-from amo_bot.db.repositories import ChatScopedRoleRepository, TopicAgentMemoryRepository, UserRoleRepository
+from amo_bot.db.repositories import ChatScopedRoleRepository, TopicAgentMemoryRepository, UserMemoryProfileRepository, UserRoleRepository
 from amo_bot.telegram.owner_notify import OwnerNotifier
 from amo_bot.webui.access_window import WebuiAccessWindowService
 
@@ -189,6 +191,14 @@ TELEGRAM_TEXTS: dict[str, dict[Locale, str]] = {
     "webui.open_remaining": {"de": "webui access: OPEN (remaining: {remaining_minutes}m)", "en": "webui access: OPEN (remaining: {remaining_minutes}m)"},
     "test.inline_button_prompt": {"de": "Inline-Button-Test: Bitte klicken.", "en": "Inline button test: please click."},
     "test.inline_button": {"de": "✅ Test Button", "en": "✅ Test button"},
+    "memory_profile.private_only": {"de": "Bitte nutze diesen Befehl im privaten Chat.", "en": "Please use this command in a private chat."},
+    "memory_profile.empty": {"de": "Kein Profil gespeichert.", "en": "No profile stored."},
+    "memory_profile.current": {"de": "Dein Memory-Profil: {profile}", "en": "Your memory profile: {profile}"},
+    "memory_profile.set.usage": {"de": "Nutzung: /memory_profile_set key=value[, key=value]", "en": "usage: /memory_profile_set key=value[, key=value]"},
+    "memory_profile.set.updated": {"de": "Profil aktualisiert. Gespeicherte Felder: {accepted}", "en": "Profile updated. Stored fields: {accepted}"},
+    "memory_profile.set.rejected": {"de": "Keine erlaubten Felder. Erlaubt: {allowed}", "en": "No allowed fields. Allowed: {allowed}"},
+    "memory_profile.set.partial": {"de": "Profil teilweise aktualisiert. Gespeichert: {accepted}; ignoriert: {rejected}", "en": "Profile partially updated. Stored: {accepted}; ignored: {rejected}"},
+    "memory_profile.delete.done": {"de": "Dein Memory-Profil wurde gelöscht.", "en": "Your memory profile was deleted."},
 }
 
 
@@ -257,6 +267,8 @@ def create_builtin_registry(
     owner_notifier: OwnerNotifier | None = None,
 ) -> CommandRegistry:
     registry = CommandRegistry()
+    if database_url:
+        init_db(database_url)
     session_factory = create_session_factory(database_url) if database_url else None
 
     async def ping_handler(ctx: CommandContext) -> str:
@@ -609,6 +621,84 @@ def create_builtin_registry(
             payload["group_fallback_text"] = _lang(ctx, "Ich kann dir aktuell keine private Nachricht senden. Bitte starte den Bot zuerst privat mit /start.", "I can't send you a private message right now. Please start the bot in private first with /start.")
         return payload
 
+
+    def _profile_to_text(profile: dict[str, object]) -> str:
+        return json.dumps(profile, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+    def _parse_profile_candidate(argument: str | None) -> dict[str, object] | None:
+        if argument is None:
+            return None
+        raw = argument.strip()
+        if not raw:
+            return None
+        if raw.startswith("{"):
+            try:
+                parsed = json.loads(raw)
+            except json.JSONDecodeError:
+                return None
+            return parsed if isinstance(parsed, dict) else None
+
+        candidate: dict[str, object] = {}
+        parts = [part.strip() for part in raw.split(",") if part.strip()]
+        for part in parts:
+            if "=" not in part:
+                continue
+            key, value = part.split("=", 1)
+            k = key.strip()
+            v = value.strip()
+            if not k:
+                continue
+            if v.startswith("["):
+                try:
+                    parsed_list = json.loads(v)
+                except json.JSONDecodeError:
+                    parsed_list = [item.strip() for item in v.split("|") if item.strip()]
+                candidate[k] = parsed_list
+            else:
+                candidate[k] = v
+        return candidate if candidate else None
+
+    async def memory_profile_handler(ctx: CommandContext) -> str:
+        if ctx.chat_type != "private":
+            return t_text("memory_profile.private_only", ctx.locale)
+        if session_factory is None:
+            return t_text("memory_profile.empty", ctx.locale)
+        with session_factory() as session:
+            profile = UserMemoryProfileRepository(session).get_profile(scope_type="private_user", user_id=ctx.user_id).profile
+        if not profile:
+            return t_text("memory_profile.empty", ctx.locale)
+        return t_text("memory_profile.current", ctx.locale, profile=_profile_to_text(profile))
+
+    async def memory_profile_set_handler(ctx: CommandContext) -> str:
+        if ctx.chat_type != "private":
+            return t_text("memory_profile.private_only", ctx.locale)
+        candidate = _parse_profile_candidate(ctx.argument)
+        if candidate is None:
+            return t_text("memory_profile.set.usage", ctx.locale)
+        if session_factory is None:
+            return t_text("memory_profile.set.rejected", ctx.locale, allowed=", ".join(UserMemoryProfileRepository.ALLOWED_PROFILE_FIELDS))
+        with session_factory() as session:
+            profile_repo = UserMemoryProfileRepository(session)
+            service = MemoryC2Service(repository=TopicAgentMemoryRepository(session), profile_repository=profile_repo)
+            result = service.apply_profile_candidate(scope=MemoryScope(scope_type="private_user", user_id=ctx.user_id), candidate=candidate)
+
+        if not result.accepted_keys:
+            return t_text("memory_profile.set.rejected", ctx.locale, allowed=", ".join(UserMemoryProfileRepository.ALLOWED_PROFILE_FIELDS))
+        accepted = ", ".join(result.accepted_keys)
+        if result.rejected_keys:
+            rejected = ", ".join(result.rejected_keys)
+            return t_text("memory_profile.set.partial", ctx.locale, accepted=accepted, rejected=rejected)
+        return t_text("memory_profile.set.updated", ctx.locale, accepted=accepted)
+
+    async def memory_profile_delete_handler(ctx: CommandContext) -> str:
+        if ctx.chat_type != "private":
+            return t_text("memory_profile.private_only", ctx.locale)
+        if session_factory is None:
+            return t_text("memory_profile.delete.done", ctx.locale)
+        with session_factory() as session:
+            UserMemoryProfileRepository(session).replace_profile(scope_type="private_user", user_id=ctx.user_id, profile={})
+        return t_text("memory_profile.delete.done", ctx.locale)
+
     async def help_handler(ctx: CommandContext) -> str:
         allowed = registry.list_allowed(ctx.role)
         if not allowed:
@@ -632,6 +722,9 @@ def create_builtin_registry(
     registry.register(Command(name="accept", description="Accept consent", description_de="Consent akzeptieren", description_en="Accept consent", allowed_roles=normal_plus, handler=accept_handler))
     registry.register(Command(name="decline", description="Decline consent", description_de="Consent ablehnen", description_en="Decline consent", allowed_roles=normal_plus, handler=decline_handler))
     registry.register(Command(name="consent", description="Show consent status", description_de="Consent-Status anzeigen", description_en="Show consent status", allowed_roles=normal_plus, handler=consent_handler))
+    registry.register(Command(name="memory_profile", description="Show your coarse memory profile", description_de="Eigenes grobes Memory-Profil anzeigen", description_en="Show your coarse memory profile", allowed_roles=normal_plus, handler=memory_profile_handler))
+    registry.register(Command(name="memory_profile_set", description="Update profile: /memory_profile_set key=value[, key=value]", description_de="Profil aktualisieren: /memory_profile_set key=value[, key=value]", description_en="Update profile: /memory_profile_set key=value[, key=value]", allowed_roles=normal_plus, handler=memory_profile_set_handler))
+    registry.register(Command(name="memory_profile_delete", description="Delete your memory profile", description_de="Eigenes Memory-Profil löschen", description_en="Delete your memory profile", allowed_roles=normal_plus, handler=memory_profile_delete_handler))
     async def new_handler(ctx: CommandContext) -> str:
         if session_factory is None:
             return _lang(ctx, "Session-Speicher ist nicht konfiguriert.", "Session storage is not configured.")

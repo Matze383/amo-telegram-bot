@@ -492,6 +492,12 @@ Wenn `WEBUI_PUBLIC_MODE=true`, blockiert das HTTP-Request-Gate den Zugriff auf g
 
 ---
 
+### Memory Profile Commands (Block C)
+
+- `/memory_profile` zeigt dein grobes privates Memory-Profil (nur dein eigener `private_user` Scope).
+- `/memory_profile_set key=value[, key=value]` aktualisiert erlaubte grobe Felder (z. B. `language=de,verbosity=high`). Nicht erlaubte Felder werden ignoriert/abgelehnt.
+- `/memory_profile_delete` löscht nur dein eigenes privates Profil.
+
 ### Consent Commands (Block 1)
 
 Der Bot enthält nun ein Consent-Management über Telegram-Commands.

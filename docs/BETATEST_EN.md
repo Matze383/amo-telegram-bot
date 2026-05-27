@@ -492,6 +492,12 @@ When `WEBUI_PUBLIC_MODE=true`, the HTTP Request Gate blocks access to protected 
 
 ---
 
+### Memory Profile Commands (Block C)
+
+- `/memory_profile` shows your coarse private memory profile (only your own `private_user` scope).
+- `/memory_profile_set key=value[, key=value]` updates allowed coarse fields (e.g. `language=en,verbosity=high`). Disallowed fields are ignored/rejected.
+- `/memory_profile_delete` deletes only your own private profile.
+
 ### Consent Commands (Block 1)
 
 The bot now includes user consent management via Telegram commands.

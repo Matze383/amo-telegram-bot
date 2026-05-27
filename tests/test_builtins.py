@@ -69,3 +69,44 @@ def test_test_command_returns_inline_button_markup() -> None:
     assert out.get("reply_markup") == {
         "inline_keyboard": [[{"text": "✅ Test Button", "callback_data": "test:ok"}]]
     }
+
+
+def test_memory_profile_commands_private_scope_update_view_delete() -> None:
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        db_url = f"sqlite:///{tmp}/mem.sqlite3"
+        reg = create_builtin_registry(database_url=db_url)
+        set_cmd = reg.get("memory_profile_set")
+        view_cmd = reg.get("memory_profile")
+        del_cmd = reg.get("memory_profile_delete")
+        assert set_cmd and view_cmd and del_cmd
+
+        out_set = asyncio.run(set_cmd.handler(CommandContext(chat_id=101, user_id=101, role=Role.NORMAL, command_name="memory_profile_set", argument="language=de,verbosity=high,password=secret")))
+        assert "Gespeichert" in out_set or "Stored" in out_set
+
+        out_view = asyncio.run(view_cmd.handler(CommandContext(chat_id=101, user_id=101, role=Role.NORMAL, command_name="memory_profile", argument=None)))
+        assert "language" in out_view
+        assert "verbosity" in out_view
+        assert "password" not in out_view
+
+        out_other = asyncio.run(view_cmd.handler(CommandContext(chat_id=202, user_id=202, role=Role.NORMAL, command_name="memory_profile", argument=None)))
+        assert "Kein Profil" in out_other or "No profile" in out_other
+
+        out_del = asyncio.run(del_cmd.handler(CommandContext(chat_id=101, user_id=101, role=Role.NORMAL, command_name="memory_profile_delete", argument=None)))
+        assert "gelöscht" in out_del or "deleted" in out_del
+
+        out_after = asyncio.run(view_cmd.handler(CommandContext(chat_id=101, user_id=101, role=Role.NORMAL, command_name="memory_profile", argument=None)))
+        assert "Kein Profil" in out_after or "No profile" in out_after
+
+
+def test_memory_profile_set_rejects_when_no_allowed_fields() -> None:
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        db_url = f"sqlite:///{tmp}/mem.sqlite3"
+        reg = create_builtin_registry(database_url=db_url)
+        set_cmd = reg.get("memory_profile_set")
+        assert set_cmd
+        out = asyncio.run(set_cmd.handler(CommandContext(chat_id=1, user_id=1, role=Role.NORMAL, command_name="memory_profile_set", argument="password=abc,token=def")))
+        assert "Keine erlaubten" in out or "No allowed" in out
