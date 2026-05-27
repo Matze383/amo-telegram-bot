@@ -388,8 +388,33 @@ def _subscription_label(sub) -> str:
     return getattr(sub, "channel_key", "")
 
 
-def _post_label(sub, entry: dict) -> str:
-    return _entry_channel_title(entry) or _subscription_label(sub) or getattr(sub, "channel_key", "")
+def _entry_channel_key(entry: dict) -> str:
+    for key in ("channel_key", "channel_id", "yt_channel_id", "author_uri"):
+        value = entry.get(key)
+        if isinstance(value, str) and value.strip():
+            candidate = value.strip()
+            if key == "author_uri":
+                marker = "/channel/"
+                idx = candidate.find(marker)
+                if idx >= 0:
+                    uc = candidate[idx + len(marker):].split("/", 1)[0].split("?", 1)[0].strip()
+                    if uc:
+                        return uc
+                continue
+            return candidate
+    return ""
+
+
+def _post_label(sub, entry: dict) -> tuple[str, str]:
+    subscription_label = _subscription_label(sub) or getattr(sub, "channel_key", "")
+    if subscription_label:
+        return subscription_label, "subscription_label"
+
+    entry_label = _entry_channel_title(entry)
+    if entry_label:
+        return entry_label, "entry_channel_title_fallback"
+
+    return "", "empty_label"
 
 
 def _parse_entry_time(entry: dict):
@@ -552,7 +577,8 @@ async def handle_schedule(context, host_api):
                 entry_key = _entry_key(entry)
                 title = _entry_title(entry)
                 link = _entry_link(entry)
-                text = f"📺 {_post_label(sub, entry)}: {title}"
+                post_label, label_source = _post_label(sub, entry)
+                text = f"📺 {post_label}: {title}"
                 if link:
                     text = f"{text}\n{link}"
                 await _send_topic_message(host_api, chat_id=sub.chat_id, thread_id=sub.thread_id, text=text)

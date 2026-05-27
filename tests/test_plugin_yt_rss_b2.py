@@ -486,7 +486,7 @@ def test_schedule_posts_new_entry_and_advances_cursor_even_when_feed_order_is_ol
     assert cursor.cursor == "v3"
 
 
-def test_schedule_post_header_prefers_entry_channel_title_then_subscription_label(tmp_path, monkeypatch) -> None:
+def test_schedule_post_header_uses_subscription_label_for_unverified_entry_channel_title(tmp_path, monkeypatch) -> None:
     plugin_main = _load_plugin_main()
     repo_module = _load_repo_module()
     repo = repo_module.YtRssStateRepository(tmp_path / "state")
@@ -521,7 +521,7 @@ def test_schedule_post_header_prefers_entry_channel_title_then_subscription_labe
 
     assert len(host.sent) == 1
     _, _, text = host.sent[0]
-    assert text.startswith("📺 Readable Feed Name: three")
+    assert text.startswith("📺 friendly-channel: three")
     assert "UCRAWID999" not in text
 
 
@@ -1039,3 +1039,67 @@ def test_schedule_skips_malformed_legacy_subscription_and_records_error(tmp_path
     raw = state_path.read_text(encoding="utf-8")
     assert "invalid_subscription_record:chat_id" in raw
     assert "bad:key" in raw
+
+
+def test_schedule_post_header_uses_subscription_label_when_entry_channel_title_mismatches_subscription(tmp_path, monkeypatch) -> None:
+    plugin_main = _load_plugin_main()
+    repo_module = _load_repo_module()
+    repo = repo_module.YtRssStateRepository(tmp_path / "state")
+    monkeypatch.setattr(plugin_main, "_repo_for_context", lambda context: repo)
+
+    repo.add_subscription(
+        chat_id=100,
+        thread_id=8,
+        channel_key="UC_KLAUS",
+        source_url="https://youtube.com/@klausgrillt",
+        canonical_channel_url="https://www.youtube.com/channel/UC_KLAUS",
+        rss_url="rss://klaus",
+        added_by_user_id=1,
+    )
+
+    host = _Host()
+    host.feed_map["rss://klaus"] = {
+        "entries": [
+            {
+                "id": "v2",
+                "title": "older",
+                "link": "https://www.youtube.com/watch?v=older",
+                "channel_title": "thebbqbear01",
+                "channel_key": "UC_KLAUS",
+            },
+            {
+                "id": "v1",
+                "title": "oldest",
+                "link": "https://www.youtube.com/watch?v=oldest",
+                "channel_title": "thebbqbear01",
+                "channel_key": "UC_KLAUS",
+            },
+        ]
+    }
+    asyncio.run(plugin_main.handle_schedule(object(), host))
+
+    host.feed_map["rss://klaus"] = {
+        "entries": [
+            {
+                "id": "v3",
+                "title": "CURRYWURSTDÖNER grillen --- Klaus grillt",
+                "link": "https://www.youtube.com/watch?v=ycD9wSWzymY",
+                "channel_title": "thebbqbear01",
+                "channel_key": "UC_KLAUS",
+            },
+            {
+                "id": "v2",
+                "title": "older",
+                "link": "https://www.youtube.com/watch?v=older",
+                "channel_title": "thebbqbear01",
+                "channel_key": "UC_KLAUS",
+            },
+        ]
+    }
+    asyncio.run(plugin_main.handle_schedule(object(), host))
+
+    assert len(host.sent) == 1
+    _, _, text = host.sent[0]
+    assert text.startswith("📺 klausgrillt: CURRYWURSTDÖNER grillen --- Klaus grillt")
+    assert "https://www.youtube.com/watch?v=ycD9wSWzymY" in text
+    assert "thebbqbear01" not in text
