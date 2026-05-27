@@ -1,16 +1,39 @@
 # Userplugin Development Guide / Entwicklungsanleitung für Userplugins
 
+> **Language Policy / Sprachpolitik:**
+> This document is **bilingual (DE/EN)**. Normative sections are provided in both languages.
+> Manifest field names, runtime signatures, and canonical terms remain **identical** across languages.
+> When updating this document, maintain parity between DE and EN sections.
+> See synchronization note at end of document.
+
 > **DE:** Anleitung für Entwickler, die eigene Userplugins für AMO schreiben möchten.
 > **EN:** Guide for developers who want to write custom userplugins for AMO.
 
 **Zielgruppe / Target Audience:**
-- Menschliche Entwickler, die Userplugins erstellen
-- Menschliche developers building userplugins
-- KI-Agenten/Subagenten, die Userplugins aus dieser Anleitung generieren
-- AI agents/subagents generating userplugins from this guide
+- Menschliche Entwickler, die Userplugins erstellen / Human developers building userplugins
+- KI-Agenten/Subagenten, die Userplugins aus dieser Anleitung generieren / AI agents/subagents generating userplugins from this guide
 
 **Version:** 2026.05.23
 **Erforderliche AMO-Version / Required AMO Version:** 2026.05.22 or later
+
+---
+
+## 📋 Quick Reference / Kurzübersicht (Language-Agnostic)
+
+The following are **canonical technical terms** used identically in all language versions:
+
+| Concept | Manifest Field | Runtime Signature | Notes |
+|---------|---------------|-------------------|-------|
+| Plugin name | `name` | `plugin_id` in context | Lowercase, alphanumeric + `_` `-`, 3-50 chars |
+| Version | `version` | — | Any format |
+| Commands | `commands` | `command_name` in context | Array of strings |
+| Schedule | `schedule` | `trigger_type: "schedule"` | `interval_seconds` or `cron` |
+| Worker | `worker` | — | `restart_backoff_seconds` |
+| Required roles | `required_roles` | `role` in context | `ignore`, `normal`, `vip`, `admin`, `owner` |
+| Required permissions | `required_permissions` | Runtime validation | `rss.fetch`, `send_message` |
+| Settings schema | `settings_schema` | — | Types: `text`, `number`, `bool`, `select`, `secret` |
+| Entry point | — | `handle_command()` or `handle_schedule()` | Async function |
+| Host API | — | `host_api` parameter | `send_message()`, `reply()`, `send_photo()`, `send_document()` |
 
 ---
 
@@ -1427,6 +1450,45 @@ SECURITY
 ├── NO filesystem escape
 └── NO public actions without approval
 ```
+
+---
+
+## 🔄 Document Synchronization / Dokumenten-Synchronisation
+
+> **Sync Marker:** `USERPLUGINS-DE-EN-PARITY-2026.05`
+
+### Language Parity Policy / Sprachparitäts-Regel
+
+This document follows the **single bilingual file** pattern:
+- Normative technical content is provided in **both DE and EN** sections
+- **Canonical technical terms** (manifest field names, runtime signatures, API methods) remain **identical** across languages
+- Code examples use English identifiers per Python conventions
+- Section anchors use language suffixes: `-de` and `-en`
+
+### Synchronization Process / Synchronisationsprozess
+
+When updating this document:
+1. **Check both language sections** for equivalent coverage
+2. **Preserve canonical term identity** — never translate field names, API methods, or runtime signatures
+3. **Update the sync marker** in both sections when making significant changes
+4. **Run parity check:** Compare the DE and EN table-of-contents headings manually, or verify that `grep -c '^## .*🇩🇪' docs/USERPLUGINS.md` and `grep -c '^## .*🇬🇧' docs/USERPLUGINS.md` both return 1 (one German block, one English block)
+
+### Canonical Terms Reference (Non-Translated) / Kanonische Begriffe (Nicht übersetzt)
+
+| Category | Terms that stay identical |
+|----------|---------------------------|
+| Manifest fields | `name`, `version`, `commands`, `schedule`, `worker`, `required_roles`, `required_permissions`, `settings_schema` |
+| Runtime context keys | `plugin_id`, `run_id`, `chat_id`, `message_id`, `message_thread_id`, `user_id`, `role`, `command_name`, `argument`, `attachments`, `reply_to_image`, `trigger_type`, `scheduled_at` |
+| API methods | `handle_command`, `handle_schedule`, `send_message`, `reply`, `send_photo`, `send_document` |
+| Permission values | `rss.fetch`, `send_message` |
+| Role values | `ignore`, `normal`, `vip`, `admin`, `owner` |
+| Settings types | `text`, `number`, `bool`, `select`, `secret` |
+
+### Drift Prevention / Abdrift-Verhinderung
+
+- DE and EN sections have **matching structure**: Overview → File Structure → Manifest → Do/Don't → Examples → API → Security → UI → Testing → AI Guidelines → Quick Ref
+- When adding a new subsection, add it to **both** language blocks
+- Use the **Quick Reference** tables at the start of each language section as parity checkpoints
 
 ---
 
