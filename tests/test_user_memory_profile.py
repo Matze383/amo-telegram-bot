@@ -4,14 +4,19 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from amo_bot.db.models import Base
-from amo_bot.db.repositories import UserMemoryProfileRepository
+from amo_bot.ai.memory_c2_service import MemoryC2Service, MemoryScope
+from amo_bot.db.repositories import TopicAgentMemoryRepository, UserMemoryProfileRepository
 
 
-def _repo() -> UserMemoryProfileRepository:
+def _repos() -> tuple[UserMemoryProfileRepository, TopicAgentMemoryRepository]:
     engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
     Base.metadata.create_all(engine)
     session = Session(engine, future=True)
-    return UserMemoryProfileRepository(session)
+    return UserMemoryProfileRepository(session), TopicAgentMemoryRepository(session)
+
+
+def _repo() -> UserMemoryProfileRepository:
+    return _repos()[0]
 
 
 def test_profile_create_read_replace_private_user() -> None:
@@ -91,6 +96,82 @@ def test_profile_scope_isolation_cross_user_and_cross_scope() -> None:
 
     right_scope = repo.get_profile(scope_type="topic", chat_id=-1000, topic_id=77, user_id=404)
     assert right_scope.profile == {"language": "de", "verbosity": "high"}
+
+
+def test_profile_candidate_update_allows_coarse_fields_only() -> None:
+    profile_repo, memory_repo = _repos()
+    service = MemoryC2Service(repository=memory_repo, profile_repository=profile_repo)
+
+    result = service.apply_profile_candidate(
+        scope=MemoryScope(scope_type="private_user", user_id=777),
+        candidate={
+            "language": "de",
+            "verbosity": "medium",
+            "interests": ["python", "ai"],
+            "api_token": "secret",
+            "message_text": "my private transcript",
+        },
+    )
+
+    assert result.applied is True
+    assert result.profile["language"] == "de"
+    assert result.profile["verbosity"] == "medium"
+    assert "api_token" not in result.profile
+    assert "message_text" not in result.profile
+
+
+def test_profile_candidate_update_rejects_private_sensitive_detail_rich() -> None:
+    profile_repo, memory_repo = _repos()
+    service = MemoryC2Service(repository=memory_repo, profile_repository=profile_repo)
+
+    result = service.apply_profile_candidate(
+        scope=MemoryScope(scope_type="private_user", user_id=888),
+        candidate={
+            "language": "alice@example.com",
+            "timezone": "+49 170 1234567",
+            "interests": ["A" * 200],
+            "avoid_topics": ["contact me at bob@example.com"],
+            "notes": "full chat transcript with private details",
+        },
+    )
+
+    assert result.applied is False
+    assert result.profile == {}
+
+
+def test_profile_candidate_update_noop_on_empty_or_rejected() -> None:
+    profile_repo, memory_repo = _repos()
+    service = MemoryC2Service(repository=memory_repo, profile_repository=profile_repo)
+
+    result = service.apply_profile_candidate(
+        scope=MemoryScope(scope_type="private_user", user_id=999),
+        candidate={},
+    )
+    assert result.applied is False
+    assert result.profile == {}
+
+
+def test_profile_candidate_cross_scope_no_private_to_topic_leak() -> None:
+    profile_repo, memory_repo = _repos()
+    service = MemoryC2Service(repository=memory_repo, profile_repository=profile_repo)
+
+    private_result = service.apply_profile_candidate(
+        scope=MemoryScope(scope_type="private_user", user_id=1234),
+        candidate={"language": "de", "interests": ["python"]},
+    )
+    assert private_result.applied is True
+
+    topic_result = service.apply_profile_candidate(
+        scope=MemoryScope(scope_type="topic", chat_id=-100, topic_id=42, user_id=1234),
+        candidate={"message_text": "private details", "api_token": "abc123"},
+    )
+    assert topic_result.applied is False
+    assert topic_result.profile == {}
+
+    private_profile = profile_repo.get_profile(scope_type="private_user", user_id=1234)
+    topic_profile = profile_repo.get_profile(scope_type="topic", chat_id=-100, topic_id=42, user_id=1234)
+    assert private_profile.profile == {"language": "de", "interests": ["python"]}
+    assert topic_profile.profile == {}
 
 
 def test_profile_scope_validation_denies_invalid_scope_shape() -> None:

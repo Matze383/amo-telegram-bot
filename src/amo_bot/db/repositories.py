@@ -1516,6 +1516,49 @@ class UserMemoryProfileRepository:
         self._session.refresh(row)
         return self._to_record(row)
 
+    def update_profile_from_candidate(
+        self,
+        *,
+        scope_type: str,
+        user_id: int,
+        candidate: dict[str, object] | None,
+        chat_id: int | None = None,
+        topic_id: int | None = None,
+    ) -> UserMemoryProfileRecord:
+        normalized_scope, normalized_chat_id, normalized_topic_id, normalized_user_id = self._normalize_scope(
+            scope_type=scope_type,
+            chat_id=chat_id,
+            topic_id=topic_id,
+            user_id=user_id,
+        )
+        if normalized_scope in {"group_chat", "topic"} and normalized_chat_id is None:
+            raise ValueError("chat_id is required for scoped profile update")
+
+        sanitized_candidate = self._sanitize_profile(candidate)
+        if not sanitized_candidate:
+            return self.get_profile(
+                scope_type=normalized_scope,
+                chat_id=normalized_chat_id,
+                topic_id=normalized_topic_id,
+                user_id=normalized_user_id,
+            )
+
+        current = self.get_profile(
+            scope_type=normalized_scope,
+            chat_id=normalized_chat_id,
+            topic_id=normalized_topic_id,
+            user_id=normalized_user_id,
+        )
+        merged = dict(current.profile)
+        merged.update(sanitized_candidate)
+        return self.replace_profile(
+            scope_type=normalized_scope,
+            chat_id=normalized_chat_id,
+            topic_id=normalized_topic_id,
+            user_id=normalized_user_id,
+            profile=merged,
+        )
+
     def get_profile(
         self,
         *,
