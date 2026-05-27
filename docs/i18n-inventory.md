@@ -1,8 +1,8 @@
 # i18n Inventory / Übersicht der Internationalisierung
 
 > **Scope:** RR-03 – i18n Inventory: Bot + Flask UI + Repo Docs
-> **Updated:** 2026-05-22 (after #10/#11/#12/#13/#14 implementation)
-> **Git Issues:** #9 (previous release), #10/#11 (runtime i18n), #12/#13 (language conventions), #14 (this inventory update)
+> **Updated:** 2026-05-27 (after GH-I18N-10, GH-I18N-11, GH-DOCS-12, GH-DOCS-13 completion; inventory refresh for GH-QA-DOCS-14)
+> **Git Issues:** #9 (previous release), #10 (WebUI i18n), #11 (Telegram bot DE/EN), #12 (README/CHANGELOG cleanup), #13 (DE/EN doc counterparts), #14 (this inventory update)
 
 ---
 
@@ -10,12 +10,12 @@
 
 Dieses Dokument listet alle sprachsensitiven Oberflächen des AMO Telegram Bots auf. Es dient als Planungs- und Tracking-Grundlage für die vollständige Zweisprachigkeit (Deutsch + Englisch).
 
-**Status nach #10/#11:**
-- ✅ Telegram Bot Commands: Vollständig bilingualisiert (siehe Abschnitt 1)
-- ✅ Consent-Flow: Vollständig bilingualisiert (Buttons, Prompts, Callbacks)
-- ✅ Dispatcher: Bilinguale Fehlermeldungen und Consent-Block-Nachrichten
-- ✅ Flask WebUI: Vollständig bilingualisiert über i18n-Modul
-- ✅ Dokumentation: Language Conventions etabliert (LANGUAGE_CONVENTIONS.md)
+**Status nach GH-I18N-10 / GH-I18N-11 / GH-DOCS-12 / GH-DOCS-13:**
+- ✅ Telegram Bot Commands: Vollständig bilingualisiert (siehe Abschnitt 1) – Implemented #11
+- ✅ Consent-Flow: Vollständig bilingualisiert (Buttons, Prompts, Callbacks) – Implemented #11
+- ✅ Dispatcher: Bilinguale Fehlermeldungen und Consent-Block-Nachrichten – Implemented #11
+- ✅ Flask WebUI: Vollständig bilingualisiert über i18n-Modul – Implemented #10
+- ✅ Dokumentation: Language Conventions etabliert (LANGUAGE_CONVENTIONS.md) – Implemented #12/#13
 
 **Wichtig:** Nach Abschluss von #10/#11/#12/#13 sind alle user-facing Surfaces bilingual. Verbleibende EN-only Bereiche sind technische Interna (Logging, Code-Kommentare), die absichtlich nicht übersetzt werden.
 
@@ -25,12 +25,12 @@ Dieses Dokument listet alle sprachsensitiven Oberflächen des AMO Telegram Bots 
 
 This document lists all language-sensitive surfaces of the AMO Telegram Bot. It serves as planning and tracking foundation for complete bilingual support (German + English).
 
-**Status after #10/#11:**
-- ✅ Telegram Bot Commands: Fully bilingualized (see Section 1)
-- ✅ Consent Flow: Fully bilingualized (buttons, prompts, callbacks)
-- ✅ Dispatcher: Bilingual error messages and consent block messages
-- ✅ Flask WebUI: Fully bilingualized via i18n module
-- ✅ Documentation: Language Conventions established (LANGUAGE_CONVENTIONS.md)
+**Status after GH-I18N-10 / GH-I18N-11 / GH-DOCS-12 / GH-DOCS-13:**
+- ✅ Telegram Bot Commands: Fully bilingualized (see Section 1) – Implemented #11
+- ✅ Consent Flow: Fully bilingualized (buttons, prompts, callbacks) – Implemented #11
+- ✅ Dispatcher: Bilingual error messages and consent block messages – Implemented #11
+- ✅ Flask WebUI: Fully bilingualized via i18n module – Implemented #10
+- ✅ Documentation: Language Conventions established (LANGUAGE_CONVENTIONS.md) – Implemented #12/#13
 
 **Important:** After completion of #10/#11/#12/#13, all user-facing surfaces are bilingual. Remaining EN-only areas are technical internals (logging, code comments) that are intentionally not translated.
 
@@ -262,7 +262,7 @@ This document lists all language-sensitive surfaces of the AMO Telegram Bot. It 
 | GitHub | SECURITY.md | Root | ✅ | ✅ | Docs | P1 | Bilingual – Completed #9 |
 | GitHub | SUPPORT.md | Root | ✅ | ✅ | Docs | P2 | Bilingual – Completed #9 |
 | GitHub | CODE_OF_CONDUCT.md | Root | ✅ | ✅ | Docs | P2 | Bilingual – Completed #9 |
-| GitHub | ROADMAP.md | Root | ⚠️ | ✅ | Docs | P2 | EN-only roadmap – Can be bilingual in future update |
+| GitHub | ROADMAP.md | Root | ✅ | ✅ | Docs | P2 | Bilingual single file – Updated in GH-DOCS-13 |
 
 ---
 
@@ -282,17 +282,17 @@ This document lists all language-sensitive surfaces of the AMO Telegram Bot. It 
 
 | Bereich / Area | Status | Implementiert in / Implemented in |
 |----------------|--------|-------------------------------------|
-| Telegram Command Descriptions | ✅ Complete | #10/#11 |
-| Telegram Command Responses (User-facing) | ✅ Complete | #10/#11 |
+| Telegram Command Descriptions | ✅ Complete | #11 (GH-I18N-11) |
+| Telegram Command Responses (User-facing) | ✅ Complete | #11 (GH-I18N-11) |
 | Telegram Command Responses (Admin/Technical) | ⚠️ Partial | EN-only for technical errors (acceptable) |
-| Consent Flow (Prompts, Buttons, Callbacks) | ✅ Complete | #10/#11 |
-| Consent Block Messages | ✅ Complete | #10/#11 |
-| Dispatcher Error Messages | ✅ Complete | #10/#11 |
-| Flask WebUI Navigation & Labels | ✅ Complete | #10/#11 |
-| Flask WebUI Forms & Tables | ✅ Complete | #10/#11 |
-| Flask WebUI Language Switching | ✅ Complete | #10/#11 |
-| Documentation Language Conventions | ✅ Complete | #12/#13 |
-| README & Setup Guides | ✅ Complete | Previous releases |
+| Consent Flow (Prompts, Buttons, Callbacks) | ✅ Complete | #11 (GH-I18N-11) |
+| Consent Block Messages | ✅ Complete | #11 (GH-I18N-11) |
+| Dispatcher Error Messages | ✅ Complete | #11 (GH-I18N-11) |
+| Flask WebUI Navigation & Labels | ✅ Complete | #10 (GH-I18N-10) |
+| Flask WebUI Forms & Tables | ✅ Complete | #10 (GH-I18N-10) |
+| Flask WebUI Language Switching | ✅ Complete | #10 (GH-I18N-10) |
+| Documentation Language Conventions | ✅ Complete | #12/#13 (GH-DOCS-12/GH-DOCS-13) |
+| README & Setup Guides | ✅ Complete | #12 (GH-DOCS-12), Previous releases |
 | GitHub Templates | ✅ Complete | #9 |
 
 ### Verbleibende Lücken (Acceptable) / Remaining Gaps (Acceptable)
@@ -304,7 +304,7 @@ This document lists all language-sensitive surfaces of the AMO Telegram Bot. It 
 | 3 | Code Comments | EN only | Standard development practice; not user-facing |
 | 4 | Logging | EN only | Internal diagnostics only; not user-facing |
 | 5 | GitHub Topics | EN only | GitHub platform limitation |
-| 6 | ROADMAP.md | EN only | Can be bilingual in future update; low priority |
+| 6 | ROADMAP.md | Bilingual | ✅ DE/EN inline – Updated in GH-DOCS-13 |
 
 ### Empfohlene Follow-up-Aktionen / Recommended Follow-up Actions
 
@@ -312,11 +312,7 @@ This document lists all language-sensitive surfaces of the AMO Telegram Bot. It 
    - Priority: Low
    - Audience: Admin users (typically EN-proficient)
 
-2. **Optional:** Make ROADMAP.md bilingual
-   - Priority: Low
-   - Effort: Low
-
-3. **Future:** Consider i18n for plugin system
+2. **Future:** Consider i18n for plugin system
    - Priority: Future consideration
    - Depends on plugin architecture evolution
 
@@ -418,7 +414,7 @@ Dieser Abschnitt dokumentiert die Entscheidungen zu bilingualen Dokumenten-Count
 
 ---
 
-*Letzte Aktualisierung / Last updated: 2026-05-27 (GH-DOCS-13 completion)*
+*Letzte Aktualisierung / Last updated: 2026-05-27 (GH-QA-DOCS-14 inventory refresh after GH-I18N-10, GH-I18N-11, GH-DOCS-12, GH-DOCS-13 completion)*
 *Issue: #14 – i18n Inventory Refresh*
-*Related: #9 (GitHub templates), #10/#11 (runtime i18n), #12/#13 (language conventions), GH-DOCS-13 (doc counterparts)*
+*Related: #9 (GitHub templates), #10 (WebUI i18n), #11 (Telegram bot DE/EN), #12 (README/CHANGELOG cleanup), #13 (DE/EN doc counterparts)*
 *Status: ✅ User-facing surfaces fully bilingual; technical internals EN-only by design*
