@@ -1,5 +1,8 @@
 # Context & Memory Architecture (A5)
 
+> **Language / Sprache:** English (EN-only) – Technical architecture specification using Lingua Franca.
+> **Rationale:** Architecture and specification documents are maintained in English only, as per [LANGUAGE_CONVENTIONS.md](LANGUAGE_CONVENTIONS.md) and [i18n-inventory.md](i18n-inventory.md) GH-DOCS-13 decision.
+
 Status: approved architecture/spec (A5 implementation pending; no production code changes in this docs-only review).
 
 ## 1) Context layers

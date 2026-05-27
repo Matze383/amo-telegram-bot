@@ -362,7 +362,63 @@ This document lists all language-sensitive surfaces of the AMO Telegram Bot. It 
 
 ---
 
-*Letzte Aktualisierung / Last updated: 2026-05-22*
+## Anhang: GH-DOCS-13 – DE/EN Counterpart Decision Matrix
+
+Dieser Abschnitt dokumentiert die Entscheidungen zu bilingualen Dokumenten-Counterparts für zukünftige Maintenance.
+
+### Decision Matrix: Core Dokumente
+
+| Dokument | DE-Version | EN-Version | Struktur | Rationale |
+|----------|------------|------------|----------|-----------|
+| README.md | ✅ (inline) | ✅ (inline) | Bilingual Single | Haupt-Entry-Point; bilingual inline mit Sprachwahl |
+| CHANGELOG.md | ✅ (inline) | ✅ (inline) | Bilingual Single | Release-History; Versions-Entries bilingual |
+| CONTRIBUTING.md | ✅ (inline) | ✅ (inline) | Bilingual Single | Contribution-Guidelines für DE+EN Communities |
+| SECURITY.md | ✅ (inline) | ✅ (inline) | Bilingual Single | Sicherheitskontakt-Info; wichtig für beide Sprachgruppen |
+| SETUP_DE.md / SETUP_EN.md | ✅ | ✅ | Separate Files | Umfangreich; separate Sprachversionen erforderlich |
+| BETATEST_DE.md / BETATEST_EN.md | ✅ | ✅ | Separate Files | Umfangreich; parallele Test-Anleitungen |
+| USERPLUGINS.md | ✅ (inline) | ✅ (inline) | Bilingual Single | Plugin-Entwicklung; Zielgruppe bilingual |
+| YT-RSS.md | ✅ (inline) | ✅ (inline) | Bilingual Single | EN-primary (Plugin-Beispiel), DE-Inline-Headers vorhanden |
+| LANGUAGE_CONVENTIONS.md | ✅ (inline) | ✅ (inline) | Bilingual Single | Selbst-dokumentierend bilingual |
+| CONTEXT_MEMORY_ARCHITECTURE.md | ❌ (N/A) | ✅ | EN-Only | Technische Architektur-Spezifikation; Lingua Franca |
+| ROADMAP.md | ✅ (inline) | ✅ (inline) | Bilingual Single | Projekt-Richtung; Community-Update |
+| CODE_OF_CONDUCT.md | ✅ (inline) | ✅ (inline) | Bilingual Single | Verhaltenskodex; rechtlich relevant |
+| SUPPORT.md | ✅ (inline) | ✅ (inline) | Bilingual Single | Support-Info; Nutzer-relevant |
+| i18n-inventory.md | ✅ (inline) | ✅ (inline) | Bilingual Single | Meta-Dokument; bilingual by design |
+
+### Legende: Struktur-Typen
+
+| Typ | Verwendung | Beispiele |
+|-----|------------|-----------|
+| **Bilingual Single** | Eine Datei mit parallelen DE/EN-Abschnitten | README.md, USERPLUGINS.md |
+| **Separate Files** | Vollständige getrennte Dateien pro Sprache | SETUP_DE.md + SETUP_EN.md |
+| **EN-Only** | Technische Dokumente; Lingua Franca | CONTEXT_MEMORY_ARCHITECTURE.md |
+
+### Crosslinks / Sprach-Referenzen
+
+- README.md enthält Sprachwahl-Table mit Links zu SETUP_DE.md / SETUP_EN.md
+- SETUP_DE.md ↔ SETUP_EN.md: Gegenseitige Verlinkung im Header
+- BETATEST_DE.md ↔ BETATEST_EN.md: Gegenseitige Verlinkung im Header
+- Alle bilinguale Dokumente nutzen `## Deutsch 🇩🇪` / `## English 🇬🇧` Header
+
+### Maintenance-Checkliste (bei neuen Dokumenten)
+
+1. [ ] Sprachstruktur entschieden (Bilingual Single / Separate Files / EN-Only)
+2. [ ] Für EN-Only: Rationale dokumentiert (warum keine DE-Version)
+3. [ ] Für Separate Files: Gegenseitige Crosslinks im Header
+4. [ ] Für Bilingual Single: Parallele Abschnitte mit `## Deutsch` / `## English` Header
+5. [ ] In LANGUAGE_CONVENTIONS.md Tabelle aktualisiert
+6. [ ] In i18n-inventory.md Decision Matrix aktualisiert
+
+### Status: GH-DOCS-13
+
+✅ **Complete** – Alle Core-Dokumente klassifiziert und strukturiert.
+- Bilingual Single: 13 Dokumente
+- Separate Files: 2 Dokument-Paare (SETUP, BETATEST)
+- EN-Only: 1 Dokument (CONTEXT_MEMORY_ARCHITECTURE.md)
+
+---
+
+*Letzte Aktualisierung / Last updated: 2026-05-27 (GH-DOCS-13 completion)*
 *Issue: #14 – i18n Inventory Refresh*
-*Related: #9 (GitHub templates), #10/#11 (runtime i18n), #12/#13 (language conventions)*
+*Related: #9 (GitHub templates), #10/#11 (runtime i18n), #12/#13 (language conventions), GH-DOCS-13 (doc counterparts)*
 *Status: ✅ User-facing surfaces fully bilingual; technical internals EN-only by design*

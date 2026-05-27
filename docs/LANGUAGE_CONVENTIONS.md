@@ -211,6 +211,7 @@ status: "pending_translation"  # oder "complete"
 | SETUP_DE/EN.md | Separate Files | ✅ | ✅ | ✅ Complete |
 | BETATEST_DE/EN.md | Separate Files | ✅ | ✅ | ✅ Complete |
 | USERPLUGINS.md | Bilingual Single | ✅ | ✅ | ✅ Complete |
+| YT-RSS.md | Bilingual Single | ✅ | ✅ | ✅ Complete |
 | WEBUI_PLUGIN_DETAIL.md | Bilingual Single | ✅ | ✅ | ✅ Complete |
 | WEBUI_PLUGIN_OVERVIEW.md | Bilingual Single | ✅ | ✅ | ✅ Complete |
 | CONTRIBUTING.md | Bilingual Single | ✅ | ✅ | ✅ Complete |
@@ -218,6 +219,8 @@ status: "pending_translation"  # oder "complete"
 | SECURITY.md | Bilingual Single | ✅ | ✅ | ✅ Complete |
 | CODE_OF_CONDUCT.md | Bilingual Single | ✅ | ✅ | ✅ Complete |
 | SUPPORT.md | Bilingual Single | ✅ | ✅ | ✅ Complete |
+| ROADMAP.md | Bilingual Single | ✅ | ✅ | ✅ Complete |
+| i18n-inventory.md | Bilingual Single | ✅ | ✅ | ✅ Complete |
 | LANGUAGE_CONVENTIONS.md | Bilingual Single | ✅ | ✅ | ✅ Complete |
 
 ---
@@ -225,14 +228,49 @@ status: "pending_translation"  # oder "complete"
 ## 8. Checkliste für neue Dokumente / Checklist for New Documents
 
 - [ ] Sprachstruktur entschieden (Separate/Bilingual/EN-Only)
+- [ ] Für EN-Only: Rationale dokumentiert (warum keine DE-Version)
 - [ ] Dateiname nach Konvention benannt
 - [ ] Header mit bilingualer Kurzbeschreibung
 - [ ] Alle internen Links validiert
 - [ ] Cross-Referenzen zu anderen Docs geprüft
 - [ ] In LANGUAGE_CONVENTIONS.md Tabelle eingetragen
+- [ ] In i18n-inventory.md Decision Matrix aktualisiert
 
 ---
 
-**Letzte Aktualisierung / Last Updated:** 2026-05-22
-**Version:** 1.0.0
+**Letzte Aktualisierung / Last Updated:** 2026-05-27 (GH-DOCS-13 completion)
+**Version:** 1.1.0
 **Git Commit:** [wird nach Commit eingetragen]
+
+---
+
+## Anhang: GH-DOCS-13 – Decision Matrix für DE/EN Counterparts
+
+> **Scope:** Dokumentation der Entscheidungen für bilingual strukturierte Core-Dokumente.
+
+### Decision Matrix
+
+| Dokument | DE-Version | EN-Version | Struktur | Rationale |
+|----------|------------|------------|----------|-----------|
+| README.md | ✅ (inline) | ✅ (inline) | Bilingual Single | Haupt-Entry-Point; Sprachwahl-Table |
+| CHANGELOG.md | ✅ (inline) | ✅ (inline) | Bilingual Single | Release-Entries bilingual |
+| CONTRIBUTING.md | ✅ (inline) | ✅ (inline) | Bilingual Single | Community-Guide für DE+EN |
+| SECURITY.md | ✅ (inline) | ✅ (inline) | Bilingual Single | Sicherheitskontakt; beide Sprachgruppen |
+| SETUP_DE.md / SETUP_EN.md | ✅ | ✅ | Separate Files | Umfangreich; separate Versionen |
+| BETATEST_DE.md / BETATEST_EN.md | ✅ | ✅ | Separate Files | Umfangreich; parallele Anleitungen |
+| USERPLUGINS.md | ✅ (inline) | ✅ (inline) | Bilingual Single | Plugin-Dev-Guide; Zielgruppe bilingual |
+| YT-RSS.md | ✅ (inline) | ✅ (inline) | Bilingual Single | Plugin-Beispiel; parallele Abschnitte |
+| LANGUAGE_CONVENTIONS.md | ✅ (inline) | ✅ (inline) | Bilingual Single | Meta-Dokument; bilingual by design |
+| CONTEXT_MEMORY_ARCHITECTURE.md | ❌ (N/A) | ✅ | EN-Only | Technische Architektur; Lingua Franca |
+| ROADMAP.md | ✅ (inline) | ✅ (inline) | Bilingual Single | Projekt-Richtung; Community-Update |
+| CODE_OF_CONDUCT.md | ✅ (inline) | ✅ (inline) | Bilingual Single | Verhaltenskodex; rechtlich relevant |
+| SUPPORT.md | ✅ (inline) | ✅ (inline) | Bilingual Single | Support-Info; Nutzer-relevant |
+| i18n-inventory.md | ✅ (inline) | ✅ (inline) | Bilingual Single | i18n-Tracking; bilingual by design |
+
+### Zusammenfassung GH-DOCS-13
+
+- **Bilingual Single:** 13 Dokumente
+- **Separate Files:** 2 Dokument-Paare (SETUP, BETATEST)
+- **EN-Only:** 1 Dokument (CONTEXT_MEMORY_ARCHITECTURE.md)
+
+✅ **Status:** Alle Core-Dokumente klassifiziert mit Rationale.

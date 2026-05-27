@@ -1,6 +1,7 @@
-# YT-RSS Plugin — User Guide
+# YT-RSS Plugin — User Guide / Nutzeranleitung
 
-> Topic-scoped YouTube channel RSS subscriptions for AMO Telegram Bot.
+> **Language / Sprache:** Bilingual (EN-primary with DE headers) – Siehe Abschnitte mit 🇩🇪 / See sections marked with 🇩🇪
+> **Scope:** Topic-scoped YouTube channel RSS subscriptions for AMO Telegram Bot.
 
 **Version:** 0.1.0 (example plugin — local use)
 **Example path:** `docs/examples/plugin-yt-rss-b2/`
