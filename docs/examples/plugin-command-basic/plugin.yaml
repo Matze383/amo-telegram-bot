@@ -16,10 +16,3 @@ required_roles:
   - normal
 required_permissions:
   - send_message
-
-settings_schema:
-  greeting_message:
-    type: text
-    required: true
-    default: "Hello from AMO!"
-    description: The message to send when triggered
