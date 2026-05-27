@@ -285,6 +285,22 @@ class TopicLongMemory(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
 
 
+class UserMemoryProfile(Base):
+    __tablename__ = "user_memory_profiles"
+    __table_args__ = (
+        UniqueConstraint("scope_type", "chat_id", "topic_id", "user_id", name="uq_user_memory_profiles_scope"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    scope_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    chat_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    topic_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    user_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    profile_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}", server_default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+
 class TopicAiSession(Base):
     __tablename__ = "topic_ai_sessions"
 

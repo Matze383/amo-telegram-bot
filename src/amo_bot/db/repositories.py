@@ -28,6 +28,7 @@ from amo_bot.db.models import (
     TopicAgentConfig,
     TopicAiSession,
     TopicDailyMemory,
+    UserMemoryProfile,
     TopicLongMemory,
     TopicRecentMessage,
     User,
@@ -1345,6 +1346,207 @@ class TopicRecentMessageRecord:
     telegram_author_is_bot: bool = False
     source: str = "user"
     created_at: datetime | None = None
+
+
+@dataclass(slots=True)
+class UserMemoryProfileRecord:
+    scope_type: str
+    chat_id: int | None
+    topic_id: int | None
+    user_id: int
+    profile: dict[str, object]
+
+
+class UserMemoryProfileRepository:
+    ALLOWED_SCOPE_TYPES: tuple[str, ...] = ("private_user", "topic", "group_chat")
+    ALLOWED_PROFILE_FIELDS: tuple[str, ...] = (
+        "language",
+        "timezone",
+        "communication_style",
+        "tone_preference",
+        "format_preference",
+        "verbosity",
+        "interests",
+        "avoid_topics",
+        "interaction_preferences",
+    )
+    ALLOWED_STRING_VALUES: dict[str, set[str]] = {
+        "communication_style": {"brief", "balanced", "detailed"},
+        "tone_preference": {"neutral", "friendly", "formal", "direct"},
+        "format_preference": {"plain", "bullet_points", "step_by_step"},
+        "verbosity": {"low", "medium", "high"},
+    }
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    @classmethod
+    def _normalize_scope(
+        cls,
+        *,
+        scope_type: str,
+        chat_id: int | None,
+        topic_id: int | None,
+        user_id: int | None,
+    ) -> tuple[str, int | None, int | None, int]:
+        normalized_scope = (scope_type or "").strip().lower()
+        if normalized_scope not in cls.ALLOWED_SCOPE_TYPES:
+            raise ValueError("invalid scope_type")
+        if user_id is None:
+            raise ValueError("user_id is required")
+
+        normalized_chat_id = chat_id
+        normalized_topic_id = topic_id
+
+        if normalized_scope == "private_user":
+            normalized_chat_id = None
+            normalized_topic_id = None
+        elif normalized_scope == "group_chat":
+            if normalized_chat_id is None:
+                raise ValueError("chat_id is required for group_chat")
+            normalized_topic_id = None
+        elif normalized_scope == "topic":
+            if normalized_chat_id is None or normalized_topic_id is None:
+                raise ValueError("chat_id and topic_id are required for topic")
+
+        return normalized_scope, normalized_chat_id, normalized_topic_id, int(user_id)
+
+    @classmethod
+    def _sanitize_profile(cls, profile: dict[str, object] | None) -> dict[str, object]:
+        if not isinstance(profile, dict):
+            return {}
+
+        sanitized: dict[str, object] = {}
+        for key in cls.ALLOWED_PROFILE_FIELDS:
+            if key not in profile:
+                continue
+            value = profile[key]
+
+            if key in {"language", "timezone"}:
+                if isinstance(value, str):
+                    cleaned = value.strip()
+                    if 1 <= len(cleaned) <= 64:
+                        sanitized[key] = cleaned
+                continue
+
+            if key in cls.ALLOWED_STRING_VALUES:
+                if isinstance(value, str):
+                    cleaned = value.strip().lower()
+                    if cleaned in cls.ALLOWED_STRING_VALUES[key]:
+                        sanitized[key] = cleaned
+                continue
+
+            if key in {"interests", "avoid_topics", "interaction_preferences"}:
+                if isinstance(value, list):
+                    items: list[str] = []
+                    for item in value:
+                        if not isinstance(item, str):
+                            continue
+                        cleaned = item.strip()
+                        if not cleaned:
+                            continue
+                        if len(cleaned) > 80:
+                            cleaned = cleaned[:80]
+                        items.append(cleaned)
+                    deduped = list(dict.fromkeys(items))[:10]
+                    if deduped:
+                        sanitized[key] = deduped
+                continue
+
+        return sanitized
+
+    @classmethod
+    def _parse_profile_json(cls, raw_value: str | None) -> dict[str, object]:
+        if not raw_value:
+            return {}
+        try:
+            parsed = json.loads(raw_value)
+        except json.JSONDecodeError:
+            return {}
+        if not isinstance(parsed, dict):
+            return {}
+        return cls._sanitize_profile(parsed)
+
+    @classmethod
+    def _to_record(cls, row: UserMemoryProfile) -> UserMemoryProfileRecord:
+        return UserMemoryProfileRecord(
+            scope_type=row.scope_type,
+            chat_id=row.chat_id,
+            topic_id=row.topic_id,
+            user_id=int(row.user_id),
+            profile=cls._parse_profile_json(row.profile_json),
+        )
+
+    def replace_profile(
+        self,
+        *,
+        scope_type: str,
+        user_id: int,
+        profile: dict[str, object],
+        chat_id: int | None = None,
+        topic_id: int | None = None,
+    ) -> UserMemoryProfileRecord:
+        normalized_scope, normalized_chat_id, normalized_topic_id, normalized_user_id = self._normalize_scope(
+            scope_type=scope_type,
+            chat_id=chat_id,
+            topic_id=topic_id,
+            user_id=user_id,
+        )
+        sanitized_profile = self._sanitize_profile(profile)
+
+        row = self._session.scalar(
+            select(UserMemoryProfile).where(
+                UserMemoryProfile.scope_type == normalized_scope,
+                UserMemoryProfile.chat_id == normalized_chat_id,
+                UserMemoryProfile.topic_id == normalized_topic_id,
+                UserMemoryProfile.user_id == normalized_user_id,
+            )
+        )
+        if row is None:
+            row = UserMemoryProfile(
+                scope_type=normalized_scope,
+                chat_id=normalized_chat_id,
+                topic_id=normalized_topic_id,
+                user_id=normalized_user_id,
+            )
+            self._session.add(row)
+
+        row.profile_json = json.dumps(sanitized_profile, separators=(",", ":"), sort_keys=True)
+        self._session.commit()
+        self._session.refresh(row)
+        return self._to_record(row)
+
+    def get_profile(
+        self,
+        *,
+        scope_type: str,
+        user_id: int,
+        chat_id: int | None = None,
+        topic_id: int | None = None,
+    ) -> UserMemoryProfileRecord:
+        normalized_scope, normalized_chat_id, normalized_topic_id, normalized_user_id = self._normalize_scope(
+            scope_type=scope_type,
+            chat_id=chat_id,
+            topic_id=topic_id,
+            user_id=user_id,
+        )
+        row = self._session.scalar(
+            select(UserMemoryProfile).where(
+                UserMemoryProfile.scope_type == normalized_scope,
+                UserMemoryProfile.chat_id == normalized_chat_id,
+                UserMemoryProfile.topic_id == normalized_topic_id,
+                UserMemoryProfile.user_id == normalized_user_id,
+            )
+        )
+        if row is None:
+            return UserMemoryProfileRecord(
+                scope_type=normalized_scope,
+                chat_id=normalized_chat_id,
+                topic_id=normalized_topic_id,
+                user_id=normalized_user_id,
+                profile={},
+            )
+        return self._to_record(row)
 
 
 class TopicAgentMemoryRepository:
