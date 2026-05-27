@@ -86,9 +86,10 @@ Das Manifest ist **verpflichtend** und muss gültiges YAML oder JSON sein.
 ```yaml
 name: my_plugin
 version: "1.0.0"
-description: Was dieses Plugin tut (max. 200 Zeichen)
 commands:
   - mycommand
+required_roles:
+  - normal
 required_permissions:
   - send_message
 ```
@@ -98,29 +99,43 @@ ODER mit Schedule:
 ```yaml
 name: my_plugin
 version: "1.0.0"
-description: Was dieses Plugin tut (max. 200 Zeichen)
 schedule:
   interval_seconds: 60
+required_roles:
+  - normal
 required_permissions: []
+```
+
+ODER mit Worker:
+
+```yaml
+name: my_plugin
+version: "1.0.0"
+worker:
+  restart_backoff_seconds: 60
+required_roles:
+  - normal
+required_permissions:
+  - send_message
 ```
 
 #### Feld-Referenz
 
 | Feld | Typ | Erforderlich | Beschreibung |
 |------|-----|--------------|--------------|
-| `name` | string | ✅ | Eindeutiger Plugin-Name: Kleinbuchstaben, alphanumerisch + Unterstrich/Bindestrich, 3-50 Zeichen. Pattern: `^[a-z][a-z0-9_-]{2,49}$`. Nicht reserviert: `core`, `system`, `internal`, `builtin` |
+| `name` | string | ✅ | Eindeutiger Plugin-Name: Kleinbuchstaben, alphanumerisch + Unterstrich/Bindestrich, 3-50 Zeichen. Nicht reserviert: `core`, `system`, `internal`, `builtin` |
 | `version` | string | ✅ | Plugin-Versionsstring (beliebiges Format) |
-| `description` | string | ❌ | Kurze Beschreibung |
+| `description` | string | ❌ | Kurze Beschreibung (Standard: leerer String) |
 | `commands` | array | ❌* | Liste von Befehlsnamen (z.B. `["rss", "weather"]`). Erforderlich, wenn kein schedule oder worker |
 | `schedule` | object | ❌* | Schedule-Konfig mit `interval_seconds` (≥10) ODER `cron` (5-Feld Cron-Ausdruck). Erforderlich, wenn keine commands oder worker |
-| `worker` | object | ❌* | Worker-Konfig mit `restart_backoff_seconds`. Erforderlich, wenn keine commands oder schedule |
-| `required_roles` | array | ✅* | Liste erlaubter Rollen. Mindestens eine von `required_roles` ODER `required_permissions` muss definiert sein. |
-| `required_permissions` | array | ✅* | Liste erforderlicher Capability-Berechtigungen. Mindestens eine von `required_roles` ODER `required_permissions` muss definiert sein. |
+| `worker` | object | ❌* | Worker-Konfig mit `restart_backoff_seconds` (Standard: 60). Erforderlich, wenn keine commands oder schedule |
+| `required_roles` | array | ✅* | Liste erlaubter Rollen: `ignore`, `normal`, `vip`, `admin`, `owner`. Mindestens `normal` empfohlen. Bedingt: Mindestens eines von `required_roles` oder `required_permissions` muss definiert sein; wenn nicht vorhanden, standardmäßig `[]`. |
+| `required_permissions` | array | ✅* | Liste erforderlicher Capability-Berechtigungen. Bedingt: Mindestens eines von `required_roles` oder `required_permissions` muss definiert sein; wenn nicht vorhanden, standardmäßig `[]`. |
 | `settings_schema` | object | ❌ | Schema für WebUI-Konfigurationseinstellungen |
 
 *Hinweis: Mindestens eine von `commands`, `schedule`, oder `worker` muss definiert sein.*
 
-*Hinweis: Mindestens eine von `required_roles` oder `required_permissions` muss definiert sein.*
+*Hinweis: Mindestens eines der Felder `required_roles` oder `required_permissions` muss definiert sein. Jedes Feld wird zu einem leeren Array `[]` standardmäßig, wenn es nicht vorhanden ist, aber ein Manifest ohne beide Felder ist ungültig.*
 
 #### Berechtigungsdeklaration
 
@@ -263,9 +278,62 @@ async def handle_command(context: Dict[str, Any], host_api: Any) -> None:
         await host_api.reply(chat_id, message_id, "Unbekannter Befehl")
 ```
 
----
+#### Schedule-Plugin Beispiel
 
-### Host-API-Referenz {#host-api-referenz-de}
+Für Plugins mit `schedule` statt `commands`:
+
+**`plugin.yaml`**
+
+```yaml
+name: daily_report
+version: "1.0.0"
+description: Sendet tägliche Zusammenfassung
+schedule:
+  interval_seconds: 86400
+required_roles:
+  - admin
+required_permissions:
+  - send_message
+```
+
+**`main.py`**
+
+```python
+"""
+Daily Report Plugin für AMO Telegram Bot.
+
+Ein Schedule-Plugin, das regelmäßig ausgeführt wird.
+"""
+
+from typing import Dict, Any
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+async def handle_schedule(context: Dict[str, Any], host_api: Any) -> None:
+    """
+    Haupt-Einstiegspunkt für Schedule-Ausführung.
+
+    Args:
+        context: Schedule-Kontext mit Schlüsseln:
+            - plugin_id: Plugin-Name
+            - run_id: Eindeutige Ausführungs-ID
+            - trigger_type: "schedule"
+            - scheduled_at: ISO-Format Zeitstempel
+        host_api: API-Objekt für Interaktion mit Telegram
+            (Sandbox-Runtime: verwendet ops-Liste für Sendeoperationen)
+
+    Raises:
+        Jede Ausnahme wird von der Runtime abgefangen und geloggt.
+    """
+    logger.info(f"Schedule ausgeführt: {context.get('run_id')}")
+    # In Sandbox-Runtime werden Sendeoperationen über die ops-Liste zurückgegeben
+    # Beispiel: return {"ops": [{"op": "send_message", "chat_id": 123, "text": "Report"}]}
+```
+
+**Hinweis:** Schedule-Plugins laufen in der Sandbox-Runtime. Sendeoperationen werden
+als ops-Liste im Rückgabewert übergeben, nicht direkt via host_api aufgerufen.
 
 #### Host-API-Methoden
 
@@ -724,9 +792,10 @@ The manifest is **mandatory** and must be valid YAML or JSON.
 ```yaml
 name: my_plugin
 version: "1.0.0"
-description: What this plugin does (max 200 chars)
 commands:
   - mycommand
+required_roles:
+  - normal
 required_permissions:
   - send_message
 ```
@@ -736,29 +805,43 @@ OR with schedule:
 ```yaml
 name: my_plugin
 version: "1.0.0"
-description: What this plugin does (max 200 chars)
 schedule:
   interval_seconds: 60
+required_roles:
+  - normal
 required_permissions: []
+```
+
+OR with worker:
+
+```yaml
+name: my_plugin
+version: "1.0.0"
+worker:
+  restart_backoff_seconds: 60
+required_roles:
+  - normal
+required_permissions:
+  - send_message
 ```
 
 #### Field Reference
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `name` | string | ✅ | Unique plugin name: lowercase, alphanumeric + underscore/hyphen, 3-50 chars. Pattern: `^[a-z][a-z0-9_-]{2,49}$`. Cannot be reserved: `core`, `system`, `internal`, `builtin` |
+| `name` | string | ✅ | Unique plugin name: lowercase, alphanumeric + underscore/hyphen, 3-50 chars. Cannot be reserved: `core`, `system`, `internal`, `builtin` |
 | `version` | string | ✅ | Plugin version string (any format) |
-| `description` | string | ❌ | Short description |
+| `description` | string | ❌ | Short description (defaults to empty string) |
 | `commands` | array | ❌* | List of command names (e.g., `["rss", "weather"]`). Required if no schedule or worker |
 | `schedule` | object | ❌* | Schedule config with `interval_seconds` (≥10) OR `cron` (5-field cron expression). Required if no commands or worker |
-| `worker` | object | ❌* | Worker config with `restart_backoff_seconds`. Required if no commands or schedule |
-| `required_roles` | array | ✅* | List of allowed roles. At least one of `required_roles` OR `required_permissions` must be defined. |
-| `required_permissions` | array | ✅* | List of required capability permissions. At least one of `required_roles` OR `required_permissions` must be defined. |
+| `worker` | object | ❌* | Worker config with `restart_backoff_seconds` (default: 60). Required if no commands or schedule |
+| `required_roles` | array | ✅* | List of allowed roles: `ignore`, `normal`, `vip`, `admin`, `owner`. At least `normal` recommended. Conditional: at least one of `required_roles` or `required_permissions` must be defined; if absent, defaults to `[]`. |
+| `required_permissions` | array | ✅* | List of required capability permissions. Conditional: at least one of `required_roles` or `required_permissions` must be defined; if absent, defaults to `[]`. |
 | `settings_schema` | object | ❌ | Schema for WebUI configuration settings |
 
 *Note: At least one of `commands`, `schedule`, or `worker` must be defined.*
 
-*Note: At least one of `required_roles` or `required_permissions` must be defined.*
+*Note: At least one of `required_roles` or `required_permissions` must be defined. Each defaults to an empty array `[]` when absent, but a manifest with neither field is invalid.*
 
 #### Permission Declaration
 
@@ -900,6 +983,63 @@ async def handle_command(context: Dict[str, Any], host_api: Any) -> None:
     else:
         await host_api.reply(chat_id, message_id, "Unknown command")
 ```
+
+#### Schedule Plugin Example
+
+For plugins with `schedule` instead of `commands`:
+
+**`plugin.yaml`**
+
+```yaml
+name: daily_report
+version: "1.0.0"
+description: Sends daily summary
+schedule:
+  interval_seconds: 86400
+required_roles:
+  - admin
+required_permissions:
+  - send_message
+```
+
+**`main.py`**
+
+```python
+"""
+Daily Report Plugin for AMO Telegram Bot.
+
+A schedule plugin that runs periodically.
+"""
+
+from typing import Dict, Any
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+async def handle_schedule(context: Dict[str, Any], host_api: Any) -> None:
+    """
+    Main entry point for schedule execution.
+
+    Args:
+        context: Schedule context with keys:
+            - plugin_id: Plugin name
+            - run_id: Unique execution ID
+            - trigger_type: "schedule"
+            - scheduled_at: ISO format timestamp
+        host_api: API object for interacting with Telegram
+            (Sandbox runtime: uses ops list for send operations)
+
+    Raises:
+        Any exception is caught and logged by the runtime.
+    """
+    logger.info(f"Schedule executed: {context.get('run_id')}")
+    # In Sandbox runtime, send operations are returned as ops list
+    # Example: return {"ops": [{"op": "send_message", "chat_id": 123, "text": "Report"}]}
+```
+
+**Note:** Schedule plugins run in the sandbox runtime. Send operations are
+passed as an ops list in the return value, not called directly via host_api.
 
 ---
 
