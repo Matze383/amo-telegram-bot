@@ -1319,6 +1319,7 @@ class TopicLongMemoryRecord:
     is_active: bool
     source_daily_memory_id: int | None
     promotion_status: str
+    answer_status: str
 
 
 @dataclass(slots=True)
@@ -1347,6 +1348,10 @@ class TopicRecentMessageRecord:
 
 
 class TopicAgentMemoryRepository:
+    ALLOWED_PROMOTION_STATUSES = {"none", "candidate"}
+    ALLOWED_ANSWER_STATUSES = {"legacy", "approved", "rejected", "archived", "deactivated"}
+    ANSWER_EFFECTIVE_STATUS = "approved"
+
     def __init__(self, session: Session) -> None:
         self._session = session
 
@@ -1546,7 +1551,7 @@ class TopicAgentMemoryRepository:
         promotion_status: str = "none",
         auto_commit: bool = True,
     ) -> TopicLongMemoryRecord:
-        if promotion_status not in {"none", "candidate"}:
+        if promotion_status not in self.ALLOWED_PROMOTION_STATUSES:
             raise ValueError("invalid promotion_status")
 
         row = TopicLongMemory(
@@ -1558,6 +1563,7 @@ class TopicAgentMemoryRepository:
             is_active=True,
             source_daily_memory_id=source_daily_memory_id,
             promotion_status=promotion_status,
+            answer_status="legacy",
         )
         self._session.add(row)
         if auto_commit:
@@ -1575,6 +1581,7 @@ class TopicAgentMemoryRepository:
         topic_id: int | None = None,
         user_id: int | None = None,
         active_only: bool = True,
+        answer_effective_only: bool = False,
         limit: int = 100,
     ) -> list[TopicLongMemoryRecord]:
         safe_limit = max(1, min(limit, 1000))
@@ -1586,6 +1593,8 @@ class TopicAgentMemoryRepository:
         )
         if active_only:
             query = query.where(TopicLongMemory.is_active.is_(True))
+        if answer_effective_only:
+            query = query.where(TopicLongMemory.answer_status == self.ANSWER_EFFECTIVE_STATUS)
         rows = self._session.scalars(query.order_by(TopicLongMemory.id.desc()).limit(safe_limit)).all()
         return [self._to_long_record(row) for row in rows]
 
@@ -1600,6 +1609,9 @@ class TopicAgentMemoryRepository:
         if row.promotion_status != "none":
             row.promotion_status = "none"
             changed = True
+        if row.answer_status != "deactivated":
+            row.answer_status = "deactivated"
+            changed = True
         if changed:
             self._session.commit()
         return True
@@ -1610,8 +1622,14 @@ class TopicAgentMemoryRepository:
             return False
         if not row.is_active:
             return False
+        changed = False
         if row.promotion_status != "candidate":
             row.promotion_status = "candidate"
+            changed = True
+        if row.answer_status != "legacy":
+            row.answer_status = "legacy"
+            changed = True
+        if changed:
             self._session.commit()
         return True
 
@@ -1619,10 +1637,47 @@ class TopicAgentMemoryRepository:
         row = self._session.scalar(select(TopicLongMemory).where(TopicLongMemory.id == memory_id))
         if row is None:
             return False
+        changed = False
         if row.promotion_status != "none":
             row.promotion_status = "none"
+            changed = True
+        if row.answer_status != "legacy":
+            row.answer_status = "legacy"
+            changed = True
+        if changed:
             self._session.commit()
         return True
+
+    def set_long_memory_answer_status(self, *, memory_id: int, answer_status: str) -> bool:
+        normalized = (answer_status or "").strip().lower()
+        if normalized not in self.ALLOWED_ANSWER_STATUSES:
+            raise ValueError("invalid answer_status")
+
+        row = self._session.scalar(select(TopicLongMemory).where(TopicLongMemory.id == memory_id))
+        if row is None:
+            return False
+        if not row.is_active and normalized == self.ANSWER_EFFECTIVE_STATUS:
+            raise ValueError("inactive memory cannot be approved")
+
+        changed = False
+        if row.answer_status != normalized:
+            row.answer_status = normalized
+            changed = True
+        if normalized in {"rejected", "archived", "deactivated", "legacy"} and row.promotion_status != "none":
+            row.promotion_status = "none"
+            changed = True
+        if changed:
+            self._session.commit()
+        return True
+
+    def approve_long_memory(self, *, memory_id: int) -> bool:
+        return self.set_long_memory_answer_status(memory_id=memory_id, answer_status="approved")
+
+    def reject_long_memory(self, *, memory_id: int) -> bool:
+        return self.set_long_memory_answer_status(memory_id=memory_id, answer_status="rejected")
+
+    def archive_long_memory(self, *, memory_id: int) -> bool:
+        return self.set_long_memory_answer_status(memory_id=memory_id, answer_status="archived")
 
     def upsert_ai_session(
         self,
@@ -1828,6 +1883,7 @@ class TopicAgentMemoryRepository:
             is_active=row.is_active,
             source_daily_memory_id=row.source_daily_memory_id,
             promotion_status=row.promotion_status,
+            answer_status=getattr(row, "answer_status", "legacy"),
         )
 
     @staticmethod

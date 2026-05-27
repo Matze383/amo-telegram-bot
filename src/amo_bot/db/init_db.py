@@ -168,6 +168,7 @@ def init_db(database_url: str) -> None:
         },
         "topic_long_memories": {
             "promotion_status": "ALTER TABLE topic_long_memories ADD COLUMN promotion_status VARCHAR(16) NOT NULL DEFAULT 'none'",
+            "answer_status": "ALTER TABLE topic_long_memories ADD COLUMN answer_status VARCHAR(16) NOT NULL DEFAULT 'legacy'",
         },
         "topic_recent_messages": {
             "telegram_message_id": "ALTER TABLE topic_recent_messages ADD COLUMN telegram_message_id BIGINT",

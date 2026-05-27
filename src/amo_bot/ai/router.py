@@ -385,6 +385,7 @@ class AIRouter:
                 topic_id=topic_id,
                 user_id=user_id,
                 active_only=True,
+                answer_effective_only=True,
                 limit=100,
             )
             if not records:
