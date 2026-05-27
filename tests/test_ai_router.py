@@ -631,6 +631,7 @@ def test_scope_trigger_matrix_documents_current_behavior_for_recent_context(tmp_
     assert private_scope.context.long_memory_text == "private long synthetic"
     assert private_scope.context.recent_messages_text == ""
 def test_long_memory_answer_effective_gate_excludes_non_approved_states(tmp_path) -> None:
+    """C2-A gate: answer path must only surface approved memories (not candidate/rejected/archived/deactivated)."""
     repo = _mk_repo(tmp_path)
     repo.upsert_config(scope_type="private_user", user_id=1111, ai_enabled=True)
 
@@ -665,6 +666,7 @@ def test_long_memory_answer_effective_gate_excludes_non_approved_states(tmp_path
 
 
 def test_long_memory_scope_isolation_topic_and_private_with_approvals(tmp_path) -> None:
+    """C2-A gate: answer-effective lookup is exact-scope isolated between topic/private and IDs."""
     repo = _mk_repo(tmp_path)
     repo.upsert_config(scope_type="topic", chat_id=-2222, topic_id=1, ai_enabled=True)
     repo.upsert_config(scope_type="topic", chat_id=-2222, topic_id=2, ai_enabled=True)
