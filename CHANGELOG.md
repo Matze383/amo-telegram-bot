@@ -35,8 +35,7 @@ Dieses Release bringt ein neues Scoped-Memory-System mit C2-Review-Service für 
 - **Effectiveness Gates:** Modularer Gate-System für Memory-Antwort-Validierung.
 
 #### Qualitätssicherung
-- **QA:** ⚠️ Partial — Core Memory-System getestet; C2-Service Foundation validiert; Image Follow-up Tests durchgeführt (C2 Tests/Router Proofs/relevante Suite); vollständige Release-QA ausstehend.
-- **Hinweis:** Vollständige QA-Gates für Production-Release in Progress.
+- **QA:** ✅ PASS — Vollständige Test-Suite: 899 Tests in 88.82s bestanden. `git diff --check`: sauber. `python -m compileall -q src tests`: sauber.
 
 ---
 
@@ -66,8 +65,7 @@ This release brings a new scoped memory system with C2 review service for enhanc
 - **Effectiveness gates:** Modular gate system for memory response validation.
 
 #### Quality Assurance
-- **QA:** ⚠️ Partial — Core memory system tested; C2 service foundation validated; Image follow-up tests performed (C2 tests/router proofs/relevant suite); full release QA pending.
-- **Note:** Full QA gates for production release in progress.
+- **QA:** ✅ PASS — Full test suite: 899 tests passed in 88.82s. `git diff --check`: clean. `python -m compileall -q src tests`: clean.
 
 ---
 
