@@ -1306,6 +1306,121 @@ def test_dispatcher_does_not_invoke_auto_image_for_plain_photo_without_addressin
     assert sent == []
 
 
+def test_dispatcher_auto_image_followup_bridge_uses_recent_same_scope_image() -> None:
+    sent: list[tuple[int, str, int | None]] = []
+    calls: list[tuple[int, int | None, int, int, int, str]] = []
+
+    async def fake_send(chat_id: int, text: str, message_thread_id: int | None = None) -> object:
+        sent.append((chat_id, text, message_thread_id))
+        return {"ok": True}
+
+    class _AutoImageExecutor:
+        async def analyze_image_automatically(self, *, actor, invocation):
+            calls.append((invocation.chat_id, invocation.message_thread_id, invocation.message_id, actor.telegram_user_id, len(invocation.attachments), invocation.attachments[0].file_id))
+            return True
+
+    dispatcher = Dispatcher(
+        command_registry=create_builtin_registry(),
+        role_resolver=InMemoryRoleResolver({6812400900: Role.ADMIN}),
+        send_text=fake_send,
+        bot_username="TsubasaOzora_bot",
+        plugin_command_executor=_AutoImageExecutor(),
+        auto_image_followup_ttl_seconds=180,
+    )
+
+    asyncio.run(dispatcher.handle_raw_update({
+        "update_id": 4001,
+        "message": {
+            "message_id": 10910,
+            "from": {"id": 6812400900, "is_bot": False, "first_name": "U"},
+            "chat": {"id": -1002003580909, "type": "supergroup"},
+            "photo": [{"file_id": "img-1", "width": 100, "height": 100}],
+        },
+    }))
+
+    asyncio.run(dispatcher.handle_raw_update({
+        "update_id": 4002,
+        "message": {
+            "message_id": 10913,
+            "from": {"id": 6812400900, "is_bot": False, "first_name": "U"},
+            "chat": {"id": -1002003580909, "type": "supergroup"},
+            "text": "@TsubasaOzora_bot guck das Bild an",
+        },
+    }))
+
+    assert calls == [(-1002003580909, None, 10913, 6812400900, 1, "img-1")]
+    assert sent == []
+
+
+def test_dispatcher_auto_image_followup_bridge_ignores_wrong_scope_or_too_old() -> None:
+    calls: list[tuple[int, int | None, int, int, int]] = []
+
+    async def fake_send(chat_id: int, text: str, message_thread_id: int | None = None) -> object:
+        return {"ok": True}
+
+    class _AutoImageExecutor:
+        async def analyze_image_automatically(self, *, actor, invocation):
+            calls.append((invocation.chat_id, invocation.message_thread_id, invocation.message_id, actor.telegram_user_id, len(invocation.attachments)))
+            return True
+
+    dispatcher = Dispatcher(
+        command_registry=create_builtin_registry(),
+        role_resolver=InMemoryRoleResolver({1001: Role.ADMIN, 1002: Role.ADMIN}),
+        send_text=fake_send,
+        bot_username="TsubasaOzora_bot",
+        plugin_command_executor=_AutoImageExecutor(),
+        auto_image_followup_ttl_seconds=1,
+    )
+
+    asyncio.run(dispatcher.handle_raw_update({
+        "update_id": 4010,
+        "message": {
+            "message_id": 200,
+            "message_thread_id": 872,
+            "from": {"id": 1001, "is_bot": False, "first_name": "A"},
+            "chat": {"id": -10, "type": "supergroup"},
+            "photo": [{"file_id": "seed", "width": 100, "height": 100}],
+        },
+    }))
+
+    asyncio.run(dispatcher.handle_raw_update({
+        "update_id": 4011,
+        "message": {
+            "message_id": 201,
+            "message_thread_id": 872,
+            "from": {"id": 1002, "is_bot": False, "first_name": "B"},
+            "chat": {"id": -10, "type": "supergroup"},
+            "text": "@TsubasaOzora_bot analyze",
+        },
+    }))
+    asyncio.run(dispatcher.handle_raw_update({
+        "update_id": 4012,
+        "message": {
+            "message_id": 202,
+            "message_thread_id": 873,
+            "from": {"id": 1001, "is_bot": False, "first_name": "A"},
+            "chat": {"id": -10, "type": "supergroup"},
+            "text": "@TsubasaOzora_bot analyze",
+        },
+    }))
+
+    import time
+    time.sleep(1.1)
+
+    asyncio.run(dispatcher.handle_raw_update({
+        "update_id": 4013,
+        "message": {
+            "message_id": 203,
+            "message_thread_id": 872,
+            "from": {"id": 1001, "is_bot": False, "first_name": "A"},
+            "chat": {"id": -10, "type": "supergroup"},
+            "text": "@TsubasaOzora_bot analyze",
+        },
+    }))
+
+    assert calls == []
+
+
 def test_consent_block_message_is_localized() -> None:
     assert Dispatcher._consent_block_message(chat_type="group", blocked_as_unreachable=False, locale="de") == "Bitte kläre Consent privat mit dem Bot."
     assert Dispatcher._consent_block_message(chat_type="group", blocked_as_unreachable=False, locale="en") == "Please resolve consent privately with the bot."

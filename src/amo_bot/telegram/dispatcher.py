@@ -3,7 +3,8 @@ from __future__ import annotations
 import json
 import logging
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
 from typing import Any, Awaitable, Callable, Protocol
 
 from amo_bot.ai.router import AIRouter, AIRouterReasonCode
@@ -49,6 +50,16 @@ class MessagePersistence(Protocol):
 
 
 @dataclass(slots=True)
+class _RecentAutoImageCandidate:
+    chat_id: int
+    message_thread_id: int | None
+    user_id: int
+    message_id: int
+    attachments: tuple[Any, ...]
+    observed_at: datetime
+
+
+@dataclass(slots=True)
 class Dispatcher:
     command_registry: CommandRegistry
     role_resolver: RoleResolver
@@ -63,6 +74,8 @@ class Dispatcher:
     owner_notifier: OwnerNotifier | None = None
     ai_service: Any | None = None
     live_edit_adapter: TelegramLiveEditAdapter | None = None
+    auto_image_followup_ttl_seconds: int = 180
+    _recent_auto_image_candidates: list[_RecentAutoImageCandidate] = field(default_factory=list)
 
     async def handle_raw_update(self, raw_update: object) -> None:
         update = parse_update(raw_update)
@@ -132,7 +145,19 @@ class Dispatcher:
 
         if command is None:
             is_addressed_for_auto_image = self._is_addressed_for_auto_image(message=message, bot_username=self.bot_username)
-            if not message.attachments:
+            followup_candidate = self._resolve_auto_image_followup_candidate(message=message)
+            followup_source = "none"
+            followup_candidate_age_seconds: int | None = None
+            effective_attachments = message.attachments
+            if followup_candidate is not None:
+                followup_source = "recent_same_scope"
+                followup_candidate_age_seconds = max(
+                    0,
+                    int((datetime.now(UTC) - followup_candidate.observed_at).total_seconds()),
+                )
+                effective_attachments = followup_candidate.attachments
+
+            if not message.attachments and followup_candidate is None:
                 logger.info(
                     "auto_image decision=skipped_no_attachments update_id=%s chat_id=%s message_thread_id=%s message_id=%s user_id=%s role=%s",
                     update.update_id,
@@ -202,9 +227,21 @@ class Dispatcher:
                         chat_id=message.chat.id,
                         message_id=message.message_id,
                         message_thread_id=message.message_thread_id,
-                        attachments=message.attachments,
+                        attachments=effective_attachments,
                     ),
                 )
+                if followup_candidate is not None:
+                    logger.info(
+                        "auto_image followup_bridge decision=resolved source=%s chat_id=%s message_thread_id=%s message_id=%s user_id=%s image_message_id=%s age_seconds=%s attachment_count=%s",
+                        followup_source,
+                        message.chat.id,
+                        message.message_thread_id,
+                        message.message_id,
+                        message.from_user.id,
+                        followup_candidate.message_id,
+                        followup_candidate_age_seconds,
+                        len(effective_attachments),
+                    )
                 logger.info(
                     "auto_image decision=%s update_id=%s chat_id=%s message_thread_id=%s message_id=%s user_id=%s role=%s handled=%s",
                     "handled" if handled_image else "not_handled",
@@ -218,6 +255,9 @@ class Dispatcher:
                 )
                 if handled_image:
                     return
+
+            if message.attachments:
+                self._remember_auto_image_candidate(message=message)
 
             await self._maybe_handle_ai_autoreply(
                 message=message,
@@ -961,6 +1001,70 @@ class Dispatcher:
                     },
                 )
                 session.commit()
+
+    def _auto_image_followup_cache(self) -> list[_RecentAutoImageCandidate]:
+        return self._recent_auto_image_candidates
+
+    def _remember_auto_image_candidate(self, *, message: TelegramMessage) -> None:
+        now = datetime.now(UTC)
+        cache = self._auto_image_followup_cache()
+        max_age = timedelta(seconds=max(self.auto_image_followup_ttl_seconds, 1))
+        pruned = [
+            item
+            for item in cache
+            if now - item.observed_at <= max_age
+        ]
+        pruned.append(
+            _RecentAutoImageCandidate(
+                chat_id=message.chat.id,
+                message_thread_id=message.message_thread_id,
+                user_id=message.from_user.id,
+                message_id=message.message_id,
+                attachments=message.attachments,
+                observed_at=now,
+            )
+        )
+        pruned.sort(key=lambda item: item.observed_at, reverse=True)
+        setattr(self, "_recent_auto_image_candidates", pruned[:128])
+
+    def _resolve_auto_image_followup_candidate(self, *, message: TelegramMessage) -> _RecentAutoImageCandidate | None:
+        if message.attachments:
+            return None
+        if not self._is_addressed_for_auto_image(message=message, bot_username=self.bot_username):
+            return None
+
+        now = datetime.now(UTC)
+        max_age = timedelta(seconds=max(self.auto_image_followup_ttl_seconds, 1))
+        cache = self._auto_image_followup_cache()
+
+        filtered: list[_RecentAutoImageCandidate] = []
+        matched: _RecentAutoImageCandidate | None = None
+        for candidate in cache:
+            age = now - candidate.observed_at
+            if age > max_age:
+                continue
+            filtered.append(candidate)
+            if matched is not None:
+                continue
+            if candidate.chat_id != message.chat.id:
+                continue
+            if candidate.message_thread_id != message.message_thread_id:
+                continue
+            if candidate.user_id != message.from_user.id:
+                continue
+            matched = candidate
+
+        setattr(self, "_recent_auto_image_candidates", filtered[:128])
+
+        if matched is None:
+            logger.info(
+                "auto_image followup_bridge decision=not_found source=recent_same_scope chat_id=%s message_thread_id=%s message_id=%s user_id=%s",
+                message.chat.id,
+                message.message_thread_id,
+                message.message_id,
+                message.from_user.id,
+            )
+        return matched
 
     async def _send_text(self, chat_id: int, text: str, message_thread_id: int | None) -> None:
         if message_thread_id is None:
