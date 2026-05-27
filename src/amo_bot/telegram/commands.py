@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, timedelta, timezone
 import json
 import logging
 from typing import Awaitable, Callable, Literal
@@ -14,7 +14,7 @@ from amo_bot.db.base import create_session_factory
 from amo_bot.db.models import GROUP_CHAT_TYPES, AuditEvent, TelegramChat, User
 from amo_bot.consent import CONSENT_ACCEPTED, CONSENT_DECLINED, CONSENT_PENDING, CONSENT_UNREACHABLE, ConsentService
 from amo_bot.consent.prompt_service import ConsentPromptService
-from amo_bot.db.repositories import ChatScopedRoleRepository, UserRoleRepository
+from amo_bot.db.repositories import ChatScopedRoleRepository, TopicAgentMemoryRepository, UserRoleRepository
 from amo_bot.telegram.owner_notify import OwnerNotifier
 from amo_bot.webui.access_window import WebuiAccessWindowService
 
@@ -47,6 +47,65 @@ class Command:
 
 
 logger = logging.getLogger(__name__)
+
+AI_SESSION_IDLE_TIMEOUT = timedelta(hours=8)
+
+
+def _ai_scope_from_ctx(ctx: CommandContext) -> tuple[str, int | None, int | None, int | None]:
+    if ctx.chat_type == "private":
+        return ("private_user", None, None, ctx.user_id)
+    return ("group_chat", ctx.chat_id, None, None)
+
+
+def _ai_scope_key(scope_type: str, chat_id: int | None, topic_id: int | None, user_id: int | None) -> str:
+    return f"{scope_type}:{chat_id}:{topic_id}:{user_id}"
+
+
+def _load_or_create_scoped_ai_session(*, repo: TopicAgentMemoryRepository, scope_type: str, chat_id: int | None, topic_id: int | None, user_id: int | None, now: datetime) -> tuple[dict[str, object], str]:
+    current_day = now.astimezone(timezone.utc).date().isoformat()
+    row = repo.get_ai_session(scope_type=scope_type, chat_id=chat_id, topic_id=topic_id, user_id=user_id)
+    if row is None:
+        payload = {"session_id": f"{now.timestamp():.6f}", "created_at": now.isoformat(), "last_activity_at": now.isoformat(), "last_activity_day": current_day}
+        repo.upsert_ai_session(scope_type=scope_type, chat_id=chat_id, topic_id=topic_id, user_id=user_id, session_payload=payload, last_message_at=now)
+        return payload, "create"
+
+    payload = dict(row.session_payload or {})
+    last_activity = payload.get("last_activity_at")
+    last_day = payload.get("last_activity_day")
+    reason = "reuse"
+    reset_reason = None
+
+    last_dt = None
+    if isinstance(last_activity, str):
+        try:
+            last_dt = datetime.fromisoformat(last_activity.replace("Z", "+00:00"))
+        except ValueError:
+            last_dt = None
+
+    if last_dt is not None and last_dt.tzinfo is None:
+        last_dt = last_dt.replace(tzinfo=timezone.utc)
+
+    if last_dt is not None and (now - last_dt) > AI_SESSION_IDLE_TIMEOUT:
+        reason = "reset"
+        reset_reason = "idle_timeout"
+    elif isinstance(last_day, str) and last_day != current_day:
+        reason = "reset"
+        reset_reason = "day_rollover"
+
+    if reason == "reset":
+        payload = {"session_id": f"{now.timestamp():.6f}", "created_at": now.isoformat(), "last_activity_at": now.isoformat(), "last_activity_day": current_day, "reset_reason": reset_reason}
+    else:
+        payload["last_activity_at"] = now.isoformat()
+        payload["last_activity_day"] = current_day
+
+    repo.upsert_ai_session(scope_type=scope_type, chat_id=chat_id, topic_id=topic_id, user_id=user_id, session_payload=payload, last_message_at=now)
+    return payload, reason
+
+
+def _reset_scoped_ai_session(*, repo: TopicAgentMemoryRepository, scope_type: str, chat_id: int | None, topic_id: int | None, user_id: int | None, now: datetime) -> None:
+    payload = {"session_id": f"{now.timestamp():.6f}", "created_at": now.isoformat(), "last_activity_at": now.isoformat(), "last_activity_day": now.astimezone(timezone.utc).date().isoformat(), "reset_reason": "explicit_reset"}
+    repo.upsert_ai_session(scope_type=scope_type, chat_id=chat_id, topic_id=topic_id, user_id=user_id, session_payload=payload, last_message_at=now)
+
 
 
 Locale = Literal["de", "en"]
@@ -391,6 +450,26 @@ def create_builtin_registry(
         if ai_service is None:
             return _lang(ctx, "AI-Service ist nicht konfiguriert.", "AI service is not configured")
 
+        now = datetime.now(timezone.utc)
+        scope_type, scope_chat_id, scope_topic_id, scope_user_id = _ai_scope_from_ctx(ctx)
+        if session_factory is not None:
+            with session_factory() as session:
+                repo = TopicAgentMemoryRepository(session)
+                _payload, lifecycle = _load_or_create_scoped_ai_session(
+                    repo=repo,
+                    scope_type=scope_type,
+                    chat_id=scope_chat_id,
+                    topic_id=scope_topic_id,
+                    user_id=scope_user_id,
+                    now=now,
+                )
+            logger.info(
+                "ai_session_lifecycle event=resolve resolver_path=ask scope_type=%s scope_key=%s action=%s",
+                scope_type,
+                _ai_scope_key(scope_type, scope_chat_id, scope_topic_id, scope_user_id),
+                lifecycle,
+            )
+
         try:
             return await ai_service.ask(ctx.argument)
         except OllamaError:
@@ -553,7 +632,45 @@ def create_builtin_registry(
     registry.register(Command(name="accept", description="Accept consent", description_de="Consent akzeptieren", description_en="Accept consent", allowed_roles=normal_plus, handler=accept_handler))
     registry.register(Command(name="decline", description="Decline consent", description_de="Consent ablehnen", description_en="Decline consent", allowed_roles=normal_plus, handler=decline_handler))
     registry.register(Command(name="consent", description="Show consent status", description_de="Consent-Status anzeigen", description_en="Show consent status", allowed_roles=normal_plus, handler=consent_handler))
+    async def new_handler(ctx: CommandContext) -> str:
+        if session_factory is None:
+            return _lang(ctx, "Session-Speicher ist nicht konfiguriert.", "Session storage is not configured.")
+        now = datetime.now(timezone.utc)
+        scope_type, scope_chat_id, scope_topic_id, scope_user_id = _ai_scope_from_ctx(ctx)
+        with session_factory() as session:
+            repo = TopicAgentMemoryRepository(session)
+            _reset_scoped_ai_session(
+                repo=repo,
+                scope_type=scope_type,
+                chat_id=scope_chat_id,
+                topic_id=scope_topic_id,
+                user_id=scope_user_id,
+                now=now,
+            )
+        logger.info("ai_session_lifecycle event=reset resolver_path=command scope_type=%s scope_key=%s action=explicit_new", scope_type, _ai_scope_key(scope_type, scope_chat_id, scope_topic_id, scope_user_id))
+        return _lang(ctx, "Neue KI-Session gestartet.", "Started a new AI session.")
+
+    async def reset_handler(ctx: CommandContext) -> str:
+        if session_factory is None:
+            return _lang(ctx, "Session-Speicher ist nicht konfiguriert.", "Session storage is not configured.")
+        now = datetime.now(timezone.utc)
+        scope_type, scope_chat_id, scope_topic_id, scope_user_id = _ai_scope_from_ctx(ctx)
+        with session_factory() as session:
+            repo = TopicAgentMemoryRepository(session)
+            _reset_scoped_ai_session(
+                repo=repo,
+                scope_type=scope_type,
+                chat_id=scope_chat_id,
+                topic_id=scope_topic_id,
+                user_id=scope_user_id,
+                now=now,
+            )
+        logger.info("ai_session_lifecycle event=reset resolver_path=command scope_type=%s scope_key=%s action=explicit_reset", scope_type, _ai_scope_key(scope_type, scope_chat_id, scope_topic_id, scope_user_id))
+        return _lang(ctx, "KI-Session zurückgesetzt.", "AI session reset.")
+
     registry.register(Command(name="ask", description="Ask Ollama: /ask <question>", description_de="Ollama fragen: /ask <frage>", description_en="Ask Ollama: /ask <question>", allowed_roles=ask_roles, handler=ask_handler))
+    registry.register(Command(name="new", description="Start a new AI session", allowed_roles=ask_roles, handler=new_handler))
+    registry.register(Command(name="reset", description="Reset current AI session", allowed_roles=ask_roles, handler=reset_handler))
     registry.register(
         Command(
             name="setrole",

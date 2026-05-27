@@ -3,6 +3,9 @@ import asyncio
 from amo_bot.ai.ollama import OllamaError
 from amo_bot.ai.service import AIService
 from amo_bot.auth.roles import Role
+from amo_bot.db.base import create_session_factory
+from amo_bot.db.init_db import init_db
+from amo_bot.db.repositories import TopicAgentMemoryRepository
 from amo_bot.telegram.commands import CommandContext, create_builtin_registry
 
 
@@ -162,3 +165,133 @@ def test_ask_error_and_usage_messages_are_localized() -> None:
         ask_cmd_fail.handler(CommandContext(chat_id=1, user_id=1, role=Role.ADMIN, command_name="ask", argument="Hi?", locale="en"))
     )
     assert out_error_en == "Sorry, I cannot answer right now. Please try again later."
+
+
+def test_ask_scope_is_private_user_isolated_per_sender(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'ask_private_scope.db'}"
+    init_db(db_url)
+    reg = create_builtin_registry(database_url=db_url, ai_service=FakeAIService(answer="ok"))
+    ask_cmd = reg.get("ask")
+    assert ask_cmd is not None
+
+    asyncio.run(ask_cmd.handler(CommandContext(chat_id=101, user_id=101, role=Role.VIP, command_name="ask", argument="one")))
+    asyncio.run(ask_cmd.handler(CommandContext(chat_id=202, user_id=202, role=Role.VIP, command_name="ask", argument="two")))
+
+    sf = create_session_factory(db_url)
+    with sf() as session:
+        repo = TopicAgentMemoryRepository(session)
+        s1 = repo.get_ai_session(scope_type="private_user", user_id=101)
+        s2 = repo.get_ai_session(scope_type="private_user", user_id=202)
+        assert s1 is not None
+        assert s2 is not None
+        assert s1.user_id == 101
+        assert s2.user_id == 202
+        assert s1.session_payload["session_id"] != s2.session_payload["session_id"]
+
+
+def test_ask_scope_is_group_chat_shared_per_chat(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'ask_group_scope.db'}"
+    init_db(db_url)
+    reg = create_builtin_registry(database_url=db_url, ai_service=FakeAIService(answer="ok"))
+    ask_cmd = reg.get("ask")
+    assert ask_cmd is not None
+
+    asyncio.run(ask_cmd.handler(CommandContext(chat_id=-7001, user_id=11, role=Role.VIP, command_name="ask", argument="one")))
+    asyncio.run(ask_cmd.handler(CommandContext(chat_id=-7001, user_id=22, role=Role.VIP, command_name="ask", argument="two")))
+
+    sf = create_session_factory(db_url)
+    with sf() as session:
+        repo = TopicAgentMemoryRepository(session)
+        s = repo.get_ai_session(scope_type="group_chat", chat_id=-7001)
+        assert s is not None
+        assert s.chat_id == -7001
+        assert s.user_id is None
+
+
+def test_new_and_reset_rotate_current_scope_session(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'ask_new_reset.db'}"
+    init_db(db_url)
+    reg = create_builtin_registry(database_url=db_url, ai_service=FakeAIService(answer="ok"))
+    ask_cmd = reg.get("ask")
+    new_cmd = reg.get("new")
+    reset_cmd = reg.get("reset")
+    assert ask_cmd is not None and new_cmd is not None and reset_cmd is not None
+
+    ctx = CommandContext(chat_id=333, user_id=333, role=Role.VIP, command_name="ask", argument="seed")
+    asyncio.run(ask_cmd.handler(ctx))
+
+    sf = create_session_factory(db_url)
+    with sf() as session:
+        repo = TopicAgentMemoryRepository(session)
+        before = repo.get_ai_session(scope_type="private_user", user_id=333)
+        assert before is not None
+        before_id = str(before.session_payload["session_id"])
+
+    out_new = asyncio.run(new_cmd.handler(CommandContext(chat_id=333, user_id=333, role=Role.VIP, command_name="new", argument=None, locale="en")))
+    assert out_new == "Started a new AI session."
+
+    with sf() as session:
+        repo = TopicAgentMemoryRepository(session)
+        after_new = repo.get_ai_session(scope_type="private_user", user_id=333)
+        assert after_new is not None
+        assert str(after_new.session_payload["session_id"]) != before_id
+        assert after_new.session_payload["reset_reason"] == "explicit_reset"
+        new_id = str(after_new.session_payload["session_id"])
+
+    out_reset = asyncio.run(reset_cmd.handler(CommandContext(chat_id=333, user_id=333, role=Role.VIP, command_name="reset", argument=None, locale="en")))
+    assert out_reset == "AI session reset."
+
+    with sf() as session:
+        repo = TopicAgentMemoryRepository(session)
+        after_reset = repo.get_ai_session(scope_type="private_user", user_id=333)
+        assert after_reset is not None
+        assert str(after_reset.session_payload["session_id"]) != new_id
+        assert after_reset.session_payload["reset_reason"] == "explicit_reset"
+
+
+def test_ask_idle_timeout_resets_and_day_rollover_resets(tmp_path, monkeypatch) -> None:
+    db_url = f"sqlite:///{tmp_path / 'ask_lifecycle_rollover.db'}"
+    init_db(db_url)
+    reg = create_builtin_registry(database_url=db_url, ai_service=FakeAIService(answer="ok"))
+    ask_cmd = reg.get("ask")
+    assert ask_cmd is not None
+
+    ctx = CommandContext(chat_id=444, user_id=444, role=Role.VIP, command_name="ask", argument="first")
+    asyncio.run(ask_cmd.handler(ctx))
+
+    sf = create_session_factory(db_url)
+    with sf() as session:
+        repo = TopicAgentMemoryRepository(session)
+        row = repo.get_ai_session(scope_type="private_user", user_id=444)
+        assert row is not None
+        seed_id = str(row.session_payload["session_id"])
+        created_at = row.session_payload["created_at"]
+
+        stale = dict(row.session_payload)
+        stale["last_activity_at"] = "2000-01-01T00:00:00+00:00"
+        stale["last_activity_day"] = "2000-01-01"
+        repo.upsert_ai_session(scope_type="private_user", user_id=444, session_payload=stale)
+
+    asyncio.run(ask_cmd.handler(CommandContext(chat_id=444, user_id=444, role=Role.VIP, command_name="ask", argument="second")))
+
+    with sf() as session:
+        repo = TopicAgentMemoryRepository(session)
+        idle_reset = repo.get_ai_session(scope_type="private_user", user_id=444)
+        assert idle_reset is not None
+        assert str(idle_reset.session_payload["session_id"]) != seed_id
+        assert idle_reset.session_payload["reset_reason"] == "idle_timeout"
+
+        rollover = dict(idle_reset.session_payload)
+        rollover["created_at"] = created_at
+        rollover["last_activity_at"] = idle_reset.session_payload["last_activity_at"]
+        rollover["last_activity_day"] = "2001-02-03"
+        repo.upsert_ai_session(scope_type="private_user", user_id=444, session_payload=rollover)
+
+    asyncio.run(ask_cmd.handler(CommandContext(chat_id=444, user_id=444, role=Role.VIP, command_name="ask", argument="third")))
+
+    with sf() as session:
+        repo = TopicAgentMemoryRepository(session)
+        day_reset = repo.get_ai_session(scope_type="private_user", user_id=444)
+        assert day_reset is not None
+        assert day_reset.session_payload["reset_reason"] == "day_rollover"
+        assert day_reset.session_payload["created_at"] != created_at

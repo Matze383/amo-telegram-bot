@@ -301,14 +301,31 @@ curl http://127.0.0.1:11434/api/tags
 - Ensure `OPENAI_API_KEY` is set in `.env`
 - Ensure `AI_PROVIDER=openai` is set in `.env`
 
-**Test:**
+**Scoped AI Sessions:**
+- **Private chats:** Each user has an isolated session (not shared)
+- **Groups:** All users in a group share the same session
+- **Session lifecycle:** Sessions are automatically reset after 8 hours of inactivity or on day rollover
+- **Manual reset:** Users can use `/new` or `/reset` at any time to start a fresh session
+
+**Test – Basic functionality:**
 - Send: `/ask What is Python?`
 - Expected: A short response from the AI model
 
+**Test – Session isolation in private chats:**
+- User A sends: `/ask Remember: My name is Alice`
+- User B sends: `/ask What is my name?` (in their own private chat)
+- Expected: User B receives no response related to Alice
+
+**Test – Session reset:**
+- Send: `/ask Remember: My favorite animal is a dog`
+- Send: `/new` or `/reset`
+- Send: `/ask What is my favorite animal?`
+- Expected: Model doesn't know the previous information anymore (new session)
+
 **MVP Limitations:**
-- Stateless (no chat history)
 - Timeout after 20 seconds (Ollama) or 30 seconds (OpenAI)
 - Maximum response length: 1500 characters
+- Sessions are automatically reset after 8h inactivity or day rollover
 
 ---
 
@@ -990,6 +1007,7 @@ Use this checklist for your test:
 - [ ] Role test /setrole vip: OK
 - [ ] Role test restriction admin/owner: OK
 - [ ] /ask test (optional): OK / Not tested
+- [ ] /new and /reset session management (optional): OK / Not tested
 - [ ] AI auto-reply via mention in active scope (optional): OK / Not tested
 - [ ] AI auto-reply via reply in active scope (optional): OK / Not tested
 - [ ] WebUI login: OK

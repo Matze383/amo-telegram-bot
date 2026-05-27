@@ -301,14 +301,31 @@ curl http://127.0.0.1:11434/api/tags
 - Stelle sicher, dass `OPENAI_API_KEY` in `.env` gesetzt ist
 - Stelle sicher, dass `AI_PROVIDER=openai` in `.env` gesetzt ist
 
-**Test:**
+**Gescopte AI-Sessions:**
+- **Private Chats:** Jeder Nutzer hat eine isolierte Session (nicht geteilt)
+- **Gruppen:** Alle Nutzer in einer Gruppe teilen sich die Session
+- **Session-Lebenszyklus:** Sessions werden automatisch zurückgesetzt nach 8 Stunden Inaktivität oder beim Tageswechsel
+- **Manuelles Reset:** Nutzer können jederzeit `/new` oder `/reset` verwenden, um eine neue Session zu starten
+
+**Test – Grundfunktion:**
 - Sende: `/ask Was ist Python?`
 - Erwartet: Eine kurze Antwort vom KI-Modell
 
+**Test – Session-Isolation in privaten Chats:**
+- Nutzer A sendet: `/ask Erinnere dich: Mein Name ist Alice`
+- Nutzer B sendet: `/ask Wie heiße ich?` (im eigenen privaten Chat)
+- Erwartet: Nutzer B erhält keine Antwort bezogen auf Alice
+
+**Test – Session-Reset:**
+- Sende: `/ask Erinnere dich: Mein Lieblingstier ist ein Hund`
+- Sende: `/new` oder `/reset`
+- Sende: `/ask Was ist mein Lieblingstier?`
+- Erwartet: Modell kennt die vorherige Information nicht mehr (neue Session)
+
 **Einschränkungen im MVP:**
-- Stateless (kein Chat-Verlauf)
 - Timeout nach 20 Sekunden (Ollama) oder 30 Sekunden (OpenAI)
 - Maximale Antwortlänge: 1500 Zeichen
+- Sessions werden nach 8h Inaktivität oder Tageswechsel automatisch zurückgesetzt
 
 ---
 
@@ -990,6 +1007,7 @@ Nutze diese Checkliste für deinen Test:
 - [ ] Rollen-Test /setrole vip: OK
 - [ ] Rollen-Test Einschränkung Admin/Owner: OK
 - [ ] /ask-Test (optional): OK / Nicht getestet
+- [ ] /new und /reset Session-Management (optional): OK / Nicht getestet
 - [ ] KI-Auto-Antwort via Erwähnung in aktivem Scope (optional): OK / Nicht getestet
 - [ ] KI-Auto-Antwort via Antwort in aktivem Scope (optional): OK / Nicht getestet
 - [ ] WebUI Login: OK
