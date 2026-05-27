@@ -851,3 +851,107 @@ def test_recent_context_window_does_not_cross_scope_boundaries(tmp_path) -> None
 
     assert private_decision.context.recent_messages_text == "private-msg"
     assert topic_decision.context.recent_messages_text == "topic-msg"
+
+
+def test_answer_context_scope_isolation_matrix_private_topic_group_and_approved_only(tmp_path) -> None:
+    """C2-B release matrix: exact answer-context isolation and approved-only memory visibility."""
+    repo = _mk_repo(tmp_path)
+
+    repo.upsert_config(scope_type="private_user", user_id=4101, ai_enabled=True)
+    repo.upsert_config(scope_type="topic", chat_id=-4100, topic_id=1, ai_enabled=True)
+    repo.upsert_config(scope_type="topic", chat_id=-4100, topic_id=2, ai_enabled=True)
+    repo.upsert_config(scope_type="group_chat", chat_id=-4100, ai_enabled=True)
+    repo.upsert_config(scope_type="group_chat", chat_id=-4200, ai_enabled=True)
+
+    p_ok = repo.create_long_memory(scope_type="private_user", user_id=4101, fact_text="p-ok")
+    p_candidate = repo.create_long_memory(scope_type="private_user", user_id=4101, fact_text="p-candidate")
+
+    t1_ok = repo.create_long_memory(scope_type="topic", chat_id=-4100, topic_id=1, fact_text="t1-ok")
+    t1_rejected = repo.create_long_memory(scope_type="topic", chat_id=-4100, topic_id=1, fact_text="t1-rejected")
+    t2_ok = repo.create_long_memory(scope_type="topic", chat_id=-4100, topic_id=2, fact_text="t2-ok")
+
+    g_same_ok = repo.create_long_memory(scope_type="group_chat", chat_id=-4100, fact_text="g-same-ok")
+    g_other_ok = repo.create_long_memory(scope_type="group_chat", chat_id=-4200, fact_text="g-other-ok")
+
+    repo.approve_long_memory(memory_id=p_ok.id)
+    assert repo.mark_long_memory_candidate(memory_id=p_candidate.id) is True
+
+    repo.approve_long_memory(memory_id=t1_ok.id)
+    repo.reject_long_memory(memory_id=t1_rejected.id)
+    repo.approve_long_memory(memory_id=t2_ok.id)
+
+    repo.approve_long_memory(memory_id=g_same_ok.id)
+    repo.approve_long_memory(memory_id=g_other_ok.id)
+
+    router = AIRouter(topic_agent_memory_repository=repo)
+
+    private_decision = router.decide(prompt="hello", chat_id=4101, user_id=4101, chat_type="private")
+    topic_1_decision = router.decide(
+        prompt="@bot hi",
+        chat_id=-4100,
+        topic_id=1,
+        user_id=9001,
+        chat_type="supergroup",
+        bot_username="bot",
+    )
+    topic_2_decision = router.decide(
+        prompt="@bot hi",
+        chat_id=-4100,
+        topic_id=2,
+        user_id=9001,
+        chat_type="supergroup",
+        bot_username="bot",
+    )
+    group_same_decision = router.decide(prompt="hello", chat_id=-4100, user_id=9001, chat_type="group")
+    group_other_decision = router.decide(prompt="hello", chat_id=-4200, user_id=9001, chat_type="group")
+
+    assert private_decision.context.long_memory_text == "p-ok"
+    assert "candidate" not in private_decision.context.long_memory_text
+
+    assert topic_1_decision.context.long_memory_text == "t1-ok"
+    assert "t1-rejected" not in topic_1_decision.context.long_memory_text
+    assert "t2-ok" not in topic_1_decision.context.long_memory_text
+    assert "g-same-ok" not in topic_1_decision.context.long_memory_text
+    assert "p-ok" not in topic_1_decision.context.long_memory_text
+
+    assert topic_2_decision.context.long_memory_text == "t2-ok"
+    assert "t1-ok" not in topic_2_decision.context.long_memory_text
+
+    assert group_same_decision.context.long_memory_text == ""
+    assert group_same_decision.reason_code is AIRouterReasonCode.DEFAULT_NOOP
+
+    assert group_other_decision.context.long_memory_text == ""
+    assert group_other_decision.reason_code is AIRouterReasonCode.DEFAULT_NOOP
+
+
+def test_long_memory_review_audit_metadata_transitions_without_content_leak(tmp_path) -> None:
+    """C2-B audit evidence: verify review metadata transitions used by release gate."""
+    repo = _mk_repo(tmp_path)
+
+    row = repo.create_long_memory(
+        scope_type="private_user",
+        user_id=5101,
+        fact_text="synthetic-audit-string",
+    )
+
+    assert row.promotion_status == "none"
+    assert row.answer_status == "legacy"
+    assert repo.mark_long_memory_candidate(memory_id=row.id) is True
+    candidate = repo.list_long_memories(scope_type="private_user", user_id=5101, active_only=False)[0]
+    assert candidate.promotion_status == "candidate"
+    assert candidate.answer_status == "legacy"
+
+    assert repo.approve_long_memory(memory_id=row.id) is True
+    approved = repo.list_long_memories(scope_type="private_user", user_id=5101, active_only=False)[0]
+    assert approved.promotion_status == "candidate"
+    assert approved.answer_status == "approved"
+
+    assert repo.reject_long_memory(memory_id=row.id) is True
+    rejected = repo.list_long_memories(scope_type="private_user", user_id=5101, active_only=False)[0]
+    assert rejected.promotion_status == "none"
+    assert rejected.answer_status == "rejected"
+
+    assert repo.archive_long_memory(memory_id=row.id) is True
+    archived = repo.list_long_memories(scope_type="private_user", user_id=5101, active_only=False)[0]
+    assert archived.promotion_status == "none"
+    assert archived.answer_status == "archived"
