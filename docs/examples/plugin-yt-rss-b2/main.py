@@ -537,12 +537,19 @@ async def handle_schedule(context, host_api):
                 key = _entry_key(entry)
                 if not key:
                     continue
-                if key == cursor.cursor or key in dedupe_seen:
+                if key == cursor.cursor:
                     break
+                if key in dedupe_seen:
+                    continue
                 new_entries.append(entry)
 
             posted_count = 0
-            for entry in reversed(new_entries):
+            posted_keys = []
+            cursor_progress = cursor.cursor
+            dedupe_progress = set(dedupe_seen)
+            total_candidates = len(new_entries)
+            for index, entry in enumerate(reversed(new_entries), start=1):
+                entry_key = _entry_key(entry)
                 title = _entry_title(entry)
                 link = _entry_link(entry)
                 text = f"📺 {_post_label(sub, entry)}: {title}"
@@ -550,16 +557,40 @@ async def handle_schedule(context, host_api):
                     text = f"{text}\n{link}"
                 await _send_topic_message(host_api, chat_id=sub.chat_id, thread_id=sub.thread_id, text=text)
                 posted_count += 1
+                if entry_key:
+                    posted_keys.append(entry_key)
+
+                cursor_before_progress = cursor_progress
+                if entry_key:
+                    dedupe_progress.discard(entry_key)
+                    dedupe_progress = {entry_key, *dedupe_progress}
+                    dedupe_out_progress = list(dedupe_progress)[:100]
+                    cursor_progress = entry_key
+                else:
+                    dedupe_out_progress = list(dedupe_progress)[:100]
+
+                repo.set_cursor(
+                    chat_id=sub.chat_id,
+                    thread_id=sub.thread_id,
+                    channel_key=sub.channel_key,
+                    cursor=cursor_progress,
+                    dedupe=dedupe_out_progress,
+                )
 
             posted_total += posted_count
-            dedupe_out = seen_keys[:100] if seen_keys else list(dedupe_seen)[:100]
-            repo.set_cursor(
-                chat_id=sub.chat_id,
-                thread_id=sub.thread_id,
-                channel_key=sub.channel_key,
-                cursor=latest_cursor or cursor.cursor,
-                dedupe=dedupe_out,
-            )
+            if posted_count == len(new_entries):
+                dedupe_out = seen_keys[:100] if seen_keys else list(dedupe_seen)[:100]
+                cursor_after = latest_cursor or cursor_progress
+                repo.set_cursor(
+                    chat_id=sub.chat_id,
+                    thread_id=sub.thread_id,
+                    channel_key=sub.channel_key,
+                    cursor=cursor_after,
+                    dedupe=dedupe_out,
+                )
+            else:
+                dedupe_out = list(dedupe_progress)[:100]
+                cursor_after = cursor_progress
             LOGGER.info(
                 "yt_rss subscription checked",
                 extra={

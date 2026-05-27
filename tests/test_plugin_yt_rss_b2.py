@@ -939,6 +939,76 @@ def test_schedule_resolved_handle_dedupes_when_uc_subscription_exists(tmp_path, 
     assert "100:root:UCARK123" in keys
 
 
+def test_schedule_partial_failure_does_not_repost_already_sent_entry(tmp_path, monkeypatch) -> None:
+    plugin_main = _load_plugin_main()
+    repo_module = _load_repo_module()
+    repo = repo_module.YtRssStateRepository(tmp_path / "state")
+    monkeypatch.setattr(plugin_main, "_repo_for_context", lambda context: repo)
+
+    repo.add_subscription(
+        chat_id=100,
+        thread_id=7,
+        channel_key="UCPARTIAL",
+        source_url="https://www.youtube.com/channel/UCPARTIAL",
+        canonical_channel_url="https://www.youtube.com/channel/UCPARTIAL",
+        rss_url="rss://partial",
+        added_by_user_id=1,
+    )
+
+    class FlakyHost(_Host):
+        def __init__(self):
+            super().__init__()
+            self.fail_on_title = "four"
+            self.attempts: list[tuple[int, int | None, str]] = []
+
+        async def send_message(self, chat_id: int, text: str, message_thread_id: int | None = None):
+            self.attempts.append((chat_id, message_thread_id, text))
+            if self.fail_on_title and f": {self.fail_on_title}" in text:
+                raise RuntimeError("send failed")
+            self.sent.append((chat_id, message_thread_id, text))
+
+    host = FlakyHost()
+
+    host.feed_map["rss://partial"] = {
+        "entries": [
+            {"id": "v2", "title": "two", "link": "https://x/2"},
+            {"id": "v1", "title": "one", "link": "https://x/1"},
+        ]
+    }
+    asyncio.run(plugin_main.handle_schedule(object(), host))
+    assert host.sent == []
+
+    host.feed_map["rss://partial"] = {
+        "entries": [
+            {"id": "v4", "title": "four", "link": "https://x/4"},
+            {"id": "v3", "title": "three", "link": "https://x/3"},
+            {"id": "v2", "title": "two", "link": "https://x/2"},
+            {"id": "v1", "title": "one", "link": "https://x/1"},
+        ]
+    }
+    asyncio.run(plugin_main.handle_schedule(object(), host))
+
+    sent_titles = [text for _, _, text in host.sent]
+    assert len(sent_titles) == 1
+    assert any(": three" in text for text in sent_titles)
+    assert not any(": four" in text for text in sent_titles)
+
+    cursor_after_failure = repo.get_cursor(chat_id=100, thread_id=7, channel_key="UCPARTIAL")
+    assert cursor_after_failure.cursor == "v3"
+    assert "v3" in (cursor_after_failure.dedupe or [])
+    assert "v4" not in (cursor_after_failure.dedupe or [])
+
+    host.fail_on_title = None
+    asyncio.run(plugin_main.handle_schedule(object(), host))
+
+    assert len(host.sent) == 2
+    assert ": four" in host.sent[-1][2]
+    assert ": three" not in host.sent[-1][2]
+
+    cursor_final = repo.get_cursor(chat_id=100, thread_id=7, channel_key="UCPARTIAL")
+    assert cursor_final.cursor == "v4"
+
+
 def test_schedule_skips_malformed_legacy_subscription_and_records_error(tmp_path, monkeypatch) -> None:
     plugin_main = _load_plugin_main()
     repo_module = _load_repo_module()
