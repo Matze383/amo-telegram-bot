@@ -164,7 +164,7 @@ WEBUI_PASSWORD=your_secure_password
 WEBUI_OWNER_TELEGRAM_ID=your_telegram_user_id
 
 # AI Provider Configuration
-AI_PROVIDER=ollama  # ollama (default), openai or anthropic
+AI_PROVIDER=ollama  # ollama (default), openai, anthropic or google
 
 # Optional: OpenAI (for /ask command)
 # OPENAI_API_KEY=sk-your-key-here
@@ -176,6 +176,12 @@ AI_PROVIDER=ollama  # ollama (default), openai or anthropic
 # ANTHROPIC_MODEL=anthropic/claude-opus-4-6
 # ANTHROPIC_TIMEOUT_SECONDS=30
 # ANTHROPIC_BASE_URL=https://api.anthropic.com
+
+# Optional: Google/Gemini (for /ask command)
+# GEMINI_API_KEY=your-google-api-key-here
+# GEMINI_MODEL=google/gemini-3-flash-preview
+# GEMINI_TIMEOUT_SECONDS=30
+# GEMINI_BASE_URL=https://generativelanguage.googleapis.com
 
 # Optional: Ollama (for /ask command)
 OLLAMA_URL=http://127.0.0.1:11434

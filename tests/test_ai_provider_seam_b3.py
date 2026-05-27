@@ -5,7 +5,8 @@ import pytest
 from amo_bot.ai.ollama import OllamaClient
 from amo_bot.ai.openai_provider import OpenAIProviderConfig
 from amo_bot.ai.anthropic_provider import AnthropicProviderConfig
-from amo_bot.ai.providers import AnthropicProvider, OpenAIProvider, build_ai_provider
+from amo_bot.ai.gemini_provider import GeminiProviderConfig
+from amo_bot.ai.providers import AnthropicProvider, GeminiProvider, OpenAIProvider, build_ai_provider
 from amo_bot.ai.service import AIService
 from amo_bot.config.settings import Settings
 
@@ -147,3 +148,42 @@ def test_anthropic_api_key_is_trimmed_not_logged() -> None:
     assert isinstance(provider, AnthropicProvider)
     assert provider.config.api_key == "ak-real-key"
     assert provider.config.redacted_dict()["api_key_preview"] == "***"
+
+
+def test_gemini_provider_selection_builds_provider_config_only() -> None:
+    settings = _settings(AI_PROVIDER="google", GEMINI_API_KEY="gk-secret")
+    provider = build_ai_provider(settings)
+    assert isinstance(provider, GeminiProvider)
+    assert isinstance(provider.config, GeminiProviderConfig)
+    assert provider.config.model == "google/gemini-3-flash-preview"
+
+
+def test_gemini_requires_either_api_key_env() -> None:
+    with pytest.raises(ValueError, match="When AI_PROVIDER=google, set GEMINI_API_KEY or GOOGLE_API_KEY"):
+        _settings(AI_PROVIDER="google")
+
+
+def test_gemini_api_key_is_trimmed_not_logged() -> None:
+    settings = _settings(AI_PROVIDER="google", GEMINI_API_KEY="  gk-real-key  ")
+    provider = build_ai_provider(settings)
+    assert isinstance(provider, GeminiProvider)
+    assert provider.config.api_key == "gk-real-key"
+    assert provider.config.redacted_dict()["api_key_preview"] == "***"
+
+
+def test_google_api_key_is_used_when_gemini_api_key_missing() -> None:
+    settings = _settings(AI_PROVIDER="google", GOOGLE_API_KEY="  gg-real-key  ")
+    provider = build_ai_provider(settings)
+    assert isinstance(provider, GeminiProvider)
+    assert provider.config.api_key == "gg-real-key"
+
+
+def test_gemini_api_key_preferred_when_both_set() -> None:
+    settings = _settings(
+        AI_PROVIDER="google",
+        GEMINI_API_KEY="gk-real-key",
+        GOOGLE_API_KEY="gg-real-key",
+    )
+    provider = build_ai_provider(settings)
+    assert isinstance(provider, GeminiProvider)
+    assert provider.config.api_key == "gk-real-key"

@@ -29,6 +29,12 @@ class Settings(BaseSettings):
     anthropic_timeout_seconds: float = Field(default=30.0, alias="ANTHROPIC_TIMEOUT_SECONDS", gt=0)
     anthropic_base_url: str = Field(default="https://api.anthropic.com", alias="ANTHROPIC_BASE_URL")
 
+    gemini_api_key: str | None = Field(default=None, alias="GEMINI_API_KEY")
+    google_api_key: str | None = Field(default=None, alias="GOOGLE_API_KEY")
+    gemini_model: str = Field(default="google/gemini-3-flash-preview", alias="GEMINI_MODEL")
+    gemini_timeout_seconds: float = Field(default=30.0, alias="GEMINI_TIMEOUT_SECONDS", gt=0)
+    gemini_base_url: str = Field(default="https://generativelanguage.googleapis.com", alias="GEMINI_BASE_URL")
+
     ollama_base_url: str = Field(default="http://127.0.0.1:11434", alias="OLLAMA_URL")
     ollama_model: str = Field(default="llama3.1", alias="OLLAMA_MODEL")
     ollama_timeout_seconds: int = Field(default=20, alias="OLLAMA_TIMEOUT_SECONDS")
@@ -63,8 +69,8 @@ class Settings(BaseSettings):
             raise ValueError("WEBUI_LOGIN_DELAY_MAX_SECONDS must be >= WEBUI_LOGIN_DELAY_BASE_SECONDS")
 
         provider = self.ai_provider.strip().casefold()
-        if provider not in {"openai", "ollama", "anthropic"}:
-            raise ValueError("AI_PROVIDER must be one of: openai, ollama, anthropic")
+        if provider not in {"openai", "ollama", "anthropic", "google"}:
+            raise ValueError("AI_PROVIDER must be one of: openai, ollama, anthropic, google")
 
         self.ai_provider = provider
 
@@ -89,6 +95,27 @@ class Settings(BaseSettings):
             if not base_url:
                 raise ValueError("ANTHROPIC_BASE_URL must not be empty")
             self.anthropic_base_url = base_url
+
+        if provider == "google":
+            gemini_api_key = (self.gemini_api_key or "").strip()
+            google_api_key = (self.google_api_key or "").strip()
+            api_key = gemini_api_key or google_api_key
+            if not api_key:
+                raise ValueError(
+                    "When AI_PROVIDER=google, set GEMINI_API_KEY or GOOGLE_API_KEY"
+                )
+            self.gemini_api_key = api_key
+            self.google_api_key = google_api_key or None
+
+            model = self.gemini_model.strip()
+            if not model:
+                raise ValueError("GEMINI_MODEL is required when AI_PROVIDER=google")
+            self.gemini_model = model
+
+            base_url = self.gemini_base_url.strip()
+            if not base_url:
+                raise ValueError("GEMINI_BASE_URL must not be empty")
+            self.gemini_base_url = base_url
 
         endpoint = self.ollama_request_endpoint.strip().casefold()
         if endpoint not in {"generate", "chat"}:

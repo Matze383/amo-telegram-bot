@@ -92,7 +92,7 @@ python main.py
 - Python 3.12+
 - Windows, macOS oder Linux
 - Telegram Bot Token von [@BotFather](https://t.me/BotFather)
-- Optional: Lokale [Ollama](https://ollama.com/)-Instanz oder OpenAI API-Key für KI-Funktionen
+- Optional: Lokale [Ollama](https://ollama.com/)-Instanz, OpenAI API-Key, Anthropic API-Key oder Google/Gemini API-Key für KI-Funktionen
 
 ### Dokumentation
 
@@ -190,7 +190,7 @@ python main.py
 - Python 3.12+
 - Windows, macOS or Linux
 - Telegram Bot Token from [@BotFather](https://t.me/BotFather)
-- Optional: Local [Ollama](https://ollama.com/) instance OR OpenAI API key for AI features
+- Optional: Local [Ollama](https://ollama.com/) instance, OpenAI API key, Anthropic API key, or Google/Gemini API key for AI features
 
 ### Documentation
 

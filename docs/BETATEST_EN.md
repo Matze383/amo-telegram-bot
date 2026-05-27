@@ -21,7 +21,8 @@ This guide helps you test the MVP status of the bot:
 - Optional: AI provider for `/ask`:
   - Local Ollama instance, **OR**
   - OpenAI API key, **OR**
-  - Anthropic API key
+  - Anthropic API key, **OR**
+  - Google/Gemini API key
 
 ---
 
@@ -42,7 +43,7 @@ BOT_USERNAME=your_bot_username
 TELEGRAM_API_BASE=https://api.telegram.org
 
 # AI Provider Configuration
-AI_PROVIDER=ollama  # ollama (default), openai or anthropic
+AI_PROVIDER=ollama  # ollama (default), openai, anthropic or google
 
 # Optional: OpenAI (for /ask command)
 # OPENAI_API_KEY=sk-your-key-here
@@ -54,6 +55,12 @@ AI_PROVIDER=ollama  # ollama (default), openai or anthropic
 # ANTHROPIC_MODEL=anthropic/claude-opus-4-6
 # ANTHROPIC_TIMEOUT_SECONDS=30
 # ANTHROPIC_BASE_URL=https://api.anthropic.com
+
+# Optional: Google/Gemini (for /ask command)
+# GEMINI_API_KEY=your-google-api-key-here
+# GEMINI_MODEL=google/gemini-3-flash-preview
+# GEMINI_TIMEOUT_SECONDS=30
+# GEMINI_BASE_URL=https://generativelanguage.googleapis.com
 
 # Optional: Ollama (for /ask command)
 OLLAMA_URL=http://127.0.0.1:11434
@@ -308,6 +315,11 @@ curl http://127.0.0.1:11434/api/tags
 - Ensure `ANTHROPIC_API_KEY` is set in `.env`
 - Ensure `AI_PROVIDER=anthropic` is set in `.env`
 - Optional: `ANTHROPIC_MODEL` can be customized (default: `anthropic/claude-opus-4-6`)
+
+**For Google/Gemini:**
+- Ensure that with `AI_PROVIDER=google` either `GEMINI_API_KEY` or `GOOGLE_API_KEY` is set in `.env`
+- Ensure `AI_PROVIDER=google` is set in `.env`
+- Optional: `GEMINI_MODEL` can be customized (default: `google/gemini-3-flash-preview`)
 
 **For OpenAI:**
 - Ensure `OPENAI_API_KEY` is set in `.env`
