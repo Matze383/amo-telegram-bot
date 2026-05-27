@@ -11,7 +11,8 @@ Complete setup instructions for running the bot locally.
 - Telegram Bot Token (from [@BotFather](https://t.me/BotFather))
 - Optional: AI provider for `/ask` command:
   - Local [Ollama](https://ollama.com/) instance, **OR**
-  - OpenAI API key
+  - OpenAI API key, **OR**
+  - Anthropic API key
 
 ---
 
@@ -163,12 +164,18 @@ WEBUI_PASSWORD=your_secure_password
 WEBUI_OWNER_TELEGRAM_ID=your_telegram_user_id
 
 # AI Provider Configuration
-AI_PROVIDER=ollama  # ollama (default) or openai
+AI_PROVIDER=ollama  # ollama (default), openai or anthropic
 
 # Optional: OpenAI (for /ask command)
 # OPENAI_API_KEY=sk-your-key-here
 # OPENAI_MODEL=gpt-4o-mini
 # OPENAI_TIMEOUT_SECONDS=30
+
+# Optional: Anthropic (for /ask command)
+# ANTHROPIC_API_KEY=sk-ant-your-key-here
+# ANTHROPIC_MODEL=anthropic/claude-opus-4-6
+# ANTHROPIC_TIMEOUT_SECONDS=30
+# ANTHROPIC_BASE_URL=https://api.anthropic.com
 
 # Optional: Ollama (for /ask command)
 OLLAMA_URL=http://127.0.0.1:11434

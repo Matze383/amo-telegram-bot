@@ -4,7 +4,8 @@ import pytest
 
 from amo_bot.ai.ollama import OllamaClient
 from amo_bot.ai.openai_provider import OpenAIProviderConfig
-from amo_bot.ai.providers import OpenAIProvider, build_ai_provider
+from amo_bot.ai.anthropic_provider import AnthropicProviderConfig
+from amo_bot.ai.providers import AnthropicProvider, OpenAIProvider, build_ai_provider
 from amo_bot.ai.service import AIService
 from amo_bot.config.settings import Settings
 
@@ -89,7 +90,7 @@ def test_ollama_streaming_mode_invalid_fails_closed() -> None:
         _settings(OLLAMA_STREAMING_MODE="stream")
 
 
-@pytest.mark.parametrize("value", ["", "anthropic", "OPEN_AI", "123"])
+@pytest.mark.parametrize("value", ["", "OPEN_AI", "123"])
 def test_invalid_provider_fails_validation(value: str) -> None:
     with pytest.raises(ValueError):
         _settings(AI_PROVIDER=value)
@@ -125,3 +126,24 @@ def test_ollama_provider_analyze_uses_image_path(monkeypatch, tmp_path) -> None:
     assert result.provider == "ollama"
     assert result.summary == "summary"
     assert seen == {"prompt": "describe", "image_paths": (str(image_path),)}
+
+
+def test_anthropic_provider_selection_builds_provider_config_only() -> None:
+    settings = _settings(AI_PROVIDER="anthropic", ANTHROPIC_API_KEY="ak-secret")
+    provider = build_ai_provider(settings)
+    assert isinstance(provider, AnthropicProvider)
+    assert isinstance(provider.config, AnthropicProviderConfig)
+    assert provider.config.model == "anthropic/claude-opus-4-6"
+
+
+def test_anthropic_requires_api_key() -> None:
+    with pytest.raises(ValueError, match="ANTHROPIC_API_KEY is required when AI_PROVIDER=anthropic"):
+        _settings(AI_PROVIDER="anthropic")
+
+
+def test_anthropic_api_key_is_trimmed_not_logged() -> None:
+    settings = _settings(AI_PROVIDER="anthropic", ANTHROPIC_API_KEY="  ak-real-key  ")
+    provider = build_ai_provider(settings)
+    assert isinstance(provider, AnthropicProvider)
+    assert provider.config.api_key == "ak-real-key"
+    assert provider.config.redacted_dict()["api_key_preview"] == "***"

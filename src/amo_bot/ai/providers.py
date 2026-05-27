@@ -8,6 +8,7 @@ from amo_bot.ai.image_analyze_orchestrator import ImageAnalyzeProviderRequest, I
 
 from amo_bot.ai.ollama import OllamaClient
 from amo_bot.ai.openai_provider import OpenAIProviderConfig, OpenAIRequestClient
+from amo_bot.ai.anthropic_provider import AnthropicProviderConfig, AnthropicRequestClient
 from amo_bot.ai.service import AIService
 from amo_bot.config.settings import Settings
 
@@ -56,6 +57,18 @@ class OpenAIProvider:
         return await self.client.ask(prompt)
 
 
+@dataclass(frozen=True, slots=True)
+class AnthropicProvider:
+    config: AnthropicProviderConfig
+
+    @property
+    def client(self) -> AnthropicRequestClient:
+        return AnthropicRequestClient(config=self.config)
+
+    async def ask(self, prompt: str) -> str:
+        return await self.client.ask(prompt)
+
+
 def _build_ollama_provider(settings: Settings) -> OllamaProvider:
     return OllamaProvider(
         AIService(
@@ -88,6 +101,16 @@ def build_ai_provider(settings: Settings) -> AIProvider:
                 api_key=settings.openai_api_key or "",
                 model=settings.openai_model,
                 timeout_seconds=settings.openai_timeout_seconds,
+            )
+        )
+
+    if provider == "anthropic":
+        return AnthropicProvider(
+            config=AnthropicProviderConfig(
+                api_key=settings.anthropic_api_key or "",
+                model=settings.anthropic_model,
+                timeout_seconds=settings.anthropic_timeout_seconds,
+                base_url=settings.anthropic_base_url,
             )
         )
 

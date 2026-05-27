@@ -24,6 +24,11 @@ class Settings(BaseSettings):
     openai_model: str = Field(default="gpt-4o-mini", alias="OPENAI_MODEL")
     openai_timeout_seconds: float = Field(default=30.0, alias="OPENAI_TIMEOUT_SECONDS", gt=0)
 
+    anthropic_api_key: str | None = Field(default=None, alias="ANTHROPIC_API_KEY")
+    anthropic_model: str = Field(default="anthropic/claude-opus-4-6", alias="ANTHROPIC_MODEL")
+    anthropic_timeout_seconds: float = Field(default=30.0, alias="ANTHROPIC_TIMEOUT_SECONDS", gt=0)
+    anthropic_base_url: str = Field(default="https://api.anthropic.com", alias="ANTHROPIC_BASE_URL")
+
     ollama_base_url: str = Field(default="http://127.0.0.1:11434", alias="OLLAMA_URL")
     ollama_model: str = Field(default="llama3.1", alias="OLLAMA_MODEL")
     ollama_timeout_seconds: int = Field(default=20, alias="OLLAMA_TIMEOUT_SECONDS")
@@ -58,8 +63,8 @@ class Settings(BaseSettings):
             raise ValueError("WEBUI_LOGIN_DELAY_MAX_SECONDS must be >= WEBUI_LOGIN_DELAY_BASE_SECONDS")
 
         provider = self.ai_provider.strip().casefold()
-        if provider not in {"openai", "ollama"}:
-            raise ValueError("AI_PROVIDER must be one of: openai, ollama")
+        if provider not in {"openai", "ollama", "anthropic"}:
+            raise ValueError("AI_PROVIDER must be one of: openai, ollama, anthropic")
 
         self.ai_provider = provider
 
@@ -68,6 +73,22 @@ class Settings(BaseSettings):
             if not api_key:
                 raise ValueError("OPENAI_API_KEY is required when AI_PROVIDER=openai")
             self.openai_api_key = api_key
+
+        if provider == "anthropic":
+            api_key = (self.anthropic_api_key or "").strip()
+            if not api_key:
+                raise ValueError("ANTHROPIC_API_KEY is required when AI_PROVIDER=anthropic")
+            self.anthropic_api_key = api_key
+
+            model = self.anthropic_model.strip()
+            if not model:
+                raise ValueError("ANTHROPIC_MODEL is required when AI_PROVIDER=anthropic")
+            self.anthropic_model = model
+
+            base_url = self.anthropic_base_url.strip()
+            if not base_url:
+                raise ValueError("ANTHROPIC_BASE_URL must not be empty")
+            self.anthropic_base_url = base_url
 
         endpoint = self.ollama_request_endpoint.strip().casefold()
         if endpoint not in {"generate", "chat"}:

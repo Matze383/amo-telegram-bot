@@ -20,7 +20,8 @@ This guide helps you test the MVP status of the bot:
 - A Telegram bot token (from @BotFather)
 - Optional: AI provider for `/ask`:
   - Local Ollama instance, **OR**
-  - OpenAI API key
+  - OpenAI API key, **OR**
+  - Anthropic API key
 
 ---
 
@@ -41,12 +42,18 @@ BOT_USERNAME=your_bot_username
 TELEGRAM_API_BASE=https://api.telegram.org
 
 # AI Provider Configuration
-AI_PROVIDER=ollama  # ollama (default) or openai
+AI_PROVIDER=ollama  # ollama (default), openai or anthropic
 
 # Optional: OpenAI (for /ask command)
 # OPENAI_API_KEY=sk-your-key-here
 # OPENAI_MODEL=gpt-4o-mini
 # OPENAI_TIMEOUT_SECONDS=30
+
+# Optional: Anthropic (for /ask command)
+# ANTHROPIC_API_KEY=sk-ant-your-key-here
+# ANTHROPIC_MODEL=anthropic/claude-opus-4-6
+# ANTHROPIC_TIMEOUT_SECONDS=30
+# ANTHROPIC_BASE_URL=https://api.anthropic.com
 
 # Optional: Ollama (for /ask command)
 OLLAMA_URL=http://127.0.0.1:11434
@@ -296,6 +303,11 @@ Start a private chat with your bot:
 # Check Ollama status
 curl http://127.0.0.1:11434/api/tags
 ```
+
+**For Anthropic:**
+- Ensure `ANTHROPIC_API_KEY` is set in `.env`
+- Ensure `AI_PROVIDER=anthropic` is set in `.env`
+- Optional: `ANTHROPIC_MODEL` can be customized (default: `anthropic/claude-opus-4-6`)
 
 **For OpenAI:**
 - Ensure `OPENAI_API_KEY` is set in `.env`
