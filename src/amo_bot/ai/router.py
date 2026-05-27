@@ -37,6 +37,7 @@ class AIRouterContextV1:
     daily_memory_text: str = ""
     long_memory_text: str = ""
     recent_messages_text: str = ""
+    recall_memory_text: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,6 +57,9 @@ class AIRouter:
     _RECENT_WINDOW_DEFAULT_MESSAGES = 20
     _RECENT_WINDOW_MAX_MESSAGES = 50
     _RECENT_WINDOW_MAX_AGE_SECONDS = 60 * 60 * 24 * 14
+    _RECALL_MAX_RECORDS = 20
+    _RECALL_MAX_CHARS = 1200
+    _RECALL_TIMEOUT_MS = 150
     _SUSPICIOUS_SOUL_MARKERS = (
         "system prompt",
         "system message",
@@ -119,6 +123,7 @@ class AIRouter:
         daily_memory_text = ""
         long_memory_text = ""
         recent_messages_text = ""
+        recall_memory_text = ""
         base_context = self._build_context(
             scope=scope,
             user_id=user_id,
@@ -131,6 +136,7 @@ class AIRouter:
             daily_memory_text=daily_memory_text,
             long_memory_text=long_memory_text,
             recent_messages_text=recent_messages_text,
+            recall_memory_text=recall_memory_text,
         )
 
         repo = self._topic_agent_memory_repository
@@ -173,7 +179,15 @@ class AIRouter:
             user_id=scope["user_id"] if isinstance(scope["user_id"], int) else None,
             limit=recent_window_size,
         )
-        context_error = ",".join(part for part in (daily_error, long_error, recent_error) if part)
+        recall_text, recall_error, recall_meta = self._read_active_recall_text(
+            scope=scope,
+            daily_memory_text=daily_memory_text,
+            long_memory_text=long_memory_text,
+            recent_messages_text=recent_messages_text,
+        )
+        context_error = ",".join(part for part in (daily_error, long_error, recent_error, recall_error) if part)
+        if recall_meta:
+            self._audit_recall(scope=scope, meta=recall_meta)
 
         if self._has_bot_mention(prompt=safe_prompt, bot_username=bot_username):
             reason_code = AIRouterReasonCode.CONTEXT_GUARD_FALLBACK if context_error else AIRouterReasonCode.MENTION_IN_ACTIVE_SCOPE
@@ -193,6 +207,7 @@ class AIRouter:
                     daily_memory_text=daily_memory_text,
                     long_memory_text=long_memory_text,
                     recent_messages_text=recent_messages_text,
+                    recall_memory_text=recall_text,
                     context_error=context_error,
                 ),
             )
@@ -215,6 +230,7 @@ class AIRouter:
                     daily_memory_text=daily_memory_text,
                     long_memory_text=long_memory_text,
                     recent_messages_text=recent_messages_text,
+                    recall_memory_text=recall_text,
                     context_error=context_error,
                 ),
             )
@@ -240,6 +256,7 @@ class AIRouter:
                 daily_memory_text=daily_memory_text,
                 long_memory_text=long_memory_text,
                 recent_messages_text=recent_messages_text,
+                recall_memory_text=recall_text,
                 context_error=context_error,
             ),
         )
@@ -258,6 +275,7 @@ class AIRouter:
         daily_memory_text: str,
         long_memory_text: str,
         recent_messages_text: str,
+        recall_memory_text: str,
         context_error: str = "",
     ) -> AIRouterContextV1:
         if scope is None:
@@ -273,6 +291,7 @@ class AIRouter:
                 daily_memory_text=daily_memory_text,
                 long_memory_text=long_memory_text,
                 recent_messages_text=recent_messages_text,
+                recall_memory_text=recall_memory_text,
             )
 
         return AIRouterContextV1(
@@ -291,6 +310,7 @@ class AIRouter:
             daily_memory_text=daily_memory_text,
             long_memory_text=long_memory_text,
             recent_messages_text=recent_messages_text,
+            recall_memory_text=recall_memory_text,
         )
 
     @staticmethod
@@ -427,6 +447,91 @@ class AIRouter:
 
         return normalized.strip()
 
+    def _read_active_recall_text(
+        self,
+        *,
+        scope: dict[str, int | str | None] | None,
+        daily_memory_text: str,
+        long_memory_text: str,
+        recent_messages_text: str,
+    ) -> tuple[str, str, dict[str, object]]:
+        meta: dict[str, object] = {
+            "decision": "skip",
+            "reason": "invalid_scope",
+            "records_in": 0,
+            "records_out": 0,
+            "chars_out": 0,
+            "truncated_records": False,
+            "truncated_chars": False,
+            "timeout_hit": False,
+            "error_class": "",
+        }
+        if scope is None:
+            return "", "", meta
+
+        scope_type = scope.get("scope_type")
+        chat_id = scope.get("chat_id")
+        topic_id = scope.get("topic_id")
+        user_id = scope.get("user_id")
+
+        is_topic = scope_type == "topic" and isinstance(chat_id, int) and isinstance(topic_id, int) and user_id is None
+        is_private = scope_type == "private_user" and chat_id is None and topic_id is None and isinstance(user_id, int)
+        if not (is_topic or is_private):
+            return "", "", meta
+
+        raw_lines: list[str] = []
+        for part in (daily_memory_text, long_memory_text, recent_messages_text):
+            if not part:
+                continue
+            for line in part.splitlines():
+                normalized = line.strip()
+                if normalized:
+                    raw_lines.append(normalized)
+
+        meta["records_in"] = len(raw_lines)
+        if not raw_lines:
+            meta["reason"] = "empty_payload"
+            return "", "", meta
+
+        try:
+            started = datetime.now(UTC)
+            compact_lines: list[str] = []
+            for line in raw_lines:
+                if (datetime.now(UTC) - started).total_seconds() * 1000 > self._RECALL_TIMEOUT_MS:
+                    meta["timeout_hit"] = True
+                    break
+                sanitized = self._sanitize_recent_message(line)
+                if not sanitized:
+                    continue
+                compact_lines.append(sanitized)
+                if len(compact_lines) >= self._RECALL_MAX_RECORDS:
+                    meta["truncated_records"] = len(raw_lines) > len(compact_lines)
+                    break
+
+            if not compact_lines:
+                meta["reason"] = "empty_after_sanitize"
+                return "", "", meta
+
+            compact = "\n".join(compact_lines)
+            truncated_chars = len(compact) > self._RECALL_MAX_CHARS
+            compact = compact[: self._RECALL_MAX_CHARS].rstrip()
+            if not compact:
+                meta["reason"] = "empty_after_trim"
+                return "", "", meta
+
+            meta["decision"] = "include"
+            meta["reason"] = "ok"
+            meta["records_out"] = len(compact.splitlines())
+            meta["chars_out"] = len(compact)
+            meta["truncated_chars"] = truncated_chars
+            return compact, "", meta
+        except Exception as exc:
+            meta["decision"] = "error"
+            meta["reason"] = "exception"
+            meta["error_class"] = exc.__class__.__name__
+            return "", "", meta
+
+
     def _read_recent_messages_text(
         self,
         *,
@@ -463,6 +568,36 @@ class AIRouter:
             return joined[: self._MAX_SOUL_CHARS].rstrip(), ""
         except Exception:
             return "", "recent_messages_error"
+
+    def _audit_recall(self, *, scope: dict[str, int | str | None], meta: dict[str, object]) -> None:
+        repo = self._topic_agent_memory_repository
+        if repo is None:
+            return
+        logger = getattr(repo, "logger", None)
+        if logger is None:
+            return
+
+        scope_type = str(scope.get("scope_type") or "")
+        payload = {
+            "event": "ai_router_recall",
+            "scope_type": scope_type,
+            "scope_chat_id": scope.get("chat_id") if isinstance(scope.get("chat_id"), int) else None,
+            "scope_topic_id": scope.get("topic_id") if isinstance(scope.get("topic_id"), int) else None,
+            "scope_user_id": scope.get("user_id") if isinstance(scope.get("user_id"), int) else None,
+            "decision": str(meta.get("decision") or "skip"),
+            "reason": str(meta.get("reason") or ""),
+            "records_in": int(meta.get("records_in") or 0),
+            "records_out": int(meta.get("records_out") or 0),
+            "chars_out": int(meta.get("chars_out") or 0),
+            "truncated_records": bool(meta.get("truncated_records")),
+            "truncated_chars": bool(meta.get("truncated_chars")),
+            "timeout_hit": bool(meta.get("timeout_hit")),
+            "error_class": str(meta.get("error_class") or ""),
+        }
+        try:
+            logger.info("%s", payload)
+        except Exception:
+            return
 
     @staticmethod
     def _has_bot_mention(*, prompt: str, bot_username: str | None) -> bool:
