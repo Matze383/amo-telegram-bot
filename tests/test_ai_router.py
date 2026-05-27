@@ -338,6 +338,26 @@ def test_daily_memory_injected_for_current_scope_day(tmp_path) -> None:
     assert decision.context.long_memory_text == ""
 
 
+def test_daily_memory_falls_back_to_yesterday_same_exact_scope(tmp_path) -> None:
+    repo = _mk_repo(tmp_path)
+    repo.upsert_config(scope_type="private_user", user_id=3003, ai_enabled=True)
+
+    yesterday = (datetime.now(UTC).date()).fromordinal(datetime.now(UTC).date().toordinal() - 1).isoformat()
+    repo.upsert_daily_memory(
+        scope_type="private_user",
+        user_id=3003,
+        memory_date=yesterday,
+        summary_text="Yesterday private memory",
+        tokens_estimate=3,
+    )
+
+    router = AIRouter(topic_agent_memory_repository=repo)
+    decision = router.decide(prompt="hello", chat_id=3003, user_id=3003)
+
+    assert decision.reason_code is AIRouterReasonCode.SCOPE_ENABLED
+    assert decision.context.daily_memory_text == "Yesterday private memory"
+
+
 def test_daily_memory_missing_is_safe_noop(tmp_path) -> None:
     repo = _mk_repo(tmp_path)
     repo.upsert_config(scope_type="private_user", user_id=3003, ai_enabled=True)
@@ -380,6 +400,36 @@ def test_daily_memory_uses_existing_redaction_and_size_bound(tmp_path) -> None:
     decision2 = router.decide(prompt="hello", chat_id=4004, user_id=4004)
     assert len(decision2.context.daily_memory_text) == AIRouter._MAX_SOUL_CHARS
     assert decision2.context.long_memory_text == ""
+
+
+def test_daily_memory_exact_scope_no_leak_between_topic_and_private(tmp_path) -> None:
+    repo = _mk_repo(tmp_path)
+    today = datetime.now(UTC).date().isoformat()
+    repo.upsert_config(scope_type="topic", chat_id=-5000, topic_id=12, ai_enabled=True)
+    repo.upsert_config(scope_type="private_user", user_id=5000, ai_enabled=True)
+
+    repo.upsert_daily_memory(
+        scope_type="topic",
+        chat_id=-5000,
+        topic_id=12,
+        memory_date=today,
+        summary_text="Topic-12 memory",
+        tokens_estimate=5,
+    )
+    repo.upsert_daily_memory(
+        scope_type="private_user",
+        user_id=5000,
+        memory_date=today,
+        summary_text="Private-5000 memory",
+        tokens_estimate=5,
+    )
+
+    router = AIRouter(topic_agent_memory_repository=repo)
+    topic_decision = router.decide(prompt="@bot hi", chat_id=-5000, topic_id=12, user_id=99, bot_username="bot")
+    private_decision = router.decide(prompt="hello", chat_id=5000, user_id=5000)
+
+    assert topic_decision.context.daily_memory_text == "Topic-12 memory"
+    assert private_decision.context.daily_memory_text == "Private-5000 memory"
 
 
 def test_daily_memory_scope_isolation_private_user(tmp_path) -> None:

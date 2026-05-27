@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 import re
 
@@ -350,19 +350,22 @@ class AIRouter:
             return "", ""
 
         try:
-            today = datetime.now(UTC).date().isoformat()
-            record = repo.get_daily_memory(
-                scope_type=scope_type,
-                chat_id=chat_id,
-                topic_id=topic_id,
-                user_id=user_id,
-                memory_date=today,
-            )
-            if record is None:
-                return "", ""
+            today = datetime.now(UTC).date()
+            for memory_date in (today, today - timedelta(days=1)):
+                record = repo.get_daily_memory(
+                    scope_type=scope_type,
+                    chat_id=chat_id,
+                    topic_id=topic_id,
+                    user_id=user_id,
+                    memory_date=memory_date.isoformat(),
+                )
+                if record is None:
+                    continue
 
-            # Reuse KI-C1 soul text bounding and redaction-style filters for daily memory injection.
-            return self._sanitize_soul_text(record.summary_text)[: self._MAX_SOUL_CHARS], ""
+                # Reuse KI-C1 soul text bounding and redaction-style filters for daily memory injection.
+                return self._sanitize_soul_text(record.summary_text)[: self._MAX_SOUL_CHARS], ""
+
+            return "", ""
         except Exception:
             return "", "daily_memory_error"
 
