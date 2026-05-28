@@ -70,6 +70,11 @@ class Settings(BaseSettings):
     fireworks_timeout_seconds: float = Field(default=30.0, alias="FIREWORKS_TIMEOUT_SECONDS", gt=0)
     fireworks_base_url: str = Field(default="https://api.fireworks.ai/inference/v1", alias="FIREWORKS_BASE_URL")
 
+    litellm_api_key: str | None = Field(default=None, alias="LITELLM_API_KEY")
+    litellm_model: str = Field(default="openai/gpt-4o-mini", alias="LITELLM_MODEL")
+    litellm_timeout_seconds: float = Field(default=30.0, alias="LITELLM_TIMEOUT_SECONDS", gt=0)
+    litellm_base_url: str = Field(default="https://api.litellm.ai", alias="LITELLM_BASE_URL")
+
     bedrock_model: str = Field(default="amazon-bedrock/anthropic.claude-3-haiku-20240307-v1:0", alias="BEDROCK_MODEL")
     bedrock_region: str | None = Field(default=None, alias="BEDROCK_REGION")
     aws_region: str | None = Field(default=None, alias="AWS_REGION")
@@ -114,8 +119,8 @@ class Settings(BaseSettings):
             raise ValueError("WEBUI_LOGIN_DELAY_MAX_SECONDS must be >= WEBUI_LOGIN_DELAY_BASE_SECONDS")
 
         provider = self.ai_provider.strip().casefold()
-        if provider not in {"openai", "ollama", "anthropic", "google", "openrouter", "groq", "mistral", "xai", "deepseek", "together", "fireworks", "amazon-bedrock"}:
-            raise ValueError("AI_PROVIDER must be one of: openai, ollama, anthropic, google, openrouter, groq, mistral, xai, deepseek, together, fireworks, amazon-bedrock")
+        if provider not in {"openai", "ollama", "anthropic", "google", "openrouter", "groq", "mistral", "xai", "deepseek", "together", "fireworks", "amazon-bedrock", "litellm"}:
+            raise ValueError("AI_PROVIDER must be one of: openai, ollama, anthropic, google, openrouter, groq, mistral, xai, deepseek, together, fireworks, amazon-bedrock, litellm")
 
         self.ai_provider = provider
 
@@ -298,6 +303,22 @@ class Settings(BaseSettings):
             self.aws_access_key_id = access_key or None
             self.aws_secret_access_key = secret_key or None
             self.aws_session_token = session_token or None
+
+        if provider == "litellm":
+            api_key = (self.litellm_api_key or "").strip()
+            if not api_key:
+                raise ValueError("LITELLM_API_KEY is required when AI_PROVIDER=litellm")
+            self.litellm_api_key = api_key
+
+            model = self.litellm_model.strip()
+            if not model:
+                raise ValueError("LITELLM_MODEL is required when AI_PROVIDER=litellm")
+            self.litellm_model = model
+
+            base_url = self.litellm_base_url.strip()
+            if not base_url:
+                raise ValueError("LITELLM_BASE_URL must not be empty")
+            self.litellm_base_url = base_url
 
         endpoint = self.ollama_request_endpoint.strip().casefold()
         if endpoint not in {"generate", "chat"}:

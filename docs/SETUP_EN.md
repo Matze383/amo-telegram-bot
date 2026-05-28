@@ -173,7 +173,7 @@ WEBUI_PASSWORD=your_secure_password
 WEBUI_OWNER_TELEGRAM_ID=your_telegram_user_id
 
 # AI Provider Configuration
-AI_PROVIDER=ollama  # ollama (default), openai, anthropic, google, openrouter, groq, mistral, xai or deepseek, amazon-bedrock
+AI_PROVIDER=ollama  # ollama (default), openai, anthropic, google, openrouter, groq, mistral, xai, deepseek, together, fireworks, or litellm
 
 # Optional: OpenAI (for /ask command)
 # OPENAI_API_KEY=your-openai-api-key-here
@@ -227,6 +227,12 @@ AI_PROVIDER=ollama  # ollama (default), openai, anthropic, google, openrouter, g
 # TOGETHER_MODEL=together/moonshotai/Kimi-K2.5
 # TOGETHER_TIMEOUT_SECONDS=30
 # TOGETHER_BASE_URL=https://api.together.xyz/v1
+
+# Optional: LiteLLM (for /ask command)
+# LITELLM_API_KEY=
+# LITELLM_MODEL=openai/gpt-4o-mini
+# LITELLM_TIMEOUT_SECONDS=30
+# LITELLM_BASE_URL=https://api.litellm.ai
 
 # Optional: Ollama (for /ask command)
 OLLAMA_URL=http://127.0.0.1:11434

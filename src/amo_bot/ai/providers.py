@@ -18,6 +18,7 @@ from amo_bot.ai.deepseek_provider import DeepSeekProviderConfig, DeepSeekRequest
 from amo_bot.ai.bedrock_provider import BedrockProviderConfig, BedrockRequestClient
 from amo_bot.ai.together_provider import TogetherProviderConfig, TogetherRequestClient
 from amo_bot.ai.fireworks_provider import FireworksProviderConfig, FireworksRequestClient
+from amo_bot.ai.litellm_provider import LiteLLMProviderConfig, LiteLLMRequestClient
 from amo_bot.ai.service import AIService
 from amo_bot.config.settings import Settings
 
@@ -186,6 +187,18 @@ class BedrockProvider:
 
     async def ask(self, prompt: str) -> str:
         return await self.client.ask(prompt)
+
+
+@dataclass(frozen=True, slots=True)
+class LiteLLMProvider:
+    config: LiteLLMProviderConfig
+
+    @property
+    def client(self) -> LiteLLMRequestClient:
+        return LiteLLMRequestClient(config=self.config)
+
+    async def ask(self, prompt: str) -> str:
+        return await self.client.ask(prompt)
 def _build_ollama_provider(settings: Settings) -> OllamaProvider:
     return OllamaProvider(
         AIService(
@@ -320,6 +333,16 @@ def build_ai_provider(settings: Settings) -> AIProvider:
                 access_key_id=settings.aws_access_key_id,
                 secret_access_key=settings.aws_secret_access_key,
                 session_token=settings.aws_session_token,
+            )
+        )
+
+    if provider == "litellm":
+        return LiteLLMProvider(
+            config=LiteLLMProviderConfig(
+                api_key=settings.litellm_api_key or "",
+                model=settings.litellm_model,
+                timeout_seconds=settings.litellm_timeout_seconds,
+                base_url=settings.litellm_base_url,
             )
         )
 

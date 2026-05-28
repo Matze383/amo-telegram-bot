@@ -6,7 +6,8 @@ from amo_bot.ai.ollama import OllamaClient
 from amo_bot.ai.openai_provider import OpenAIProviderConfig
 from amo_bot.ai.anthropic_provider import AnthropicProviderConfig
 from amo_bot.ai.gemini_provider import GeminiProviderConfig
-from amo_bot.ai.providers import AnthropicProvider, BedrockProvider, DeepSeekProvider, FireworksProvider, GeminiProvider, GroqProvider, MistralProvider, OpenAIProvider, OpenRouterProvider, TogetherProvider, XAIProvider, build_ai_provider
+from amo_bot.ai.litellm_provider import LiteLLMProviderConfig
+from amo_bot.ai.providers import AnthropicProvider, BedrockProvider, DeepSeekProvider, FireworksProvider, GeminiProvider, GroqProvider, LiteLLMProvider, MistralProvider, OpenAIProvider, OpenRouterProvider, TogetherProvider, XAIProvider, build_ai_provider
 from amo_bot.ai.service import AIService
 from amo_bot.config.settings import Settings
 
@@ -375,3 +376,46 @@ def test_fireworks_api_key_is_trimmed_not_logged() -> None:
     assert isinstance(provider, FireworksProvider)
     assert provider.config.api_key == "fireworks-credential-placeholder"
     assert provider.config.redacted_dict()["api_key_preview"] == "***"
+
+
+def test_litellm_provider_selection_builds_provider_config_only() -> None:
+    settings = _settings(AI_PROVIDER="litellm", LITELLM_API_KEY="litellm-credential-placeholder")
+    provider = build_ai_provider(settings)
+    assert isinstance(provider, LiteLLMProvider)
+    assert isinstance(provider.config, LiteLLMProviderConfig)
+    assert provider.config.model == "openai/gpt-4o-mini"
+
+
+def test_litellm_requires_api_key() -> None:
+    with pytest.raises(ValueError, match="LITELLM_API_KEY is required when AI_PROVIDER=litellm"):
+        _settings(AI_PROVIDER="litellm")
+
+
+def test_litellm_api_key_is_trimmed_not_logged() -> None:
+    settings = _settings(AI_PROVIDER="litellm", LITELLM_API_KEY="  trimmed-litellm-credential  ")
+    provider = build_ai_provider(settings)
+    assert isinstance(provider, LiteLLMProvider)
+    assert provider.config.api_key == "trimmed-litellm-credential"
+    assert provider.config.redacted_dict()["api_key_preview"] == "***"
+
+
+def test_litellm_requires_model() -> None:
+    with pytest.raises(ValueError, match="LITELLM_MODEL is required when AI_PROVIDER=litellm"):
+        _settings(AI_PROVIDER="litellm", LITELLM_API_KEY="key", LITELLM_MODEL="  ")
+
+
+def test_litellm_requires_non_empty_base_url() -> None:
+    with pytest.raises(ValueError, match="LITELLM_BASE_URL must not be empty"):
+        _settings(AI_PROVIDER="litellm", LITELLM_API_KEY="key", LITELLM_BASE_URL="  ")
+
+
+def test_litellm_regression_ollama_still_works() -> None:
+    settings = _settings(AI_PROVIDER="ollama")
+    provider = build_ai_provider(settings)
+    assert isinstance(provider.service, AIService)
+
+
+def test_litellm_regression_openai_still_works() -> None:
+    settings = _settings(AI_PROVIDER="openai", OPENAI_API_KEY="sk-test")
+    provider = build_ai_provider(settings)
+    assert isinstance(provider, OpenAIProvider)
