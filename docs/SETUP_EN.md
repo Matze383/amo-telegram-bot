@@ -12,7 +12,9 @@ Complete setup instructions for running the bot locally.
 - Optional: AI provider for `/ask` command:
   - Local [Ollama](https://ollama.com/) instance, **OR**
   - OpenAI API key, **OR**
-  - Anthropic API key
+  - Anthropic API key, **OR**
+  - Google/Gemini API key, **OR**
+  - OpenRouter API key
 
 ---
 
@@ -164,7 +166,7 @@ WEBUI_PASSWORD=your_secure_password
 WEBUI_OWNER_TELEGRAM_ID=your_telegram_user_id
 
 # AI Provider Configuration
-AI_PROVIDER=ollama  # ollama (default), openai, anthropic or google
+AI_PROVIDER=ollama  # ollama (default), openai, anthropic, google or openrouter
 
 # Optional: OpenAI (for /ask command)
 # OPENAI_API_KEY=sk-your-key-here
@@ -182,6 +184,12 @@ AI_PROVIDER=ollama  # ollama (default), openai, anthropic or google
 # GEMINI_MODEL=google/gemini-3-flash-preview
 # GEMINI_TIMEOUT_SECONDS=30
 # GEMINI_BASE_URL=https://generativelanguage.googleapis.com
+
+# Optional: OpenRouter (for /ask command)
+# OPENROUTER_API_KEY=your-openrouter-api-key-here
+# OPENROUTER_MODEL=openrouter/auto
+# OPENROUTER_TIMEOUT_SECONDS=30
+# OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
 
 # Optional: Ollama (for /ask command)
 OLLAMA_URL=http://127.0.0.1:11434

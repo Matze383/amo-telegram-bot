@@ -10,6 +10,7 @@ from amo_bot.ai.ollama import OllamaClient
 from amo_bot.ai.openai_provider import OpenAIProviderConfig, OpenAIRequestClient
 from amo_bot.ai.anthropic_provider import AnthropicProviderConfig, AnthropicRequestClient
 from amo_bot.ai.gemini_provider import GeminiProviderConfig, GeminiRequestClient
+from amo_bot.ai.openrouter_provider import OpenRouterProviderConfig, OpenRouterRequestClient
 from amo_bot.ai.service import AIService
 from amo_bot.config.settings import Settings
 
@@ -82,6 +83,18 @@ class GeminiProvider:
         return await self.client.ask(prompt)
 
 
+@dataclass(frozen=True, slots=True)
+class OpenRouterProvider:
+    config: OpenRouterProviderConfig
+
+    @property
+    def client(self) -> OpenRouterRequestClient:
+        return OpenRouterRequestClient(config=self.config)
+
+    async def ask(self, prompt: str) -> str:
+        return await self.client.ask(prompt)
+
+
 def _build_ollama_provider(settings: Settings) -> OllamaProvider:
     return OllamaProvider(
         AIService(
@@ -134,6 +147,16 @@ def build_ai_provider(settings: Settings) -> AIProvider:
                 model=settings.gemini_model,
                 timeout_seconds=settings.gemini_timeout_seconds,
                 base_url=settings.gemini_base_url,
+            )
+        )
+
+    if provider == "openrouter":
+        return OpenRouterProvider(
+            config=OpenRouterProviderConfig(
+                api_key=settings.openrouter_api_key or "",
+                model=settings.openrouter_model,
+                timeout_seconds=settings.openrouter_timeout_seconds,
+                base_url=settings.openrouter_base_url,
             )
         )
 

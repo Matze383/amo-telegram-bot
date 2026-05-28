@@ -22,7 +22,8 @@ This guide helps you test the MVP status of the bot:
   - Local Ollama instance, **OR**
   - OpenAI API key, **OR**
   - Anthropic API key, **OR**
-  - Google/Gemini API key
+  - Google/Gemini API key, **OR**
+  - OpenRouter API key
 
 ---
 
@@ -43,7 +44,7 @@ BOT_USERNAME=your_bot_username
 TELEGRAM_API_BASE=https://api.telegram.org
 
 # AI Provider Configuration
-AI_PROVIDER=ollama  # ollama (default), openai, anthropic or google
+AI_PROVIDER=ollama  # ollama (default), openai, anthropic, google or openrouter
 
 # Optional: OpenAI (for /ask command)
 # OPENAI_API_KEY=sk-your-key-here
@@ -61,6 +62,12 @@ AI_PROVIDER=ollama  # ollama (default), openai, anthropic or google
 # GEMINI_MODEL=google/gemini-3-flash-preview
 # GEMINI_TIMEOUT_SECONDS=30
 # GEMINI_BASE_URL=https://generativelanguage.googleapis.com
+
+# Optional: OpenRouter (for /ask command)
+# OPENROUTER_API_KEY=your-openrouter-api-key-here
+# OPENROUTER_MODEL=openrouter/auto
+# OPENROUTER_TIMEOUT_SECONDS=30
+# OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
 
 # Optional: Ollama (for /ask command)
 OLLAMA_URL=http://127.0.0.1:11434
@@ -303,7 +310,13 @@ Start a private chat with your bot:
 
 ### /ask Test with AI Provider (optional)
 
-**Prerequisite:** AI provider configured (Ollama or OpenAI)
+**Prerequisite:** AI provider configured (Ollama, OpenAI, Anthropic, Google or OpenRouter)
+
+**For OpenRouter:**
+- Ensure `OPENROUTER_API_KEY` is set in `.env`
+- Ensure `AI_PROVIDER=openrouter` is set in `.env`
+- Optional: `OPENROUTER_MODEL` can be customized (default: `openrouter/auto`)
+- Optional: `OPENROUTER_BASE_URL` can be customized (default: `https://openrouter.ai/api/v1`)
 
 **For Ollama:**
 ```bash
@@ -366,7 +379,7 @@ The bot can auto-respond via AI when mentioned or replied to in **active scopes*
 - User must have role `vip`, `admin`, or `owner`
 - User must have accepted consent (`/accept`)
 - The scope (topic or private chat) must have AI enabled in the configuration
-- The AI service must be configured (Ollama or OpenAI)
+- The AI service must be configured (Ollama, OpenAI, Anthropic, Google or OpenRouter)
 
 **Audit Events:**
 - `ai_autoreply_sent` — Response successfully sent

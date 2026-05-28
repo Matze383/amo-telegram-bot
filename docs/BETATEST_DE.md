@@ -22,7 +22,8 @@ Diese Anleitung unterstützt dich beim Testen des MVP-Status des Bots:
   - Lokale Ollama-Instanz, **ODER**
   - OpenAI API-Key, **ODER**
   - Anthropic API-Key, **ODER**
-  - Google/Gemini API-Key
+  - Google/Gemini API-Key, **ODER**
+  - OpenRouter API-Key
 
 ---
 
@@ -43,7 +44,7 @@ BOT_USERNAME=dein_bot_username
 TELEGRAM_API_BASE=https://api.telegram.org
 
 # KI-Provider Konfiguration
-AI_PROVIDER=ollama  # ollama (Standard), openai, anthropic oder google
+AI_PROVIDER=ollama  # ollama (Standard), openai, anthropic, google oder openrouter
 
 # Optional: OpenAI (für /ask Kommando)
 # OPENAI_API_KEY=sk-your-key-hier
@@ -61,6 +62,12 @@ AI_PROVIDER=ollama  # ollama (Standard), openai, anthropic oder google
 # GEMINI_MODEL=google/gemini-3-flash-preview
 # GEMINI_TIMEOUT_SECONDS=30
 # GEMINI_BASE_URL=https://generativelanguage.googleapis.com
+
+# Optional: OpenRouter (für /ask Kommando)
+# OPENROUTER_API_KEY=dein-openrouter-api-key-hier
+# OPENROUTER_MODEL=openrouter/auto
+# OPENROUTER_TIMEOUT_SECONDS=30
+# OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
 
 # Optional: Ollama (für /ask Kommando)
 OLLAMA_URL=http://127.0.0.1:11434
@@ -303,7 +310,13 @@ Starte einen privaten Chat mit deinem Bot:
 
 ### /ask-Test mit KI-Provider (optional)
 
-**Voraussetzung:** KI-Provider konfiguriert (Ollama oder OpenAI)
+**Voraussetzung:** KI-Provider konfiguriert (Ollama, OpenAI, Anthropic, Google oder OpenRouter)
+
+**Für OpenRouter:**
+- Stelle sicher, dass `OPENROUTER_API_KEY` in `.env` gesetzt ist
+- Stelle sicher, dass `AI_PROVIDER=openrouter` in `.env` gesetzt ist
+- Optional: `OPENROUTER_MODEL` kann angepasst werden (Standard: `openrouter/auto`)
+- Optional: `OPENROUTER_BASE_URL` kann angepasst werden (Standard: `https://openrouter.ai/api/v1`)
 
 **Für Ollama:**
 ```bash
@@ -366,7 +379,7 @@ Der Bot kann bei Erwähnung oder als Antwort in **aktiven Scopes** (Themen oder 
 - Nutzer muss Rolle `vip`, `admin` oder `owner` haben
 - Nutzer muss Consent akzeptiert haben (`/accept`)
 - Der Scope (Thema oder privater Chat) muss KI-aktiviert konfiguriert sein
-- Der KI-Service muss konfiguriert sein (Ollama oder OpenAI)
+- Der KI-Service muss konfiguriert sein (Ollama, OpenAI, Anthropic, Google oder OpenRouter)
 
 **Audit-Events:**
 - `ai_autoreply_sent` — Antwort erfolgreich gesendet

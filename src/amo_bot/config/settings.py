@@ -35,6 +35,11 @@ class Settings(BaseSettings):
     gemini_timeout_seconds: float = Field(default=30.0, alias="GEMINI_TIMEOUT_SECONDS", gt=0)
     gemini_base_url: str = Field(default="https://generativelanguage.googleapis.com", alias="GEMINI_BASE_URL")
 
+    openrouter_api_key: str | None = Field(default=None, alias="OPENROUTER_API_KEY")
+    openrouter_model: str = Field(default="openrouter/auto", alias="OPENROUTER_MODEL")
+    openrouter_timeout_seconds: float = Field(default=30.0, alias="OPENROUTER_TIMEOUT_SECONDS", gt=0)
+    openrouter_base_url: str = Field(default="https://openrouter.ai/api/v1", alias="OPENROUTER_BASE_URL")
+
     ollama_base_url: str = Field(default="http://127.0.0.1:11434", alias="OLLAMA_URL")
     ollama_model: str = Field(default="llama3.1", alias="OLLAMA_MODEL")
     ollama_timeout_seconds: int = Field(default=20, alias="OLLAMA_TIMEOUT_SECONDS")
@@ -69,8 +74,8 @@ class Settings(BaseSettings):
             raise ValueError("WEBUI_LOGIN_DELAY_MAX_SECONDS must be >= WEBUI_LOGIN_DELAY_BASE_SECONDS")
 
         provider = self.ai_provider.strip().casefold()
-        if provider not in {"openai", "ollama", "anthropic", "google"}:
-            raise ValueError("AI_PROVIDER must be one of: openai, ollama, anthropic, google")
+        if provider not in {"openai", "ollama", "anthropic", "google", "openrouter"}:
+            raise ValueError("AI_PROVIDER must be one of: openai, ollama, anthropic, google, openrouter")
 
         self.ai_provider = provider
 
@@ -116,6 +121,22 @@ class Settings(BaseSettings):
             if not base_url:
                 raise ValueError("GEMINI_BASE_URL must not be empty")
             self.gemini_base_url = base_url
+
+        if provider == "openrouter":
+            api_key = (self.openrouter_api_key or "").strip()
+            if not api_key:
+                raise ValueError("OPENROUTER_API_KEY is required when AI_PROVIDER=openrouter")
+            self.openrouter_api_key = api_key
+
+            model = self.openrouter_model.strip()
+            if not model:
+                raise ValueError("OPENROUTER_MODEL is required when AI_PROVIDER=openrouter")
+            self.openrouter_model = model
+
+            base_url = self.openrouter_base_url.strip()
+            if not base_url:
+                raise ValueError("OPENROUTER_BASE_URL must not be empty")
+            self.openrouter_base_url = base_url
 
         endpoint = self.ollama_request_endpoint.strip().casefold()
         if endpoint not in {"generate", "chat"}:

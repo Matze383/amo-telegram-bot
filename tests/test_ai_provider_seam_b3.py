@@ -6,7 +6,7 @@ from amo_bot.ai.ollama import OllamaClient
 from amo_bot.ai.openai_provider import OpenAIProviderConfig
 from amo_bot.ai.anthropic_provider import AnthropicProviderConfig
 from amo_bot.ai.gemini_provider import GeminiProviderConfig
-from amo_bot.ai.providers import AnthropicProvider, GeminiProvider, OpenAIProvider, build_ai_provider
+from amo_bot.ai.providers import AnthropicProvider, GeminiProvider, OpenAIProvider, OpenRouterProvider, build_ai_provider
 from amo_bot.ai.service import AIService
 from amo_bot.config.settings import Settings
 
@@ -187,3 +187,23 @@ def test_gemini_api_key_preferred_when_both_set() -> None:
     provider = build_ai_provider(settings)
     assert isinstance(provider, GeminiProvider)
     assert provider.config.api_key == "gk-real-key"
+
+
+def test_openrouter_provider_selection_builds_provider_config_only() -> None:
+    settings = _settings(AI_PROVIDER="openrouter", OPENROUTER_API_KEY="or-secret")
+    provider = build_ai_provider(settings)
+    assert isinstance(provider, OpenRouterProvider)
+    assert provider.config.model == "openrouter/auto"
+
+
+def test_openrouter_requires_api_key() -> None:
+    with pytest.raises(ValueError, match="OPENROUTER_API_KEY is required when AI_PROVIDER=openrouter"):
+        _settings(AI_PROVIDER="openrouter")
+
+
+def test_openrouter_api_key_is_trimmed_not_logged() -> None:
+    settings = _settings(AI_PROVIDER="openrouter", OPENROUTER_API_KEY="  or-real-key  ")
+    provider = build_ai_provider(settings)
+    assert isinstance(provider, OpenRouterProvider)
+    assert provider.config.api_key == "or-real-key"
+    assert provider.config.redacted_dict()["api_key_preview"] == "***"
