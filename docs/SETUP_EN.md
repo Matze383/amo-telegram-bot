@@ -14,7 +14,8 @@ Complete setup instructions for running the bot locally.
   - OpenAI API key, **OR**
   - Anthropic API key, **OR**
   - Google/Gemini API key, **OR**
-  - OpenRouter API key
+  - OpenRouter API key, **OR**
+  - [Groq](https://groq.com/) API key
 
 ---
 
@@ -166,15 +167,15 @@ WEBUI_PASSWORD=your_secure_password
 WEBUI_OWNER_TELEGRAM_ID=your_telegram_user_id
 
 # AI Provider Configuration
-AI_PROVIDER=ollama  # ollama (default), openai, anthropic, google or openrouter
+AI_PROVIDER=ollama  # ollama (default), openai, anthropic, google, openrouter or groq
 
 # Optional: OpenAI (for /ask command)
-# OPENAI_API_KEY=sk-your-key-here
+# OPENAI_API_KEY=your-openai-api-key-here
 # OPENAI_MODEL=gpt-4o-mini
 # OPENAI_TIMEOUT_SECONDS=30
 
 # Optional: Anthropic (for /ask command)
-# ANTHROPIC_API_KEY=sk-ant-your-key-here
+# ANTHROPIC_API_KEY=your-anthropic-api-key-here
 # ANTHROPIC_MODEL=anthropic/claude-opus-4-6
 # ANTHROPIC_TIMEOUT_SECONDS=30
 # ANTHROPIC_BASE_URL=https://api.anthropic.com
@@ -190,6 +191,12 @@ AI_PROVIDER=ollama  # ollama (default), openai, anthropic, google or openrouter
 # OPENROUTER_MODEL=openrouter/auto
 # OPENROUTER_TIMEOUT_SECONDS=30
 # OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
+
+# Optional: Groq (for /ask command)
+# GROQ_API_KEY=your-groq-api-key-here
+# GROQ_MODEL=groq/llama-3.1-8b-instant
+# GROQ_TIMEOUT_SECONDS=30
+# GROQ_BASE_URL=https://api.groq.com/openai/v1
 
 # Optional: Ollama (for /ask command)
 OLLAMA_URL=http://127.0.0.1:11434

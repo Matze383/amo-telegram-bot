@@ -14,7 +14,8 @@ Vollständige Anleitung zum lokalen Betrieb des Bots.
   - OpenAI API-Key, **ODER**
   - Anthropic API-Key, **ODER**
   - Google/Gemini API-Key, **ODER**
-  - OpenRouter API-Key
+  - OpenRouter API-Key, **ODER**
+  - [Groq](https://groq.com/) API-Key
 
 ---
 
@@ -166,15 +167,15 @@ WEBUI_PASSWORD=dein_sicheres_passwort
 WEBUI_OWNER_TELEGRAM_ID=deine_telegram_user_id
 
 # KI-Provider Konfiguration
-AI_PROVIDER=ollama  # ollama (Standard), openai, anthropic, google oder openrouter
+AI_PROVIDER=ollama  # ollama (Standard), openai, anthropic, google, openrouter oder groq
 
 # Optional: OpenAI (für /ask Kommando)
-# OPENAI_API_KEY=sk-your-key-hier
+# OPENAI_API_KEY=dein-openai-api-key-hier
 # OPENAI_MODEL=gpt-4o-mini
 # OPENAI_TIMEOUT_SECONDS=30
 
 # Optional: Anthropic (für /ask Kommando)
-# ANTHROPIC_API_KEY=sk-ant-your-key-hier
+# ANTHROPIC_API_KEY=dein-anthropic-api-key-hier
 # ANTHROPIC_MODEL=anthropic/claude-opus-4-6
 # ANTHROPIC_TIMEOUT_SECONDS=30
 # ANTHROPIC_BASE_URL=https://api.anthropic.com
@@ -190,6 +191,12 @@ AI_PROVIDER=ollama  # ollama (Standard), openai, anthropic, google oder openrout
 # OPENROUTER_MODEL=openrouter/auto
 # OPENROUTER_TIMEOUT_SECONDS=30
 # OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
+
+# Optional: Groq (für /ask Kommando)
+# GROQ_API_KEY=dein-groq-api-key-hier
+# GROQ_MODEL=groq/llama-3.1-8b-instant
+# GROQ_TIMEOUT_SECONDS=30
+# GROQ_BASE_URL=https://api.groq.com/openai/v1
 
 # Optional: Ollama (für /ask Kommando)
 OLLAMA_URL=http://127.0.0.1:11434

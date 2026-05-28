@@ -40,6 +40,11 @@ class Settings(BaseSettings):
     openrouter_timeout_seconds: float = Field(default=30.0, alias="OPENROUTER_TIMEOUT_SECONDS", gt=0)
     openrouter_base_url: str = Field(default="https://openrouter.ai/api/v1", alias="OPENROUTER_BASE_URL")
 
+    groq_api_key: str | None = Field(default=None, alias="GROQ_API_KEY")
+    groq_model: str = Field(default="groq/llama-3.1-8b-instant", alias="GROQ_MODEL")
+    groq_timeout_seconds: float = Field(default=30.0, alias="GROQ_TIMEOUT_SECONDS", gt=0)
+    groq_base_url: str = Field(default="https://api.groq.com/openai/v1", alias="GROQ_BASE_URL")
+
     ollama_base_url: str = Field(default="http://127.0.0.1:11434", alias="OLLAMA_URL")
     ollama_model: str = Field(default="llama3.1", alias="OLLAMA_MODEL")
     ollama_timeout_seconds: int = Field(default=20, alias="OLLAMA_TIMEOUT_SECONDS")
@@ -74,8 +79,8 @@ class Settings(BaseSettings):
             raise ValueError("WEBUI_LOGIN_DELAY_MAX_SECONDS must be >= WEBUI_LOGIN_DELAY_BASE_SECONDS")
 
         provider = self.ai_provider.strip().casefold()
-        if provider not in {"openai", "ollama", "anthropic", "google", "openrouter"}:
-            raise ValueError("AI_PROVIDER must be one of: openai, ollama, anthropic, google, openrouter")
+        if provider not in {"openai", "ollama", "anthropic", "google", "openrouter", "groq"}:
+            raise ValueError("AI_PROVIDER must be one of: openai, ollama, anthropic, google, openrouter, groq")
 
         self.ai_provider = provider
 
@@ -137,6 +142,22 @@ class Settings(BaseSettings):
             if not base_url:
                 raise ValueError("OPENROUTER_BASE_URL must not be empty")
             self.openrouter_base_url = base_url
+
+        if provider == "groq":
+            api_key = (self.groq_api_key or "").strip()
+            if not api_key:
+                raise ValueError("GROQ_API_KEY is required when AI_PROVIDER=groq")
+            self.groq_api_key = api_key
+
+            model = self.groq_model.strip()
+            if not model:
+                raise ValueError("GROQ_MODEL is required when AI_PROVIDER=groq")
+            self.groq_model = model
+
+            base_url = self.groq_base_url.strip()
+            if not base_url:
+                raise ValueError("GROQ_BASE_URL must not be empty")
+            self.groq_base_url = base_url
 
         endpoint = self.ollama_request_endpoint.strip().casefold()
         if endpoint not in {"generate", "chat"}:

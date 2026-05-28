@@ -23,7 +23,8 @@ This guide helps you test the MVP status of the bot:
   - OpenAI API key, **OR**
   - Anthropic API key, **OR**
   - Google/Gemini API key, **OR**
-  - OpenRouter API key
+  - OpenRouter API key, **OR**
+  - [Groq](https://groq.com/) API key
 
 ---
 
@@ -44,15 +45,15 @@ BOT_USERNAME=your_bot_username
 TELEGRAM_API_BASE=https://api.telegram.org
 
 # AI Provider Configuration
-AI_PROVIDER=ollama  # ollama (default), openai, anthropic, google or openrouter
+AI_PROVIDER=ollama  # ollama (default), openai, anthropic, google, openrouter or groq
 
 # Optional: OpenAI (for /ask command)
-# OPENAI_API_KEY=sk-your-key-here
+# OPENAI_API_KEY=your-openai-api-key-here
 # OPENAI_MODEL=gpt-4o-mini
 # OPENAI_TIMEOUT_SECONDS=30
 
 # Optional: Anthropic (for /ask command)
-# ANTHROPIC_API_KEY=sk-ant-your-key-here
+# ANTHROPIC_API_KEY=your-anthropic-api-key-here
 # ANTHROPIC_MODEL=anthropic/claude-opus-4-6
 # ANTHROPIC_TIMEOUT_SECONDS=30
 # ANTHROPIC_BASE_URL=https://api.anthropic.com
@@ -68,6 +69,12 @@ AI_PROVIDER=ollama  # ollama (default), openai, anthropic, google or openrouter
 # OPENROUTER_MODEL=openrouter/auto
 # OPENROUTER_TIMEOUT_SECONDS=30
 # OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
+
+# Optional: Groq (for /ask command)
+# GROQ_API_KEY=your-groq-api-key-here
+# GROQ_MODEL=groq/llama-3.1-8b-instant
+# GROQ_TIMEOUT_SECONDS=30
+# GROQ_BASE_URL=https://api.groq.com/openai/v1
 
 # Optional: Ollama (for /ask command)
 OLLAMA_URL=http://127.0.0.1:11434
@@ -310,7 +317,7 @@ Start a private chat with your bot:
 
 ### /ask Test with AI Provider (optional)
 
-**Prerequisite:** AI provider configured (Ollama, OpenAI, Anthropic, Google or OpenRouter)
+**Prerequisite:** AI provider configured (Ollama, OpenAI, Anthropic, Google, OpenRouter or Groq)
 
 **For OpenRouter:**
 - Ensure `OPENROUTER_API_KEY` is set in `.env`
@@ -337,6 +344,12 @@ curl http://127.0.0.1:11434/api/tags
 **For OpenAI:**
 - Ensure `OPENAI_API_KEY` is set in `.env`
 - Ensure `AI_PROVIDER=openai` is set in `.env`
+
+**For Groq:**
+- Ensure `GROQ_API_KEY` is set in `.env`
+- Ensure `AI_PROVIDER=groq` is set in `.env`
+- Optional: `GROQ_MODEL` can be customized (default: `groq/llama-3.1-8b-instant`)
+- Optional: `GROQ_BASE_URL` can be customized (default: `https://api.groq.com/openai/v1`)
 
 **Scoped AI Sessions:**
 - **Private chats:** Each user has an isolated session (not shared)
@@ -379,7 +392,7 @@ The bot can auto-respond via AI when mentioned or replied to in **active scopes*
 - User must have role `vip`, `admin`, or `owner`
 - User must have accepted consent (`/accept`)
 - The scope (topic or private chat) must have AI enabled in the configuration
-- The AI service must be configured (Ollama, OpenAI, Anthropic, Google or OpenRouter)
+- The AI service must be configured (Ollama, OpenAI, Anthropic, Google, OpenRouter or Groq)
 
 **Audit Events:**
 - `ai_autoreply_sent` — Response successfully sent
