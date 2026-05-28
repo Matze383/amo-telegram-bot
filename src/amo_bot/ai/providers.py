@@ -17,6 +17,7 @@ from amo_bot.ai.xai_provider import XAIProviderConfig, XAIRequestClient
 from amo_bot.ai.deepseek_provider import DeepSeekProviderConfig, DeepSeekRequestClient
 from amo_bot.ai.bedrock_provider import BedrockProviderConfig, BedrockRequestClient
 from amo_bot.ai.together_provider import TogetherProviderConfig, TogetherRequestClient
+from amo_bot.ai.fireworks_provider import FireworksProviderConfig, FireworksRequestClient
 from amo_bot.ai.service import AIService
 from amo_bot.config.settings import Settings
 
@@ -164,6 +165,18 @@ class TogetherProvider:
 
 
 @dataclass(frozen=True, slots=True)
+class FireworksProvider:
+    config: FireworksProviderConfig
+
+    @property
+    def client(self) -> FireworksRequestClient:
+        return FireworksRequestClient(config=self.config)
+
+    async def ask(self, prompt: str) -> str:
+        return await self.client.ask(prompt)
+
+
+@dataclass(frozen=True, slots=True)
 class BedrockProvider:
     config: BedrockProviderConfig
 
@@ -285,6 +298,16 @@ def build_ai_provider(settings: Settings) -> AIProvider:
                 model=settings.together_model,
                 timeout_seconds=settings.together_timeout_seconds,
                 base_url=settings.together_base_url,
+            )
+        )
+
+    if provider == "fireworks":
+        return FireworksProvider(
+            config=FireworksProviderConfig(
+                api_key=settings.fireworks_api_key or "",
+                model=settings.fireworks_model,
+                timeout_seconds=settings.fireworks_timeout_seconds,
+                base_url=settings.fireworks_base_url,
             )
         )
 

@@ -6,7 +6,7 @@ from amo_bot.ai.ollama import OllamaClient
 from amo_bot.ai.openai_provider import OpenAIProviderConfig
 from amo_bot.ai.anthropic_provider import AnthropicProviderConfig
 from amo_bot.ai.gemini_provider import GeminiProviderConfig
-from amo_bot.ai.providers import AnthropicProvider, BedrockProvider, DeepSeekProvider, GeminiProvider, GroqProvider, MistralProvider, OpenAIProvider, OpenRouterProvider, TogetherProvider, XAIProvider, build_ai_provider
+from amo_bot.ai.providers import AnthropicProvider, BedrockProvider, DeepSeekProvider, FireworksProvider, GeminiProvider, GroqProvider, MistralProvider, OpenAIProvider, OpenRouterProvider, TogetherProvider, XAIProvider, build_ai_provider
 from amo_bot.ai.service import AIService
 from amo_bot.config.settings import Settings
 
@@ -355,3 +355,23 @@ def test_bedrock_optional_credentials_trimmed_and_redacted() -> None:
     redacted = provider.config.redacted_dict()
     assert redacted["aws_access_key_id_present"] is True
     assert redacted["aws_secret_access_key_present"] is True
+
+
+def test_fireworks_provider_selection_builds_provider_config_only() -> None:
+    settings = _settings(AI_PROVIDER="fireworks", FIREWORKS_API_KEY="fireworks-credential-placeholder")
+    provider = build_ai_provider(settings)
+    assert isinstance(provider, FireworksProvider)
+    assert provider.config.model == "fireworks/accounts/fireworks/models/llama-v3p1-8b-instruct"
+
+
+def test_fireworks_requires_api_key() -> None:
+    with pytest.raises(ValueError, match="FIREWORKS_API_KEY is required when AI_PROVIDER=fireworks"):
+        _settings(AI_PROVIDER="fireworks")
+
+
+def test_fireworks_api_key_is_trimmed_not_logged() -> None:
+    settings = _settings(AI_PROVIDER="fireworks", FIREWORKS_API_KEY="  fireworks-credential-placeholder  ")
+    provider = build_ai_provider(settings)
+    assert isinstance(provider, FireworksProvider)
+    assert provider.config.api_key == "fireworks-credential-placeholder"
+    assert provider.config.redacted_dict()["api_key_preview"] == "***"

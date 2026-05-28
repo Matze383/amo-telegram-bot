@@ -19,7 +19,9 @@ Complete setup instructions for running the bot locally.
   - Mistral API key, **OR**
   - xAI API key, **OR**
   - DeepSeek API key, **OR**
-  - Together API key, or AWS credentials/profile for Amazon Bedrock
+  - Together API key, **OR**
+  - Fireworks API key, or
+  - AWS credentials/profile for Amazon Bedrock
 
 ---
 
@@ -1151,3 +1153,6 @@ chmod 755 data
 - Does the `data\` directory exist?
 - Check folder permissions (right-click → Properties → Security)
 - For testing only: `del data\amo_bot.db` and restart
+
+
+Fireworks provider (GH38): AI_PROVIDER=fireworks with FIREWORKS_API_KEY, FIREWORKS_MODEL, FIREWORKS_BASE_URL, FIREWORKS_TIMEOUT_SECONDS.
