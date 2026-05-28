@@ -55,7 +55,7 @@ class GeminiRequestClient:
         api_model = self._api_model_name(self.config.model)
         endpoint = (
             self.config.base_url.rstrip("/")
-            + f"/v1beta/models/{api_model}:generateContent?key={self.config.api_key}"
+            + f"/v1beta/models/{api_model}:generateContent"
         )
         data = json.dumps(payload).encode("utf-8")
         req = request.Request(
@@ -64,6 +64,7 @@ class GeminiRequestClient:
             method="POST",
             headers={
                 "Content-Type": "application/json",
+                "x-goog-api-key": self.config.api_key,
             },
         )
 

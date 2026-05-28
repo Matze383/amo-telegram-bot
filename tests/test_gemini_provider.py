@@ -39,6 +39,7 @@ def test_gemini_request_client_success(monkeypatch: pytest.MonkeyPatch) -> None:
     def fake_urlopen(req, timeout):
         captured["url"] = req.full_url
         captured["content_type"] = req.headers.get("Content-type")
+        captured["headers"] = dict(req.headers)
         captured["timeout"] = timeout
         captured["payload"] = json.loads(req.data.decode("utf-8"))
         return _Response(payload={"candidates": [{"content": {"parts": [{"text": "  hello  "}]}}]})
@@ -49,11 +50,13 @@ def test_gemini_request_client_success(monkeypatch: pytest.MonkeyPatch) -> None:
     result = asyncio.run(client.ask("hi"))
 
     assert result == "hello"
+    assert "key=" not in captured["url"]
     assert (
         captured["url"]
-        == "https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=gk-test"
+        == "https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent"
     )
     assert captured["content_type"] == "application/json"
+    assert captured["headers"]["X-goog-api-key"] == "gk-test"
     assert captured["timeout"] == 3.0
     assert captured["payload"] == {
         "contents": [{"role": "user", "parts": [{"text": "hi"}]}],
