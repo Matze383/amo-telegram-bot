@@ -21,6 +21,7 @@ from amo_bot.ai.fireworks_provider import FireworksProviderConfig, FireworksRequ
 from amo_bot.ai.litellm_provider import LiteLLMProviderConfig, LiteLLMRequestClient
 from amo_bot.ai.lmstudio_provider import LMStudioProviderConfig, LMStudioRequestClient
 from amo_bot.ai.vllm_provider import VLLMProviderConfig, VLLMRequestClient
+from amo_bot.ai.sglang_provider import SGLangProviderConfig, SGLangRequestClient
 from amo_bot.ai.service import AIService
 from amo_bot.config.settings import Settings
 
@@ -223,6 +224,19 @@ class VLLMProvider:
     def client(self) -> VLLMRequestClient:
         return VLLMRequestClient(config=self.config)
 
+
+    async def ask(self, prompt: str) -> str:
+        return await self.client.ask(prompt)
+
+
+@dataclass(frozen=True, slots=True)
+class SGLangProvider:
+    config: SGLangProviderConfig
+
+    @property
+    def client(self) -> SGLangRequestClient:
+        return SGLangRequestClient(config=self.config)
+
     async def ask(self, prompt: str) -> str:
         return await self.client.ask(prompt)
 
@@ -391,6 +405,16 @@ def build_ai_provider(settings: Settings) -> AIProvider:
                 model=settings.vllm_model,
                 timeout_seconds=settings.vllm_timeout_seconds,
                 base_url=settings.vllm_base_url,
+            )
+        )
+
+    if provider == "sglang":
+        return SGLangProvider(
+            config=SGLangProviderConfig(
+                api_key=settings.sglang_api_key,
+                model=settings.sglang_model,
+                timeout_seconds=settings.sglang_timeout_seconds,
+                base_url=settings.sglang_base_url,
             )
         )
 

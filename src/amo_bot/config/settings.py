@@ -85,6 +85,11 @@ class Settings(BaseSettings):
     vllm_timeout_seconds: float = Field(default=60.0, alias="VLLM_TIMEOUT_SECONDS", gt=0)
     vllm_base_url: str = Field(default="http://127.0.0.1:8000/v1", alias="VLLM_BASE_URL")
 
+    sglang_api_key: str | None = Field(default=None, alias="SGLANG_API_KEY")
+    sglang_model: str = Field(default="", alias="SGLANG_MODEL")
+    sglang_timeout_seconds: float = Field(default=60.0, alias="SGLANG_TIMEOUT_SECONDS", gt=0)
+    sglang_base_url: str = Field(default="http://127.0.0.1:8000/v1", alias="SGLANG_BASE_URL")
+
     bedrock_model: str = Field(default="amazon-bedrock/anthropic.claude-3-haiku-20240307-v1:0", alias="BEDROCK_MODEL")
     bedrock_region: str | None = Field(default=None, alias="BEDROCK_REGION")
     aws_region: str | None = Field(default=None, alias="AWS_REGION")
@@ -129,8 +134,8 @@ class Settings(BaseSettings):
             raise ValueError("WEBUI_LOGIN_DELAY_MAX_SECONDS must be >= WEBUI_LOGIN_DELAY_BASE_SECONDS")
 
         provider = self.ai_provider.strip().casefold()
-        if provider not in {"openai", "ollama", "anthropic", "google", "openrouter", "groq", "mistral", "xai", "deepseek", "together", "fireworks", "amazon-bedrock", "litellm", "lmstudio", "vllm"}:
-            raise ValueError("AI_PROVIDER must be one of: openai, ollama, anthropic, google, openrouter, groq, mistral, xai, deepseek, together, fireworks, amazon-bedrock, litellm, lmstudio, vllm")
+        if provider not in {"openai", "ollama", "anthropic", "google", "openrouter", "groq", "mistral", "xai", "deepseek", "together", "fireworks", "amazon-bedrock", "litellm", "lmstudio", "vllm", "sglang"}:
+            raise ValueError("AI_PROVIDER must be one of: openai, ollama, anthropic, google, openrouter, groq, mistral, xai, deepseek, together, fireworks, amazon-bedrock, litellm, lmstudio, vllm, sglang")
 
         self.ai_provider = provider
 
@@ -357,6 +362,20 @@ class Settings(BaseSettings):
             if not base_url:
                 raise ValueError("VLLM_BASE_URL must not be empty")
             self.vllm_base_url = base_url
+
+        if provider == "sglang":
+            api_key = (self.sglang_api_key or "").strip()
+            self.sglang_api_key = api_key or None
+
+            model = self.sglang_model.strip()
+            if not model:
+                raise ValueError("SGLANG_MODEL is required when AI_PROVIDER=sglang")
+            self.sglang_model = model
+
+            base_url = self.sglang_base_url.strip()
+            if not base_url:
+                raise ValueError("SGLANG_BASE_URL must not be empty")
+            self.sglang_base_url = base_url
 
         endpoint = self.ollama_request_endpoint.strip().casefold()
         if endpoint not in {"generate", "chat"}:

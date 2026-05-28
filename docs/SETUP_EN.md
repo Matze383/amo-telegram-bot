@@ -21,7 +21,8 @@ Complete setup instructions for running the bot locally.
   - DeepSeek API key, **OR**
   - Together API key, **OR**
   - Fireworks API key, or
-  - AWS credentials/profile for Amazon Bedrock
+  - AWS credentials/profile for Amazon Bedrock, or
+  - SGLang local server instance
 
 ---
 
@@ -173,7 +174,7 @@ WEBUI_PASSWORD=your_secure_password
 WEBUI_OWNER_TELEGRAM_ID=your_telegram_user_id
 
 # AI Provider Configuration
-AI_PROVIDER=ollama  # ollama (default), openai, anthropic, google, openrouter, groq, mistral, xai, deepseek, together, fireworks, litellm, or lmstudio, or vllm
+AI_PROVIDER=ollama  # ollama (default), openai, anthropic, google, openrouter, groq, mistral, xai, deepseek, together, fireworks, litellm, lmstudio, vllm, or sglang
 
 # Optional: OpenAI (for /ask command)
 # OPENAI_API_KEY=your-openai-api-key-here
@@ -245,6 +246,12 @@ AI_PROVIDER=ollama  # ollama (default), openai, anthropic, google, openrouter, g
 # VLLM_MODEL=                 # model name exposed by the vLLM server
 # VLLM_TIMEOUT_SECONDS=60     # higher timeout recommended for local inference
 # VLLM_BASE_URL=http://127.0.0.1:8000/v1
+
+# Optional: SGLang (for /ask command) - local OpenAI-compatible server
+# SGLANG_API_KEY=             # optional; omit for unauthenticated local servers
+# SGLANG_MODEL=               # model name exposed by the SGLang server
+# SGLANG_TIMEOUT_SECONDS=60   # higher timeout recommended for local inference
+# SGLANG_BASE_URL=http://127.0.0.1:8000/v1
 
 # Optional: Ollama (for /ask command)
 OLLAMA_URL=http://127.0.0.1:11434
