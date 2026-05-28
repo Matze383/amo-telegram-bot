@@ -173,7 +173,7 @@ WEBUI_PASSWORD=your_secure_password
 WEBUI_OWNER_TELEGRAM_ID=your_telegram_user_id
 
 # AI Provider Configuration
-AI_PROVIDER=ollama  # ollama (default), openai, anthropic, google, openrouter, groq, mistral, xai, deepseek, together, fireworks, litellm, or lmstudio
+AI_PROVIDER=ollama  # ollama (default), openai, anthropic, google, openrouter, groq, mistral, xai, deepseek, together, fireworks, litellm, or lmstudio, or vllm
 
 # Optional: OpenAI (for /ask command)
 # OPENAI_API_KEY=your-openai-api-key-here
@@ -239,6 +239,12 @@ AI_PROVIDER=ollama  # ollama (default), openai, anthropic, google, openrouter, g
 # LMSTUDIO_MODEL=local-model  # model name exposed by LM Studio
 # LMSTUDIO_TIMEOUT_SECONDS=60  # higher timeout recommended for local inference
 # LMSTUDIO_BASE_URL=http://127.0.0.1:1234/v1
+
+# Optional: vLLM (for /ask command) - local OpenAI-compatible server (e.g. OpenClaw backend)
+# VLLM_API_KEY=               # optional; omit for unauthenticated local servers
+# VLLM_MODEL=                 # model name exposed by the vLLM server
+# VLLM_TIMEOUT_SECONDS=60     # higher timeout recommended for local inference
+# VLLM_BASE_URL=http://127.0.0.1:8000/v1
 
 # Optional: Ollama (for /ask command)
 OLLAMA_URL=http://127.0.0.1:11434

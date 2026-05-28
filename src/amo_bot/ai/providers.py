@@ -20,6 +20,7 @@ from amo_bot.ai.together_provider import TogetherProviderConfig, TogetherRequest
 from amo_bot.ai.fireworks_provider import FireworksProviderConfig, FireworksRequestClient
 from amo_bot.ai.litellm_provider import LiteLLMProviderConfig, LiteLLMRequestClient
 from amo_bot.ai.lmstudio_provider import LMStudioProviderConfig, LMStudioRequestClient
+from amo_bot.ai.vllm_provider import VLLMProviderConfig, VLLMRequestClient
 from amo_bot.ai.service import AIService
 from amo_bot.config.settings import Settings
 
@@ -214,6 +215,18 @@ class LMStudioProvider:
         return await self.client.ask(prompt)
 
 
+@dataclass(frozen=True, slots=True)
+class VLLMProvider:
+    config: VLLMProviderConfig
+
+    @property
+    def client(self) -> VLLMRequestClient:
+        return VLLMRequestClient(config=self.config)
+
+    async def ask(self, prompt: str) -> str:
+        return await self.client.ask(prompt)
+
+
 def _build_ollama_provider(settings: Settings) -> OllamaProvider:
     return OllamaProvider(
         AIService(
@@ -368,6 +381,16 @@ def build_ai_provider(settings: Settings) -> AIProvider:
                 model=settings.lmstudio_model,
                 timeout_seconds=settings.lmstudio_timeout_seconds,
                 base_url=settings.lmstudio_base_url,
+            )
+        )
+
+    if provider == "vllm":
+        return VLLMProvider(
+            config=VLLMProviderConfig(
+                api_key=settings.vllm_api_key,
+                model=settings.vllm_model,
+                timeout_seconds=settings.vllm_timeout_seconds,
+                base_url=settings.vllm_base_url,
             )
         )
 

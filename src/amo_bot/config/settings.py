@@ -80,6 +80,11 @@ class Settings(BaseSettings):
     lmstudio_timeout_seconds: float = Field(default=60.0, alias="LMSTUDIO_TIMEOUT_SECONDS", gt=0)
     lmstudio_base_url: str = Field(default="http://127.0.0.1:1234/v1", alias="LMSTUDIO_BASE_URL")
 
+    vllm_api_key: str | None = Field(default=None, alias="VLLM_API_KEY")
+    vllm_model: str = Field(default="", alias="VLLM_MODEL")
+    vllm_timeout_seconds: float = Field(default=60.0, alias="VLLM_TIMEOUT_SECONDS", gt=0)
+    vllm_base_url: str = Field(default="http://127.0.0.1:8000/v1", alias="VLLM_BASE_URL")
+
     bedrock_model: str = Field(default="amazon-bedrock/anthropic.claude-3-haiku-20240307-v1:0", alias="BEDROCK_MODEL")
     bedrock_region: str | None = Field(default=None, alias="BEDROCK_REGION")
     aws_region: str | None = Field(default=None, alias="AWS_REGION")
@@ -124,8 +129,8 @@ class Settings(BaseSettings):
             raise ValueError("WEBUI_LOGIN_DELAY_MAX_SECONDS must be >= WEBUI_LOGIN_DELAY_BASE_SECONDS")
 
         provider = self.ai_provider.strip().casefold()
-        if provider not in {"openai", "ollama", "anthropic", "google", "openrouter", "groq", "mistral", "xai", "deepseek", "together", "fireworks", "amazon-bedrock", "litellm", "lmstudio"}:
-            raise ValueError("AI_PROVIDER must be one of: openai, ollama, anthropic, google, openrouter, groq, mistral, xai, deepseek, together, fireworks, amazon-bedrock, litellm, lmstudio")
+        if provider not in {"openai", "ollama", "anthropic", "google", "openrouter", "groq", "mistral", "xai", "deepseek", "together", "fireworks", "amazon-bedrock", "litellm", "lmstudio", "vllm"}:
+            raise ValueError("AI_PROVIDER must be one of: openai, ollama, anthropic, google, openrouter, groq, mistral, xai, deepseek, together, fireworks, amazon-bedrock, litellm, lmstudio, vllm")
 
         self.ai_provider = provider
 
@@ -338,6 +343,20 @@ class Settings(BaseSettings):
             if not base_url:
                 raise ValueError("LMSTUDIO_BASE_URL must not be empty")
             self.lmstudio_base_url = base_url
+
+        if provider == "vllm":
+            api_key = (self.vllm_api_key or "").strip()
+            self.vllm_api_key = api_key or None
+
+            model = self.vllm_model.strip()
+            if not model:
+                raise ValueError("VLLM_MODEL is required when AI_PROVIDER=vllm")
+            self.vllm_model = model
+
+            base_url = self.vllm_base_url.strip()
+            if not base_url:
+                raise ValueError("VLLM_BASE_URL must not be empty")
+            self.vllm_base_url = base_url
 
         endpoint = self.ollama_request_endpoint.strip().casefold()
         if endpoint not in {"generate", "chat"}:
