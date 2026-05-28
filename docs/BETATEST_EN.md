@@ -26,7 +26,8 @@ This guide helps you test the MVP status of the bot:
   - OpenRouter API key, **OR**
   - [Groq](https://groq.com/) API key, **OR**
   - Mistral API key, **OR**
-  - xAI API key
+  - xAI API key, **OR**
+  - DeepSeek API key
 
 ---
 
@@ -47,7 +48,7 @@ BOT_USERNAME=your_bot_username
 TELEGRAM_API_BASE=https://api.telegram.org
 
 # AI Provider Configuration
-AI_PROVIDER=ollama  # ollama (default), openai, anthropic, google, openrouter, groq, mistral or xai
+AI_PROVIDER=ollama  # ollama (default), openai, anthropic, google, openrouter, groq, mistral, xai or deepseek
 
 # Optional: OpenAI (for /ask command)
 # OPENAI_API_KEY=your-openai-api-key-here
@@ -89,6 +90,12 @@ AI_PROVIDER=ollama  # ollama (default), openai, anthropic, google, openrouter, g
 # XAI_MODEL=xai/grok-4.3
 # XAI_TIMEOUT_SECONDS=30
 # XAI_BASE_URL=https://api.x.ai/v1
+
+# Optional: DeepSeek (for /ask command)
+# DEEPSEEK_API_KEY=
+# DEEPSEEK_MODEL=deepseek/deepseek-v4-flash
+# DEEPSEEK_TIMEOUT_SECONDS=30
+# DEEPSEEK_BASE_URL=https://api.deepseek.com/v1
 
 # Optional: Ollama (for /ask command)
 OLLAMA_URL=http://127.0.0.1:11434
@@ -377,6 +384,12 @@ curl http://127.0.0.1:11434/api/tags
 - Optional: `XAI_MODEL` can be customized (default: `xai/grok-4.3`)
 - Optional: `XAI_BASE_URL` can be customized (default: `https://api.x.ai/v1`)
 
+**For DeepSeek:**
+- Ensure `DEEPSEEK_API_KEY` is set in `.env`
+- Ensure `AI_PROVIDER=deepseek` is set in `.env`
+- Optional: `DEEPSEEK_MODEL` can be customized (default: `deepseek/deepseek-v4-flash`)
+- Optional: `DEEPSEEK_BASE_URL` can be customized (default: `https://api.deepseek.com/v1`)
+
 **Scoped AI Sessions:**
 - **Private chats:** Each user has an isolated session (not shared)
 - **Groups:** All users in a group share the same session
@@ -418,7 +431,7 @@ The bot can auto-respond via AI when mentioned or replied to in **active scopes*
 - User must have role `vip`, `admin`, or `owner`
 - User must have accepted consent (`/accept`)
 - The scope (topic or private chat) must have AI enabled in the configuration
-- The AI service must be configured (Ollama, OpenAI, Anthropic, Google, OpenRouter, Groq, Mistral or xAI)
+- The AI service must be configured (Ollama, OpenAI, Anthropic, Google, OpenRouter, Groq, Mistral, xAI or DeepSeek)
 
 **Audit Events:**
 - `ai_autoreply_sent` — Response successfully sent

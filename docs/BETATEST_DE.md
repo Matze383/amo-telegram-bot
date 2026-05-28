@@ -26,7 +26,8 @@ Diese Anleitung unterstützt dich beim Testen des MVP-Status des Bots:
   - OpenRouter API-Key, **ODER**
   - [Groq](https://groq.com/) API-Key, **ODER**
   - Mistral API-Key, **ODER**
-  - xAI API-Key
+  - xAI API-Key, **ODER**
+  - DeepSeek API-Key
 
 ---
 
@@ -47,7 +48,7 @@ BOT_USERNAME=dein_bot_username
 TELEGRAM_API_BASE=https://api.telegram.org
 
 # KI-Provider Konfiguration
-AI_PROVIDER=ollama  # ollama (Standard), openai, anthropic, google, openrouter, groq, mistral oder xai
+AI_PROVIDER=ollama  # ollama (Standard), openai, anthropic, google, openrouter, groq, mistral, xai oder deepseek
 
 # Optional: OpenAI (für /ask Kommando)
 # OPENAI_API_KEY=dein-openai-api-key-hier
@@ -89,6 +90,12 @@ AI_PROVIDER=ollama  # ollama (Standard), openai, anthropic, google, openrouter, 
 # XAI_MODEL=xai/grok-4.3
 # XAI_TIMEOUT_SECONDS=30
 # XAI_BASE_URL=https://api.x.ai/v1
+
+# Optional: DeepSeek (für /ask Kommando)
+# DEEPSEEK_API_KEY=
+# DEEPSEEK_MODEL=deepseek/deepseek-v4-flash
+# DEEPSEEK_TIMEOUT_SECONDS=30
+# DEEPSEEK_BASE_URL=https://api.deepseek.com/v1
 
 # Optional: Ollama (für /ask Kommando)
 OLLAMA_URL=http://127.0.0.1:11434
@@ -377,6 +384,12 @@ curl http://127.0.0.1:11434/api/tags
 - Optional: `XAI_MODEL` kann angepasst werden (Standard: `xai/grok-4.3`)
 - Optional: `XAI_BASE_URL` kann angepasst werden (Standard: `https://api.x.ai/v1`)
 
+**Für DeepSeek:**
+- Stelle sicher, dass `DEEPSEEK_API_KEY` in `.env` gesetzt ist
+- Stelle sicher, dass `AI_PROVIDER=deepseek` in `.env` gesetzt ist
+- Optional: `DEEPSEEK_MODEL` kann angepasst werden (Standard: `deepseek/deepseek-v4-flash`)
+- Optional: `DEEPSEEK_BASE_URL` kann angepasst werden (Standard: `https://api.deepseek.com/v1`)
+
 **Gescopte AI-Sessions:**
 - **Private Chats:** Jeder Nutzer hat eine isolierte Session (nicht geteilt)
 - **Gruppen:** Alle Nutzer in einer Gruppe teilen sich die Session
@@ -418,7 +431,7 @@ Der Bot kann bei Erwähnung oder als Antwort in **aktiven Scopes** (Themen oder 
 - Nutzer muss Rolle `vip`, `admin` oder `owner` haben
 - Nutzer muss Consent akzeptiert haben (`/accept`)
 - Der Scope (Thema oder privater Chat) muss KI-aktiviert konfiguriert sein
-- Der KI-Service muss konfiguriert sein (Ollama, OpenAI, Anthropic, Google, OpenRouter, Groq, Mistral oder xAI)
+- Der KI-Service muss konfiguriert sein (Ollama, OpenAI, Anthropic, Google, OpenRouter, Groq, Mistral, xAI oder DeepSeek)
 
 **Audit-Events:**
 - `ai_autoreply_sent` — Antwort erfolgreich gesendet

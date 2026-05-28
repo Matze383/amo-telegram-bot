@@ -6,7 +6,7 @@ from amo_bot.ai.ollama import OllamaClient
 from amo_bot.ai.openai_provider import OpenAIProviderConfig
 from amo_bot.ai.anthropic_provider import AnthropicProviderConfig
 from amo_bot.ai.gemini_provider import GeminiProviderConfig
-from amo_bot.ai.providers import AnthropicProvider, GeminiProvider, GroqProvider, MistralProvider, OpenAIProvider, OpenRouterProvider, XAIProvider, build_ai_provider
+from amo_bot.ai.providers import AnthropicProvider, DeepSeekProvider, GeminiProvider, GroqProvider, MistralProvider, OpenAIProvider, OpenRouterProvider, XAIProvider, build_ai_provider
 from amo_bot.ai.service import AIService
 from amo_bot.config.settings import Settings
 
@@ -266,4 +266,24 @@ def test_xai_api_key_is_trimmed_not_logged() -> None:
     provider = build_ai_provider(settings)
     assert isinstance(provider, XAIProvider)
     assert provider.config.api_key == "xai-credential-placeholder"
+    assert provider.config.redacted_dict()["api_key_preview"] == "***"
+
+
+def test_deepseek_provider_selection_builds_provider_config_only() -> None:
+    settings = _settings(AI_PROVIDER="deepseek", DEEPSEEK_API_KEY="deepseek-credential-placeholder")
+    provider = build_ai_provider(settings)
+    assert isinstance(provider, DeepSeekProvider)
+    assert provider.config.model == "deepseek/deepseek-v4-flash"
+
+
+def test_deepseek_requires_api_key() -> None:
+    with pytest.raises(ValueError, match="DEEPSEEK_API_KEY is required when AI_PROVIDER=deepseek"):
+        _settings(AI_PROVIDER="deepseek")
+
+
+def test_deepseek_api_key_is_trimmed_not_logged() -> None:
+    settings = _settings(AI_PROVIDER="deepseek", DEEPSEEK_API_KEY="  deepseek-credential-placeholder  ")
+    provider = build_ai_provider(settings)
+    assert isinstance(provider, DeepSeekProvider)
+    assert provider.config.api_key == "deepseek-credential-placeholder"
     assert provider.config.redacted_dict()["api_key_preview"] == "***"

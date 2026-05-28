@@ -15,7 +15,10 @@ Vollständige Anleitung zum lokalen Betrieb des Bots.
   - Anthropic API-Key, **ODER**
   - Google/Gemini API-Key, **ODER**
   - OpenRouter API-Key, **ODER**
-  - [Groq](https://groq.com/) API-Key
+  - [Groq](https://groq.com/) API-Key, **ODER**
+  - Mistral API-Key, **ODER**
+  - xAI API-Key, **ODER**
+  - DeepSeek API-Key
 
 ---
 
@@ -167,7 +170,7 @@ WEBUI_PASSWORD=dein_sicheres_passwort
 WEBUI_OWNER_TELEGRAM_ID=deine_telegram_user_id
 
 # KI-Provider Konfiguration
-AI_PROVIDER=ollama  # ollama (Standard), openai, anthropic, google, openrouter, groq, mistral oder xai
+AI_PROVIDER=ollama  # ollama (Standard), openai, anthropic, google, openrouter, groq, mistral, xai oder deepseek
 
 # Optional: OpenAI (für /ask Kommando)
 # OPENAI_API_KEY=dein-openai-api-key-hier
@@ -209,6 +212,12 @@ AI_PROVIDER=ollama  # ollama (Standard), openai, anthropic, google, openrouter, 
 # XAI_MODEL=xai/grok-4.3
 # XAI_TIMEOUT_SECONDS=30
 # XAI_BASE_URL=https://api.x.ai/v1
+
+# Optional: DeepSeek (für /ask Kommando)
+# DEEPSEEK_API_KEY=
+# DEEPSEEK_MODEL=deepseek/deepseek-v4-flash
+# DEEPSEEK_TIMEOUT_SECONDS=30
+# DEEPSEEK_BASE_URL=https://api.deepseek.com/v1
 
 # Optional: Ollama (für /ask Kommando)
 OLLAMA_URL=http://127.0.0.1:11434

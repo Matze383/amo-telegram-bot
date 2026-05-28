@@ -36,7 +36,7 @@ AMO ist ein erweiterbarer Telegram-Bot für Gruppen und private Chats. Er bietet
 | 🔐 **Rollen-System** | Owner, Admin, VIP, Normal, Ignore — gruppenspezifisch und berechtigungsbasiert |
 | ✅ **Consent-Management** | Nutzer müssen explizit zustimmen, bevor der Bot aktiv wird |
 | 🌐 **WebUI** | Lokale Flask-Oberfläche für Verwaltung und Konfiguration |
-| 🤖 **KI-Integration** | Optionales `/ask`-Kommando mit gescopten Sessions, `/new` und `/reset` für Session-Management, Auto-Antworten via Ollama, OpenAI, Anthropic, Google, OpenRouter, Groq, Mistral oder xAI |
+| 🤖 **KI-Integration** | Optionales `/ask`-Kommando mit gescopten Sessions, `/new` und `/reset` für Session-Management, Auto-Antworten via Ollama, OpenAI, Anthropic, Google, OpenRouter, Groq, Mistral, xAI oder DeepSeek |
 | 🧠 **Memory-System** | Tägliche Langzeitgedächtnis-Kuratierung mit Datenschutz-Defaults; **Neu:** Scoped Memory mit C2-Review-Service für verbesserte Datenschutzkontrolle |
 | 🖼️ **Bildanalyse & -sendung** | Image-Analysis-Interface (IMG) mit send_photo/send_document Wrappern; WebUI pro-Topic Bilderkennungs-Toggle (inherit/enabled/disabled); WebUI Rollen-Quotas für Bildanalyse (IMG-B7); Runtime Quota-Enforcement mit Rolling-24h-Fenster (IMG-B8); **Neu:** Follow-up Bildanalyse für Kontext-Fortführung |
 | 🔒 **Sandbox-Runtime** | **Neu:** Plugin-Ausführung über Sandbox-Worker mit Capability-Gating für Commands, Scheduled- und Worker-Plugins (Command/Scheduled/Worker-Runtime isoliert) |
@@ -92,7 +92,7 @@ python main.py
 - Python 3.12+
 - Windows, macOS oder Linux
 - Telegram Bot Token von [@BotFather](https://t.me/BotFather)
-- Optional: Lokale [Ollama](https://ollama.com/)-Instanz, OpenAI API-Key, Anthropic API-Key, Google/Gemini API-Key, OpenRouter API-Key, [Groq](https://groq.com/) API-Key, Mistral API-Key oder xAI API-Key für KI-Funktionen
+- Optional: Lokale [Ollama](https://ollama.com/)-Instanz, OpenAI API-Key, Anthropic API-Key, Google/Gemini API-Key, OpenRouter API-Key, [Groq](https://groq.com/) API-Key, Mistral API-Key, xAI API-Key oder DeepSeek API-Key für KI-Funktionen
 
 ### Dokumentation
 
@@ -134,7 +134,7 @@ AMO is an extensible Telegram bot for groups and private chats. It provides a ro
 | 🔐 **Role System** | Owner, Admin, VIP, Normal, Ignore — group-scoped and permission-based |
 | ✅ **Consent Management** | Users must explicitly opt-in before the bot becomes active |
 | 🌐 **WebUI** | Local Flask interface for management and configuration |
-| 🤖 **AI Integration** | Optional `/ask` command with scoped sessions, `/new` and `/reset` for session management, auto-replies via Ollama, OpenAI, Anthropic, Google, OpenRouter, Groq, Mistral or xAI |
+| 🤖 **AI Integration** | Optional `/ask` command with scoped sessions, `/new` and `/reset` for session management, auto-replies via Ollama, OpenAI, Anthropic, Google, OpenRouter, Groq, Mistral, xAI or DeepSeek |
 | 🧠 **Memory System** | Daily long-term memory curation with privacy-first defaults; **New:** Scoped memory with C2 review service for enhanced privacy control |
 | 🖼️ **Image Analysis & Sending** | Image Analysis interface (IMG) with send_photo/send_document wrappers; WebUI per-topic image recognition toggle (inherit/enabled/disabled); WebUI role quotas for image analysis (IMG-B7); Runtime quota enforcement with rolling 24h window (IMG-B8); **New:** Follow-up image analysis for context continuation |
 | 🔒 **Sandbox Runtime** | **New:** Plugin execution via sandbox workers with capability gating for commands, scheduled, and worker plugins (command/scheduled/worker runtime isolated) |
@@ -190,7 +190,7 @@ python main.py
 - Python 3.12+
 - Windows, macOS or Linux
 - Telegram Bot Token from [@BotFather](https://t.me/BotFather)
-- Optional: Local [Ollama](https://ollama.com/) instance, OpenAI API key, Anthropic API key, Google/Gemini API key, OpenRouter API key, [Groq](https://groq.com/) API key, Mistral API key, or xAI API key for AI features
+- Optional: Local [Ollama](https://ollama.com/) instance, OpenAI API key, Anthropic API key, Google/Gemini API key, OpenRouter API key, [Groq](https://groq.com/) API key, Mistral API key, xAI API key, or DeepSeek API key for AI features
 
 ### Documentation
 

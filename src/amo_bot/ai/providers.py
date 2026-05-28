@@ -14,6 +14,7 @@ from amo_bot.ai.openrouter_provider import OpenRouterProviderConfig, OpenRouterR
 from amo_bot.ai.groq_provider import GroqProviderConfig, GroqRequestClient
 from amo_bot.ai.mistral_provider import MistralProviderConfig, MistralRequestClient
 from amo_bot.ai.xai_provider import XAIProviderConfig, XAIRequestClient
+from amo_bot.ai.deepseek_provider import DeepSeekProviderConfig, DeepSeekRequestClient
 from amo_bot.ai.service import AIService
 from amo_bot.config.settings import Settings
 
@@ -134,6 +135,18 @@ class XAIProvider:
 
     async def ask(self, prompt: str) -> str:
         return await self.client.ask(prompt)
+
+
+@dataclass(frozen=True, slots=True)
+class DeepSeekProvider:
+    config: DeepSeekProviderConfig
+
+    @property
+    def client(self) -> DeepSeekRequestClient:
+        return DeepSeekRequestClient(config=self.config)
+
+    async def ask(self, prompt: str) -> str:
+        return await self.client.ask(prompt)
 def _build_ollama_provider(settings: Settings) -> OllamaProvider:
     return OllamaProvider(
         AIService(
@@ -226,6 +239,16 @@ def build_ai_provider(settings: Settings) -> AIProvider:
                 model=settings.xai_model,
                 timeout_seconds=settings.xai_timeout_seconds,
                 base_url=settings.xai_base_url,
+            )
+        )
+
+    if provider == "deepseek":
+        return DeepSeekProvider(
+            config=DeepSeekProviderConfig(
+                api_key=settings.deepseek_api_key or "",
+                model=settings.deepseek_model,
+                timeout_seconds=settings.deepseek_timeout_seconds,
+                base_url=settings.deepseek_base_url,
             )
         )
 

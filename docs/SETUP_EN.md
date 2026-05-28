@@ -15,7 +15,10 @@ Complete setup instructions for running the bot locally.
   - Anthropic API key, **OR**
   - Google/Gemini API key, **OR**
   - OpenRouter API key, **OR**
-  - [Groq](https://groq.com/) API key
+  - [Groq](https://groq.com/) API key, **OR**
+  - Mistral API key, **OR**
+  - xAI API key, **OR**
+  - DeepSeek API key
 
 ---
 
@@ -167,7 +170,7 @@ WEBUI_PASSWORD=your_secure_password
 WEBUI_OWNER_TELEGRAM_ID=your_telegram_user_id
 
 # AI Provider Configuration
-AI_PROVIDER=ollama  # ollama (default), openai, anthropic, google, openrouter, groq, mistral or xai
+AI_PROVIDER=ollama  # ollama (default), openai, anthropic, google, openrouter, groq, mistral, xai or deepseek
 
 # Optional: OpenAI (for /ask command)
 # OPENAI_API_KEY=your-openai-api-key-here
@@ -209,6 +212,12 @@ AI_PROVIDER=ollama  # ollama (default), openai, anthropic, google, openrouter, g
 # XAI_MODEL=xai/grok-4.3
 # XAI_TIMEOUT_SECONDS=30
 # XAI_BASE_URL=https://api.x.ai/v1
+
+# Optional: DeepSeek (for /ask command)
+# DEEPSEEK_API_KEY=
+# DEEPSEEK_MODEL=deepseek/deepseek-v4-flash
+# DEEPSEEK_TIMEOUT_SECONDS=30
+# DEEPSEEK_BASE_URL=https://api.deepseek.com/v1
 
 # Optional: Ollama (for /ask command)
 OLLAMA_URL=http://127.0.0.1:11434
