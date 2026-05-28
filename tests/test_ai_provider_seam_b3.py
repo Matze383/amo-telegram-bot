@@ -6,7 +6,7 @@ from amo_bot.ai.ollama import OllamaClient
 from amo_bot.ai.openai_provider import OpenAIProviderConfig
 from amo_bot.ai.anthropic_provider import AnthropicProviderConfig
 from amo_bot.ai.gemini_provider import GeminiProviderConfig
-from amo_bot.ai.providers import AnthropicProvider, BedrockProvider, DeepSeekProvider, GeminiProvider, GroqProvider, MistralProvider, OpenAIProvider, OpenRouterProvider, XAIProvider, build_ai_provider
+from amo_bot.ai.providers import AnthropicProvider, BedrockProvider, DeepSeekProvider, GeminiProvider, GroqProvider, MistralProvider, OpenAIProvider, OpenRouterProvider, TogetherProvider, XAIProvider, build_ai_provider
 from amo_bot.ai.service import AIService
 from amo_bot.config.settings import Settings
 
@@ -95,6 +95,26 @@ def test_ollama_streaming_mode_invalid_fails_closed() -> None:
 def test_invalid_provider_fails_validation(value: str) -> None:
     with pytest.raises(ValueError):
         _settings(AI_PROVIDER=value)
+
+
+def test_together_provider_selection_builds_provider_config_only() -> None:
+    settings = _settings(AI_PROVIDER="together", TOGETHER_API_KEY="together-credential-placeholder")
+    provider = build_ai_provider(settings)
+    assert isinstance(provider, TogetherProvider)
+    assert provider.config.model == "together/moonshotai/Kimi-K2.5"
+
+
+def test_together_requires_api_key() -> None:
+    with pytest.raises(ValueError, match="TOGETHER_API_KEY is required when AI_PROVIDER=together"):
+        _settings(AI_PROVIDER="together")
+
+
+def test_together_api_key_is_trimmed_not_logged() -> None:
+    settings = _settings(AI_PROVIDER="together", TOGETHER_API_KEY="  trimmed-together-credential  ")
+    provider = build_ai_provider(settings)
+    assert isinstance(provider, TogetherProvider)
+    assert provider.config.api_key == "trimmed-together-credential"
+    assert provider.config.redacted_dict()["api_key_preview"] == "***"
 
 
 def test_groq_provider_selection_builds_provider_config_only() -> None:

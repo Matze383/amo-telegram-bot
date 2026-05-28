@@ -18,7 +18,8 @@ Complete setup instructions for running the bot locally.
   - [Groq](https://groq.com/) API key, **OR**
   - Mistral API key, **OR**
   - xAI API key, **OR**
-  - DeepSeek API key, or AWS credentials/profile for Amazon Bedrock
+  - DeepSeek API key, **OR**
+  - Together API key, or AWS credentials/profile for Amazon Bedrock
 
 ---
 
@@ -218,6 +219,12 @@ AI_PROVIDER=ollama  # ollama (default), openai, anthropic, google, openrouter, g
 # DEEPSEEK_MODEL=deepseek/deepseek-v4-flash
 # DEEPSEEK_TIMEOUT_SECONDS=30
 # DEEPSEEK_BASE_URL=https://api.deepseek.com/v1
+
+# Optional: Together AI (for /ask command)
+# TOGETHER_API_KEY=
+# TOGETHER_MODEL=together/moonshotai/Kimi-K2.5
+# TOGETHER_TIMEOUT_SECONDS=30
+# TOGETHER_BASE_URL=https://api.together.xyz/v1
 
 # Optional: Ollama (for /ask command)
 OLLAMA_URL=http://127.0.0.1:11434

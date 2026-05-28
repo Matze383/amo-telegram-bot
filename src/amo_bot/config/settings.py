@@ -60,6 +60,10 @@ class Settings(BaseSettings):
     deepseek_timeout_seconds: float = Field(default=30.0, alias="DEEPSEEK_TIMEOUT_SECONDS", gt=0)
     deepseek_base_url: str = Field(default="https://api.deepseek.com/v1", alias="DEEPSEEK_BASE_URL")
 
+    together_api_key: str | None = Field(default=None, alias="TOGETHER_API_KEY")
+    together_model: str = Field(default="together/moonshotai/Kimi-K2.5", alias="TOGETHER_MODEL")
+    together_timeout_seconds: float = Field(default=30.0, alias="TOGETHER_TIMEOUT_SECONDS", gt=0)
+    together_base_url: str = Field(default="https://api.together.xyz/v1", alias="TOGETHER_BASE_URL")
 
     bedrock_model: str = Field(default="amazon-bedrock/anthropic.claude-3-haiku-20240307-v1:0", alias="BEDROCK_MODEL")
     bedrock_region: str | None = Field(default=None, alias="BEDROCK_REGION")
@@ -105,8 +109,8 @@ class Settings(BaseSettings):
             raise ValueError("WEBUI_LOGIN_DELAY_MAX_SECONDS must be >= WEBUI_LOGIN_DELAY_BASE_SECONDS")
 
         provider = self.ai_provider.strip().casefold()
-        if provider not in {"openai", "ollama", "anthropic", "google", "openrouter", "groq", "mistral", "xai", "deepseek", "amazon-bedrock"}:
-            raise ValueError("AI_PROVIDER must be one of: openai, ollama, anthropic, google, openrouter, groq, mistral, xai, deepseek, amazon-bedrock")
+        if provider not in {"openai", "ollama", "anthropic", "google", "openrouter", "groq", "mistral", "xai", "deepseek", "together", "amazon-bedrock"}:
+            raise ValueError("AI_PROVIDER must be one of: openai, ollama, anthropic, google, openrouter, groq, mistral, xai, deepseek, together, amazon-bedrock")
 
         self.ai_provider = provider
 
@@ -232,6 +236,22 @@ class Settings(BaseSettings):
             if not base_url:
                 raise ValueError("DEEPSEEK_BASE_URL must not be empty")
             self.deepseek_base_url = base_url
+
+        if provider == "together":
+            api_key = (self.together_api_key or "").strip()
+            if not api_key:
+                raise ValueError("TOGETHER_API_KEY is required when AI_PROVIDER=together")
+            self.together_api_key = api_key
+
+            model = self.together_model.strip()
+            if not model:
+                raise ValueError("TOGETHER_MODEL is required when AI_PROVIDER=together")
+            self.together_model = model
+
+            base_url = self.together_base_url.strip()
+            if not base_url:
+                raise ValueError("TOGETHER_BASE_URL must not be empty")
+            self.together_base_url = base_url
 
         if provider == "amazon-bedrock":
             model = self.bedrock_model.strip()

@@ -16,6 +16,7 @@ from amo_bot.ai.mistral_provider import MistralProviderConfig, MistralRequestCli
 from amo_bot.ai.xai_provider import XAIProviderConfig, XAIRequestClient
 from amo_bot.ai.deepseek_provider import DeepSeekProviderConfig, DeepSeekRequestClient
 from amo_bot.ai.bedrock_provider import BedrockProviderConfig, BedrockRequestClient
+from amo_bot.ai.together_provider import TogetherProviderConfig, TogetherRequestClient
 from amo_bot.ai.service import AIService
 from amo_bot.config.settings import Settings
 
@@ -151,6 +152,18 @@ class DeepSeekProvider:
 
 
 @dataclass(frozen=True, slots=True)
+class TogetherProvider:
+    config: TogetherProviderConfig
+
+    @property
+    def client(self) -> TogetherRequestClient:
+        return TogetherRequestClient(config=self.config)
+
+    async def ask(self, prompt: str) -> str:
+        return await self.client.ask(prompt)
+
+
+@dataclass(frozen=True, slots=True)
 class BedrockProvider:
     config: BedrockProviderConfig
 
@@ -262,6 +275,16 @@ def build_ai_provider(settings: Settings) -> AIProvider:
                 model=settings.deepseek_model,
                 timeout_seconds=settings.deepseek_timeout_seconds,
                 base_url=settings.deepseek_base_url,
+            )
+        )
+
+    if provider == "together":
+        return TogetherProvider(
+            config=TogetherProviderConfig(
+                api_key=settings.together_api_key or "",
+                model=settings.together_model,
+                timeout_seconds=settings.together_timeout_seconds,
+                base_url=settings.together_base_url,
             )
         )
 
