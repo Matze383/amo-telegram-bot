@@ -13,6 +13,7 @@ from amo_bot.ai.gemini_provider import GeminiProviderConfig, GeminiRequestClient
 from amo_bot.ai.openrouter_provider import OpenRouterProviderConfig, OpenRouterRequestClient
 from amo_bot.ai.groq_provider import GroqProviderConfig, GroqRequestClient
 from amo_bot.ai.mistral_provider import MistralProviderConfig, MistralRequestClient
+from amo_bot.ai.xai_provider import XAIProviderConfig, XAIRequestClient
 from amo_bot.ai.service import AIService
 from amo_bot.config.settings import Settings
 
@@ -121,6 +122,18 @@ class MistralProvider:
         return await self.client.ask(prompt)
 
 
+
+
+@dataclass(frozen=True, slots=True)
+class XAIProvider:
+    config: XAIProviderConfig
+
+    @property
+    def client(self) -> XAIRequestClient:
+        return XAIRequestClient(config=self.config)
+
+    async def ask(self, prompt: str) -> str:
+        return await self.client.ask(prompt)
 def _build_ollama_provider(settings: Settings) -> OllamaProvider:
     return OllamaProvider(
         AIService(
@@ -203,6 +216,16 @@ def build_ai_provider(settings: Settings) -> AIProvider:
                 model=settings.mistral_model,
                 timeout_seconds=settings.mistral_timeout_seconds,
                 base_url=settings.mistral_base_url,
+            )
+        )
+
+    if provider == "xai":
+        return XAIProvider(
+            config=XAIProviderConfig(
+                api_key=settings.xai_api_key or "",
+                model=settings.xai_model,
+                timeout_seconds=settings.xai_timeout_seconds,
+                base_url=settings.xai_base_url,
             )
         )
 

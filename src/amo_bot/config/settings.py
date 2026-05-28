@@ -50,6 +50,11 @@ class Settings(BaseSettings):
     mistral_timeout_seconds: float = Field(default=30.0, alias="MISTRAL_TIMEOUT_SECONDS", gt=0)
     mistral_base_url: str = Field(default="https://api.mistral.ai/v1", alias="MISTRAL_BASE_URL")
 
+    xai_api_key: str | None = Field(default=None, alias="XAI_API_KEY")
+    xai_model: str = Field(default="xai/grok-4.3", alias="XAI_MODEL")
+    xai_timeout_seconds: float = Field(default=30.0, alias="XAI_TIMEOUT_SECONDS", gt=0)
+    xai_base_url: str = Field(default="https://api.x.ai/v1", alias="XAI_BASE_URL")
+
     ollama_base_url: str = Field(default="http://127.0.0.1:11434", alias="OLLAMA_URL")
     ollama_model: str = Field(default="llama3.1", alias="OLLAMA_MODEL")
     ollama_timeout_seconds: int = Field(default=20, alias="OLLAMA_TIMEOUT_SECONDS")
@@ -84,8 +89,8 @@ class Settings(BaseSettings):
             raise ValueError("WEBUI_LOGIN_DELAY_MAX_SECONDS must be >= WEBUI_LOGIN_DELAY_BASE_SECONDS")
 
         provider = self.ai_provider.strip().casefold()
-        if provider not in {"openai", "ollama", "anthropic", "google", "openrouter", "groq", "mistral"}:
-            raise ValueError("AI_PROVIDER must be one of: openai, ollama, anthropic, google, openrouter, groq, mistral")
+        if provider not in {"openai", "ollama", "anthropic", "google", "openrouter", "groq", "mistral", "xai"}:
+            raise ValueError("AI_PROVIDER must be one of: openai, ollama, anthropic, google, openrouter, groq, mistral, xai")
 
         self.ai_provider = provider
 
@@ -179,6 +184,22 @@ class Settings(BaseSettings):
             if not base_url:
                 raise ValueError("MISTRAL_BASE_URL must not be empty")
             self.mistral_base_url = base_url
+
+        if provider == "xai":
+            api_key = (self.xai_api_key or "").strip()
+            if not api_key:
+                raise ValueError("XAI_API_KEY is required when AI_PROVIDER=xai")
+            self.xai_api_key = api_key
+
+            model = self.xai_model.strip()
+            if not model:
+                raise ValueError("XAI_MODEL is required when AI_PROVIDER=xai")
+            self.xai_model = model
+
+            base_url = self.xai_base_url.strip()
+            if not base_url:
+                raise ValueError("XAI_BASE_URL must not be empty")
+            self.xai_base_url = base_url
 
         endpoint = self.ollama_request_endpoint.strip().casefold()
         if endpoint not in {"generate", "chat"}:

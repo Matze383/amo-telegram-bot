@@ -25,7 +25,8 @@ This guide helps you test the MVP status of the bot:
   - Google/Gemini API key, **OR**
   - OpenRouter API key, **OR**
   - [Groq](https://groq.com/) API key, **OR**
-  - Mistral API key
+  - Mistral API key, **OR**
+  - xAI API key
 
 ---
 
@@ -46,7 +47,7 @@ BOT_USERNAME=your_bot_username
 TELEGRAM_API_BASE=https://api.telegram.org
 
 # AI Provider Configuration
-AI_PROVIDER=ollama  # ollama (default), openai, anthropic, google, openrouter, groq or mistral
+AI_PROVIDER=ollama  # ollama (default), openai, anthropic, google, openrouter, groq, mistral or xai
 
 # Optional: OpenAI (for /ask command)
 # OPENAI_API_KEY=your-openai-api-key-here
@@ -82,6 +83,12 @@ AI_PROVIDER=ollama  # ollama (default), openai, anthropic, google, openrouter, g
 # MISTRAL_MODEL=mistral/mistral-large-latest
 # MISTRAL_TIMEOUT_SECONDS=30
 # MISTRAL_BASE_URL=https://api.mistral.ai/v1
+
+# Optional: xAI (for /ask command)
+# XAI_API_KEY=
+# XAI_MODEL=xai/grok-4.3
+# XAI_TIMEOUT_SECONDS=30
+# XAI_BASE_URL=https://api.x.ai/v1
 
 # Optional: Ollama (for /ask command)
 OLLAMA_URL=http://127.0.0.1:11434
@@ -324,7 +331,7 @@ Start a private chat with your bot:
 
 ### /ask Test with AI Provider (optional)
 
-**Prerequisite:** AI provider configured (Ollama, OpenAI, Anthropic, Google, OpenRouter, Groq or Mistral)
+**Prerequisite:** AI provider configured (Ollama, OpenAI, Anthropic, Google, OpenRouter, Groq, Mistral or xAI)
 
 **For OpenRouter:**
 - Ensure `OPENROUTER_API_KEY` is set in `.env`
@@ -363,6 +370,12 @@ curl http://127.0.0.1:11434/api/tags
 - Ensure `AI_PROVIDER=mistral` is set in `.env`
 - Optional: `MISTRAL_MODEL` can be customized (default: `mistral/mistral-large-latest`)
 - Optional: `MISTRAL_BASE_URL` can be customized (default: `https://api.mistral.ai/v1`)
+
+**For xAI:**
+- Ensure `XAI_API_KEY` is set in `.env`
+- Ensure `AI_PROVIDER=xai` is set in `.env`
+- Optional: `XAI_MODEL` can be customized (default: `xai/grok-4.3`)
+- Optional: `XAI_BASE_URL` can be customized (default: `https://api.x.ai/v1`)
 
 **Scoped AI Sessions:**
 - **Private chats:** Each user has an isolated session (not shared)
@@ -405,7 +418,7 @@ The bot can auto-respond via AI when mentioned or replied to in **active scopes*
 - User must have role `vip`, `admin`, or `owner`
 - User must have accepted consent (`/accept`)
 - The scope (topic or private chat) must have AI enabled in the configuration
-- The AI service must be configured (Ollama, OpenAI, Anthropic, Google, OpenRouter, Groq or Mistral)
+- The AI service must be configured (Ollama, OpenAI, Anthropic, Google, OpenRouter, Groq, Mistral or xAI)
 
 **Audit Events:**
 - `ai_autoreply_sent` — Response successfully sent

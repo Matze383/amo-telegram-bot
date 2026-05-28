@@ -167,7 +167,7 @@ WEBUI_PASSWORD=dein_sicheres_passwort
 WEBUI_OWNER_TELEGRAM_ID=deine_telegram_user_id
 
 # KI-Provider Konfiguration
-AI_PROVIDER=ollama  # ollama (Standard), openai, anthropic, google, openrouter, groq oder mistral
+AI_PROVIDER=ollama  # ollama (Standard), openai, anthropic, google, openrouter, groq, mistral oder xai
 
 # Optional: OpenAI (für /ask Kommando)
 # OPENAI_API_KEY=dein-openai-api-key-hier
@@ -203,6 +203,12 @@ AI_PROVIDER=ollama  # ollama (Standard), openai, anthropic, google, openrouter, 
 # MISTRAL_MODEL=mistral/mistral-large-latest
 # MISTRAL_TIMEOUT_SECONDS=30
 # MISTRAL_BASE_URL=https://api.mistral.ai/v1
+
+# Optional: xAI (für /ask Kommando)
+# XAI_API_KEY=
+# XAI_MODEL=xai/grok-4.3
+# XAI_TIMEOUT_SECONDS=30
+# XAI_BASE_URL=https://api.x.ai/v1
 
 # Optional: Ollama (für /ask Kommando)
 OLLAMA_URL=http://127.0.0.1:11434

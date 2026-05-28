@@ -6,7 +6,7 @@ from amo_bot.ai.ollama import OllamaClient
 from amo_bot.ai.openai_provider import OpenAIProviderConfig
 from amo_bot.ai.anthropic_provider import AnthropicProviderConfig
 from amo_bot.ai.gemini_provider import GeminiProviderConfig
-from amo_bot.ai.providers import AnthropicProvider, GeminiProvider, GroqProvider, MistralProvider, OpenAIProvider, OpenRouterProvider, build_ai_provider
+from amo_bot.ai.providers import AnthropicProvider, GeminiProvider, GroqProvider, MistralProvider, OpenAIProvider, OpenRouterProvider, XAIProvider, build_ai_provider
 from amo_bot.ai.service import AIService
 from amo_bot.config.settings import Settings
 
@@ -246,4 +246,24 @@ def test_mistral_api_key_is_trimmed_not_logged() -> None:
     provider = build_ai_provider(settings)
     assert isinstance(provider, MistralProvider)
     assert provider.config.api_key == "trimmed-mistral-credential"
+    assert provider.config.redacted_dict()["api_key_preview"] == "***"
+
+
+def test_xai_provider_selection_builds_provider_config_only() -> None:
+    settings = _settings(AI_PROVIDER="xai", XAI_API_KEY="xai-credential-placeholder")
+    provider = build_ai_provider(settings)
+    assert isinstance(provider, XAIProvider)
+    assert provider.config.model == "xai/grok-4.3"
+
+
+def test_xai_requires_api_key() -> None:
+    with pytest.raises(ValueError, match="XAI_API_KEY is required when AI_PROVIDER=xai"):
+        _settings(AI_PROVIDER="xai")
+
+
+def test_xai_api_key_is_trimmed_not_logged() -> None:
+    settings = _settings(AI_PROVIDER="xai", XAI_API_KEY="  xai-credential-placeholder  ")
+    provider = build_ai_provider(settings)
+    assert isinstance(provider, XAIProvider)
+    assert provider.config.api_key == "xai-credential-placeholder"
     assert provider.config.redacted_dict()["api_key_preview"] == "***"
