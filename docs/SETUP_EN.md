@@ -167,7 +167,7 @@ WEBUI_PASSWORD=your_secure_password
 WEBUI_OWNER_TELEGRAM_ID=your_telegram_user_id
 
 # AI Provider Configuration
-AI_PROVIDER=ollama  # ollama (default), openai, anthropic, google, openrouter or groq
+AI_PROVIDER=ollama  # ollama (default), openai, anthropic, google, openrouter, groq or mistral
 
 # Optional: OpenAI (for /ask command)
 # OPENAI_API_KEY=your-openai-api-key-here
@@ -193,10 +193,16 @@ AI_PROVIDER=ollama  # ollama (default), openai, anthropic, google, openrouter or
 # OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
 
 # Optional: Groq (for /ask command)
-# GROQ_API_KEY=your-groq-api-key-here
+# GROQ_API_KEY=
 # GROQ_MODEL=groq/llama-3.1-8b-instant
 # GROQ_TIMEOUT_SECONDS=30
 # GROQ_BASE_URL=https://api.groq.com/openai/v1
+
+# Optional: Mistral (for /ask command)
+# MISTRAL_API_KEY=
+# MISTRAL_MODEL=mistral/mistral-large-latest
+# MISTRAL_TIMEOUT_SECONDS=30
+# MISTRAL_BASE_URL=https://api.mistral.ai/v1
 
 # Optional: Ollama (for /ask command)
 OLLAMA_URL=http://127.0.0.1:11434

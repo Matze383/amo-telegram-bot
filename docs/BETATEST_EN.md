@@ -24,7 +24,8 @@ This guide helps you test the MVP status of the bot:
   - Anthropic API key, **OR**
   - Google/Gemini API key, **OR**
   - OpenRouter API key, **OR**
-  - [Groq](https://groq.com/) API key
+  - [Groq](https://groq.com/) API key, **OR**
+  - Mistral API key
 
 ---
 
@@ -45,7 +46,7 @@ BOT_USERNAME=your_bot_username
 TELEGRAM_API_BASE=https://api.telegram.org
 
 # AI Provider Configuration
-AI_PROVIDER=ollama  # ollama (default), openai, anthropic, google, openrouter or groq
+AI_PROVIDER=ollama  # ollama (default), openai, anthropic, google, openrouter, groq or mistral
 
 # Optional: OpenAI (for /ask command)
 # OPENAI_API_KEY=your-openai-api-key-here
@@ -71,10 +72,16 @@ AI_PROVIDER=ollama  # ollama (default), openai, anthropic, google, openrouter or
 # OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
 
 # Optional: Groq (for /ask command)
-# GROQ_API_KEY=your-groq-api-key-here
+# GROQ_API_KEY=
 # GROQ_MODEL=groq/llama-3.1-8b-instant
 # GROQ_TIMEOUT_SECONDS=30
 # GROQ_BASE_URL=https://api.groq.com/openai/v1
+
+# Optional: Mistral (for /ask command)
+# MISTRAL_API_KEY=
+# MISTRAL_MODEL=mistral/mistral-large-latest
+# MISTRAL_TIMEOUT_SECONDS=30
+# MISTRAL_BASE_URL=https://api.mistral.ai/v1
 
 # Optional: Ollama (for /ask command)
 OLLAMA_URL=http://127.0.0.1:11434
@@ -317,7 +324,7 @@ Start a private chat with your bot:
 
 ### /ask Test with AI Provider (optional)
 
-**Prerequisite:** AI provider configured (Ollama, OpenAI, Anthropic, Google, OpenRouter or Groq)
+**Prerequisite:** AI provider configured (Ollama, OpenAI, Anthropic, Google, OpenRouter, Groq or Mistral)
 
 **For OpenRouter:**
 - Ensure `OPENROUTER_API_KEY` is set in `.env`
@@ -350,6 +357,12 @@ curl http://127.0.0.1:11434/api/tags
 - Ensure `AI_PROVIDER=groq` is set in `.env`
 - Optional: `GROQ_MODEL` can be customized (default: `groq/llama-3.1-8b-instant`)
 - Optional: `GROQ_BASE_URL` can be customized (default: `https://api.groq.com/openai/v1`)
+
+**For Mistral:**
+- Ensure `MISTRAL_API_KEY` is set in `.env`
+- Ensure `AI_PROVIDER=mistral` is set in `.env`
+- Optional: `MISTRAL_MODEL` can be customized (default: `mistral/mistral-large-latest`)
+- Optional: `MISTRAL_BASE_URL` can be customized (default: `https://api.mistral.ai/v1`)
 
 **Scoped AI Sessions:**
 - **Private chats:** Each user has an isolated session (not shared)
@@ -392,7 +405,7 @@ The bot can auto-respond via AI when mentioned or replied to in **active scopes*
 - User must have role `vip`, `admin`, or `owner`
 - User must have accepted consent (`/accept`)
 - The scope (topic or private chat) must have AI enabled in the configuration
-- The AI service must be configured (Ollama, OpenAI, Anthropic, Google, OpenRouter or Groq)
+- The AI service must be configured (Ollama, OpenAI, Anthropic, Google, OpenRouter, Groq or Mistral)
 
 **Audit Events:**
 - `ai_autoreply_sent` — Response successfully sent

@@ -24,7 +24,8 @@ Diese Anleitung unterstützt dich beim Testen des MVP-Status des Bots:
   - Anthropic API-Key, **ODER**
   - Google/Gemini API-Key, **ODER**
   - OpenRouter API-Key, **ODER**
-  - [Groq](https://groq.com/) API-Key
+  - [Groq](https://groq.com/) API-Key, **ODER**
+  - Mistral API-Key
 
 ---
 
@@ -45,7 +46,7 @@ BOT_USERNAME=dein_bot_username
 TELEGRAM_API_BASE=https://api.telegram.org
 
 # KI-Provider Konfiguration
-AI_PROVIDER=ollama  # ollama (Standard), openai, anthropic, google, openrouter oder groq
+AI_PROVIDER=ollama  # ollama (Standard), openai, anthropic, google, openrouter, groq oder mistral
 
 # Optional: OpenAI (für /ask Kommando)
 # OPENAI_API_KEY=dein-openai-api-key-hier
@@ -71,10 +72,16 @@ AI_PROVIDER=ollama  # ollama (Standard), openai, anthropic, google, openrouter o
 # OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
 
 # Optional: Groq (für /ask Kommando)
-# GROQ_API_KEY=dein-groq-api-key-hier
+# GROQ_API_KEY=
 # GROQ_MODEL=groq/llama-3.1-8b-instant
 # GROQ_TIMEOUT_SECONDS=30
 # GROQ_BASE_URL=https://api.groq.com/openai/v1
+
+# Optional: Mistral (für /ask Kommando)
+# MISTRAL_API_KEY=
+# MISTRAL_MODEL=mistral/mistral-large-latest
+# MISTRAL_TIMEOUT_SECONDS=30
+# MISTRAL_BASE_URL=https://api.mistral.ai/v1
 
 # Optional: Ollama (für /ask Kommando)
 OLLAMA_URL=http://127.0.0.1:11434
@@ -317,7 +324,7 @@ Starte einen privaten Chat mit deinem Bot:
 
 ### /ask-Test mit KI-Provider (optional)
 
-**Voraussetzung:** KI-Provider konfiguriert (Ollama, OpenAI, Anthropic, Google, OpenRouter oder Groq)
+**Voraussetzung:** KI-Provider konfiguriert (Ollama, OpenAI, Anthropic, Google, OpenRouter, Groq oder Mistral)
 
 **Für OpenRouter:**
 - Stelle sicher, dass `OPENROUTER_API_KEY` in `.env` gesetzt ist
@@ -350,6 +357,12 @@ curl http://127.0.0.1:11434/api/tags
 - Stelle sicher, dass `AI_PROVIDER=groq` in `.env` gesetzt ist
 - Optional: `GROQ_MODEL` kann angepasst werden (Standard: `groq/llama-3.1-8b-instant`)
 - Optional: `GROQ_BASE_URL` kann angepasst werden (Standard: `https://api.groq.com/openai/v1`)
+
+**Für Mistral:**
+- Stelle sicher, dass `MISTRAL_API_KEY` in `.env` gesetzt ist
+- Stelle sicher, dass `AI_PROVIDER=mistral` in `.env` gesetzt ist
+- Optional: `MISTRAL_MODEL` kann angepasst werden (Standard: `mistral/mistral-large-latest`)
+- Optional: `MISTRAL_BASE_URL` kann angepasst werden (Standard: `https://api.mistral.ai/v1`)
 
 **Gescopte AI-Sessions:**
 - **Private Chats:** Jeder Nutzer hat eine isolierte Session (nicht geteilt)
@@ -392,7 +405,7 @@ Der Bot kann bei Erwähnung oder als Antwort in **aktiven Scopes** (Themen oder 
 - Nutzer muss Rolle `vip`, `admin` oder `owner` haben
 - Nutzer muss Consent akzeptiert haben (`/accept`)
 - Der Scope (Thema oder privater Chat) muss KI-aktiviert konfiguriert sein
-- Der KI-Service muss konfiguriert sein (Ollama, OpenAI, Anthropic, Google, OpenRouter oder Groq)
+- Der KI-Service muss konfiguriert sein (Ollama, OpenAI, Anthropic, Google, OpenRouter, Groq oder Mistral)
 
 **Audit-Events:**
 - `ai_autoreply_sent` — Antwort erfolgreich gesendet

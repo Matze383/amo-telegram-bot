@@ -12,6 +12,7 @@ from amo_bot.ai.anthropic_provider import AnthropicProviderConfig, AnthropicRequ
 from amo_bot.ai.gemini_provider import GeminiProviderConfig, GeminiRequestClient
 from amo_bot.ai.openrouter_provider import OpenRouterProviderConfig, OpenRouterRequestClient
 from amo_bot.ai.groq_provider import GroqProviderConfig, GroqRequestClient
+from amo_bot.ai.mistral_provider import MistralProviderConfig, MistralRequestClient
 from amo_bot.ai.service import AIService
 from amo_bot.config.settings import Settings
 
@@ -108,6 +109,18 @@ class GroqProvider:
         return await self.client.ask(prompt)
 
 
+@dataclass(frozen=True, slots=True)
+class MistralProvider:
+    config: MistralProviderConfig
+
+    @property
+    def client(self) -> MistralRequestClient:
+        return MistralRequestClient(config=self.config)
+
+    async def ask(self, prompt: str) -> str:
+        return await self.client.ask(prompt)
+
+
 def _build_ollama_provider(settings: Settings) -> OllamaProvider:
     return OllamaProvider(
         AIService(
@@ -180,6 +193,16 @@ def build_ai_provider(settings: Settings) -> AIProvider:
                 model=settings.groq_model,
                 timeout_seconds=settings.groq_timeout_seconds,
                 base_url=settings.groq_base_url,
+            )
+        )
+
+    if provider == "mistral":
+        return MistralProvider(
+            config=MistralProviderConfig(
+                api_key=settings.mistral_api_key or "",
+                model=settings.mistral_model,
+                timeout_seconds=settings.mistral_timeout_seconds,
+                base_url=settings.mistral_base_url,
             )
         )
 
