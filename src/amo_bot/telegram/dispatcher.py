@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any, Awaitable, Callable, Protocol
@@ -11,6 +12,14 @@ from amo_bot.ai.router import AIRouter, AIRouterReasonCode
 from amo_bot.auth.permissions import can_use_bot
 from amo_bot.auth.roles import Role, role_meets_minimum
 from amo_bot.consent import CONSENT_UNREACHABLE, ConsentService
+from amo_bot.core.logging import (
+    duration_timer,
+    log_event,
+    masked_id,
+    new_request_id,
+    set_request_id,
+    get_request_id,
+)
 from amo_bot.db.base import create_session_factory
 from amo_bot.db.repositories import PrivateChatPolicyRepository, TopicAgentMemoryRepository, TopicRecentMessageRecord
 from amo_bot.db.models import AuditEvent, User
@@ -20,6 +29,8 @@ from amo_bot.telegram.live_edit_adapter import DisabledTelegramLiveEditAdapter, 
 from amo_bot.telegram.owner_notify import OwnerNotifier
 from amo_bot.telegram.update_parser import TelegramMessage, parse_update
 
+
+_COMPONENT = "telegram.dispatcher"
 
 AUTOREPLY_ALLOWED_ROLES: set[Role] = {Role.OWNER, Role.ADMIN, Role.VIP}
 AI_AUTOREPLY_ERROR_FALLBACK_TEXT = {
@@ -80,30 +91,42 @@ class Dispatcher:
     async def handle_raw_update(self, raw_update: object) -> None:
         update = parse_update(raw_update)
         if update is None:
-            logger.warning("telegram update parse failed: raw_type=%s", type(raw_update).__name__)
+            raw_type = type(raw_update).__name__
+            log_event(
+                logger, logging.WARNING,
+                event="telegram.update.parse_failed",
+                component=_COMPONENT,
+                extra={"raw_type": raw_type},
+            )
             return
 
         callback_query = update.callback_query
         if callback_query is not None:
-            logger.info(
-                "telegram callback parsed update_id=%s kind=%s callback_id=%s data_prefix=%s data_len=%s has_message=%s has_maybe_inaccessible=%s",
-                update.update_id,
-                update.top_level_kind,
-                callback_query.id,
-                (callback_query.data or "")[:32],
-                len(callback_query.data or ""),
-                callback_query.message is not None,
-                isinstance(raw_update, dict) and isinstance(raw_update.get("callback_query"), dict) and raw_update.get("callback_query", {}).get("maybe_inaccessible_message") is not None,
+            log_event(
+                logger, logging.INFO,
+                event="telegram.callback.received",
+                component=_COMPONENT,
+                update_id=update.update_id,
+                extra={
+                    "callback_id": callback_query.id,
+                    "data_prefix": (callback_query.data or "")[:32],
+                    "data_len": len(callback_query.data or ""),
+                    "has_message": callback_query.message is not None,
+                },
             )
             await self._handle_callback_query(callback_query)
             return
 
         if update.message is None:
-            logger.warning(
-                "telegram update ignored update_id=%s kind=%s keys=%s",
-                update.update_id,
-                update.top_level_kind,
-                sorted(list(raw_update.keys())) if isinstance(raw_update, dict) else None,
+            log_event(
+                logger, logging.WARNING,
+                event="telegram.update.ignored",
+                component=_COMPONENT,
+                update_id=update.update_id,
+                extra={
+                    "kind": update.top_level_kind,
+                    "keys": sorted(list(raw_update.keys())) if isinstance(raw_update, dict) else None,
+                },
             )
             return
 
@@ -127,20 +150,24 @@ class Dispatcher:
         attachment_count = len(message.attachments)
         has_photo_attachment = any(item.type_hint == "image" or item.source_kind == "photo" for item in message.attachments)
         has_image_document = any(item.type_hint == "image_document" for item in message.attachments)
-        logger.info(
-            "telegram message parsed update_id=%s chat_id=%s message_thread_id=%s message_id=%s user_id=%s chat_type=%s text_len=%s attachment_count=%s has_photo_attachment=%s has_image_document=%s command=%s role=%s",
-            update.update_id,
-            message.chat.id,
-            message.message_thread_id,
-            message.message_id,
-            message.from_user.id,
-            message.chat.type,
-            len(message.text or ""),
-            attachment_count,
-            has_photo_attachment,
-            has_image_document,
-            command.name if command is not None else None,
-            role.value,
+
+        log_event(
+            logger, logging.INFO,
+            event="telegram.message.parsed",
+            component=_COMPONENT,
+            update_id=update.update_id,
+            chat_id=message.chat.id,
+            message_id=message.message_id,
+            message_thread_id=message.message_thread_id,
+            user_id=message.from_user.id,
+            command=command.name if command is not None else None,
+            extra={
+                "chat_type": message.chat.type,
+                "attachment_count": attachment_count,
+                "has_photo_attachment": has_photo_attachment,
+                "has_image_document": has_image_document,
+                "role": role.value,
+            },
         )
 
         if command is None:
@@ -158,66 +185,85 @@ class Dispatcher:
                 effective_attachments = followup_candidate.attachments
 
             if not message.attachments and followup_candidate is None:
-                logger.info(
-                    "auto_image decision=skipped_no_attachments update_id=%s chat_id=%s message_thread_id=%s message_id=%s user_id=%s role=%s",
-                    update.update_id,
-                    message.chat.id,
-                    message.message_thread_id,
-                    message.message_id,
-                    message.from_user.id,
-                    role.value,
+                log_event(
+                    logger, logging.INFO,
+                    event="auto_image.decision",
+                    component=_COMPONENT,
+                    update_id=update.update_id,
+                    chat_id=message.chat.id,
+                    message_id=message.message_id,
+                    message_thread_id=message.message_thread_id,
+                    user_id=message.from_user.id,
+                    extra={
+                        "decision": "skipped_no_attachments",
+                        "role": role.value,
+                    },
                 )
             elif not can_use_bot(role):
-                logger.info(
-                    "auto_image decision=skipped_role update_id=%s chat_id=%s message_thread_id=%s message_id=%s user_id=%s role=%s attachment_count=%s has_photo_attachment=%s has_image_document=%s",
-                    update.update_id,
-                    message.chat.id,
-                    message.message_thread_id,
-                    message.message_id,
-                    message.from_user.id,
-                    role.value,
-                    attachment_count,
-                    has_photo_attachment,
-                    has_image_document,
+                log_event(
+                    logger, logging.INFO,
+                    event="auto_image.decision",
+                    component=_COMPONENT,
+                    update_id=update.update_id,
+                    chat_id=message.chat.id,
+                    message_id=message.message_id,
+                    message_thread_id=message.message_thread_id,
+                    user_id=message.from_user.id,
+                    extra={
+                        "decision": "skipped_role",
+                        "role": role.value,
+                        "attachment_count": attachment_count,
+                        "has_photo_attachment": has_photo_attachment,
+                        "has_image_document": has_image_document,
+                    },
                 )
             elif self.plugin_command_executor is None:
-                logger.info(
-                    "auto_image decision=skipped_no_executor update_id=%s chat_id=%s message_thread_id=%s message_id=%s user_id=%s role=%s attachment_count=%s has_photo_attachment=%s has_image_document=%s",
-                    update.update_id,
-                    message.chat.id,
-                    message.message_thread_id,
-                    message.message_id,
-                    message.from_user.id,
-                    role.value,
-                    attachment_count,
-                    has_photo_attachment,
-                    has_image_document,
+                log_event(
+                    logger, logging.INFO,
+                    event="auto_image.decision",
+                    component=_COMPONENT,
+                    update_id=update.update_id,
+                    chat_id=message.chat.id,
+                    message_id=message.message_id,
+                    message_thread_id=message.message_thread_id,
+                    user_id=message.from_user.id,
+                    extra={
+                        "decision": "skipped_no_executor",
+                        "role": role.value,
+                        "attachment_count": attachment_count,
+                    },
                 )
             elif not is_addressed_for_auto_image:
-                logger.info(
-                    "auto_image decision=skipped_not_addressed update_id=%s chat_id=%s message_thread_id=%s message_id=%s user_id=%s role=%s attachment_count=%s has_photo_attachment=%s has_image_document=%s",
-                    update.update_id,
-                    message.chat.id,
-                    message.message_thread_id,
-                    message.message_id,
-                    message.from_user.id,
-                    role.value,
-                    attachment_count,
-                    has_photo_attachment,
-                    has_image_document,
+                log_event(
+                    logger, logging.INFO,
+                    event="auto_image.decision",
+                    component=_COMPONENT,
+                    update_id=update.update_id,
+                    chat_id=message.chat.id,
+                    message_id=message.message_id,
+                    message_thread_id=message.message_thread_id,
+                    user_id=message.from_user.id,
+                    extra={
+                        "decision": "skipped_not_addressed",
+                        "role": role.value,
+                        "attachment_count": attachment_count,
+                    },
                 )
             else:
-                logger.info(
-                    "auto_image decision=invoked update_id=%s chat_id=%s message_thread_id=%s message_id=%s user_id=%s role=%s attachment_count=%s has_photo_attachment=%s has_image_document=%s",
-                    update.update_id,
-                    message.chat.id,
-                    message.message_thread_id,
-                    message.message_id,
-                    message.from_user.id,
-                    role.value,
-                    attachment_count,
-                    has_photo_attachment,
-                    has_image_document,
+                log_event(
+                    logger, logging.INFO,
+                    event="auto_image.decision",
+                    component=_COMPONENT,
+                    update_id=update.update_id,
+                    chat_id=message.chat.id,
+                    message_id=message.message_id,
+                    message_thread_id=message.message_thread_id,
+                    user_id=message.from_user.id,
+                    extra={
+                        "decision": "invoked",
+                        "role": role.value,
+                        "attachment_count": attachment_count,
+                    },
                 )
                 handled_image = await self.plugin_command_executor.analyze_image_automatically(
                     actor=CommandActor(telegram_user_id=message.from_user.id, role=role),
@@ -231,27 +277,35 @@ class Dispatcher:
                     ),
                 )
                 if followup_candidate is not None:
-                    logger.info(
-                        "auto_image followup_bridge decision=resolved source=%s chat_id=%s message_thread_id=%s message_id=%s user_id=%s image_message_id=%s age_seconds=%s attachment_count=%s",
-                        followup_source,
-                        message.chat.id,
-                        message.message_thread_id,
-                        message.message_id,
-                        message.from_user.id,
-                        followup_candidate.message_id,
-                        followup_candidate_age_seconds,
-                        len(effective_attachments),
+                    log_event(
+                        logger, logging.INFO,
+                        event="auto_image.followup_bridge",
+                        component=_COMPONENT,
+                        update_id=update.update_id,
+                        chat_id=message.chat.id,
+                        message_id=message.message_id,
+                        message_thread_id=message.message_thread_id,
+                        user_id=message.from_user.id,
+                        extra={
+                            "source": followup_source,
+                            "image_message_id": followup_candidate.message_id,
+                            "age_seconds": followup_candidate_age_seconds,
+                            "attachment_count": len(effective_attachments),
+                        },
                     )
-                logger.info(
-                    "auto_image decision=%s update_id=%s chat_id=%s message_thread_id=%s message_id=%s user_id=%s role=%s handled=%s",
-                    "handled" if handled_image else "not_handled",
-                    update.update_id,
-                    message.chat.id,
-                    message.message_thread_id,
-                    message.message_id,
-                    message.from_user.id,
-                    role.value,
-                    handled_image,
+                log_event(
+                    logger, logging.INFO,
+                    event="auto_image.decision",
+                    component=_COMPONENT,
+                    update_id=update.update_id,
+                    chat_id=message.chat.id,
+                    message_id=message.message_id,
+                    message_thread_id=message.message_thread_id,
+                    user_id=message.from_user.id,
+                    extra={
+                        "decision": "handled" if handled_image else "not_handled",
+                        "role": role.value,
+                    },
                 )
                 if handled_image:
                     return
@@ -314,6 +368,18 @@ class Dispatcher:
                     ),
                 )
             if plugin_handled:
+                log_event(
+                    logger, logging.INFO,
+                    event="plugin.command.handled",
+                    component=_COMPONENT,
+                    update_id=update.update_id,
+                    chat_id=message.chat.id,
+                    message_id=message.message_id,
+                    message_thread_id=message.message_thread_id,
+                    user_id=message.from_user.id,
+                    command=command.name,
+                    extra={"outcome": "handled"},
+                )
                 return
             await self._send_text(message.chat.id, self._unknown_command_message(message=message, command_name=command.name), message.message_thread_id)
             return
@@ -361,20 +427,33 @@ class Dispatcher:
                     and self.send_private_markup is not None
                 ):
                     try:
-                        logger.info(
-                            "/test private route: chat_id=%s user_id=%s is_group_like=%s dm_success=false",
-                            message.chat.id,
-                            target_user_id,
-                            is_group_like,
+                        log_event(
+                            logger, logging.INFO,
+                            event="test.private_route",
+                            component=_COMPONENT,
+                            chat_id=message.chat.id,
+                            user_id=target_user_id,
+                            command="test",
+                            extra={
+                                "is_group_like": is_group_like,
+                                "dm_success": False,
+                            },
                         )
                         await self.send_private_markup(target_user_id, text, reply_markup)
                     except Exception as exc:
                         msg = str(exc).casefold()
-                        logger.info(
-                            "/test private route: chat_id=%s user_id=%s is_group_like=%s dm_success=false",
-                            message.chat.id,
-                            target_user_id,
-                            is_group_like,
+                        log_event(
+                            logger, logging.INFO,
+                            event="test.private_route",
+                            component=_COMPONENT,
+                            chat_id=message.chat.id,
+                            user_id=target_user_id,
+                            command="test",
+                            extra={
+                                "is_group_like": is_group_like,
+                                "dm_success": False,
+                                "error": str(exc),
+                            },
                         )
                         blocked = any(
                             marker in msg
@@ -391,11 +470,14 @@ class Dispatcher:
                         else:
                             raise
                     else:
-                        logger.info(
-                            "/test private route: chat_id=%s user_id=%s is_group_like=%s dm_success=true",
-                            message.chat.id,
-                            target_user_id,
-                            is_group_like,
+                        log_event(
+                            logger, logging.INFO,
+                            event="test.private_route",
+                            component=_COMPONENT,
+                            chat_id=message.chat.id,
+                            user_id=target_user_id,
+                            command="test",
+                            extra={"is_group_like": is_group_like, "dm_success": True},
                         )
                         if isinstance(group_success_text, str) and group_success_text:
                             await self._send_text(message.chat.id, group_success_text, message.message_thread_id)
@@ -429,22 +511,29 @@ class Dispatcher:
 
         if data.startswith("yt_rss:") and self.plugin_command_executor is not None:
             message = callback_query.message
-            logger.info(
-                "telegram callback routing candidate update_kind=callback_query callback_id=%s data_prefix=%s data_len=%s has_message=%s chat_id=%s thread_id=%s message_id=%s",
-                callback_query.id,
-                data[:32],
-                len(data),
-                message is not None,
-                message.chat.id if message is not None else None,
-                message.message_thread_id if message is not None else None,
-                message.message_id if message is not None else None,
+            log_event(
+                logger, logging.INFO,
+                event="telegram.callback.routing_candidate",
+                component=_COMPONENT,
+                extra={
+                    "callback_id": callback_query.id,
+                    "data_prefix": data[:32],
+                    "data_len": len(data),
+                    "has_message": message is not None,
+                    "chat_id": message.chat.id if message is not None else None,
+                    "thread_id": message.message_thread_id if message is not None else None,
+                    "message_id": message.message_id if message is not None else None,
+                },
             )
             if message is None:
-                logger.warning(
-                    "telegram callback routing skipped reason=no_message callback_id=%s data_prefix=%s data_len=%s",
-                    callback_query.id,
-                    data[:32],
-                    len(data),
+                log_event(
+                    logger, logging.WARNING,
+                    event="telegram.callback.routing_skipped",
+                    component=_COMPONENT,
+                    extra={
+                        "callback_id": callback_query.id,
+                        "reason": "no_message",
+                    },
                 )
                 if self.answer_callback is not None:
                     await self.answer_callback(callback_query.id, "Callback expired")
@@ -459,14 +548,18 @@ class Dispatcher:
                 message_thread_id=message.message_thread_id,
                 answer_callback=self.answer_callback,
             )
-            logger.info(
-                "telegram callback routing result callback_id=%s command_prefix=%s handled=%s chat_id=%s thread_id=%s message_id=%s",
-                callback_query.id,
-                data.split(":", 1)[0],
-                plugin_handled,
-                message.chat.id,
-                message.message_thread_id,
-                message.message_id,
+            log_event(
+                logger, logging.INFO,
+                event="telegram.callback.routing_result",
+                component=_COMPONENT,
+                extra={
+                    "callback_id": callback_query.id,
+                    "command_prefix": data.split(":", 1)[0],
+                    "handled": plugin_handled,
+                    "chat_id": message.chat.id,
+                    "thread_id": message.message_thread_id,
+                    "message_id": message.message_id,
+                },
             )
             if plugin_handled:
                 return
@@ -925,30 +1018,33 @@ class Dispatcher:
 
         message_locale = self._locale_for_message(message)
 
-        try:
-            response = await self.ai_service.ask(llm_prompt)
-        except Exception:
-            logger.exception("ai_autoreply failed: user_id=%s chat_id=%s", message.from_user.id, message.chat.id)
-            if self.database_url is not None:
-                with create_session_factory(self.database_url)() as session:
-                    self._write_ai_audit(
-                        session=session,
-                        actor_user_id=message.from_user.id,
-                        chat_id=message.chat.id,
-                        message_id=message.message_id,
-                        message_thread_id=message.message_thread_id,
-                        event_type="ai_autoreply_error",
-                        payload={"reason": "ai_error", "router_reason": decision.reason_code.value},
-                    )
-                    session.commit()
+        # Structured log: AI autoreply attempt
+        timing: dict[str, Any] = {}
+        with duration_timer(timing):
+            try:
+                response = await self.ai_service.ask(llm_prompt)
+            except Exception:
+                logger.exception("ai_autoreply failed: user_id=%s chat_id=%s", message.from_user.id, message.chat.id)
+                if self.database_url is not None:
+                    with create_session_factory(self.database_url)() as session:
+                        self._write_ai_audit(
+                            session=session,
+                            actor_user_id=message.from_user.id,
+                            chat_id=message.chat.id,
+                            message_id=message.message_id,
+                            message_thread_id=message.message_thread_id,
+                            event_type="ai_autoreply_error",
+                            payload={"reason": "ai_error", "router_reason": decision.reason_code.value},
+                        )
+                        session.commit()
 
-            if is_triggered_path:
-                await self._send_text(
-                    message.chat.id,
-                    AI_AUTOREPLY_ERROR_FALLBACK_TEXT[message_locale],
-                    message.message_thread_id,
-                )
-            return
+                if is_triggered_path:
+                    await self._send_text(
+                        message.chat.id,
+                        AI_AUTOREPLY_ERROR_FALLBACK_TEXT[message_locale],
+                        message.message_thread_id,
+                    )
+                return
 
         client = getattr(self.ai_service, "client", None)
         # Safety distinction: live-edit streaming is only allowed when we have
@@ -974,7 +1070,15 @@ class Dispatcher:
                 try:
                     await adapter.consume(chat_id=message.chat.id, message_thread_id=message.message_thread_id, event=event)
                 except Exception:
-                    logger.info("ai_live_edit_degraded stage=consume code=adapter_error")
+                    log_event(
+                        logger, logging.INFO,
+                        event="ai.live_edit.degraded",
+                        component=_COMPONENT,
+                        chat_id=message.chat.id,
+                        message_id=message.message_id,
+                        message_thread_id=message.message_thread_id,
+                        extra={"stage": "consume", "code": "adapter_error"},
+                    )
                     break
 
                 if str(getattr(event, "get", lambda *_args, **_kwargs: None)("event", "")).casefold() in terminal_events:
@@ -984,6 +1088,22 @@ class Dispatcher:
             return
 
         await self._send_text(message.chat.id, response, message.message_thread_id)
+
+        log_event(
+            logger, logging.INFO,
+            event="ai.autoreply.sent",
+            component=_COMPONENT,
+            chat_id=message.chat.id,
+            message_id=message.message_id,
+            message_thread_id=message.message_thread_id,
+            user_id=message.from_user.id,
+            extra={
+                "router_reason": decision.reason_code.value,
+                "mention_removed": mention_removed,
+                "bot_identity": identity_label,
+                "duration_ms": timing.get("duration_ms"),
+            },
+        )
 
         if self.database_url is not None:
             with create_session_factory(self.database_url)() as session:
@@ -1057,12 +1177,18 @@ class Dispatcher:
         setattr(self, "_recent_auto_image_candidates", filtered[:128])
 
         if matched is None:
-            logger.info(
-                "auto_image followup_bridge decision=not_found source=recent_same_scope chat_id=%s message_thread_id=%s message_id=%s user_id=%s",
-                message.chat.id,
-                message.message_thread_id,
-                message.message_id,
-                message.from_user.id,
+            log_event(
+                logger, logging.INFO,
+                event="auto_image.followup_bridge",
+                component=_COMPONENT,
+                chat_id=message.chat.id,
+                message_id=message.message_id,
+                message_thread_id=message.message_thread_id,
+                user_id=message.from_user.id,
+                extra={
+                    "decision": "not_found",
+                    "source": "recent_same_scope",
+                },
             )
         return matched
 
@@ -1103,6 +1229,7 @@ class Dispatcher:
                 text=text,
                 bot_username=self.bot_username,
             )
+
         except Exception:
             logger.exception("Failed to persist bot-sent Telegram message; continuing")
 

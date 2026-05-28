@@ -163,3 +163,31 @@ Gruppenrollen-Änderungen sind jetzt vollständig auditierbar:
   - `new_role` – Die Rolle nach der Änderung
   - `source` – Ursprung der Änderung (`telegram_command` oder `webui`)
 - **Clear/Fallback-Audit**: Das Setzen von `normal` in einer Gruppe (was die gruppenspezifische Rolle löscht) erzeugt jetzt ein `group_role_clear`-Event mit korrekt gemeldeter vorheriger Rolle in der Antwort
+
+### Einheitliches Debug- und Logging-System (GitHub #43)
+
+**Commit:** Logging-System für den gesamten Bot
+
+Einheitliches strukturiertes Logging mit Konfigurationsoptionen und Datenschutz-Features:
+
+- **Log-Level**: `debug`, `info`, `warning`, `error` (Standard: `info`)
+- **Log-Format**: `text` (menschenlesbar) oder `json` (strukturiert für Aggregation)
+- **Log-Ausgabe**: stderr (Standard) oder optional Log-Datei via `LOG_FILE`
+- **Debug-Scopes**: Komponenten-spezifisches DEBUG-Level via `LOG_DEBUG_SCOPES` (z.B. `ai.router,plugin.runtime`)
+
+**Datenschutz-Features:**
+- **Private-ID-Redaction**: User-IDs und Chat-IDs werden standardmäßig maskiert
+- **`LOG_INCLUDE_PRIVATE_IDS`**: Nur bei explizitem Setzen werden unmaskierte IDs geloggt
+- **Metadata-only Logs**: Keine privaten Inhalte (Nachrichten, Bilder, Memory) in Logs
+- **Safe Redaction**: Sensitive Werte (Tokens, Keys) werden automatisch aus Logs entfernt
+
+**Audit- und Traceability:**
+- **Correlation IDs**: Einheitliche Request-/Run-ID-Verfolgung über Komponenten
+- **Strukturierte JSON-Logs**: Für Log-Aggregationssysteme (Splunk, ELK, etc.)
+- **Text-Logs**: Menschenlesbares Format für lokale Entwicklung
+
+**Sicherheit:**
+- Keine privaten Nutzernachrichten in Logs
+- Keine Memory-Inhalte
+- Keine Bildinhalte, nur Metadaten
+- Deterministische Redaction für sensible Werte

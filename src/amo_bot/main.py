@@ -7,7 +7,7 @@ from argparse import ArgumentParser
 
 from amo_bot.ai.providers import build_ai_provider
 from amo_bot.config.settings import get_settings
-from amo_bot.core.logging import setup_logging
+from amo_bot.core.logging import setup_logging, log_event
 from amo_bot.db.base import create_session_factory
 from amo_bot.db.init_db import init_db
 from amo_bot.plugins.command_runtime import PluginCommandExecutor
@@ -232,6 +232,12 @@ def run(argv: list[str] | None = None) -> None:
 
     if args.webui:
         app = create_flask_app(settings=settings)
+        log_event(
+            logger, logging.INFO,
+            event="bot.start",
+            component="main",
+            extra={"mode": "webui_only", "host": settings.webui_host, "port": settings.webui_port},
+        )
         app.run(host=settings.webui_host, port=settings.webui_port)
         return
 
@@ -250,6 +256,12 @@ def run(argv: list[str] | None = None) -> None:
         )
         webui_thread.start()
 
+        log_event(
+            logger, logging.INFO,
+            event="bot.start",
+            component="main",
+            extra={"mode": "webui_plus_polling", "webui_host": settings.webui_host, "webui_port": settings.webui_port},
+        )
         asyncio.run(
             run_polling(
                 tg,
@@ -263,6 +275,12 @@ def run(argv: list[str] | None = None) -> None:
         )
         return
 
+    log_event(
+        logger, logging.INFO,
+        event="bot.start",
+        component="main",
+        extra={"mode": "polling_only"},
+    )
     asyncio.run(
         run_polling(
             tg,

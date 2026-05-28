@@ -14,6 +14,7 @@ from typing import Any, Awaitable, Callable
 
 from sqlalchemy.orm import sessionmaker
 
+from amo_bot.core.logging import duration_timer, log_event, set_run_id, get_run_id
 from amo_bot.db.models import AuditEvent
 from amo_bot.db.repositories import PluginRepository
 from amo_bot.plugins.command_runtime import PluginHostAPI, ReplyFn, SendMessageFn
@@ -23,6 +24,7 @@ from amo_bot.plugins.sandbox.runner import PluginSandboxRunner
 from amo_bot.plugins.sandbox.types import SandboxRequest
 
 logger = logging.getLogger(__name__)
+_COMPONENT = "plugin.scheduled"
 
 _ALLOWED_SCHEDULE_DIAGNOSTIC_FIELDS = {
     "event",
@@ -83,12 +85,17 @@ class ScheduledPluginExecutor:
             manifest = manifests.get(row.name)
             if manifest is None or manifest.schedule is None:
                 continue
-            await self._execute_one(manifest=manifest, now=run_at)
-            executed += 1
+            run_id = str(uuid.uuid4())
+            token = set_run_id(run_id)
+            try:
+                await self._execute_one(manifest=manifest, now=run_at)
+                executed += 1
+            finally:
+                set_run_id(None)  # type: ignore[arg-type]
         return executed
 
     async def _execute_one(self, *, manifest: PluginManifest, now: datetime) -> None:
-        run_id = str(uuid.uuid4())
+        run_id = get_run_id() or str(uuid.uuid4())
         schedule = manifest.schedule or {}
         interval_seconds = schedule.get("interval_seconds")
         if isinstance(interval_seconds, int):
@@ -108,57 +115,77 @@ class ScheduledPluginExecutor:
             event_type="plugin_schedule_start",
             payload={"plugin_name": manifest.name, "run_id": run_id},
         )
+        log_event(
+            logger, logging.INFO,
+            event="plugin.schedule.start",
+            component=_COMPONENT,
+            extra={"plugin_id": manifest.name, "run_id": run_id},
+        )
 
-        start = time.monotonic()
-        try:
-            request = SandboxRequest.from_dict(
-                {
-                    "request_id": run_id,
-                    "action": "run",
-                    "plugin_id": manifest.name,
-                    "payload": {
-                        "plugin_entry": f"{manifest.name}/main.py",
-                        "trigger": "schedule",
-                        "run_id": run_id,
-                        "scheduled_at": now.isoformat(),
-                        "capability": "plugin.runtime.schedule.execute",
-                        "permissions": list(manifest.required_permissions),
-                    },
-                    "timeout_ms": int(self._sandbox_timeout_seconds * 1000),
-                }
-            )
-            response = PluginSandboxRunner(
-                plugins_dir=self._loader.plugins_dir,
-                max_timeout_ms=int(self._sandbox_timeout_seconds * 1000),
-            ).run(request)
-            if not response.ok:
-                raise RuntimeError(response.error_message or response.error_code or "sandbox_schedule_failed")
-            result = response.result or {}
-            await self._apply_sandbox_ops(result)
-            self._log_schedule_diagnostics(manifest.name, run_id, result)
-        except asyncio.TimeoutError:
-            self._record_result(
-                manifest.name,
-                status="timeout",
-                ran_at=now,
-                next_run_at=failure_next_run_at,
-                event_type="plugin_schedule_timeout",
-                payload={"plugin_name": manifest.name, "run_id": run_id, "timeout_seconds": self._timeout_seconds},
-            )
-            return
-        except Exception as exc:
-            logger.exception("scheduled plugin failed plugin=%s", manifest.name)
-            self._record_result(
-                manifest.name,
-                status="error",
-                ran_at=now,
-                next_run_at=failure_next_run_at,
-                event_type="plugin_schedule_error",
-                payload={"plugin_name": manifest.name, "run_id": run_id, "error": str(exc)},
-            )
-            return
+        timing: dict[str, Any] = {}
+        with duration_timer(timing):
+            try:
+                request = SandboxRequest.from_dict(
+                    {
+                        "request_id": run_id,
+                        "action": "run",
+                        "plugin_id": manifest.name,
+                        "payload": {
+                            "plugin_entry": f"{manifest.name}/main.py",
+                            "trigger": "schedule",
+                            "run_id": run_id,
+                            "scheduled_at": now.isoformat(),
+                            "capability": "plugin.runtime.schedule.execute",
+                            "permissions": list(manifest.required_permissions),
+                        },
+                        "timeout_ms": int(self._sandbox_timeout_seconds * 1000),
+                    }
+                )
+                response = PluginSandboxRunner(
+                    plugins_dir=self._loader.plugins_dir,
+                    max_timeout_ms=int(self._sandbox_timeout_seconds * 1000),
+                ).run(request)
+                if not response.ok:
+                    raise RuntimeError(response.error_message or response.error_code or "sandbox_schedule_failed")
+                result = response.result or {}
+                await self._apply_sandbox_ops(result)
+                self._log_schedule_diagnostics(manifest.name, run_id, result)
+            except asyncio.TimeoutError:
+                duration_ms = timing.get("duration_ms", 0)
+                self._record_result(
+                    manifest.name,
+                    status="timeout",
+                    ran_at=now,
+                    next_run_at=failure_next_run_at,
+                    event_type="plugin_schedule_timeout",
+                    payload={"plugin_name": manifest.name, "run_id": run_id, "timeout_seconds": self._timeout_seconds},
+                )
+                log_event(
+                    logger, logging.WARNING,
+                    event="plugin.schedule.timeout",
+                    component=_COMPONENT,
+                    extra={"plugin_id": manifest.name, "run_id": run_id, "duration_ms": duration_ms},
+                )
+                return
+            except Exception as exc:
+                logger.exception("scheduled plugin failed plugin=%s", manifest.name)
+                self._record_result(
+                    manifest.name,
+                    status="error",
+                    ran_at=now,
+                    next_run_at=failure_next_run_at,
+                    event_type="plugin_schedule_error",
+                    payload={"plugin_name": manifest.name, "run_id": run_id, "error": str(exc)},
+                )
+                log_event(
+                    logger, logging.ERROR,
+                    event="plugin.schedule.error",
+                    component=_COMPONENT,
+                    extra={"plugin_id": manifest.name, "run_id": run_id, "error": str(exc)},
+                )
+                return
 
-        duration_ms = int((time.monotonic() - start) * 1000)
+        duration_ms = timing.get("duration_ms", 0)
         self._record_result(
             manifest.name,
             status="success",
@@ -166,6 +193,13 @@ class ScheduledPluginExecutor:
             next_run_at=success_next_run_at,
             event_type="plugin_schedule_success",
             payload={"plugin_name": manifest.name, "run_id": run_id, "duration_ms": duration_ms},
+        )
+        log_event(
+            logger, logging.INFO,
+            event="plugin.schedule.success",
+            component=_COMPONENT,
+            duration_ms=duration_ms,
+            extra={"plugin_id": manifest.name, "run_id": run_id},
         )
 
     async def _apply_sandbox_ops(self, result: dict[str, Any]) -> None:

@@ -9,18 +9,23 @@ import mimetypes
 
 import httpx
 
+_COMPONENT = "telegram.api"
+
 
 class TelegramApiError(RuntimeError):
-    pass
-
-
-logger = logging.getLogger(__name__)
+    def __init__(self, message: str, *, code: int | None = None, error_data: dict[str, Any] | None = None) -> None:
+        super().__init__(message)
+        self.code = code
+        self.error_data = error_data or {}
 
 
 class TelegramRateLimitError(TelegramApiError):
     def __init__(self, retry_after: int) -> None:
-        super().__init__(f"Telegram rate limit hit, retry after {retry_after}s")
+        super().__init__(f"Telegram rate limit hit, retry after {retry_after}s", code=429)
         self.retry_after = retry_after
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -37,6 +42,12 @@ class TelegramClient:
     async def _call(self, method: str, payload: dict[str, Any]) -> Any:
         url = f"{self.api_root}/{method}"
         timeout = self._timeout_for_method(method=method, payload=payload)
+
+        extra: dict[str, Any] = {"method": method}
+        req_id = getattr(self, "_request_id", None)
+        if req_id:
+            extra["request_id"] = req_id
+
         async with httpx.AsyncClient(timeout=timeout) as client:
             response = await client.post(url, json=payload)
 
@@ -46,14 +57,32 @@ class TelegramClient:
                 retry_after = int(response.json().get("parameters", {}).get("retry_after", 1))
             except Exception:
                 pass
+            logger.warning(
+                "telegram rate_limit component=%s method=%s retry_after=%s",
+                _COMPONENT, method, retry_after,
+            )
             raise TelegramRateLimitError(retry_after=retry_after)
 
         if response.status_code >= 400:
-            raise TelegramApiError(f"HTTP {response.status_code}: {response.text[:300]}")
+            error_msg = response.text[:300]
+            logger.warning(
+                "telegram http_error component=%s method=%s status=%s message=%s",
+                _COMPONENT, method, response.status_code, error_msg,
+            )
+            raise TelegramApiError(
+                f"HTTP {response.status_code}: {error_msg}",
+                code=response.status_code,
+            )
 
         data = response.json()
         if not data.get("ok", False):
-            raise TelegramApiError(str(data.get("description", "Unknown Telegram error")))
+            desc = str(data.get("description", "Unknown Telegram error"))
+            logger.warning(
+                "telegram api_error component=%s method=%s description=%s",
+                _COMPONENT, method, desc,
+            )
+            raise TelegramApiError(desc, error_data=data)
+
         return data.get("result")
 
     def _timeout_for_method(self, *, method: str, payload: dict[str, Any]) -> httpx.Timeout | float:
@@ -154,14 +183,31 @@ class TelegramClient:
                 retry_after = int(response.json().get("parameters", {}).get("retry_after", 1))
             except Exception:
                 pass
+            logger.warning(
+                "telegram rate_limit component=%s method=%s retry_after=%s",
+                _COMPONENT, method, retry_after,
+            )
             raise TelegramRateLimitError(retry_after=retry_after)
 
         if response.status_code >= 400:
-            raise TelegramApiError(f"HTTP {response.status_code}: {response.text[:300]}")
+            error_msg = response.text[:300]
+            logger.warning(
+                "telegram http_error component=%s method=%s status=%s message=%s",
+                _COMPONENT, method, response.status_code, error_msg,
+            )
+            raise TelegramApiError(
+                f"HTTP {response.status_code}: {error_msg}",
+                code=response.status_code,
+            )
 
         data = response.json()
         if not data.get("ok", False):
-            raise TelegramApiError(str(data.get("description", "Unknown Telegram error")))
+            desc = str(data.get("description", "Unknown Telegram error"))
+            logger.warning(
+                "telegram api_error component=%s method=%s description=%s",
+                _COMPONENT, method, desc,
+            )
+            raise TelegramApiError(desc, error_data=data)
         result = data.get("result")
         return result if isinstance(result, dict) else {}
 

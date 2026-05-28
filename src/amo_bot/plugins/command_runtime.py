@@ -17,6 +17,7 @@ from amo_bot.plugins.sandbox.command_protocol import CommandError, CommandExecut
 from sqlalchemy.orm import sessionmaker
 
 from amo_bot.auth.roles import Role
+from amo_bot.core.logging import duration_timer, log_event, masked_id
 from amo_bot.db.models import AuditEvent
 from amo_bot.db.repositories import PluginPolicyOverrideRepository, PluginRepository
 from amo_bot.plugins.loader import PluginLoader
@@ -27,6 +28,7 @@ from amo_bot.plugins.policy_overrides import evaluate_effective_policy, resolve_
 from amo_bot.ai.image_analyze_orchestrator import ImageAnalyzeOrchestrator, ImageAnalyzeOrchestratorRequest
 
 logger = logging.getLogger(__name__)
+_COMPONENT = "plugin.runtime"
 
 SendMessageFn = Callable[[int, str], Awaitable[object]]
 ReplyFn = Callable[[int, int, str, int | None], Awaitable[object]]
@@ -180,38 +182,52 @@ class PluginCommandExecutor:
 
     async def analyze_image_automatically(self, *, actor: CommandActor, invocation: CommandInvocation) -> bool:
         if not invocation.attachments:
-            logger.info(
-                "auto_image skipped reason=no_attachments chat_id=%s message_thread_id=%s message_id=%s user_id=%s role=%s",
-                invocation.chat_id,
-                invocation.message_thread_id,
-                invocation.message_id,
-                actor.telegram_user_id,
-                actor.role.value,
+            log_event(
+                logger, logging.INFO,
+                event="auto_image.skipped",
+                component=_COMPONENT,
+                chat_id=invocation.chat_id,
+                message_id=invocation.message_id,
+                message_thread_id=invocation.message_thread_id,
+                user_id=actor.telegram_user_id,
+                command="auto_image",
+                extra={"reason": "no_attachments", "role": actor.role.value},
             )
             return False
 
         attachment_context = await self._build_attachment_context(invocation=invocation)
         reply_to_image = self._resolve_image_from_attachments(attachments=attachment_context)
-        logger.info(
-            "auto_image gate input chat_id=%s message_thread_id=%s message_id=%s user_id=%s role=%s attachment_count=%s context_count=%s image_ok=%s reason=%s",
-            invocation.chat_id,
-            invocation.message_thread_id,
-            invocation.message_id,
-            actor.telegram_user_id,
-            actor.role.value,
-            len(invocation.attachments),
-            len(attachment_context),
-            bool(reply_to_image and reply_to_image.get("ok") is True),
-            (reply_to_image or {}).get("reason_code"),
+        log_event(
+            logger, logging.INFO,
+            event="auto_image.gate_input",
+            component=_COMPONENT,
+            chat_id=invocation.chat_id,
+            message_id=invocation.message_id,
+            message_thread_id=invocation.message_thread_id,
+            user_id=actor.telegram_user_id,
+            command="auto_image",
+            extra={
+                "attachment_count": len(invocation.attachments),
+                "context_count": len(attachment_context),
+                "image_ok": bool(reply_to_image and reply_to_image.get("ok") is True),
+                "reason_code": (reply_to_image or {}).get("reason_code"),
+                "role": actor.role.value,
+            },
         )
-        logger.info(
-            "auto_image decision=invoked chat_id=%s message_thread_id=%s message_id=%s user_id=%s role=%s attachment_count=%s",
-            invocation.chat_id,
-            invocation.message_thread_id,
-            invocation.message_id,
-            actor.telegram_user_id,
-            actor.role.value,
-            len(invocation.attachments),
+        log_event(
+            logger, logging.INFO,
+            event="auto_image.decision",
+            component=_COMPONENT,
+            chat_id=invocation.chat_id,
+            message_id=invocation.message_id,
+            message_thread_id=invocation.message_thread_id,
+            user_id=actor.telegram_user_id,
+            command="auto_image",
+            extra={
+                "decision": "invoked",
+                "attachment_count": len(invocation.attachments),
+                "role": actor.role.value,
+            },
         )
         gate_result = await self._image_analyze_orchestrator.evaluate_and_maybe_invoke_provider_async(
             request=ImageAnalyzeOrchestratorRequest(
@@ -227,16 +243,21 @@ class PluginCommandExecutor:
                 prompt=invocation.argument or "",
             ),
         )
-        logger.info(
-            "auto_image gate result chat_id=%s message_thread_id=%s message_id=%s user_id=%s allowed=%s outcome=%s provider_called=%s count=%s",
-            invocation.chat_id,
-            invocation.message_thread_id,
-            invocation.message_id,
-            actor.telegram_user_id,
-            gate_result.allowed,
-            gate_result.outcome,
-            gate_result.provider_called,
-            gate_result.count,
+        log_event(
+            logger, logging.INFO,
+            event="auto_image.gate_result",
+            component=_COMPONENT,
+            chat_id=invocation.chat_id,
+            message_id=invocation.message_id,
+            message_thread_id=invocation.message_thread_id,
+            user_id=actor.telegram_user_id,
+            command="auto_image",
+            extra={
+                "allowed": gate_result.allowed,
+                "outcome": gate_result.outcome,
+                "provider_called": gate_result.provider_called,
+                "count": gate_result.count,
+            },
         )
         if not gate_result.allowed or gate_result.provider_result is None:
             return False
@@ -274,6 +295,17 @@ class PluginCommandExecutor:
                     "run_id": run_id,
                 },
             )
+            log_event(
+                logger, logging.INFO,
+                event="plugin.command.skipped",
+                component=_COMPONENT,
+                chat_id=invocation.chat_id,
+                message_id=invocation.message_id,
+                message_thread_id=invocation.message_thread_id,
+                user_id=actor.telegram_user_id,
+                command=invocation.command_name,
+                extra={"plugin_id": manifest.name, "run_id": run_id, "outcome": "plugin_disabled"},
+            )
             return True
 
         try:
@@ -300,6 +332,17 @@ class PluginCommandExecutor:
                     "reason": policy_eval.deny_reason,
                     "run_id": run_id,
                 },
+            )
+            log_event(
+                logger, logging.INFO,
+                event="plugin.command.denied",
+                component=_COMPONENT,
+                chat_id=invocation.chat_id,
+                message_id=invocation.message_id,
+                message_thread_id=invocation.message_thread_id,
+                user_id=actor.telegram_user_id,
+                command=invocation.command_name,
+                extra={"plugin_id": manifest.name, "run_id": run_id, "outcome": policy_eval.deny_reason},
             )
             return True
 
@@ -347,6 +390,17 @@ class PluginCommandExecutor:
                         "run_id": run_id,
                     },
                 )
+                log_event(
+                    logger, logging.INFO,
+                    event="plugin.command.denied",
+                    component=_COMPONENT,
+                    chat_id=invocation.chat_id,
+                    message_id=invocation.message_id,
+                    message_thread_id=invocation.message_thread_id,
+                    user_id=actor.telegram_user_id,
+                    command=invocation.command_name,
+                    extra={"plugin_id": manifest.name, "run_id": run_id, "outcome": gate_result.outcome},
+                )
                 return True
 
         self._write_audit(
@@ -358,41 +412,86 @@ class PluginCommandExecutor:
                 "run_id": run_id,
             },
         )
+        log_event(
+            logger, logging.INFO,
+            event="plugin.command.start",
+            component=_COMPONENT,
+            chat_id=invocation.chat_id,
+            message_id=invocation.message_id,
+            message_thread_id=invocation.message_thread_id,
+            user_id=actor.telegram_user_id,
+            command=invocation.command_name,
+            extra={"plugin_id": manifest.name, "run_id": run_id},
+        )
 
-        start = time.monotonic()
-        try:
-            await self._execute_via_sandbox(manifest=manifest, context=context)
-        except asyncio.TimeoutError:
-            self._write_audit(
-                event_type="plugin_command_timeout",
-                actor_telegram_user_id=actor.telegram_user_id,
-                payload={
+        timing: dict[str, Any] = {}
+        with duration_timer(timing):
+            try:
+                await self._execute_via_sandbox(manifest=manifest, context=context)
+            except asyncio.TimeoutError:
+                self._write_audit(
+                    event_type="plugin_command_timeout",
+                    actor_telegram_user_id=actor.telegram_user_id,
+                    payload={
+                        "plugin_name": manifest.name,
+                        "command": invocation.command_name,
+                        "run_id": run_id,
+                        "timeout_seconds": self._timeout_seconds,
+                    },
+                )
+                log_event(
+                    logger, logging.WARNING,
+                    event="plugin.command.timeout",
+                    component=_COMPONENT,
+                    chat_id=invocation.chat_id,
+                    message_id=invocation.message_id,
+                    message_thread_id=invocation.message_thread_id,
+                    user_id=actor.telegram_user_id,
+                    command=invocation.command_name,
+                    extra={
+                        "plugin_id": manifest.name,
+                        "run_id": run_id,
+                        "timeout_seconds": self._timeout_seconds,
+                        "outcome": "timeout",
+                    },
+                )
+                return True
+            except Exception as exc:
+                logger.exception("plugin command failed plugin=%s command=%s", manifest.name, invocation.command_name)
+                payload = {
                     "plugin_name": manifest.name,
                     "command": invocation.command_name,
                     "run_id": run_id,
-                    "timeout_seconds": self._timeout_seconds,
-                },
-            )
-            return True
-        except Exception as exc:
-            logger.exception("plugin command failed plugin=%s command=%s", manifest.name, invocation.command_name)
-            payload = {
-                "plugin_name": manifest.name,
-                "command": invocation.command_name,
-                "run_id": run_id,
-                "error": str(exc),
-            }
-            sandbox_error_code = getattr(exc, "sandbox_error_code", None)
-            if isinstance(sandbox_error_code, str) and sandbox_error_code.strip():
-                payload["error_code"] = sandbox_error_code.strip()
-            self._write_audit(
-                event_type="plugin_command_error",
-                actor_telegram_user_id=actor.telegram_user_id,
-                payload=payload,
-            )
-            return True
+                    "error": str(exc),
+                }
+                sandbox_error_code = getattr(exc, "sandbox_error_code", None)
+                if isinstance(sandbox_error_code, str) and sandbox_error_code.strip():
+                    payload["error_code"] = sandbox_error_code.strip()
+                self._write_audit(
+                    event_type="plugin_command_error",
+                    actor_telegram_user_id=actor.telegram_user_id,
+                    payload=payload,
+                )
+                log_event(
+                    logger, logging.ERROR,
+                    event="plugin.command.error",
+                    component=_COMPONENT,
+                    chat_id=invocation.chat_id,
+                    message_id=invocation.message_id,
+                    message_thread_id=invocation.message_thread_id,
+                    user_id=actor.telegram_user_id,
+                    command=invocation.command_name,
+                    extra={
+                        "plugin_id": manifest.name,
+                        "run_id": run_id,
+                        "error": str(exc),
+                        "error_code": sandbox_error_code if isinstance(sandbox_error_code, str) else None,
+                        "outcome": "error",
+                    },
+                )
+                return True
 
-        duration_ms = int((time.monotonic() - start) * 1000)
+        duration_ms = timing.get("duration_ms", 0)
         self._write_audit(
             event_type="plugin_command_success",
             actor_telegram_user_id=actor.telegram_user_id,
@@ -402,6 +501,18 @@ class PluginCommandExecutor:
                 "run_id": run_id,
                 "duration_ms": duration_ms,
             },
+        )
+        log_event(
+            logger, logging.INFO,
+            event="plugin.command.success",
+            component=_COMPONENT,
+            chat_id=invocation.chat_id,
+            message_id=invocation.message_id,
+            message_thread_id=invocation.message_thread_id,
+            user_id=actor.telegram_user_id,
+            command=invocation.command_name,
+            duration_ms=duration_ms,
+            extra={"plugin_id": manifest.name, "run_id": run_id, "outcome": "success"},
         )
         return True
 
@@ -574,9 +685,21 @@ class PluginCommandExecutor:
             handled = await asyncio.wait_for(callback_handler(callback_context, host_api), timeout=self._timeout_seconds)
         except asyncio.TimeoutError:
             logger.warning("plugin callback timeout plugin=%s callback=%s", manifest.name, callback_data)
+            log_event(
+                logger, logging.WARNING,
+                event="plugin.callback.timeout",
+                component=_COMPONENT,
+                extra={"plugin_id": manifest.name, "run_id": run_id},
+            )
             return True
         except Exception:
             logger.exception("plugin callback failed plugin=%s callback=%s", manifest.name, callback_data)
+            log_event(
+                logger, logging.ERROR,
+                event="plugin.callback.error",
+                component=_COMPONENT,
+                extra={"plugin_id": manifest.name, "run_id": run_id},
+            )
             return True
 
         if handled is None:

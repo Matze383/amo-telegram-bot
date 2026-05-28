@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import timedelta
+import logging
 
 from flask import Flask, abort, jsonify, request, session, url_for
 
@@ -8,6 +9,7 @@ from amo_bot.webui.i18n import resolve_lang, translate
 from flask_wtf import CSRFProtect
 
 from amo_bot.config.settings import Settings, get_settings
+from amo_bot.core.logging import new_request_id, set_request_id, log_event
 from amo_bot.db.base import create_session_factory
 from amo_bot.db.init_db import init_db
 from amo_bot.plugins.loader import PluginLoader
@@ -111,6 +113,27 @@ def create_flask_app(
     def _resolve_language() -> None:
         lang = resolve_lang()
         app.extensions["amo.lang"] = lang
+
+    @app.before_request
+    def _request_id_and_logging() -> None:
+        """Bind a request ID and emit a structured start event for every WebUI request."""
+        req_id = new_request_id()
+        set_request_id(req_id)
+        # Store on g so handlers can append it to responses if needed
+        import flask.g
+        flask.g.request_id = req_id
+        log_event(
+            logging.getLogger("amo_bot.webui"),
+            logging.INFO,
+            event="webui.request.start",
+            component="webui",
+            extra={
+                "method": request.method,
+                "path": request.path,
+                "remote_addr": request.remote_addr,
+                "request_id": req_id,
+            },
+        )
 
     @app.context_processor
     def _inject_i18n_context():

@@ -269,6 +269,13 @@ DATABASE_URL=sqlite:///./data/amo_bot.db
 # Optional: Plugin directory
 AMO_PLUGIN_DIR=./plugins
 
+# Optional: Logging
+LOG_LEVEL=info                # debug|info|warning|error (default: info)
+LOG_FORMAT=text               # text|json (default: text)
+# LOG_FILE=./logs/amo.log     # Optional file path for log output
+LOG_DEBUG_SCOPES=             # Comma-separated components to set to DEBUG (e.g.: ai.router,plugin.runtime)
+LOG_INCLUDE_PRIVATE_IDS=0     # Set to 1 to include unmasked IDs in structured logs
+
 # Optional: WebUI settings
 WEBUI_HOST=127.0.0.1
 WEBUI_PORT=8080
@@ -308,6 +315,27 @@ The WebUI includes configurable security features:
 |----------|---------|-------------|-------------|
 | `WEBUI_LOGIN_DELAY_BASE_SECONDS` | `0.25` | non-negative | Base delay after first failed login (seconds) |
 | `WEBUI_LOGIN_DELAY_MAX_SECONDS` | `2.0` | non-negative, must be >= base | Maximum delay cap (seconds) |
+
+---
+
+## Logging Configuration
+
+The bot uses structured logging with configurable output format and filtering.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `LOG_LEVEL` | `info` | Minimum log level: `debug`, `info`, `warning`, `error` |
+| `LOG_FORMAT` | `text` | Output format: `text` (human-readable) or `json` (structured) |
+| `LOG_FILE` | *(none)* | Optional file path for log output (default: stderr only) |
+| `LOG_DEBUG_SCOPES` | *(none)* | Comma-separated component names to force DEBUG level (e.g., `ai.router,plugin.runtime`) |
+| `LOG_INCLUDE_PRIVATE_IDS` | `0` | Set to `1`/`true`/`yes` to include unmasked IDs in structured logs. **Privacy warning:** Enabling this may expose sensitive identifiers in log files. |
+
+**Privacy Note:**
+- By default, `LOG_INCLUDE_PRIVATE_IDS` is disabled to protect user privacy
+- When enabled, sensitive identifiers (user IDs, chat IDs) are logged without masking
+- Log files should be protected with appropriate file permissions if IDs are included
+- JSON format logs contain structured data; when `LOG_INCLUDE_PRIVATE_IDS=1` they include unmasked IDs
+- **Recommended:** Keep `LOG_INCLUDE_PRIVATE_IDS=0` for production environments; enable only when needed
 
 ---
 
@@ -1178,6 +1206,3 @@ chmod 755 data
 - Does the `data\` directory exist?
 - Check folder permissions (right-click → Properties → Security)
 - For testing only: `del data\amo_bot.db` and restart
-
-
-Fireworks provider (GH38): AI_PROVIDER=fireworks with FIREWORKS_API_KEY, FIREWORKS_MODEL, FIREWORKS_BASE_URL, FIREWORKS_TIMEOUT_SECONDS.

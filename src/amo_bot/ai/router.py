@@ -3,9 +3,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
+import logging
 import re
 
+from amo_bot.core.logging import log_event
 from amo_bot.db.repositories import TopicAgentMemoryRepository
+
+logger = logging.getLogger(__name__)
+_COMPONENT = "ai.router"
 
 
 class AIRouterReasonCode(StrEnum):
@@ -573,31 +578,29 @@ class AIRouter:
         repo = self._topic_agent_memory_repository
         if repo is None:
             return
-        logger = getattr(repo, "logger", None)
-        if logger is None:
-            return
 
         scope_type = str(scope.get("scope_type") or "")
-        payload = {
-            "event": "ai_router_recall",
-            "scope_type": scope_type,
-            "scope_chat_id": scope.get("chat_id") if isinstance(scope.get("chat_id"), int) else None,
-            "scope_topic_id": scope.get("topic_id") if isinstance(scope.get("topic_id"), int) else None,
-            "scope_user_id": scope.get("user_id") if isinstance(scope.get("user_id"), int) else None,
-            "decision": str(meta.get("decision") or "skip"),
-            "reason": str(meta.get("reason") or ""),
-            "records_in": int(meta.get("records_in") or 0),
-            "records_out": int(meta.get("records_out") or 0),
-            "chars_out": int(meta.get("chars_out") or 0),
-            "truncated_records": bool(meta.get("truncated_records")),
-            "truncated_chars": bool(meta.get("truncated_chars")),
-            "timeout_hit": bool(meta.get("timeout_hit")),
-            "error_class": str(meta.get("error_class") or ""),
-        }
-        try:
-            logger.info("%s", payload)
-        except Exception:
-            return
+        log_event(
+            logger,
+            logging.INFO,
+            event="ai_router_recall",
+            component=_COMPONENT,
+            extra={
+                "scope_type": scope_type,
+                "scope_chat_id": scope.get("chat_id") if isinstance(scope.get("chat_id"), int) else None,
+                "scope_topic_id": scope.get("topic_id") if isinstance(scope.get("topic_id"), int) else None,
+                "scope_user_id": scope.get("user_id") if isinstance(scope.get("user_id"), int) else None,
+                "decision": str(meta.get("decision") or "skip"),
+                "reason": str(meta.get("reason") or ""),
+                "records_in": int(meta.get("records_in") or 0),
+                "records_out": int(meta.get("records_out") or 0),
+                "chars_out": int(meta.get("chars_out") or 0),
+                "truncated_records": bool(meta.get("truncated_records")),
+                "truncated_chars": bool(meta.get("truncated_chars")),
+                "timeout_hit": bool(meta.get("timeout_hit")),
+                "error_class": str(meta.get("error_class") or ""),
+            },
+        )
 
     @staticmethod
     def _has_bot_mention(*, prompt: str, bot_username: str | None) -> bool:

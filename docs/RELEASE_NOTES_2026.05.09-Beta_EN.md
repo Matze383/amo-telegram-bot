@@ -164,6 +164,34 @@ Group role changes are now fully auditable:
   - `source` – Where the change originated (`telegram_command` or `webui`)
 - **Clear/fallback audit**: Setting `normal` in a group (which clears the group-scoped role) now generates a `group_role_clear` event with the correct previous role reported in the response
 
+### Unified Debug and Logging System (GitHub #43)
+
+**Commit:** Logging system for the entire bot
+
+Unified structured logging with configuration options and privacy features:
+
+- **Log Level**: `debug`, `info`, `warning`, `error` (default: `info`)
+- **Log Format**: `text` (human-readable) or `json` (structured for aggregation)
+- **Log Output**: stderr (default) or optional log file via `LOG_FILE`
+- **Debug Scopes**: Component-specific DEBUG level via `LOG_DEBUG_SCOPES` (e.g., `ai.router,plugin.runtime`)
+
+**Privacy Features:**
+- **Private ID Redaction**: User IDs and chat IDs are masked by default
+- **`LOG_INCLUDE_PRIVATE_IDS`**: Only when explicitly set are unmasked IDs logged
+- **Metadata-only Logs**: No private content (messages, images, memory) in logs
+- **Safe Redaction**: Sensitive values (tokens, keys) are automatically removed from logs
+
+**Audit and Traceability:**
+- **Correlation IDs**: Unified request/run ID tracking across components
+- **Structured JSON Logs**: For log aggregation systems (Splunk, ELK, etc.)
+- **Text Logs**: Human-readable format for local development
+
+**Security:**
+- No private user messages in logs
+- No memory contents
+- No image contents, only metadata
+- Deterministic redaction for sensitive values
+
 ---
 
 ---

@@ -1447,7 +1447,7 @@ def test_dispatcher_logs_unhandled_update_kind(caplog: pytest.LogCaptureFixture)
         }))
 
     assert sent == []
-    assert any("telegram update ignored" in rec.message for rec in caplog.records)
+    assert any("telegram.update.ignored" in rec.message for rec in caplog.records)
 
 
 def test_dispatcher_parses_callback_with_inaccessible_message(caplog: pytest.LogCaptureFixture) -> None:
@@ -1486,4 +1486,4 @@ def test_dispatcher_parses_callback_with_inaccessible_message(caplog: pytest.Log
         )
 
     assert callback_answers == [("cb-inacc", "Button-Test ok")]
-    assert any("telegram callback parsed" in rec.message for rec in caplog.records)
+    assert any("telegram.callback.received" in rec.message for rec in caplog.records)

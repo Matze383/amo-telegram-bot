@@ -269,6 +269,13 @@ DATABASE_URL=sqlite:///./data/amo_bot.db
 # Optional: Plugin-Verzeichnis
 AMO_PLUGIN_DIR=./plugins
 
+# Optional: Logging
+LOG_LEVEL=info                # debug|info|warning|error (Standard: info)
+LOG_FORMAT=text               # text|json (Standard: text)
+# LOG_FILE=./logs/amo.log     # Optionaler Dateipfad für Log-Ausgabe
+LOG_DEBUG_SCOPES=             # Komma-separierte Komponenten für DEBUG (z.B.: ai.router,plugin.runtime)
+LOG_INCLUDE_PRIVATE_IDS=0     # Auf 1 setzen für unmaskierte IDs in strukturierten Logs
+
 # Optional: WebUI-Einstellungen
 WEBUI_HOST=127.0.0.1
 WEBUI_PORT=8080
@@ -308,6 +315,27 @@ Die WebUI enthält konfigurierbare Sicherheitsfeatures:
 |----------|----------|-----------------|--------------|
 | `WEBUI_LOGIN_DELAY_BASE_SECONDS` | `0,25` | nicht-negativ | Basisverzögerung nach erstem fehlgeschlagenen Login (Sekunden) |
 | `WEBUI_LOGIN_DELAY_MAX_SECONDS` | `2,0` | nicht-negativ, muss >= Basis sein | Maximale Verzögerung (Sekunden) |
+
+---
+
+## Logging-Konfiguration
+
+Der Bot verwendet strukturiertes Logging mit konfigurierbarem Ausgabeformat und Filterung.
+
+| Variable | Standard | Beschreibung |
+|----------|----------|--------------|
+| `LOG_LEVEL` | `info` | Minimales Log-Level: `debug`, `info`, `warning`, `error` |
+| `LOG_FORMAT` | `text` | Ausgabeformat: `text` (menschenlesbar) oder `json` (strukturiert) |
+| `LOG_FILE` | *(keiner)* | Optionaler Dateipfad für Log-Ausgabe (Standard: nur stderr) |
+| `LOG_DEBUG_SCOPES` | *(keiner)* | Komma-separierte Komponentennamen für DEBUG-Level (z.B. `ai.router,plugin.runtime`) |
+| `LOG_INCLUDE_PRIVATE_IDS` | `0` | Auf `1`/`true`/`yes` setzen für unmaskierte IDs in strukturierten Logs. **Datenschutz-Warnung:** Aktivierung kann sensible Kennungen in Log-Dateien offenlegen. |
+
+**Datenschutz-Hinweis:**
+- Standardmäßig ist `LOG_INCLUDE_PRIVATE_IDS` deaktiviert zum Schutz der Privatsphäre
+- Bei Aktivierung werden sensible Kennungen (User-IDs, Chat-IDs) unmaskiert protokolliert
+- Log-Dateien sollten bei aktivierten IDs mit entsprechenden Dateiberechtigungen geschützt werden
+- JSON-Format-Logs enthalten strukturierte Daten; bei `LOG_INCLUDE_PRIVATE_IDS=1` auch unmaskierte IDs
+- **Empfohlen:** `LOG_INCLUDE_PRIVATE_IDS=0` für Produktivumgebungen; nur bei Bedarf aktivieren
 
 ---
 
@@ -1178,6 +1206,3 @@ chmod 755 data
 - Existiert das Verzeichnis `data\`?
 - Ordnerberechtigungen prüfen (Rechtsklick → Eigenschaften → Sicherheit)
 - Nur für Tests: `del data\amo_bot.db` und Neustart
-
-
-Fireworks provider (GH38): AI_PROVIDER=fireworks with FIREWORKS_API_KEY, FIREWORKS_MODEL, FIREWORKS_BASE_URL, FIREWORKS_TIMEOUT_SECONDS.

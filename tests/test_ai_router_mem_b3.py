@@ -1,5 +1,7 @@
 from dataclasses import dataclass
 
+import pytest
+
 from amo_bot.ai.router import AIRouter, AIRouterReasonCode
 
 
@@ -128,15 +130,27 @@ def test_mem_b3_missing_or_ambiguous_scope_no_fallback_and_empty_recall() -> Non
     assert decision.context.recall_memory_text == ""
 
 
-def test_mem_b3_audit_payload_is_metadata_only() -> None:
+def test_mem_b3_audit_payload_is_metadata_only(caplog: pytest.LogCaptureFixture) -> None:
+    import logging as _logging
     repo = _Repo()
     router = AIRouter(topic_agent_memory_repository=repo)
 
-    _ = router.decide(prompt="hello secret token=zzz", chat_id=42, user_id=42)
+    with caplog.at_level(_logging.INFO, logger="amo_bot.ai.router"):
+        _ = router.decide(prompt="hello secret token=zzz", chat_id=42, user_id=42)
 
-    assert repo.logger.entries
-    _, payload = repo.logger.entries[-1]
-    assert isinstance(payload, dict)
+    # Find the ai_router_recall event — payload is in the message dict via getMessage()
+    recall_records = [
+        r for r in caplog.records
+        if "ai_router_recall" in r.getMessage()
+    ]
+    assert recall_records, f"Expected ai_router_recall event in {caplog.text!r}"
+    record = recall_records[-1]
+    # getMessage() returns the str(dict) logged via log_event's logger.log(level, "%s", kwargs)
+    message_str = record.getMessage()
+    # message_str is a string representation of the dict, e.g.: "{'event': 'ai_router_recall', ...}"
+    import ast
+    payload = ast.literal_eval(message_str)
+    assert isinstance(payload, dict), f"Expected dict message, got {payload!r}"
     keys = set(payload.keys())
     assert "event" in keys
     assert "decision" in keys
