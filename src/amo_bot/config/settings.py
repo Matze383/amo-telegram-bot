@@ -75,6 +75,11 @@ class Settings(BaseSettings):
     litellm_timeout_seconds: float = Field(default=30.0, alias="LITELLM_TIMEOUT_SECONDS", gt=0)
     litellm_base_url: str = Field(default="https://api.litellm.ai", alias="LITELLM_BASE_URL")
 
+    lmstudio_api_key: str | None = Field(default=None, alias="LMSTUDIO_API_KEY")
+    lmstudio_model: str = Field(default="local-model", alias="LMSTUDIO_MODEL")
+    lmstudio_timeout_seconds: float = Field(default=60.0, alias="LMSTUDIO_TIMEOUT_SECONDS", gt=0)
+    lmstudio_base_url: str = Field(default="http://127.0.0.1:1234/v1", alias="LMSTUDIO_BASE_URL")
+
     bedrock_model: str = Field(default="amazon-bedrock/anthropic.claude-3-haiku-20240307-v1:0", alias="BEDROCK_MODEL")
     bedrock_region: str | None = Field(default=None, alias="BEDROCK_REGION")
     aws_region: str | None = Field(default=None, alias="AWS_REGION")
@@ -119,8 +124,8 @@ class Settings(BaseSettings):
             raise ValueError("WEBUI_LOGIN_DELAY_MAX_SECONDS must be >= WEBUI_LOGIN_DELAY_BASE_SECONDS")
 
         provider = self.ai_provider.strip().casefold()
-        if provider not in {"openai", "ollama", "anthropic", "google", "openrouter", "groq", "mistral", "xai", "deepseek", "together", "fireworks", "amazon-bedrock", "litellm"}:
-            raise ValueError("AI_PROVIDER must be one of: openai, ollama, anthropic, google, openrouter, groq, mistral, xai, deepseek, together, fireworks, amazon-bedrock, litellm")
+        if provider not in {"openai", "ollama", "anthropic", "google", "openrouter", "groq", "mistral", "xai", "deepseek", "together", "fireworks", "amazon-bedrock", "litellm", "lmstudio"}:
+            raise ValueError("AI_PROVIDER must be one of: openai, ollama, anthropic, google, openrouter, groq, mistral, xai, deepseek, together, fireworks, amazon-bedrock, litellm, lmstudio")
 
         self.ai_provider = provider
 
@@ -319,6 +324,20 @@ class Settings(BaseSettings):
             if not base_url:
                 raise ValueError("LITELLM_BASE_URL must not be empty")
             self.litellm_base_url = base_url
+
+        if provider == "lmstudio":
+            api_key = (self.lmstudio_api_key or "").strip()
+            self.lmstudio_api_key = api_key or None
+
+            model = self.lmstudio_model.strip()
+            if not model:
+                raise ValueError("LMSTUDIO_MODEL is required when AI_PROVIDER=lmstudio")
+            self.lmstudio_model = model
+
+            base_url = self.lmstudio_base_url.strip()
+            if not base_url:
+                raise ValueError("LMSTUDIO_BASE_URL must not be empty")
+            self.lmstudio_base_url = base_url
 
         endpoint = self.ollama_request_endpoint.strip().casefold()
         if endpoint not in {"generate", "chat"}:

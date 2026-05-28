@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from amo_bot.ai.ollama import OllamaClient
@@ -7,7 +9,7 @@ from amo_bot.ai.openai_provider import OpenAIProviderConfig
 from amo_bot.ai.anthropic_provider import AnthropicProviderConfig
 from amo_bot.ai.gemini_provider import GeminiProviderConfig
 from amo_bot.ai.litellm_provider import LiteLLMProviderConfig
-from amo_bot.ai.providers import AnthropicProvider, BedrockProvider, DeepSeekProvider, FireworksProvider, GeminiProvider, GroqProvider, LiteLLMProvider, MistralProvider, OpenAIProvider, OpenRouterProvider, TogetherProvider, XAIProvider, build_ai_provider
+from amo_bot.ai.providers import AnthropicProvider, BedrockProvider, DeepSeekProvider, FireworksProvider, GeminiProvider, GroqProvider, LiteLLMProvider, LMStudioProvider, MistralProvider, OpenAIProvider, OpenRouterProvider, TogetherProvider, XAIProvider, build_ai_provider
 from amo_bot.ai.service import AIService
 from amo_bot.config.settings import Settings
 
@@ -409,13 +411,61 @@ def test_litellm_requires_non_empty_base_url() -> None:
         _settings(AI_PROVIDER="litellm", LITELLM_API_KEY="key", LITELLM_BASE_URL="  ")
 
 
-def test_litellm_regression_ollama_still_works() -> None:
+def test_lmstudio_provider_selection_builds_provider_config_only() -> None:
+    settings = _settings(AI_PROVIDER="lmstudio", LMSTUDIO_MODEL="local-model")
+    provider = build_ai_provider(settings)
+    assert isinstance(provider, LMStudioProvider)
+    assert provider.config.model == "local-model"
+    assert provider.config.api_key is None
+
+
+def test_lmstudio_api_key_optional(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fake_urlopen(req, timeout):
+        return type("_R", (), {"status": 200, "read": lambda self: b'{"choices":[{"message":{"content":"hi"}}]}', "__enter__": lambda self: self, "__exit__": lambda *_: None})()
+
+    monkeypatch.setattr("amo_bot.ai.lmstudio_provider.request.urlopen", fake_urlopen)
+
+    # No API key provided - should work
+    settings = _settings(AI_PROVIDER="lmstudio", LMSTUDIO_MODEL="local-model", LMSTUDIO_API_KEY=None)
+    provider = build_ai_provider(settings)
+    result = asyncio.run(provider.ask("hi"))
+    assert result == "hi"
+
+
+def test_lmstudio_with_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured_auth = []
+
+    def fake_urlopen(req, timeout):
+        captured_auth.append(req.headers.get("Authorization"))
+        return type("_R", (), {"status": 200, "read": lambda self: b'{"choices":[{"message":{"content":"hi"}}]}', "__enter__": lambda self: self, "__exit__": lambda *_: None})()
+
+    monkeypatch.setattr("amo_bot.ai.lmstudio_provider.request.urlopen", fake_urlopen)
+
+    settings = _settings(AI_PROVIDER="lmstudio", LMSTUDIO_MODEL="local-model", LMSTUDIO_API_KEY="  lm-key-123  ")
+    provider = build_ai_provider(settings)
+    assert provider.config.api_key == "lm-key-123"
+    result = asyncio.run(provider.ask("hi"))
+    assert result == "hi"
+    assert captured_auth == ["Bearer lm-key-123"]
+
+
+def test_lmstudio_requires_model() -> None:
+    with pytest.raises(ValueError, match="LMSTUDIO_MODEL is required when AI_PROVIDER=lmstudio"):
+        _settings(AI_PROVIDER="lmstudio", LMSTUDIO_MODEL="  ")
+
+
+def test_lmstudio_requires_non_empty_base_url() -> None:
+    with pytest.raises(ValueError, match="LMSTUDIO_BASE_URL must not be empty"):
+        _settings(AI_PROVIDER="lmstudio", LMSTUDIO_MODEL="local-model", LMSTUDIO_BASE_URL="  ")
+
+
+def test_lmstudio_regression_ollama_still_works() -> None:
     settings = _settings(AI_PROVIDER="ollama")
     provider = build_ai_provider(settings)
     assert isinstance(provider.service, AIService)
 
 
-def test_litellm_regression_openai_still_works() -> None:
+def test_lmstudio_regression_openai_still_works() -> None:
     settings = _settings(AI_PROVIDER="openai", OPENAI_API_KEY="sk-test")
     provider = build_ai_provider(settings)
     assert isinstance(provider, OpenAIProvider)

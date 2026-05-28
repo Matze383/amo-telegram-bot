@@ -19,6 +19,7 @@ from amo_bot.ai.bedrock_provider import BedrockProviderConfig, BedrockRequestCli
 from amo_bot.ai.together_provider import TogetherProviderConfig, TogetherRequestClient
 from amo_bot.ai.fireworks_provider import FireworksProviderConfig, FireworksRequestClient
 from amo_bot.ai.litellm_provider import LiteLLMProviderConfig, LiteLLMRequestClient
+from amo_bot.ai.lmstudio_provider import LMStudioProviderConfig, LMStudioRequestClient
 from amo_bot.ai.service import AIService
 from amo_bot.config.settings import Settings
 
@@ -199,6 +200,20 @@ class LiteLLMProvider:
 
     async def ask(self, prompt: str) -> str:
         return await self.client.ask(prompt)
+
+
+@dataclass(frozen=True, slots=True)
+class LMStudioProvider:
+    config: LMStudioProviderConfig
+
+    @property
+    def client(self) -> LMStudioRequestClient:
+        return LMStudioRequestClient(config=self.config)
+
+    async def ask(self, prompt: str) -> str:
+        return await self.client.ask(prompt)
+
+
 def _build_ollama_provider(settings: Settings) -> OllamaProvider:
     return OllamaProvider(
         AIService(
@@ -343,6 +358,16 @@ def build_ai_provider(settings: Settings) -> AIProvider:
                 model=settings.litellm_model,
                 timeout_seconds=settings.litellm_timeout_seconds,
                 base_url=settings.litellm_base_url,
+            )
+        )
+
+    if provider == "lmstudio":
+        return LMStudioProvider(
+            config=LMStudioProviderConfig(
+                api_key=settings.lmstudio_api_key,
+                model=settings.lmstudio_model,
+                timeout_seconds=settings.lmstudio_timeout_seconds,
+                base_url=settings.lmstudio_base_url,
             )
         )
 
