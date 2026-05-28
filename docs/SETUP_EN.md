@@ -18,7 +18,7 @@ Complete setup instructions for running the bot locally.
   - [Groq](https://groq.com/) API key, **OR**
   - Mistral API key, **OR**
   - xAI API key, **OR**
-  - DeepSeek API key
+  - DeepSeek API key, or AWS credentials/profile for Amazon Bedrock
 
 ---
 
@@ -170,7 +170,7 @@ WEBUI_PASSWORD=your_secure_password
 WEBUI_OWNER_TELEGRAM_ID=your_telegram_user_id
 
 # AI Provider Configuration
-AI_PROVIDER=ollama  # ollama (default), openai, anthropic, google, openrouter, groq, mistral, xai or deepseek
+AI_PROVIDER=ollama  # ollama (default), openai, anthropic, google, openrouter, groq, mistral, xai or deepseek, amazon-bedrock
 
 # Optional: OpenAI (for /ask command)
 # OPENAI_API_KEY=your-openai-api-key-here

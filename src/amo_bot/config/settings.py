@@ -60,6 +60,17 @@ class Settings(BaseSettings):
     deepseek_timeout_seconds: float = Field(default=30.0, alias="DEEPSEEK_TIMEOUT_SECONDS", gt=0)
     deepseek_base_url: str = Field(default="https://api.deepseek.com/v1", alias="DEEPSEEK_BASE_URL")
 
+
+    bedrock_model: str = Field(default="amazon-bedrock/anthropic.claude-3-haiku-20240307-v1:0", alias="BEDROCK_MODEL")
+    bedrock_region: str | None = Field(default=None, alias="BEDROCK_REGION")
+    aws_region: str | None = Field(default=None, alias="AWS_REGION")
+    aws_default_region: str | None = Field(default=None, alias="AWS_DEFAULT_REGION")
+    bedrock_timeout_seconds: float = Field(default=30.0, alias="BEDROCK_TIMEOUT_SECONDS", gt=0)
+
+    aws_access_key_id: str | None = Field(default=None, alias="AWS_ACCESS_KEY_ID")
+    aws_secret_access_key: str | None = Field(default=None, alias="AWS_SECRET_ACCESS_KEY")
+    aws_session_token: str | None = Field(default=None, alias="AWS_SESSION_TOKEN")
+
     ollama_base_url: str = Field(default="http://127.0.0.1:11434", alias="OLLAMA_URL")
     ollama_model: str = Field(default="llama3.1", alias="OLLAMA_MODEL")
     ollama_timeout_seconds: int = Field(default=20, alias="OLLAMA_TIMEOUT_SECONDS")
@@ -94,8 +105,8 @@ class Settings(BaseSettings):
             raise ValueError("WEBUI_LOGIN_DELAY_MAX_SECONDS must be >= WEBUI_LOGIN_DELAY_BASE_SECONDS")
 
         provider = self.ai_provider.strip().casefold()
-        if provider not in {"openai", "ollama", "anthropic", "google", "openrouter", "groq", "mistral", "xai", "deepseek"}:
-            raise ValueError("AI_PROVIDER must be one of: openai, ollama, anthropic, google, openrouter, groq, mistral, xai, deepseek")
+        if provider not in {"openai", "ollama", "anthropic", "google", "openrouter", "groq", "mistral", "xai", "deepseek", "amazon-bedrock"}:
+            raise ValueError("AI_PROVIDER must be one of: openai, ollama, anthropic, google, openrouter, groq, mistral, xai, deepseek, amazon-bedrock")
 
         self.ai_provider = provider
 
@@ -221,6 +232,31 @@ class Settings(BaseSettings):
             if not base_url:
                 raise ValueError("DEEPSEEK_BASE_URL must not be empty")
             self.deepseek_base_url = base_url
+
+        if provider == "amazon-bedrock":
+            model = self.bedrock_model.strip()
+            if not model:
+                raise ValueError("BEDROCK_MODEL is required when AI_PROVIDER=amazon-bedrock")
+            self.bedrock_model = model
+
+            region = (self.bedrock_region or "").strip() or (self.aws_region or "").strip() or (self.aws_default_region or "").strip()
+            if not region:
+                raise ValueError("BEDROCK_REGION (or AWS_REGION/AWS_DEFAULT_REGION) is required when AI_PROVIDER=amazon-bedrock")
+            self.bedrock_region = region
+
+            access_key = (self.aws_access_key_id or "").strip()
+            secret_key = (self.aws_secret_access_key or "").strip()
+            session_token = (self.aws_session_token or "").strip()
+
+            has_any = bool(access_key or secret_key or session_token)
+            has_all_pair = bool(access_key and secret_key)
+
+            if has_any and not has_all_pair:
+                raise ValueError("For AI_PROVIDER=amazon-bedrock set both AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY, or rely on ambient AWS credentials")
+
+            self.aws_access_key_id = access_key or None
+            self.aws_secret_access_key = secret_key or None
+            self.aws_session_token = session_token or None
 
         endpoint = self.ollama_request_endpoint.strip().casefold()
         if endpoint not in {"generate", "chat"}:

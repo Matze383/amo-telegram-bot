@@ -15,6 +15,7 @@ from amo_bot.ai.groq_provider import GroqProviderConfig, GroqRequestClient
 from amo_bot.ai.mistral_provider import MistralProviderConfig, MistralRequestClient
 from amo_bot.ai.xai_provider import XAIProviderConfig, XAIRequestClient
 from amo_bot.ai.deepseek_provider import DeepSeekProviderConfig, DeepSeekRequestClient
+from amo_bot.ai.bedrock_provider import BedrockProviderConfig, BedrockRequestClient
 from amo_bot.ai.service import AIService
 from amo_bot.config.settings import Settings
 
@@ -147,6 +148,18 @@ class DeepSeekProvider:
 
     async def ask(self, prompt: str) -> str:
         return await self.client.ask(prompt)
+
+
+@dataclass(frozen=True, slots=True)
+class BedrockProvider:
+    config: BedrockProviderConfig
+
+    @property
+    def client(self) -> BedrockRequestClient:
+        return BedrockRequestClient(config=self.config)
+
+    async def ask(self, prompt: str) -> str:
+        return await self.client.ask(prompt)
 def _build_ollama_provider(settings: Settings) -> OllamaProvider:
     return OllamaProvider(
         AIService(
@@ -249,6 +262,18 @@ def build_ai_provider(settings: Settings) -> AIProvider:
                 model=settings.deepseek_model,
                 timeout_seconds=settings.deepseek_timeout_seconds,
                 base_url=settings.deepseek_base_url,
+            )
+        )
+
+    if provider == "amazon-bedrock":
+        return BedrockProvider(
+            config=BedrockProviderConfig(
+                model=settings.bedrock_model,
+                region=settings.bedrock_region or "",
+                timeout_seconds=settings.bedrock_timeout_seconds,
+                access_key_id=settings.aws_access_key_id,
+                secret_access_key=settings.aws_secret_access_key,
+                session_token=settings.aws_session_token,
             )
         )
 

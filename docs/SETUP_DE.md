@@ -18,7 +18,7 @@ Vollständige Anleitung zum lokalen Betrieb des Bots.
   - [Groq](https://groq.com/) API-Key, **ODER**
   - Mistral API-Key, **ODER**
   - xAI API-Key, **ODER**
-  - DeepSeek API-Key
+  - DeepSeek API-Key oder AWS-Credentials/-Profil für Amazon Bedrock
 
 ---
 
@@ -170,7 +170,7 @@ WEBUI_PASSWORD=dein_sicheres_passwort
 WEBUI_OWNER_TELEGRAM_ID=deine_telegram_user_id
 
 # KI-Provider Konfiguration
-AI_PROVIDER=ollama  # ollama (Standard), openai, anthropic, google, openrouter, groq, mistral, xai oder deepseek
+AI_PROVIDER=ollama  # ollama (Standard), openai, anthropic, google, openrouter, groq, mistral, xai oder deepseek, amazon-bedrock
 
 # Optional: OpenAI (für /ask Kommando)
 # OPENAI_API_KEY=dein-openai-api-key-hier

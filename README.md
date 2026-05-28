@@ -92,7 +92,7 @@ python main.py
 - Python 3.12+
 - Windows, macOS oder Linux
 - Telegram Bot Token von [@BotFather](https://t.me/BotFather)
-- Optional: Lokale [Ollama](https://ollama.com/)-Instanz, OpenAI API-Key, Anthropic API-Key, Google/Gemini API-Key, OpenRouter API-Key, [Groq](https://groq.com/) API-Key, Mistral API-Key, xAI API-Key oder DeepSeek API-Key für KI-Funktionen
+- Optional: Lokale [Ollama](https://ollama.com/)-Instanz, OpenAI API-Key, Anthropic API-Key, Google/Gemini API-Key, OpenRouter API-Key, [Groq](https://groq.com/) API-Key, Mistral API-Key, xAI API-Key oder DeepSeek API-Key oder AWS-Credentials/-Profil für Amazon Bedrock für KI-Funktionen
 
 ### Dokumentation
 
@@ -190,7 +190,7 @@ python main.py
 - Python 3.12+
 - Windows, macOS or Linux
 - Telegram Bot Token from [@BotFather](https://t.me/BotFather)
-- Optional: Local [Ollama](https://ollama.com/) instance, OpenAI API key, Anthropic API key, Google/Gemini API key, OpenRouter API key, [Groq](https://groq.com/) API key, Mistral API key, xAI API key, or DeepSeek API key for AI features
+- Optional: Local [Ollama](https://ollama.com/) instance, OpenAI API key, Anthropic API key, Google/Gemini API key, OpenRouter API key, [Groq](https://groq.com/) API key, Mistral API key, xAI API key, or DeepSeek API key, or AWS credentials/profile for Amazon Bedrock for AI features
 
 ### Documentation
 

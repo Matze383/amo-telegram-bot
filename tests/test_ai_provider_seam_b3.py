@@ -6,7 +6,7 @@ from amo_bot.ai.ollama import OllamaClient
 from amo_bot.ai.openai_provider import OpenAIProviderConfig
 from amo_bot.ai.anthropic_provider import AnthropicProviderConfig
 from amo_bot.ai.gemini_provider import GeminiProviderConfig
-from amo_bot.ai.providers import AnthropicProvider, DeepSeekProvider, GeminiProvider, GroqProvider, MistralProvider, OpenAIProvider, OpenRouterProvider, XAIProvider, build_ai_provider
+from amo_bot.ai.providers import AnthropicProvider, BedrockProvider, DeepSeekProvider, GeminiProvider, GroqProvider, MistralProvider, OpenAIProvider, OpenRouterProvider, XAIProvider, build_ai_provider
 from amo_bot.ai.service import AIService
 from amo_bot.config.settings import Settings
 
@@ -287,3 +287,51 @@ def test_deepseek_api_key_is_trimmed_not_logged() -> None:
     assert isinstance(provider, DeepSeekProvider)
     assert provider.config.api_key == "deepseek-credential-placeholder"
     assert provider.config.redacted_dict()["api_key_preview"] == "***"
+
+
+def test_bedrock_provider_selection_builds_provider_config_only() -> None:
+    settings = _settings(
+        AI_PROVIDER="amazon-bedrock",
+        BEDROCK_REGION="eu-central-1",
+        BEDROCK_MODEL="amazon-bedrock/anthropic.claude-3-haiku-20240307-v1:0",
+    )
+    provider = build_ai_provider(settings)
+    assert isinstance(provider, BedrockProvider)
+    assert provider.config.region == "eu-central-1"
+
+
+def test_bedrock_requires_region() -> None:
+    with pytest.raises(ValueError, match="BEDROCK_REGION \(or AWS_REGION/AWS_DEFAULT_REGION\) is required"):
+        _settings(AI_PROVIDER="amazon-bedrock")
+
+
+def test_bedrock_region_falls_back_to_aws_region() -> None:
+    settings = _settings(AI_PROVIDER="amazon-bedrock", AWS_REGION="eu-west-1")
+    provider = build_ai_provider(settings)
+    assert isinstance(provider, BedrockProvider)
+    assert provider.config.region == "eu-west-1"
+
+
+def test_bedrock_partial_aws_credentials_fail_validation() -> None:
+    with pytest.raises(ValueError, match="set both AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY"):
+        _settings(
+            AI_PROVIDER="amazon-bedrock",
+            BEDROCK_REGION="eu-central-1",
+            AWS_ACCESS_KEY_ID="access-placeholder",
+        )
+
+
+def test_bedrock_optional_credentials_trimmed_and_redacted() -> None:
+    settings = _settings(
+        AI_PROVIDER="amazon-bedrock",
+        BEDROCK_REGION="eu-central-1",
+        AWS_ACCESS_KEY_ID="  access-placeholder  ",
+        AWS_SECRET_ACCESS_KEY="  credential-placeholder  ",
+    )
+    provider = build_ai_provider(settings)
+    assert isinstance(provider, BedrockProvider)
+    assert provider.config.access_key_id == "access-placeholder"
+    assert provider.config.secret_access_key == "credential-placeholder"
+    redacted = provider.config.redacted_dict()
+    assert redacted["aws_access_key_id_present"] is True
+    assert redacted["aws_secret_access_key_present"] is True
