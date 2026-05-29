@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from datetime import datetime
 
 from dotenv import load_dotenv
 from pydantic import Field, model_validator
@@ -135,6 +136,16 @@ class Settings(BaseSettings):
     dreaming_max_daily_candidates_per_scope: int = Field(default=3, alias="DREAMING_MAX_DAILY_CANDIDATES_PER_SCOPE", ge=1, le=30)
     dreaming_max_promotions_per_scope: int = Field(default=2, alias="DREAMING_MAX_PROMOTIONS_PER_SCOPE", ge=1, le=20)
     dreaming_auto_approve_mode: bool = Field(default=False, alias="DREAMING_AUTO_APPROVE_MODE")
+
+    # Nightly dreaming window (Europe/Berlin default)
+    dreaming_window_start: str = Field(default="02:00", alias="DREAMING_WINDOW_START")
+    dreaming_window_end: str = Field(default="05:00", alias="DREAMING_WINDOW_END")
+    dreaming_timezone: str = Field(default="Europe/Berlin", alias="DREAMING_TIMEZONE")
+    dreaming_max_scopes_per_batch: int = Field(default=3, alias="DREAMING_MAX_SCOPES_PER_BATCH", ge=1, le=50)
+    dreaming_batch_pause_seconds: int = Field(default=300, alias="DREAMING_BATCH_PAUSE_SECONDS", ge=0)
+    dreaming_jitter_seconds: int = Field(default=120, alias="DREAMING_JITTER_SECONDS", ge=0)
+    dreaming_min_daily_memories: int = Field(default=1, alias="DREAMING_MIN_DAILY_MEMORIES", ge=0)
+    dreaming_lookback_days: int = Field(default=7, alias="DREAMING_LOOKBACK_DAYS", ge=1)
 
     @model_validator(mode="after")
     def _validate_login_delay_bounds(self) -> Settings:
@@ -394,6 +405,24 @@ class Settings(BaseSettings):
         if streaming_mode not in {"off", "collect_only", "live_edit"}:
             raise ValueError("OLLAMA_STREAMING_MODE must be one of: off, collect_only, live_edit")
         self.ollama_streaming_mode = streaming_mode
+
+        # Validate dreaming window: start must be before end (in the same timezone).
+        try:
+            from zoneinfo import ZoneInfo
+        except ImportError:
+            from backports.zoneinfo import ZoneInfo  # type: ignore
+
+        tz = ZoneInfo(self.dreaming_timezone)
+
+        def parse_window_time(value: str, label: str) -> datetime:
+            parsed = datetime.strptime(value, "%H:%M").time()
+            today = datetime.now(tz).date()
+            return datetime.combine(today, parsed, tzinfo=tz)
+
+        start_dt = parse_window_time(self.dreaming_window_start, "DREAMING_WINDOW_START")
+        end_dt = parse_window_time(self.dreaming_window_end, "DREAMING_WINDOW_END")
+        if start_dt >= end_dt:
+            raise ValueError("DREAMING_WINDOW_START must be before DREAMING_WINDOW_END")
 
         return self
 

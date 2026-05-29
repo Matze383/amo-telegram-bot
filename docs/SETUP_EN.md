@@ -334,7 +334,7 @@ The bot uses structured logging with configurable output format and filtering.
 
 ## Dreaming / Memory-Curation Runtime (KI-F4)
 
-The Dreaming system periodically performs automatic curation of daily memory entries. It identifies relevant conversation patterns and promotes important information to long-term memory.
+The Dreaming system performs **nightly** automatic curation of daily memory entries. It identifies relevant conversation patterns and promotes important information to long-term memory. The worker runs within a configurable night window in batches.
 
 ### Activation
 
@@ -350,7 +350,14 @@ DREAMING_ENABLED=1
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `DREAMING_ENABLED` | `0` | `1` to enable automatic memory curation |
-| `DREAMING_INTERVAL_SECONDS` | `3600` | Interval between curation runs (seconds) |
+| `DREAMING_WINDOW_START` | `02:00` | Night window start time (HH:MM, Europe/Berlin) |
+| `DREAMING_WINDOW_END` | `05:00` | Night window end time (HH:MM, Europe/Berlin) |
+| `DREAMING_TIMEZONE` | `Europe/Berlin` | Timezone for the night window |
+| `DREAMING_MAX_SCOPES_PER_BATCH` | `3` | Maximum scopes per batch |
+| `DREAMING_BATCH_PAUSE_SECONDS` | `300` | Pause between batches (seconds) |
+| `DREAMING_JITTER_SECONDS` | `120` | Random delay per batch (seconds) |
+| `DREAMING_MIN_DAILY_MEMORIES` | `1` | Minimum daily memory entries for scope eligibility |
+| `DREAMING_LOOKBACK_DAYS` | `7` | How many days back for memory check |
 | `DREAMING_TIMEOUT_SECONDS` | `300` | Timeout for a single curation run |
 | `DREAMING_MAX_DAILY_CANDIDATES_PER_SCOPE` | `3` | Maximum candidates per scope per day |
 | `DREAMING_MAX_PROMOTIONS_PER_SCOPE` | `2` | Maximum promotions per scope per day |
@@ -359,11 +366,15 @@ DREAMING_ENABLED=1
 ### Safety Behavior
 
 - **Default-Off:** The system is disabled by default — explicit activation required
+- **Nightly Worker:** Only runs within the configured night window (e.g., 02:00–05:00)
+- **No Max-Scopes-Per-Night:** The worker runs in batches until no eligible scopes remain or the window ends
 - **Scope-Isolation:** Memory curation happens strictly per topic/private chat — no cross-scope access
-- **Bounded Candidates:** Maximum number of candidates and promotions per scope is limited
+- **Bounded Batches:** Maximum scopes per batch is configurable; pause and jitter between batches
+- **Eligibility Filter:** Only scopes with sufficient daily memory material are processed
 - **Timeout Protection:** Individual runs have fixed timeouts to prevent infinite loops
 - **Auto-Approve:** Disabled by default; enabling bypasses human review and should only be used in trusted environments
 - **No-Overlap Enforcement:** Only one curation run executes at a time; concurrent runs are blocked by an internal lock
+- **Metadata-only Logs:** Audit events contain only metadata, no memory contents
 
 ### Recommended Configuration
 
@@ -375,14 +386,21 @@ DREAMING_ENABLED=0  # Disabled (default)
 **For activated Dreaming with secure defaults:**
 ```ini
 DREAMING_ENABLED=1
-DREAMING_INTERVAL_SECONDS=3600
+DREAMING_WINDOW_START=02:00
+DREAMING_WINDOW_END=05:00
+DREAMING_TIMEZONE=Europe/Berlin
+DREAMING_MAX_SCOPES_PER_BATCH=3
+DREAMING_BATCH_PAUSE_SECONDS=300
+DREAMING_JITTER_SECONDS=120
+DREAMING_MIN_DAILY_MEMORIES=1
+DREAMING_LOOKBACK_DAYS=7
 DREAMING_TIMEOUT_SECONDS=300
 DREAMING_MAX_DAILY_CANDIDATES_PER_SCOPE=3
 DREAMING_MAX_PROMOTIONS_PER_SCOPE=2
 DREAMING_AUTO_APPROVE_MODE=0  # Human review required
 ```
 
-> **Note:** When Dreaming is enabled, curation runs as a background task. Results are logged to audit events (no memory contents, only metadata).
+> **Note:** The Nightly Worker periodically checks if the night window is active. Within the window, it processes scopes in batches (max. 3 per batch), pauses between batches, and adds random jitter. There is no global limit per night — the worker runs until all eligible scopes are processed or the window ends. Results are logged to audit events (no memory contents, only metadata).
 
 **Privacy Note:**
 - By default, `LOG_INCLUDE_PRIVATE_IDS` is disabled to protect user privacy

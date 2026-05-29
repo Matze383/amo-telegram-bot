@@ -194,30 +194,42 @@ Einheitliches strukturiertes Logging mit Konfigurationsoptionen und Datenschutz-
 
 ### Dreaming / Memory-Curation Runtime (GitHub #45)
 
-**Commit:** Aktiviert den periodischen Memory-Curation-Hintergrundtask
+**Commit:** Aktiviert den nächtlichen Memory-Curation-Hintergrundworker
 
 Neues Dreaming-System für automatische Kuratierung von täglichen Memory-Einträgen:
 
-- **Periodische Ausführung**: Automatischer Hintergrundtask zur Memory-Kuratierung
-- **Default-Off**: Standardmäßig deaktiviert (`DREAMING_ENABLED=0`) — explizite Aktivierung erforderlich
-- **Konfigurierbare Intervalle**: `DREAMING_INTERVAL_SECONDS` (Standard: 3600s)
-- **Timeout-Schutz**: `DREAMING_TIMEOUT_SECONDS` (Standard: 300s)
-- **Begrenzte Kandidaten**: `DREAMING_MAX_DAILY_CANDIDATES_PER_SCOPE` (Standard: 3)
-- **Begrenzte Promotions**: `DREAMING_MAX_PROMOTIONS_PER_SCOPE` (Standard: 2)
-- **Auto-Approve-Modus**: `DREAMING_AUTO_APPROVE_MODE` (Standard: 0) — `1` überspringt menschliche Review
+- **Nightly Worker:** Läuft nur innerhalb eines konfigurierbaren Nachtfensters (Standard: 02:00–05:00 Europe/Berlin)
+- **Batch-Verarbeitung:** Scopes werden in Batches (Standard: max. 3 pro Batch) verarbeitet
+- **Pause und Jitter:** Konfigurierbare Pause zwischen Batches mit zufälligem Jitter
+- **Eligibility-Filter:** Nur Scopes mit ausreichend Daily-Memory-Material werden verarbeitet
+- **Kein Max-Scopes-pro-Nacht:** Der Worker läuft, bis alle eligible Scopes verarbeitet sind oder das Fenster endet
+- **Default-Off:** Standardmäßig deaktiviert (`DREAMING_ENABLED=0`) — explizite Aktivierung erforderlich
+- **Konfigurierbares Zeitfenster:** Start/Ende-Zeit und Zeitzone anpassbar
+- **Lookback:** Konfigurierbare Tage für Memory-Prüfung (`DREAMING_LOOKBACK_DAYS`)
+- **Timeout-Schutz:** Feste Timeouts für einzelne Läufe
+- **Begrenzte Kandidaten:** Maximale Kandidaten und Promotions pro Scope pro Tag
+- **Auto-Approve-Modus:** Standardmäßig deaktiviert; überspringt menschliche Review bei Aktivierung
 
 **Sicherheitsverhalten:**
 - Explizite Aktivierung erforderlich (opt-in)
 - Scope-Isolation: Kein Cross-Topic/Chat-Zugriff
-- Begrenzte Ressourcennutzung durch Kandidaten- und Promotions-Limits
+- Begrenzte Ressourcennutzung durch Batch-Größen und Pausen
 - Audit-Events enthalten nur Metadaten, keine Memory-Inhalte
 - Auto-Approve deaktiviert by default — menschliche Review bei Aktivierung empfohlen
 - **No-Overlap Enforcement:** Es kann nur ein Kuratierungsdurchlauf gleichzeitig ausgeführt werden; parallele Durchläufe werden durch eine interne Sperre blockiert
+- **Metadata-only Logs:** Nur Metadaten in Audit-Events, keine Memory-Inhalte
 
 **Konfiguration:**
 ```ini
 DREAMING_ENABLED=1
-DREAMING_INTERVAL_SECONDS=3600
+DREAMING_WINDOW_START=02:00
+DREAMING_WINDOW_END=05:00
+DREAMING_TIMEZONE=Europe/Berlin
+DREAMING_MAX_SCOPES_PER_BATCH=3
+DREAMING_BATCH_PAUSE_SECONDS=300
+DREAMING_JITTER_SECONDS=120
+DREAMING_MIN_DAILY_MEMORIES=1
+DREAMING_LOOKBACK_DAYS=7
 DREAMING_TIMEOUT_SECONDS=300
 DREAMING_MAX_DAILY_CANDIDATES_PER_SCOPE=3
 DREAMING_MAX_PROMOTIONS_PER_SCOPE=2

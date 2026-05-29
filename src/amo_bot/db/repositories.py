@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta, timezone
 from typing import TYPE_CHECKING
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from amo_bot.auth.roles import Role
@@ -1783,6 +1783,34 @@ class TopicAgentMemoryRepository:
             self._session.delete(row)
         self._session.commit()
         return deleted
+
+    def count_recent_daily_memories_for_scope(
+        self,
+        *,
+        scope_type: str,
+        chat_id: int | None,
+        topic_id: int | None,
+        user_id: int | None,
+        lookback_days: int = 7,
+    ) -> int:
+        """Count daily-memory rows for a single scope within the lookback window.
+
+
+        Used by the dreaming runtime to determine whether a scope has sufficient
+        material to be worth processing (DREAMING_MIN_DAILY_MEMORIES gate).
+        """
+        lookback_date = (datetime.now(UTC).date() - timedelta(days=lookback_days)).isoformat()
+        count = self._session.scalar(
+            select(sqlalchemy.func.count(TopicDailyMemory.id))
+            .where(
+                TopicDailyMemory.scope_type == scope_type,
+                TopicDailyMemory.chat_id == chat_id,
+                TopicDailyMemory.topic_id == topic_id,
+                TopicDailyMemory.user_id == user_id,
+                TopicDailyMemory.memory_date >= lookback_date,
+            )
+        ) or 0
+        return count
 
     def create_long_memory(
         self,

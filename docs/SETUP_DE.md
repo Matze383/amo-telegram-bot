@@ -334,7 +334,7 @@ Der Bot verwendet strukturiertes Logging mit konfigurierbarem Ausgabeformat und 
 
 ## Dreaming / Memory-Curation Runtime (KI-F4)
 
-Das Dreaming-System führt periodisch eine automatische Kuratierung von täglichen Memory-Einträgen durch. Es identifiziert relevante Gesprächsmuster und hebt wichtige Informationen in das Langzeitgedächtnis.
+Das Dreaming-System führt **nächtlich** eine automatische Kuratierung von täglichen Memory-Einträgen durch. Es identifiziert relevante Gesprächsmuster und hebt wichtige Informationen in das Langzeitgedächtnis. Der Worker läuft innerhalb eines konfigurierbaren Nachtfensters in Batches.
 
 ### Aktivierung
 
@@ -350,7 +350,14 @@ DREAMING_ENABLED=1
 | Variable | Standard | Beschreibung |
 |----------|----------|--------------|
 | `DREAMING_ENABLED` | `0` | `1` zum Aktivieren der automatischen Memory-Kuratierung |
-| `DREAMING_INTERVAL_SECONDS` | `3600` | Intervall zwischen Kuratierungsläufen (Sekunden) |
+| `DREAMING_WINDOW_START` | `02:00` | Startzeit des Nachtfensters (HH:MM, Europe/Berlin) |
+| `DREAMING_WINDOW_END` | `05:00` | Endzeit des Nachtfensters (HH:MM, Europe/Berlin) |
+| `DREAMING_TIMEZONE` | `Europe/Berlin` | Zeitzone für das Nachtfenster |
+| `DREAMING_MAX_SCOPES_PER_BATCH` | `3` | Maximale Scopes pro Batch |
+| `DREAMING_BATCH_PAUSE_SECONDS` | `300` | Pause zwischen Batches (Sekunden) |
+| `DREAMING_JITTER_SECONDS` | `120` | Zufällige Verzögerung pro Batch (Sekunden) |
+| `DREAMING_MIN_DAILY_MEMORIES` | `1` | Mindestanzahl Daily-Memory-Einträge für Scope-Eligibility |
+| `DREAMING_LOOKBACK_DAYS` | `7` | Wie viele Tage zurück für Memory-Prüfung |
 | `DREAMING_TIMEOUT_SECONDS` | `300` | Timeout für einen einzelnen Kuratierungslauf |
 | `DREAMING_MAX_DAILY_CANDIDATES_PER_SCOPE` | `3` | Maximale Kandidaten pro Scope pro Tag |
 | `DREAMING_MAX_PROMOTIONS_PER_SCOPE` | `2` | Maximale Promotions pro Scope pro Tag |
@@ -359,11 +366,15 @@ DREAMING_ENABLED=1
 ### Sicherheitsverhalten
 
 - **Default-Off:** Das System ist standardmäßig deaktiviert — explizite Aktivierung erforderlich
+- **Nightly Worker:** Läuft nur innerhalb des konfigurierten Nachtfensters (z. B. 02:00–05:00)
+- **Kein Max-Scopes-pro-Nacht:** Der Worker läuft batchweise bis keine eligible Scopes mehr vorhanden sind oder das Fenster endet
 - **Scope-Isolation:** Memory-Kuratierung erfolgt strikt pro Topic/Private-Chat — kein Cross-Scope-Zugriff
-- **Begrenzte Kandidaten:** Maximale Anzahl von Kandidaten und Promotions pro Scope begrenzt
+- **Begrenzte Batches:** Maximale Anzahl Scopes pro Batch konfigurierbar; Pause und Jitter zwischen Batches
+- **Eligibility-Filter:** Nur Scopes mit ausreichend Daily-Memory-Material werden verarbeitet
 - **Timeout-Schutz:** Einzelne Läufe haben feste Timeouts, um Endlosschleifen zu vermeiden
 - **Auto-Approve:** Standardmäßig deaktiviert; Aktivierung überspringt menschliche Review und sollte nur in vertrauenswürdigen Umgebungen erfolgen
 - **No-Overlap Enforcement:** Es kann nur ein Kuratierungsdurchlauf gleichzeitig ausgeführt werden; parallele Durchläufe werden durch eine interne Sperre blockiert
+- **Metadata-only Logs:** Audit-Events enthalten nur Metadaten, keine Memory-Inhalte
 
 ### Empfohlene Konfiguration
 
@@ -375,14 +386,21 @@ DREAMING_ENABLED=0  # Deaktiviert (Standard)
 **Für aktiviertes Dreaming mit sicheren Defaults:**
 ```ini
 DREAMING_ENABLED=1
-DREAMING_INTERVAL_SECONDS=3600
+DREAMING_WINDOW_START=02:00
+DREAMING_WINDOW_END=05:00
+DREAMING_TIMEZONE=Europe/Berlin
+DREAMING_MAX_SCOPES_PER_BATCH=3
+DREAMING_BATCH_PAUSE_SECONDS=300
+DREAMING_JITTER_SECONDS=120
+DREAMING_MIN_DAILY_MEMORIES=1
+DREAMING_LOOKBACK_DAYS=7
 DREAMING_TIMEOUT_SECONDS=300
 DREAMING_MAX_DAILY_CANDIDATES_PER_SCOPE=3
 DREAMING_MAX_PROMOTIONS_PER_SCOPE=2
 DREAMING_AUTO_APPROVE_MODE=0  # Menschliche Review erforderlich
 ```
 
-> **Hinweis:** Bei aktiviertem Dreaming läuft die Kuratierung als Hintergrundtask. Die Ergebnisse werden in Audit-Events protokolliert (keine Memory-Inhalte, nur Metadaten).
+> **Hinweis:** Der Nightly Worker prüft periodisch, ob das Nachtfenster aktiv ist. Innerhalb des Fensters verarbeitet er Scopes in Batches (max. 3 pro Batch), pausiert zwischen Batches und fügt zufällige Jitter hinzu. Es gibt kein globales Limit pro Nacht — der Worker läuft, bis alle eligible Scopes verarbeitet sind oder das Fenster endet. Die Ergebnisse werden in Audit-Events protokolliert (keine Memory-Inhalte, nur Metadaten).
 
 **Datenschutz-Hinweis:**
 - Standardmäßig ist `LOG_INCLUDE_PRIVATE_IDS` deaktiviert zum Schutz der Privatsphäre

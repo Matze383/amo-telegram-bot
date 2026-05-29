@@ -45,7 +45,17 @@ class MemoryMaintenanceService:
         self._max_promotions_per_scope = max(1, min(max_promotions_per_scope, 20))
         self._curator = curator or _DefaultCurator()
 
-    def run_once(self, *, now: datetime | None = None) -> MemoryMaintenanceResult:
+    def run_once(
+        self,
+        *,
+        now: datetime | None = None,
+        scopes: list[TopicAgentConfig] | None = None,
+    ) -> MemoryMaintenanceResult:
+        """Run one maintenance cycle.
+
+        If ``scopes`` is provided, only those configs are processed (batch mode).
+        If None, all configs from the DB are processed (legacy full-scan mode).
+        """
         run_at = now or datetime.now(UTC)
         scopes_scanned = 0
         scopes_pruned = 0
@@ -55,7 +65,9 @@ class MemoryMaintenanceService:
         curation_promoted = 0
         curation_scopes_failed = 0
 
-        scopes = self._repository._session.scalars(select(TopicAgentConfig)).all()  # noqa: SLF001
+        if scopes is None:
+            scopes = self._repository._session.scalars(select(TopicAgentConfig)).all()  # noqa: SLF001
+
         for scope in scopes:
             scopes_scanned += 1
             deleted = self._repository.prune_daily_memories(

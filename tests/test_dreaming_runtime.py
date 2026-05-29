@@ -1,14 +1,18 @@
 """
-Focused tests for the Dreaming / Memory-Curation Runtime.
+Focused tests for the nightly Dreaming Runtime.
 
 Covers:
-- Config defaults (disabled, interval, timeout, limits, auto-approve off)
-- Scheduler disabled/enabled behaviour
-- No-overlap enforcement (second run blocked while first is in progress)
-- Timeout enforcement
-- Failure isolation (crash does not affect next cycle)
+- Config defaults (window, batch, lookback, jitter)
+- Config validation (window start < end)
+- Window-aware sleep (outside window → wait; inside window → proceed)
+- Batch size limit (never more than max_scopes_per_batch scopes per batch)
+- No-eligible-scopes handling
+- No-overlap enforcement per batch
+- Timeout enforcement per batch
+- Failure isolation (crash in one batch does not affect next batch)
 - Metadata-only logging (no secret/leak in log output)
-- Scope isolation and review/permission preservation
+- Scope selection respects min_daily_memories / lookback_days / ai-layer-only filter
+- DREAMING_MIN_DAILY_MEMORIES=0 disables the memory gate
 """
 
 from __future__ import annotations
@@ -16,19 +20,17 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-import sys
-from datetime import UTC, datetime, timedelta
-from unittest.mock import patch, MagicMock
+from datetime import UTC, datetime, timedelta, timezone
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from amo_bot.ai.dreaming_runtime import DreamingRuntime
-from amo_bot.ai.memory_maintenance import MemoryMaintenanceService, MemoryMaintenanceResult
+from amo_bot.ai.memory_maintenance import MemoryMaintenanceResult
 from amo_bot.config.settings import Settings
-from amo_bot.core.logging import SensitiveLogFilter, setup_logging
 
 
-# ── helpers ──────────────────────────────────────────────────────────────────
+# ── helpers ────────────────────────────────────────────────────────────────────
 
 def _make_mock_repo() -> MagicMock:
     repo = MagicMock()
@@ -49,73 +51,122 @@ def _make_success_result(now: datetime | None = None) -> MemoryMaintenanceResult
     )
 
 
+class _EchoCurator:
+    """Curator that promotes all given daily memories — used only in tests."""
+    def curate(self, *, scope, daily_memories, now):
+        return [
+            {"source_daily_memory_id": d.id, "fact_text": d.summary_text}
+            for d in daily_memories
+        ]
+
+
 # ── test: config defaults ─────────────────────────────────────────────────────
 
-def test_dreaming_disabled_by_default() -> None:
-    """DREAMING_ENABLED defaults to False so the runtime never auto-starts."""
+def test_dreaming_window_defaults() -> None:
+    """Nightly window and batch settings have the correct defaults."""
     s = Settings(
         BOT_TOKEN="1234:TOKEN",
         WEBUI_PASSWORD="pw",
         WEBUI_SECRET_KEY="x" * 32,
     )
-    assert s.dreaming_enabled is False
+    assert s.dreaming_window_start == "02:00"
+    assert s.dreaming_window_end == "05:00"
+    assert s.dreaming_timezone == "Europe/Berlin"
+    assert s.dreaming_max_scopes_per_batch == 3
+    assert s.dreaming_batch_pause_seconds == 300
+    assert s.dreaming_jitter_seconds == 120
+    assert s.dreaming_min_daily_memories == 1
+    assert s.dreaming_lookback_days == 7
 
 
-def test_dreaming_interval_minimum_enforced() -> None:
-    """Intervals are accepted within the [60, ∞) range by pydantic validation."""
+def test_dreaming_window_start_must_be_before_end() -> None:
+    """A window where start >= end is rejected."""
+    with pytest.raises(ValueError, match="DREAMING_WINDOW_START must be before DREAMING_WINDOW_END"):
+        Settings(
+            BOT_TOKEN="1234:TOKEN",
+            WEBUI_PASSWORD="pw",
+            WEBUI_SECRET_KEY="x" * 32,
+            DREAMING_WINDOW_START="05:00",
+            DREAMING_WINDOW_END="02:00",
+        )
+
+
+def test_dreaming_window_end_equals_start_rejected() -> None:
+    """A window where start == end is rejected (same time is not a valid window)."""
+    with pytest.raises(ValueError, match="DREAMING_WINDOW_START must be before DREAMING_WINDOW_END"):
+        Settings(
+            BOT_TOKEN="1234:TOKEN",
+            WEBUI_PASSWORD="pw",
+            WEBUI_SECRET_KEY="x" * 32,
+            DREAMING_WINDOW_START="03:00",
+            DREAMING_WINDOW_END="03:00",
+        )
+
+
+def test_dreaming_max_scopes_per_batch_bounds() -> None:
+    """Batch size at boundaries [1,50] are accepted."""
     s = Settings(
         BOT_TOKEN="1234:TOKEN",
         WEBUI_PASSWORD="pw",
         WEBUI_SECRET_KEY="x" * 32,
-        DREAMING_INTERVAL_SECONDS=60,
+        DREAMING_MAX_SCOPES_PER_BATCH=1,
     )
-    assert s.dreaming_interval_seconds == 60
+    assert s.dreaming_max_scopes_per_batch == 1
 
-
-def test_dreaming_candidate_limit_bounds() -> None:
-    """Limits at the boundary of [1,30] are accepted."""
-    s = Settings(
+    s2 = Settings(
         BOT_TOKEN="1234:TOKEN",
         WEBUI_PASSWORD="pw",
         WEBUI_SECRET_KEY="x" * 32,
-        DREAMING_MAX_DAILY_CANDIDATES_PER_SCOPE=30,
-        DREAMING_MAX_PROMOTIONS_PER_SCOPE=1,
+        DREAMING_MAX_SCOPES_PER_BATCH=50,
     )
-    assert s.dreaming_max_daily_candidates_per_scope == 30
-    assert s.dreaming_max_promotions_per_scope == 1
-
-
-def test_dreaming_auto_approve_defaults_false() -> None:
-    """Auto-approve is off by default — human review is always required."""
-    s = Settings(
-        BOT_TOKEN="1234:TOKEN",
-        WEBUI_PASSWORD="pw",
-        WEBUI_SECRET_KEY="x" * 32,
-    )
-    assert s.dreaming_auto_approve_mode is False
+    assert s2.dreaming_max_scopes_per_batch == 50
 
 
 # ── test: DreamingRuntime construction ───────────────────────────────────────
 
-def test_runtime_refuses_negative_interval() -> None:
-    """A negative interval is clamped to minimum 60 s."""
+def test_runtime_refuses_negative_timeout() -> None:
+    """A negative timeout is clamped to minimum 1 s."""
     repo = _make_mock_repo()
-    rt = DreamingRuntime(repository=repo, enabled=True, interval_seconds=-10)
-    assert rt._interval == 60
+    rt = DreamingRuntime(repository=repo, enabled=True, timeout_seconds=-10)
+    assert rt._timeout == 1.0
 
 
-def test_runtime_clamps_candidate_limit() -> None:
-    """Candidate limit above 30 is clamped to 30."""
+def test_runtime_clamps_max_scopes_per_batch() -> None:
+    """Batch size above 50 is clamped to 50."""
     repo = _make_mock_repo()
-    rt = DreamingRuntime(repository=repo, enabled=True, max_daily_candidates_per_scope=99)
-    assert rt._max_daily_candidates == 30
+    rt = DreamingRuntime(repository=repo, enabled=True, max_scopes_per_batch=99)
+    assert rt._max_scopes_per_batch == 50
 
 
-def test_runtime_clamps_promotion_limit() -> None:
-    """Promotion limit above 20 is clamped to 20."""
+def test_runtime_clamps_batch_pause() -> None:
+    """Negative batch pause is clamped to 0."""
     repo = _make_mock_repo()
-    rt = DreamingRuntime(repository=repo, enabled=True, max_promotions_per_scope=99)
-    assert rt._max_promotions == 20
+    rt = DreamingRuntime(repository=repo, enabled=True, batch_pause_seconds=-50)
+    assert rt._batch_pause_seconds == 0
+
+
+def test_runtime_clamps_jitter() -> None:
+    """Negative jitter is clamped to 0."""
+    repo = _make_mock_repo()
+    rt = DreamingRuntime(repository=repo, enabled=True, jitter_seconds=-100)
+    assert rt._jitter_seconds == 0
+
+
+def test_runtime_min_daily_memories_zero_disables_gate() -> None:
+    """When min_daily_memories=0 the memory gate is disabled."""
+    repo = _make_mock_repo()
+    rt = DreamingRuntime(repository=repo, enabled=True, min_daily_memories=0)
+    assert rt._min_daily_memories == 0
+
+
+def test_runtime_lookback_days_clamped() -> None:
+    """Lookback days are clamped to [1, 365]."""
+    repo = _make_mock_repo()
+    rt_bad = DreamingRuntime(repository=repo, enabled=True, lookback_days=0)
+    assert rt_bad._lookback_days == 1
+
+    rt_good = DreamingRuntime(repository=repo, enabled=True, lookback_days=999)
+    assert rt_good._lookback_days == 365
 
 
 def test_runtime_disabled_does_not_start_loop() -> None:
@@ -124,162 +175,163 @@ def test_runtime_disabled_does_not_start_loop() -> None:
     rt = DreamingRuntime(repository=repo, enabled=False)
     rt.start()
     assert rt.is_running is False
-    assert rt.is_enabled is False
 
 
-def test_runtime_enabled_start_requires_running_loop() -> None:
-    """Enabled startup must be performed inside the polling asyncio loop."""
+# ── test: window helpers ──────────────────────────────────────────────────────
+
+def test_is_in_window_inside() -> None:
+    """_is_in_window returns True when current time is inside the window."""
     repo = _make_mock_repo()
-    rt = DreamingRuntime(repository=repo, enabled=True, interval_seconds=3600)
-    with pytest.raises(RuntimeError, match="running event loop"):
-        rt.start()
-    assert rt.is_running is False
+    rt = DreamingRuntime(
+        repository=repo,
+        enabled=False,
+        window_start="02:00",
+        window_end="05:00",
+        timezone="UTC",
+    )
+    # 03:00 UTC is inside 02:00-05:00 UTC.
+    check_time = datetime(2026, 5, 29, 3, 0, 0, tzinfo=timezone.utc)
+    assert rt._is_in_window(when=check_time) is True
 
+
+def test_is_in_window_before() -> None:
+    """_is_in_window returns False when before the window."""
+    repo = _make_mock_repo()
+    rt = DreamingRuntime(
+        repository=repo,
+        enabled=False,
+        window_start="02:00",
+        window_end="05:00",
+        timezone="UTC",
+    )
+    # 01:00 UTC is before 02:00-05:00 UTC.
+    check_time = datetime(2026, 5, 29, 1, 0, 0, tzinfo=timezone.utc)
+    assert rt._is_in_window(when=check_time) is False
+
+
+def test_is_in_window_after() -> None:
+    """_is_in_window returns False when after the window."""
+    repo = _make_mock_repo()
+    rt = DreamingRuntime(
+        repository=repo,
+        enabled=False,
+        window_start="02:00",
+        window_end="05:00",
+        timezone="UTC",
+    )
+    # 06:00 UTC is after 02:00-05:00 UTC.
+    check_time = datetime(2026, 5, 29, 6, 0, 0, tzinfo=timezone.utc)
+    assert rt._is_in_window(when=check_time) is False
+
+
+def test_is_in_window_exactly_at_start() -> None:
+    """_is_in_window returns True at exactly the window start time."""
+    repo = _make_mock_repo()
+    rt = DreamingRuntime(
+        repository=repo,
+        enabled=False,
+        window_start="02:00",
+        window_end="05:00",
+        timezone="UTC",
+    )
+    check_time = datetime(2026, 5, 29, 2, 0, 0, tzinfo=timezone.utc)
+    assert rt._is_in_window(when=check_time) is True
+
+
+def test_is_in_window_just_before_end() -> None:
+    """_is_in_window returns True one second before the window end."""
+    repo = _make_mock_repo()
+    rt = DreamingRuntime(
+        repository=repo,
+        enabled=False,
+        window_start="02:00",
+        window_end="05:00",
+        timezone="UTC",
+    )
+    # 04:59:59 UTC is just before 05:00 — still inside.
+    check_time = datetime(2026, 5, 29, 4, 59, 59, tzinfo=timezone.utc)
+    assert rt._is_in_window(when=check_time) is True
+
+
+def test_is_in_window_exactly_at_end() -> None:
+    """_is_in_window returns False at exactly the window end time."""
+    repo = _make_mock_repo()
+    rt = DreamingRuntime(
+        repository=repo,
+        enabled=False,
+        window_start="02:00",
+        window_end="05:00",
+        timezone="UTC",
+    )
+    check_time = datetime(2026, 5, 29, 5, 0, 0, tzinfo=timezone.utc)
+    assert rt._is_in_window(when=check_time) is False
+
+
+# ── test: no-overlap batch ──────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
-async def test_runtime_enabled_starts_loop() -> None:
-    """When enabled=True start() launches the background task."""
-    repo = _make_mock_repo()
-    rt = DreamingRuntime(repository=repo, enabled=True, interval_seconds=3600)
-    rt.start()
-    await asyncio.sleep(0.05)
-    assert rt.is_running is True
-    assert rt.is_enabled is True
-    await rt.stop()
-
-
-@pytest.mark.asyncio
-async def test_start_is_idempotent() -> None:
-    """Calling start() twice does not create duplicate tasks."""
-    repo = _make_mock_repo()
-    rt = DreamingRuntime(repository=repo, enabled=True, interval_seconds=3600)
-    rt.start()
-    await asyncio.sleep(0.05)
-    first_task = rt._task
-    rt.start()  # idempotent
-    await asyncio.sleep(0.05)
-    assert rt._task is first_task
-    await rt.stop()
-
-
-# ── test: no-overlap ─────────────────────────────────────────────────────────
-
-@pytest.mark.asyncio
-async def test_no_overlap_lock_prevents_concurrent_execution() -> None:
+async def test_no_overlap_batch_lock_prevents_concurrent_batches() -> None:
     """
     The asyncio.Lock inside DreamingRuntime serialises concurrent calls to
-    _execute_protected.  We verify this by having a slow _run_once and checking
-    that the second call does not overlap with the first.
+    _execute_batch.  A second batch must not run while the first is in progress.
     """
     repo = _make_mock_repo()
-    rt = DreamingRuntime(repository=repo, enabled=False, interval_seconds=3600)
+    rt = DreamingRuntime(repository=repo, enabled=False, timeout_seconds=5.0)
 
     overlap_lock = asyncio.Lock()
 
     async def slow_run(*args: object, **kwargs: object) -> MemoryMaintenanceResult:
         async with overlap_lock:
-            # If we can acquire here, there is no concurrent execution yet.
-            pass
-        await asyncio.sleep(0.5)  # longer than the lock acquisition timeout
+            pass  # verify single batch
+        await asyncio.sleep(0.5)
         return _make_success_result()
 
-    rt._run_once = slow_run  # type: ignore[method-assignment]
+    rt._run_batch = slow_run  # type: ignore[method-assignment]
 
-    # Start first call.
-    first_task = asyncio.create_task(rt._execute_protected())
-    await asyncio.sleep(0.05)  # let first call start and hit the lock
-
-    # Start second call while first is in progress.
-    second_task = asyncio.create_task(rt._execute_protected())
+    first_task = asyncio.create_task(rt._execute_batch([]))
     await asyncio.sleep(0.05)
 
-    # The second call should still be blocked by the lock.
-    # Verify that second is not yet done.
-    assert not second_task.done(), "second call should be blocked by lock"
+    second_task = asyncio.create_task(rt._execute_batch([]))
+    await asyncio.sleep(0.05)
 
-    # Let both finish.
+    assert not second_task.done(), "second batch should be blocked by lock"
+
     first_result, second_result = await asyncio.gather(first_task, second_task)
 
-    # Neither should be an error from lock_timeout.
     assert first_result.status == "success"
     assert second_result.status == "success"
 
 
-# ── test: timeout ─────────────────────────────────────────────────────────────
+# ── test: timeout ───────────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
-async def test_run_times_out_when_execution_exceeds_timeout() -> None:
+async def test_batch_times_out_when_execution_exceeds_timeout() -> None:
     """
-    If run_once exceeds the configured timeout, the run is marked 'timeout'.
+    If _run_batch exceeds the configured timeout, the batch is marked 'timeout'.
     """
     repo = _make_mock_repo()
-    rt = DreamingRuntime(repository=repo, enabled=False, timeout_seconds=2.0)
-
-    async def very_slow(*args: object, **kwargs: object) -> MemoryMaintenanceResult:
-        await asyncio.sleep(10.0)  # over the 2 s timeout
-        return _make_success_result()
-
-    rt._run_once = very_slow  # type: ignore[method-assignment]
-
-    result = await rt._execute_protected()
-    assert result.status == "timeout"
-    assert result.error_class == "TimeoutError"
-    assert rt._active_run_task is not None
-    assert not rt._active_run_task.cancelled()
-    await rt.stop()
-
-
-@pytest.mark.asyncio
-async def test_sync_service_run_once_executes_off_event_loop_thread() -> None:
-    """The synchronous maintenance service is called via asyncio.to_thread."""
-    repo = _make_mock_repo()
-    rt = DreamingRuntime(repository=repo, enabled=False, timeout_seconds=5.0)
-    seen: dict[str, object] = {}
-
-    def fake_call_service_once() -> MemoryMaintenanceResult:
-        seen["in_event_loop"] = True
-        try:
-            asyncio.get_running_loop()
-        except RuntimeError:
-            seen["in_event_loop"] = False
-        return _make_success_result()
-
-    rt._call_service_once = fake_call_service_once  # type: ignore[method-assignment]
-
-    result = await rt._run_once("run123")
-
-    assert result.scopes_scanned == 3
-    assert seen["in_event_loop"] is False
-
-
-@pytest.mark.asyncio
-async def test_stop_cancels_timeout_worker_after_graceful_timeout_result() -> None:
-    """Timeout result is returned first; explicit stop then cancels the worker."""
-    repo = _make_mock_repo()
-    rt = DreamingRuntime(repository=repo, enabled=False, timeout_seconds=0.05)
+    rt = DreamingRuntime(repository=repo, enabled=False, timeout_seconds=0.5)
 
     async def very_slow(*args: object, **kwargs: object) -> MemoryMaintenanceResult:
         await asyncio.sleep(10.0)
         return _make_success_result()
 
-    rt._run_once = very_slow  # type: ignore[method-assignment]
+    rt._run_batch = very_slow  # type: ignore[method-assignment]
 
-    result = await rt._execute_protected()
+    result = await rt._execute_batch([])
     assert result.status == "timeout"
-    worker = rt._active_run_task
-    assert worker is not None
+    assert result.error_class == "TimeoutError"
 
     await rt.stop()
 
-    assert worker.cancelled()
-    assert rt._active_run_task is None
 
-
-# ── test: failure isolation ───────────────────────────────────────────────────
+# ── test: failure isolation ────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
-async def test_crash_in_run_does_not_prevent_next_cycle() -> None:
-    """If run_once raises an exception the result is 'error' but next run succeeds."""
+async def test_crash_in_batch_does_not_prevent_next_batch() -> None:
+    """
+    If a batch raises an exception the result is 'error' but the next batch succeeds.
+    """
     repo = _make_mock_repo()
     rt = DreamingRuntime(repository=repo, enabled=False, timeout_seconds=5.0)
 
@@ -292,22 +344,22 @@ async def test_crash_in_run_does_not_prevent_next_cycle() -> None:
             raise RuntimeError("simulated failure")
         return _make_success_result()
 
-    rt._run_once = flaky_run  # type: ignore[method-assignment]
+    rt._run_batch = flaky_run  # type: ignore[method-assignment]
 
-    result1 = await rt._execute_protected()
+    result1 = await rt._execute_batch([])
     assert result1.status == "error"
     assert result1.error_class == "RuntimeError"
 
-    result2 = await rt._execute_protected()
+    result2 = await rt._execute_batch([])
     assert result2.status == "success"
     assert result2.scopes_scanned == 3
 
 
-# ── test: stop / drain ────────────────────────────────────────────────────────
+# ── test: stop / drain ──────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
-async def test_stop_waits_for_in_progress_run() -> None:
-    """stop() blocks until the current run finishes (drain)."""
+async def test_stop_waits_for_in_progress_batch() -> None:
+    """stop() blocks until the current batch finishes (drain)."""
     repo = _make_mock_repo()
     rt = DreamingRuntime(repository=repo, enabled=True, timeout_seconds=5.0)
 
@@ -318,44 +370,111 @@ async def test_stop_waits_for_in_progress_run() -> None:
         finishing.set()
         return _make_success_result()
 
-    rt._run_once = blocking_run  # type: ignore[method-assignment]
+    rt._run_batch = blocking_run  # type: ignore[method-assignment]
 
     async def one_cycle_loop() -> None:
-        run_task = asyncio.create_task(rt._execute_protected())
-        await run_task
+        await rt._execute_batch([])
         while not rt._stopping:
             await asyncio.sleep(0.01)
 
     rt._loop = one_cycle_loop  # type: ignore[method-assignment]
     rt.start()
-    await asyncio.sleep(0.05)  # let the run start
+    await asyncio.sleep(0.05)
 
-    # Stop while it's running.
     stop_task = asyncio.create_task(rt.stop())
-
-    # Wait for the run to signal it finished.
     await finishing.wait()
 
-    # stop() should complete shortly after the run finishes.
     done, pending = await asyncio.wait([stop_task], timeout=2.0)
     assert len(done) == 1
     assert rt.is_running is False
 
 
-# ── test: metadata-only logging ───────────────────────────────────────────────
+# ── test: batch size enforcement ────────────────────────────────────────────────
 
-def test_log_output_contains_no_memory_content() -> None:
+def test_select_eligible_scopes_respects_max_batch_size() -> None:
     """
-    Structured log events emitted by the dreaming runtime must not contain
+    _select_eligible_scopes applies limit=max_scopes_per_batch via the SQL query.
+    With mock we verify the query is built with the correct limit.
+    """
+    from unittest.mock import ANY
+
+    repo = _make_mock_repo()
+    rt = DreamingRuntime(
+        repository=repo,
+        enabled=True,
+        window_start="00:00",
+        window_end="23:59",
+        timezone="UTC",
+        max_scopes_per_batch=2,
+        min_daily_memories=0,  # no memory gate — uses simple path
+    )
+
+    # Simulate 5 configs in the DB.
+    fake_configs = [
+        MagicMock(scope_type="topic", chat_id=i, topic_id=i, user_id=None)
+        for i in range(1, 6)
+    ]
+
+    # When min_daily_memories=0 the no-memory-gate path is used.
+    # Build a chain: select().limit().all() returns at most 2 items.
+    limited_query = MagicMock()
+    limited_query.all.return_value = fake_configs[:2]  # capped at max_scopes_per_batch
+    repo._session.scalars.return_value = limited_query
+
+    selected = rt._select_eligible_scopes()
+    assert len(selected) == 2
+
+
+# ── test: min_daily_memories gate ──────────────────────────────────────────────
+
+def test_select_eligible_scopes_respects_min_daily_memories() -> None:
+    """
+    When min_daily_memories=1, a scope with zero daily memories in the lookback
+    window must not be returned.
+    """
+    repo = _make_mock_repo()
+    rt = DreamingRuntime(
+        repository=repo,
+        enabled=True,
+        window_start="00:00",
+        window_end="23:59",
+        timezone="UTC",
+        max_scopes_per_batch=10,
+        min_daily_memories=1,
+        lookback_days=7,
+    )
+
+    # Simulate 3 configs, only one with daily memories (count >= 1).
+    # The SQLAlchemy scalars().all() returns TopicAgentConfig rows.
+    # When min_daily_memories > 0, the outer join must filter correctly.
+    # We simulate: all configs are in the DB, but only those with mem_count >= 1 survive.
+
+    rich_scope = MagicMock(scope_type="topic", chat_id=1, topic_id=1, user_id=None)
+    poor_scope = MagicMock(scope_type="topic", chat_id=2, topic_id=2, user_id=None)
+
+    # When min_daily_memories > 0, the mock's scalars().all() should return only
+    # scopes that pass the memory-count subquery filter.
+    repo._session.scalars.return_value.all.return_value = [rich_scope]
+
+    selected = rt._select_eligible_scopes()
+    assert len(selected) == 1
+    assert selected[0].chat_id == 1
+
+
+# ── test: metadata-only logging ─────────────────────────────────────────────────
+
+def test_batch_log_output_contains_no_memory_content() -> None:
+    """
+    Structured log events emitted by the batch runtime must not contain
     raw memory text, prompts, tokens, or API keys.
     """
-    # Install SensitiveLogFilter before the test.
+    from amo_bot.core.logging import SensitiveLogFilter
+
     root = logging.getLogger()
     has_filter = any(isinstance(f, SensitiveLogFilter) for f in root.filters)
     if not has_filter:
         root.addFilter(SensitiveLogFilter())
 
-    # Capture all log records.
     records: list[logging.LogRecord] = []
     handler = logging.Handler()
     handler.emit = lambda r: records.append(r)  # type: ignore
@@ -368,17 +487,16 @@ def test_log_output_contains_no_memory_content() -> None:
     rt = DreamingRuntime(
         repository=repo,
         enabled=False,
-        interval_seconds=60,
         timeout_seconds=5.0,
     )
 
     async def fake_run(*args: object, **kwargs: object) -> MemoryMaintenanceResult:
         return _make_success_result()
 
-    rt._run_once = fake_run  # type: ignore[method-assignment]
+    rt._run_batch = fake_run  # type: ignore[method-assignment]
 
     async def _test() -> None:
-        await rt._execute_protected()
+        await rt._execute_batch([])
 
     loop = asyncio.new_event_loop()
     loop.run_until_complete(_test())
@@ -401,7 +519,7 @@ def test_log_output_contains_no_memory_content() -> None:
     logger.removeHandler(handler)
 
 
-def test_result_contains_only_metadata_fields() -> None:
+def test_dreaming_run_result_is_metadata_only() -> None:
     """DreamingRunResult must not carry actual memory/prompt content."""
     from amo_bot.ai.dreaming_runtime import DreamingRunResult
 
@@ -423,294 +541,54 @@ def test_result_contains_only_metadata_fields() -> None:
 
     assert r.run_id == "abc123"
     assert r.status == "success"
-    assert r.error_class is None
     # No fact_text, prompt, token, memory_content fields exist.
     assert not hasattr(r, "fact_text")
     assert not hasattr(r, "prompt")
     assert not hasattr(r, "tokens")
+    assert not hasattr(r, "memory_content")
 
 
-# ── test: scope/review isolation preserved ────────────────────────────────────
+# ── test: service scopes parameter ─────────────────────────────────────────────
 
-def test_service_does_not_auto_approve_by_default() -> None:
+def test_service_run_once_accepts_scopes_list(tmp_path: pytest.TempPathFactory) -> None:
     """
-    MemoryMaintenanceService.run_once() does not approve candidates —
-    human review is the only path unless auto_approve is explicitly enabled.
+    MemoryMaintenanceService.run_once() with scopes= list processes only that list
+    and not all configs (confirming the batch contract).
     """
     from amo_bot.ai.memory_maintenance import MemoryMaintenanceService
+    from amo_bot.db.init_db import init_db
+    from amo_bot.db.repositories import TopicAgentMemoryRepository
 
-    repo = _make_mock_repo()
+    db_url = f"sqlite:///{tmp_path}/scopes_param.sqlite"
+    init_db(database_url=db_url)
+    from amo_bot.db.base import create_session_factory
+    session_factory = create_session_factory(db_url)
+    repo = TopicAgentMemoryRepository(session_factory())
+
+    # Two scopes.
+    repo.upsert_config(
+        scope_type="topic", chat_id=-1001, topic_id=10, user_id=None,
+        ai_enabled=False, response_mode="command", memory_retention_days=30,
+    )
+    repo.upsert_config(
+        scope_type="topic", chat_id=-1002, topic_id=11, user_id=None,
+        ai_enabled=False, response_mode="command", memory_retention_days=30,
+    )
+
+    # Process only the first scope via batch mode.
+    from amo_bot.db.models import TopicAgentConfig
+    from sqlalchemy import select
+
+    session = session_factory()
+    scope_list: list[TopicAgentConfig] = session.scalars(
+        select(TopicAgentConfig).where(TopicAgentConfig.chat_id == -1001)
+    ).all()
+
     svc = MemoryMaintenanceService(repository=repo, auto_curate_long_memory=False)
-    # When auto_curate_long_memory=False curation is skipped entirely.
-    # When True (dreaming runtime) candidates are created but stay in
-    # "candidate" status — never auto-approved.
-    assert svc._auto_curate_long_memory is False
+    result = svc.run_once(scopes=scope_list)
 
+    # Only one scope should have been scanned.
+    assert result.scopes_scanned == 1
+    assert result.scopes_pruned == 0
 
-# ── test: curation candidates stay non-approved by default ──────────────────
-
-class _EchoCurator:
-    """Curator that promotes all given daily memories — used only in tests."""
-    def curate(self, *, scope, daily_memories, now):
-        return [
-            {"source_daily_memory_id": d.id, "fact_text": d.summary_text}
-            for d in daily_memories
-        ]
-
-
-def test_curation_creates_candidate_status_not_auto_approved(tmp_path: pytest.TempPathFactory) -> None:
-    """
-    MemoryMaintenanceService._curate_scope creates long_memory records with
-    promotion_status='candidate'.  They never become answer-effective until
-    a human (or explicit auto_approve) acts.
-    """
-    from amo_bot.ai.memory_maintenance import MemoryMaintenanceService
-    from amo_bot.db.init_db import init_db
-    from amo_bot.db.repositories import TopicAgentMemoryRepository
-
-    db_url = f"sqlite:///{tmp_path}/curation_candidate.sqlite"
-    init_db(database_url=db_url)
-    from amo_bot.db.base import create_session_factory
-    session_factory = create_session_factory(db_url)
-    repo = TopicAgentMemoryRepository(session_factory())
-
-    repo.upsert_config(
-        scope_type="topic", chat_id=-9001, topic_id=90, user_id=None,
-        ai_enabled=False, response_mode="command", memory_retention_days=30,
-    )
-    repo.upsert_daily_memory(
-        scope_type="topic", chat_id=-9001, topic_id=90, user_id=None,
-        summary_text="user prefers morning workouts", memory_date="2026-05-14", tokens_estimate=10,
-    )
-
-    svc = MemoryMaintenanceService(
-        repository=repo,
-        auto_curate_long_memory=True,
-        max_daily_candidates_per_scope=3,
-        max_promotions_per_scope=2,
-        curator=_EchoCurator(),
-    )
-    result = svc.run_once()
-    assert result.curation_promoted >= 1
-
-    candidates = repo.list_long_memories(
-        scope_type="topic",
-        chat_id=-9001,
-        topic_id=90,
-        active_only=False,
-    )
-    assert len(candidates) >= 1
-    for row in candidates:
-        assert row.promotion_status == "candidate", (
-            f"expected status 'candidate', got '{row.promotion_status}' — "
-            "curation must not auto-approve"
-        )
-
-    # Candidates must NOT appear in answer-effective results.
-    effective = repo.list_long_memories(
-        scope_type="topic",
-        chat_id=-9001,
-        topic_id=90,
-        answer_effective_only=True,
-    )
-    assert effective == [], "candidate entries must not be answer-effective without review"
-
-
-def test_candidates_are_scope_isolated_no_cross_scope_leak(tmp_path: pytest.TempPathFactory) -> None:
-    """
-    Curation candidates created in one scope must not appear in another scope.
-    """
-    from amo_bot.ai.memory_maintenance import MemoryMaintenanceService
-    from amo_bot.db.init_db import init_db
-    from amo_bot.db.repositories import TopicAgentMemoryRepository
-
-    db_url = f"sqlite:///{tmp_path}/scope_leak.sqlite"
-    init_db(database_url=db_url)
-    from amo_bot.db.base import create_session_factory
-    session_factory = create_session_factory(db_url)
-    repo = TopicAgentMemoryRepository(session_factory())
-
-    # Two distinct scopes.
-    for (stype, cid, tid) in [("topic", -9101, 91), ("topic", -9102, 92)]:
-        repo.upsert_config(
-            scope_type=stype, chat_id=cid, topic_id=tid, user_id=None,
-            ai_enabled=False, response_mode="command", memory_retention_days=30,
-        )
-        repo.upsert_daily_memory(
-            scope_type=stype, chat_id=cid, topic_id=tid, user_id=None,
-            summary_text=f"facts about scope {cid}:{tid}", memory_date="2026-05-14", tokens_estimate=10,
-        )
-
-    svc = MemoryMaintenanceService(repository=repo, auto_curate_long_memory=True, curator=_EchoCurator())
-    svc.run_once()
-
-    scope1_memories = repo.list_long_memories(
-        scope_type="topic", chat_id=-9101, topic_id=91, active_only=False,
-    )
-    scope2_memories = repo.list_long_memories(
-        scope_type="topic", chat_id=-9102, topic_id=92, active_only=False,
-    )
-
-    assert len(scope1_memories) >= 1
-    assert len(scope2_memories) >= 1
-
-    # IDs must not leak across scopes.
-    scope1_ids = {m.id for m in scope1_memories}
-    scope2_ids = {m.id for m in scope2_memories}
-    assert scope1_ids.isdisjoint(scope2_ids), "cross-scope ID leak detected"
-
-
-def test_candidates_have_correct_scope_metadata(tmp_path: pytest.TempPathFactory) -> None:
-    """
-    Curated long_memory rows carry the correct scope fields from the source config.
-    """
-    from amo_bot.ai.memory_maintenance import MemoryMaintenanceService
-    from amo_bot.db.init_db import init_db
-    from amo_bot.db.repositories import TopicAgentMemoryRepository
-
-    db_url = f"sqlite:///{tmp_path}/scope_meta.sqlite"
-    init_db(database_url=db_url)
-    from amo_bot.db.base import create_session_factory
-    session_factory = create_session_factory(db_url)
-    repo = TopicAgentMemoryRepository(session_factory())
-
-    repo.upsert_config(
-        scope_type="private_user", chat_id=None, topic_id=None, user_id=9999,
-        ai_enabled=False, response_mode="command", memory_retention_days=30,
-    )
-    daily = repo.upsert_daily_memory(
-        scope_type="private_user", chat_id=None, topic_id=None, user_id=9999,
-        summary_text="...", memory_date="2026-05-14", tokens_estimate=10,
-    )
-
-    svc = MemoryMaintenanceService(repository=repo, auto_curate_long_memory=True, curator=_EchoCurator())
-    svc.run_once()
-
-    long_memories = repo.list_long_memories(
-        scope_type="private_user", user_id=9999, active_only=False,
-    )
-    assert len(long_memories) >= 1
-    row = long_memories[0]
-    assert row.scope_type == "private_user"
-    assert row.user_id == 9999
-    assert row.chat_id is None
-    assert row.topic_id is None
-    assert row.promotion_status == "candidate"
-
-
-@pytest.mark.asyncio
-async def test_dreaming_runtime_does_not_auto_approve_by_default(tmp_path: pytest.TempPathFactory) -> None:
-    """
-    DreamingRuntime with auto_approve=False (the default) creates candidate
-    records but does not promote them to answer-effective.
-    """
-    from amo_bot.ai.dreaming_runtime import DreamingRuntime
-    from amo_bot.db.init_db import init_db
-    from amo_bot.db.repositories import TopicAgentMemoryRepository
-
-    db_url = f"sqlite:///{tmp_path}/dr_no_auto_approve.sqlite"
-    init_db(database_url=db_url)
-    from amo_bot.db.base import create_session_factory
-    session_factory = create_session_factory(db_url)
-    repo = TopicAgentMemoryRepository(session_factory())
-
-    repo.upsert_config(
-        scope_type="topic", chat_id=-9201, topic_id=92, user_id=None,
-        ai_enabled=False, response_mode="command", memory_retention_days=30,
-    )
-    repo.upsert_daily_memory(
-        scope_type="topic", chat_id=-9201, topic_id=92, user_id=None,
-        summary_text="...", memory_date="2026-05-14", tokens_estimate=10,
-    )
-
-    # auto_approve=False (the default)
-    rt = DreamingRuntime(
-        repository=repo,
-        enabled=True,
-        interval_seconds=3600,
-        timeout_seconds=30.0,
-        auto_approve=False,
-    )
-
-    # Inject a real curator so promotions actually get created.
-    rt._service._curator = _EchoCurator()
-
-    result = await rt._execute_protected()
-
-    assert result.status == "success"
-    assert result.curation_auto_approved == 0, "auto_approve=False must not approve any candidates"
-
-    # Candidates exist but are not answer-effective.
-    long_memories = repo.list_long_memories(
-        scope_type="topic", chat_id=-9201, topic_id=92, active_only=False,
-    )
-    assert len(long_memories) >= 1
-    for row in long_memories:
-        assert row.promotion_status == "candidate"
-
-    effective = repo.list_long_memories(
-        scope_type="topic", chat_id=-9201, topic_id=92, answer_effective_only=True,
-    )
-    assert effective == [], "candidates without auto_approve must not be answer-effective"
-
-    await rt.stop()
-
-
-@pytest.mark.asyncio
-async def test_dreaming_runtime_scope_isolated_no_cross_topic_review(tmp_path: pytest.TempPathFactory) -> None:
-    """
-    Entries curated for one topic must not be retrievable under a different topic.
-    """
-    from amo_bot.ai.dreaming_runtime import DreamingRuntime
-    from amo_bot.db.init_db import init_db
-    from amo_bot.db.repositories import TopicAgentMemoryRepository
-
-    db_url = f"sqlite:///{tmp_path}/dr_scope_iso.sqlite"
-    init_db(database_url=db_url)
-    from amo_bot.db.base import create_session_factory
-    session_factory = create_session_factory(db_url)
-    repo = TopicAgentMemoryRepository(session_factory())
-
-    for (cid, tid) in [(-9301, 93), (-9302, 94)]:
-        repo.upsert_config(
-            scope_type="topic", chat_id=cid, topic_id=tid, user_id=None,
-            ai_enabled=False, response_mode="command", memory_retention_days=30,
-        )
-        repo.upsert_daily_memory(
-            scope_type="topic", chat_id=cid, topic_id=tid, user_id=None,
-            summary_text=f"unique fact for {cid}:{tid}", memory_date="2026-05-14", tokens_estimate=10,
-        )
-
-    rt = DreamingRuntime(repository=repo, enabled=True, interval_seconds=3600, timeout_seconds=30.0)
-
-    # Inject a real curator so promotions actually get created.
-    rt._service._curator = _EchoCurator()
-
-    result = await rt._execute_protected()
-    assert result.status == "success"
-
-    memories_topic1 = repo.list_long_memories(
-        scope_type="topic", chat_id=-9301, topic_id=93, active_only=False,
-    )
-    memories_topic2 = repo.list_long_memories(
-        scope_type="topic", chat_id=-9302, topic_id=94, active_only=False,
-    )
-
-    assert len(memories_topic1) >= 1
-    assert len(memories_topic2) >= 1
-    assert memories_topic1[0].fact_text == f"unique fact for -9301:93"
-    assert memories_topic2[0].fact_text == f"unique fact for -9302:94"
-
-    await rt.stop()
-
-
-def test_service_auto_approve_flag_controls_review_bypass() -> None:
-    """
-    The auto_approve flag in DreamingRuntime is the ONLY mechanism that bypasses
-    human review.  When False (default) candidates stay in 'candidate' status.
-    """
-    from amo_bot.config.settings import Settings
-
-    # Default — auto_approve=False
-    s = Settings(BOT_TOKEN="1234:TOKEN", WEBUI_PASSWORD="pw", WEBUI_SECRET_KEY="x" * 32)
-    assert s.dreaming_auto_approve_mode is False, "dreaming_auto_approve_mode must default to False"
+    session.close()

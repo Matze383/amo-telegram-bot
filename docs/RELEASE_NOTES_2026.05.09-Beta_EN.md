@@ -194,30 +194,42 @@ Unified structured logging with configuration options and privacy features:
 
 ### Dreaming / Memory-Curation Runtime (GitHub #45)
 
-**Commit:** Activates the periodic memory curation background task
+**Commit:** Activates the nightly memory curation background worker
 
 New Dreaming system for automatic curation of daily memory entries:
 
-- **Periodic Execution**: Automatic background task for memory curation
-- **Default-Off**: Disabled by default (`DREAMING_ENABLED=0`) — explicit activation required
-- **Configurable Intervals**: `DREAMING_INTERVAL_SECONDS` (default: 3600s)
-- **Timeout Protection**: `DREAMING_TIMEOUT_SECONDS` (default: 300s)
-- **Bounded Candidates**: `DREAMING_MAX_DAILY_CANDIDATES_PER_SCOPE` (default: 3)
-- **Bounded Promotions**: `DREAMING_MAX_PROMOTIONS_PER_SCOPE` (default: 2)
-- **Auto-Approve Mode**: `DREAMING_AUTO_APPROVE_MODE` (default: 0) — `1` bypasses human review
+- **Nightly Worker:** Only runs within a configurable night window (default: 02:00–05:00 Europe/Berlin)
+- **Batch Processing:** Scopes are processed in batches (default: max. 3 per batch)
+- **Pause and Jitter:** Configurable pause between batches with random jitter
+- **Eligibility Filter:** Only scopes with sufficient daily memory material are processed
+- **No Max-Scopes-Per-Night:** The worker runs until all eligible scopes are processed or the window ends
+- **Default-Off:** Disabled by default (`DREAMING_ENABLED=0`) — explicit activation required
+- **Configurable Time Window:** Start/end time and timezone adjustable
+- **Lookback:** Configurable days for memory check (`DREAMING_LOOKBACK_DAYS`)
+- **Timeout Protection:** Fixed timeouts for individual runs
+- **Bounded Candidates:** Maximum candidates and promotions per scope per day
+- **Auto-Approve Mode:** Disabled by default; bypasses human review when enabled
 
 **Safety Behavior:**
 - Explicit activation required (opt-in)
 - Scope isolation: No cross-topic/chat access
-- Limited resource usage through candidate and promotion limits
+- Limited resource usage through batch sizes and pauses
 - Audit events contain only metadata, no memory contents
 - Auto-approve disabled by default — human review recommended when enabled
 - **No-Overlap Enforcement:** Only one curation run executes at a time; concurrent runs are blocked by an internal lock
+- **Metadata-only Logs:** Only metadata in audit events, no memory contents
 
 **Configuration:**
 ```ini
 DREAMING_ENABLED=1
-DREAMING_INTERVAL_SECONDS=3600
+DREAMING_WINDOW_START=02:00
+DREAMING_WINDOW_END=05:00
+DREAMING_TIMEZONE=Europe/Berlin
+DREAMING_MAX_SCOPES_PER_BATCH=3
+DREAMING_BATCH_PAUSE_SECONDS=300
+DREAMING_JITTER_SECONDS=120
+DREAMING_MIN_DAILY_MEMORIES=1
+DREAMING_LOOKBACK_DAYS=7
 DREAMING_TIMEOUT_SECONDS=300
 DREAMING_MAX_DAILY_CANDIDATES_PER_SCOPE=3
 DREAMING_MAX_PROMOTIONS_PER_SCOPE=2
