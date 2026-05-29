@@ -192,6 +192,50 @@ Unified structured logging with configuration options and privacy features:
 - No image contents, only metadata
 - Deterministic redaction for sensitive values
 
+### LiteLLM Provider Support (GitHub #39)
+
+New AI provider for LiteLLM proxy integration:
+
+- **AI_PROVIDER=litellm** for LiteLLM support
+- **Configuration:** `LITELLM_API_KEY`, `LITELLM_MODEL`, `LITELLM_BASE_URL`, `LITELLM_TIMEOUT_SECONDS`
+- Enables unified access to 100+ LLMs via LiteLLM proxy
+- OpenAI-compatible API format
+
+### LM Studio Provider Support
+
+New local AI provider for LM Studio:
+
+- **AI_PROVIDER=lmstudio** for local LM Studio instance
+- **Configuration:** `LMSTUDIO_MODEL`, `LMSTUDIO_TIMEOUT_SECONDS`, `LMSTUDIO_BASE_URL` (optional: `LMSTUDIO_API_KEY`)
+- Default base URL: `http://127.0.0.1:1234/v1`
+- Higher timeout values recommended (default: 60s) for local inference
+
+### vLLM Provider Support
+
+New local AI provider for vLLM servers:
+
+- **AI_PROVIDER=vllm** for vLLM installations (e.g., OpenClaw backend)
+- **Configuration:** `VLLM_MODEL` (required), `VLLM_TIMEOUT_SECONDS`, `VLLM_BASE_URL` (optional: `VLLM_API_KEY`)
+- Default base URL: `http://127.0.0.1:8000/v1`
+- Higher timeout values recommended (default: 60s) for local inference
+
+### SGLang Provider Support
+
+New local AI provider for SGLang:
+
+- **AI_PROVIDER=sglang** for SGLang installations
+- **Configuration:** `SGLANG_MODEL` (required), `SGLANG_TIMEOUT_SECONDS`, `SGLANG_BASE_URL` (optional: `SGLANG_API_KEY`)
+- Default base URL: `http://127.0.0.1:8000/v1`
+- Higher timeout values recommended (default: 60s) for local inference
+
+### Gemini Key Security Fix
+
+Improved security for Google/Gemini API keys:
+
+- Support for both `GEMINI_API_KEY` **and** `GOOGLE_API_KEY` (alias for compatibility)
+- Automatic redaction of sensitive keys in logs and diagnostic outputs
+- Priority: `GEMINI_API_KEY` is preferred when both are set
+
 ### Dreaming / Memory-Curation Runtime (GitHub #45)
 
 **Commit:** Activates the nightly memory curation background worker
@@ -209,6 +253,8 @@ New Dreaming system for automatic curation of daily memory entries:
 - **Timeout Protection:** Fixed timeouts for individual runs
 - **Bounded Candidates:** Maximum candidates and promotions per scope per day
 - **Auto-Approve Mode:** Disabled by default; bypasses human review when enabled
+- **Metadata-only Logs:** No private content (messages, images, memory) in audit events
+- **Review Gates:** Human review required for memory curation (unless auto-approve explicitly enabled)
 
 **Safety Behavior:**
 - Explicit activation required (opt-in)

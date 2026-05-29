@@ -374,6 +374,20 @@ def test_main_wires_scheduled_plugin_executor_timeout(monkeypatch) -> None:
         poll_retry_max_seconds = 30
         webui_host = "127.0.0.1"
         webui_port = 8080
+        dreaming_enabled = False
+        dreaming_interval_seconds = 300
+        dreaming_timeout_seconds = 300.0
+        dreaming_max_daily_candidates_per_scope = 3
+        dreaming_max_promotions_per_scope = 2
+        dreaming_auto_approve_mode = False
+        dreaming_window_start = "02:00"
+        dreaming_window_end = "05:00"
+        dreaming_timezone = "Europe/Berlin"
+        dreaming_max_scopes_per_batch = 3
+        dreaming_batch_pause_seconds = 300
+        dreaming_jitter_seconds = 120
+        dreaming_min_daily_memories = 1
+        dreaming_lookback_days = 7
 
     class _DummyContext:
         def __enter__(self):

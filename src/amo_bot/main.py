@@ -263,11 +263,18 @@ def run(argv: list[str] | None = None) -> None:
     dreaming_runtime = DreamingRuntime(
         repository=dreaming_repo,
         enabled=settings.dreaming_enabled,
-        interval_seconds=settings.dreaming_interval_seconds,
         timeout_seconds=settings.dreaming_timeout_seconds,
         max_daily_candidates_per_scope=settings.dreaming_max_daily_candidates_per_scope,
         max_promotions_per_scope=settings.dreaming_max_promotions_per_scope,
         auto_approve=settings.dreaming_auto_approve_mode,
+        window_start=settings.dreaming_window_start,
+        window_end=settings.dreaming_window_end,
+        timezone=settings.dreaming_timezone,
+        max_scopes_per_batch=settings.dreaming_max_scopes_per_batch,
+        batch_pause_seconds=settings.dreaming_batch_pause_seconds,
+        jitter_seconds=settings.dreaming_jitter_seconds,
+        min_daily_memories=settings.dreaming_min_daily_memories,
+        lookback_days=settings.dreaming_lookback_days,
     )
 
     if args.webui:

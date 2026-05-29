@@ -192,6 +192,50 @@ Einheitliches strukturiertes Logging mit Konfigurationsoptionen und Datenschutz-
 - Keine Bildinhalte, nur Metadaten
 - Deterministische Redaction für sensible Werte
 
+### LiteLLM Provider Support (GitHub #39)
+
+Neuer AI-Provider für LiteLLM-Proxy-Integration:
+
+- **AI_PROVIDER=litellm** für LiteLLM-Unterstützung
+- **Konfiguration:** `LITELLM_API_KEY`, `LITELLM_MODEL`, `LITELLM_BASE_URL`, `LITELLM_TIMEOUT_SECONDS`
+- Ermöglicht einheitlichen Zugriff auf über 100+ LLMs über LiteLLM-Proxy
+- OpenAI-kompatibles API-Format
+
+### LM Studio Provider Support
+
+Neuer lokaler AI-Provider für LM Studio:
+
+- **AI_PROVIDER=lmstudio** für lokale LM Studio-Instanz
+- **Konfiguration:** `LMSTUDIO_MODEL`, `LMSTUDIO_TIMEOUT_SECONDS`, `LMSTUDIO_BASE_URL` (optional: `LMSTUDIO_API_KEY`)
+- Standard-Base-URL: `http://127.0.0.1:1234/v1`
+- Höhere Timeout-Werte empfohlen (Standard: 60s) für lokale Inferenz
+
+### vLLM Provider Support
+
+Neuer lokaler AI-Provider für vLLM-Server:
+
+- **AI_PROVIDER=vllm** für vLLM-Installationen (z.B. OpenClaw Backend)
+- **Konfiguration:** `VLLM_MODEL` (erforderlich), `VLLM_TIMEOUT_SECONDS`, `VLLM_BASE_URL` (optional: `VLLM_API_KEY`)
+- Standard-Base-URL: `http://127.0.0.1:8000/v1`
+- Höhere Timeout-Werte empfohlen (Standard: 60s) für lokale Inferenz
+
+### SGLang Provider Support
+
+Neuer lokaler AI-Provider für SGLang:
+
+- **AI_PROVIDER=sglang** für SGLang-Installationen
+- **Konfiguration:** `SGLANG_MODEL` (erforderlich), `SGLANG_TIMEOUT_SECONDS`, `SGLANG_BASE_URL` (optional: `SGLANG_API_KEY`)
+- Standard-Base-URL: `http://127.0.0.1:8000/v1`
+- Höhere Timeout-Werte empfohlen (Standard: 60s) für lokale Inferenz
+
+### Gemini Key Security Fix
+
+Verbesserte Sicherheit für Google/Gemini API-Keys:
+
+- Unterstützung für `GEMINI_API_KEY` **und** `GOOGLE_API_KEY` (Alias für Kompatibilität)
+- Automatische Redaktion sensibler Schlüssel in Logs und Diagnose-Ausgaben
+- Priorität: `GEMINI_API_KEY` wird bevorzugt verwendet wenn beide gesetzt sind
+
 ### Dreaming / Memory-Curation Runtime (GitHub #45)
 
 **Commit:** Aktiviert den nächtlichen Memory-Curation-Hintergrundworker
@@ -209,6 +253,8 @@ Neues Dreaming-System für automatische Kuratierung von täglichen Memory-Eintr�
 - **Timeout-Schutz:** Feste Timeouts für einzelne Läufe
 - **Begrenzte Kandidaten:** Maximale Kandidaten und Promotions pro Scope pro Tag
 - **Auto-Approve-Modus:** Standardmäßig deaktiviert; überspringt menschliche Review bei Aktivierung
+- **Metadata-only Logs:** Keine privaten Inhalte (Nachrichten, Bilder, Memory) in Audit-Events
+- **Review-Gates:** Menschliche Überprüfung erforderlich für Memory-Kuratierung (außer bei expliziter Aktivierung von Auto-Approve)
 
 **Sicherheitsverhalten:**
 - Explizite Aktivierung erforderlich (opt-in)
