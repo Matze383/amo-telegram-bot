@@ -116,17 +116,6 @@ def run(argv: list[str] | None = None) -> None:
         await _persist_sent_result(chat_id=chat_id, text=text, message_thread_id=None, result=result)
         return result
 
-    owner_notifier = OwnerNotifier(
-        owner_telegram_user_id=settings.webui_owner_telegram_id,
-        send_private_text=send_owner_private_text,
-    )
-
-    command_registry = create_builtin_registry(
-        database_url=settings.database_url,
-        ai_service=ai_service,
-        owner_notifier=owner_notifier,
-    )
-
     async def send_text(chat_id: int, text: str, message_thread_id: int | None = None, _persist_sent_result=persist_sent_result) -> object:
         result = await tg.send_message(chat_id=chat_id, text=text, message_thread_id=message_thread_id)
         await _persist_sent_result(chat_id=chat_id, text=text, message_thread_id=message_thread_id, result=result)
@@ -157,6 +146,18 @@ def run(argv: list[str] | None = None) -> None:
         result = await tg.send_message(chat_id=chat_id, text=text, reply_markup=reply_markup)
         await _persist_sent_result(chat_id=chat_id, text=text, message_thread_id=None, result=result)
         return result
+
+    owner_notifier = OwnerNotifier(
+        owner_telegram_user_id=settings.webui_owner_telegram_id,
+        send_private_text=send_owner_private_text,
+        send_private_markup=send_private_text_with_markup,
+    )
+
+    command_registry = create_builtin_registry(
+        database_url=settings.database_url,
+        ai_service=ai_service,
+        owner_notifier=owner_notifier,
+    )
 
     async def answer_callback(callback_query_id: str, text: str | None = None) -> object:
         return await tg.answer_callback_query(callback_query_id=callback_query_id, text=text)

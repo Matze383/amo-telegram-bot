@@ -60,6 +60,22 @@ def test_init_db_creates_topic_agent_configs_with_recent_context_window_size(tmp
     assert "recent_context_window_size" in columns
 
 
+def test_init_db_creates_bot_peers_table(tmp_path) -> None:
+    db_path = tmp_path / "bot_peers.sqlite"
+
+    init_db(f"sqlite:///{db_path}")
+
+    engine = create_engine(f"sqlite:///{db_path}")
+    columns = {column["name"] for column in inspect(engine).get_columns("bot_peers")}
+    assert {
+        "telegram_bot_id",
+        "status",
+        "last_seen_chat_id",
+        "owner_decided_by_telegram_user_id",
+        "owner_decided_at",
+    }.issubset(columns)
+
+
 def test_init_db_migrates_topic_agent_configs_adds_recent_context_window_size(tmp_path) -> None:
     db_path = tmp_path / "legacy_topic_cfg.sqlite"
     conn = sqlite3.connect(db_path)

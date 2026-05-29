@@ -685,6 +685,40 @@ The bot automatically sends a private consent prompt to users who are in "pendin
 
 ---
 
+### Bot-to-Bot Approval
+
+When AMO is allowed to receive messages from other Telegram bots, new bot senders are not answered automatically.
+
+**Test Steps:**
+
+1. **Test a new bot sender:**
+   - Have a second test bot send a message or command to AMO
+   - Expected: AMO does not answer that bot
+   - Expected: The owner receives a private approval DM with `Bot erlauben` and `Bot blockieren`
+
+2. **Test one-shot behavior:**
+   - Have the same pending bot write again
+   - Expected: No second owner DM for the same bot
+
+3. **Test allow:**
+   - Owner clicks `Bot erlauben`
+   - The bot may then trigger the diagnostic commands `/ping` and `/help`
+
+4. **Test block:**
+   - Owner clicks `Bot blockieren`
+   - Messages from that bot stay unanswered
+
+**Checklist:**
+- [ ] New bots are detected as `pending`
+- [ ] Pending bots receive no answer
+- [ ] Owner DM contains allow/block buttons
+- [ ] Only the owner can change bot approvals
+- [ ] Other commands such as `/accept` stay blocked for bot peers
+- [ ] Blocked bots stay silent
+- [ ] Human consent flows stay unchanged
+
+---
+
 ### WebUI: Topic Soul Editor (KI-F2)
 
 The group detail page includes a **Topic Soul Editor** for configuring topic-specific AI behavior instructions.

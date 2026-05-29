@@ -568,6 +568,16 @@ python main.py
 3. Den bereitgestellten Token kopieren
 4. Bot-Username in `.env` eintragen
 
+### Bot-zu-Bot-Kommunikation
+
+Wenn Telegram so konfiguriert ist, dass AMO Nachrichten anderer Bots empfangen darf, gilt ein separater Sicherheits-Gate:
+
+- Neue Bot-Absender werden in `bot_peers` mit Status `pending` gespeichert.
+- AMO schreibt den konfigurierten Owner privat an und fragt per Inline-Buttons, ob dieser Bot erlaubt oder blockiert werden soll.
+- `pending` und `blocked` Bots werden nicht beantwortet.
+- `allowed` Bots duerfen in V1 nur die explizit freigegebenen Diagnose-Commands `/ping` und `/help` ausloesen; normale User-Consent-Flows werden nicht fuer Bots verwendet.
+- Die Freigabe ist bewusst von der Datenschutzerklaerung fuer menschliche Nutzer getrennt.
+
 ---
 
 ## Preflight-Tests
