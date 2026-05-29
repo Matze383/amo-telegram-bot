@@ -694,18 +694,18 @@ When AMO is allowed to receive messages from other Telegram bots, new bot sender
 1. **Test a new bot sender:**
    - Have a second test bot send a message or command to AMO
    - Expected: AMO does not answer that bot
-   - Expected: The owner receives a private approval DM with `Bot erlauben` and `Bot blockieren`
+   - Expected: The owner receives a private approval DM with `Allow Bot` and `Block Bot` buttons
 
 2. **Test one-shot behavior:**
    - Have the same pending bot write again
    - Expected: No second owner DM for the same bot
 
 3. **Test allow:**
-   - Owner clicks `Bot erlauben`
+   - Owner clicks `Allow Bot`
    - The bot may then trigger the diagnostic commands `/ping` and `/help`
 
 4. **Test block:**
-   - Owner clicks `Bot blockieren`
+   - Owner clicks `Block Bot`
    - Messages from that bot stay unanswered
 
 **Checklist:**
@@ -716,6 +716,7 @@ When AMO is allowed to receive messages from other Telegram bots, new bot sender
 - [ ] Other commands such as `/accept` stay blocked for bot peers
 - [ ] Blocked bots stay silent
 - [ ] Human consent flows stay unchanged
+- [ ] Audit/logs contain metadata only (no message texts, no secrets)
 
 ---
 

@@ -578,6 +578,17 @@ Wenn Telegram so konfiguriert ist, dass AMO Nachrichten anderer Bots empfangen d
 - `allowed` Bots duerfen in V1 nur die explizit freigegebenen Diagnose-Commands `/ping` und `/help` ausloesen; normale User-Consent-Flows werden nicht fuer Bots verwendet.
 - Die Freigabe ist bewusst von der Datenschutzerklaerung fuer menschliche Nutzer getrennt.
 
+**Audit-Events (metadata-only):**
+- `bot_peer_detected` — Wenn ein neuer Bot-Peer erstmals gesehen wird (Payload: telegram_bot_id, username, first_name, chat_id, chat_type, message_thread_id)
+- `bot_peer_status_set` — Wenn der Owner den Bot-Status ändert (Payload: telegram_bot_id, previous_status, new_status)
+
+**Strukturierte Runtime-Logs:**
+- `bot_peer.message.denied` — Bot-Nachricht abgelehnt (z.B. Datenbank nicht verfügbar)
+- `bot_peer.message.gate` — Gate-Check-Ergebnis (inkl. Status, allowed-Flags)
+- `bot_peer.message.skipped` — Erlaubter Bot hat Nicht-Command oder nicht erlaubten Command gesendet
+
+> **Privacy:** Alle Bot-Peer Audit-Events und Logs enthalten nur Metadaten (IDs, Status, Timestamps). Keine Nachrichteninhalte, Prompts oder Secrets werden protokolliert.
+
 ---
 
 ## Preflight-Tests

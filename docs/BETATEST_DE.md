@@ -716,6 +716,7 @@ Wenn AMO Nachrichten anderer Telegram-Bots empfangen darf, werden neue Bot-Absen
 - [ ] Andere Commands wie `/accept` bleiben fuer Bot-Peers gesperrt
 - [ ] Blockierte Bots bleiben stumm
 - [ ] Human-Consent-Flows bleiben unveraendert
+- [ ] Audit/Logs enthalten nur Metadaten (keine Nachrichtentexte, keine Secrets)
 
 ---
 
