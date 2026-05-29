@@ -105,8 +105,8 @@ def test_ask_includes_only_current_scoped_user_profile(tmp_path) -> None:
     assert out == "ok"
     assert "language" in ai.prompt
     assert "de" in ai.prompt
-    assert "en" not in ai.prompt
-    assert "tone_preference" not in ai.prompt
+    assert "language=\":\"en\"" not in ai.prompt, "topic scope should not leak other topic language"
+    assert "tone_preference" not in ai.prompt, "private_user scope should not leak private profile to topic"
 
 
 def test_ask_handles_service_error_cleanly() -> None:

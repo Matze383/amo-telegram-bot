@@ -24,13 +24,15 @@ class _DecisionMention:
         assembled_soul_text = None
         daily_memory_text = None
         long_memory_text = None
+        recall_memory_text = None
+        user_profile_context_text = None
 
     reason_code = AIRouterReasonCode.MENTION_IN_ACTIVE_SCOPE
     context = _Context()
 
 
 class _RouterMention:
-    def __init__(self, topic_agent_memory_repository: object) -> None:
+    def __init__(self, **kwargs: object) -> None:
         pass
 
     def decide(self, **kwargs: object):

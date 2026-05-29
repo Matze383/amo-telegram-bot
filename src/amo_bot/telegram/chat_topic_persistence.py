@@ -48,7 +48,7 @@ def _extract_coarse_profile_candidate(text: str) -> dict[str, object]:
     elif any(marker in lower for marker in ("speak english", "answer in english", "reply in english")):
         candidate["language"] = "en"
 
-    if any(marker in lower for marker in ("halte dich kurz", "antwort mir lieber kurz", "bitte kurz", "keep it short", "short answers")):
+    if any(marker in lower for marker in ("halte dich kurz", "antworte mir lieber kurz", "bitte kurz", "keep it short", "short answers")):
         candidate["verbosity"] = "low"
         candidate["communication_style"] = "brief"
     elif any(marker in lower for marker in ("ausführlich", "detailliert", "detailed answer", "explain in detail")):

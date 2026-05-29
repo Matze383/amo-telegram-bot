@@ -586,9 +586,12 @@ class AIRouter:
             return "", ""
 
         participant_ids: list[int] = []
-        for candidate in (current_user_id, reply_to_user_id, scope_user_id):
-            if isinstance(candidate, int) and candidate > 0:
-                participant_ids.append(candidate)
+        if isinstance(current_user_id, int) and current_user_id > 0:
+            participant_ids.append(current_user_id)
+        if isinstance(reply_to_user_id, int) and reply_to_user_id > 0:
+            participant_ids.append(reply_to_user_id)
+        if isinstance(scope_user_id, int) and scope_user_id > 0:
+            participant_ids.append(scope_user_id)
 
         try:
             rows = memory_repo.list_recent(
@@ -596,7 +599,7 @@ class AIRouter:
                 chat_id=chat_id,
                 topic_id=topic_id,
                 user_id=scope_user_id if scope_type == "private_user" else None,
-                limit=max(1, min(recent_limit, self._PROFILE_MAX_USERS * 3)),
+                limit=max(1, min(recent_limit, self._PROFILE_MAX_USERS * 20)),
                 max_age_seconds=self._RECENT_WINDOW_MAX_AGE_SECONDS,
             )
             for row in rows:
@@ -604,7 +607,11 @@ class AIRouter:
                 if isinstance(author_id, int) and author_id > 0:
                     participant_ids.append(author_id)
 
-            unique_participants = list(dict.fromkeys(participant_ids))[: self._PROFILE_MAX_USERS]
+            # Deduplicate while preserving order; collect a wide pool first,
+            # then cap before calling list_profiles_for_users so we don't
+            # accidentally exclude message authors who have real profiles.
+            unique_participants = list(dict.fromkeys(participant_ids))
+
             if not unique_participants:
                 return "", ""
 

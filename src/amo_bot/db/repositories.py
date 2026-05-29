@@ -1602,11 +1602,14 @@ class UserMemoryProfileRepository:
         limit_users: int = 5,
     ) -> list[UserMemoryProfileRecord]:
         safe_limit = max(1, min(limit_users, 20))
-        normalized_users = list(dict.fromkeys(int(user_id) for user_id in user_ids if int(user_id) > 0))[:safe_limit]
-        if not normalized_users:
+        # Do NOT pre-truncate user_ids before the DB query; let the DB return
+        # all matching rows, then cap the final result so we don't accidentally
+        # exclude users at the tail who have real profiles.
+        all_valid_users = list(dict.fromkeys(int(user_id) for user_id in user_ids if int(user_id) > 0))
+        if not all_valid_users:
             return []
 
-        first_user = normalized_users[0]
+        first_user = all_valid_users[0]
         normalized_scope, normalized_chat_id, normalized_topic_id, _ = self._normalize_scope(
             scope_type=scope_type,
             chat_id=chat_id,
@@ -1618,11 +1621,13 @@ class UserMemoryProfileRepository:
                 UserMemoryProfile.scope_type == normalized_scope,
                 UserMemoryProfile.chat_id == normalized_chat_id,
                 UserMemoryProfile.topic_id == normalized_topic_id,
-                UserMemoryProfile.user_id.in_(normalized_users),
+                UserMemoryProfile.user_id.in_(all_valid_users),
             )
         ).all()
         by_user = {int(row.user_id): self._to_record(row) for row in rows}
-        return [by_user[user_id] for user_id in normalized_users if user_id in by_user and by_user[user_id].profile]
+        # Filter to users with non-empty profiles and respect limit_users
+        result = [by_user[uid] for uid in all_valid_users if uid in by_user and by_user[uid].profile][:safe_limit]
+        return result
 
 
 class TopicAgentMemoryRepository:

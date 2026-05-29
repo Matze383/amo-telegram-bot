@@ -32,12 +32,18 @@ def test_ai_not_called_without_trigger_when_router_rejects(monkeypatch) -> None:
             scope_type = "group"
             flag_bot_mention = False
             flag_reply_to_bot = False
+            recent_messages_text = None
+            assembled_soul_text = None
+            daily_memory_text = None
+            long_memory_text = None
+            recall_memory_text = None
+            user_profile_context_text = None
 
         reason_code = type("RC", (), {"value": "scope_disabled"})
         context = _Context()
 
     class _Router:
-        def __init__(self, topic_agent_memory_repository: object) -> None:
+        def __init__(self, **kwargs: object) -> None:
             pass
 
         def decide(self, **kwargs: object) -> _Decision:

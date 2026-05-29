@@ -236,6 +236,22 @@ Verbesserte Sicherheit für Google/Gemini API-Keys:
 - Automatische Redaktion sensibler Schlüssel in Logs und Diagnose-Ausgaben
 - Priorität: `GEMINI_API_KEY` wird bevorzugt verwendet wenn beide gesetzt sind
 
+### Scoped User Profile Memory (GitHub #46)
+
+Neues System für gescopte Nutzerprofil-Memory mit verbessertem Datenschutz:
+
+- **Scope-Isolation:** Profil-Daten sind strikt an den aktuellen Scope (Topic/Private-Chat) gebunden
+- **Keine Cross-Scope-Leaks:** Profile werden nur innerhalb desselben Scopes geteilt
+- **Nur aktuelle Teilnehmer:** Memory-Kandidaten werden auf aktive Scope-Teilnehmer beschränkt
+- **Safe Candidate Policy:** Automatische Filterung von Profil-Kandidaten basierend auf Scope-Teilnahme
+- **Nutzerkontrolle:** Eingebaute Kontrollen für Profil-Memory-Verwaltung durch Nutzer
+
+**Sicherheitsverhalten:**
+- Profil-Daten werden nie über Scope-Grenzen hinweg geteilt
+- Nur Teilnehmer des aktuellen Scopes können als Memory-Kandidaten verwendet werden
+- Audit-Events enthalten nur Metadaten, keine Profil-Inhalte
+- Explizite Policy-Prüfungen für alle Profil-Memory-Operationen
+
 ### Dreaming / Memory-Curation Runtime (GitHub #45)
 
 **Commit:** Aktiviert den nächtlichen Memory-Curation-Hintergrundworker
