@@ -1,8 +1,5 @@
 # Public Repository Metadata / Öffentliche Repository-Metadaten
 
-> **HARD STOP:** Kein push/tag/release/publication ohne explizite Matze-Freigabe.
-> **HARD STOP:** No push/tag/release/publication without explicit Matze approval.
-
 ---
 
 ## English

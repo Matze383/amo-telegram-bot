@@ -1,7 +1,5 @@
 # Release Baseline / Release-Baseline
 
-> **HARD STOP: Kein push/tag/release/publication ohne explizite Matze-Freigabe.**  
-> **HARD STOP: No push/tag/release/publication without explicit Matze approval.**
 
 ---
 
@@ -161,10 +159,8 @@ Aktuelle Beta-Bereiche:
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│  HARD STOP: Kein push/tag/release/publication             │
 │           ohne explizite Matze-Freigabe.                │
 │                                                         │
-│  HARD STOP: No push/tag/release/publication             │
 │           without explicit Matze approval.              │
 └─────────────────────────────────────────────────────────┘
 ```

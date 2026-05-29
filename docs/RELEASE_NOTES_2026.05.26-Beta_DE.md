@@ -1,8 +1,5 @@
 # Release Notes 2026.05.26-Beta / Versionshinweise 2026.05.26-Beta
 
-> **HARD STOP:** Kein push/tag/release/publication ohne explizite Matze-Freigabe.
-> **HARD STOP:** No push/tag/release/publication without explicit Matze approval.
-
 ---
 
 ## 🇩🇪 Deutsch
