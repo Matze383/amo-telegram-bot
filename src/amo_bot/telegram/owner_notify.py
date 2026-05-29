@@ -9,12 +9,24 @@ from amo_bot.telegram.update_parser import TelegramMessage
 logger = logging.getLogger(__name__)
 
 SendOwnerTextFn = Callable[[int, str], Awaitable[object]]
+SendOwnerMarkupFn = Callable[[int, str, dict[str, object]], Awaitable[object]]
 
 
 class OwnerNotifier:
-    def __init__(self, *, owner_telegram_user_id: int | None, send_private_text: SendOwnerTextFn | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        owner_telegram_user_id: int | None,
+        send_private_text: SendOwnerTextFn | None = None,
+        send_private_markup: SendOwnerMarkupFn | None = None,
+    ) -> None:
         self._owner_telegram_user_id = owner_telegram_user_id
         self._send_private_text = send_private_text
+        self._send_private_markup = send_private_markup
+
+    @property
+    def owner_telegram_user_id(self) -> int | None:
+        return self._owner_telegram_user_id
 
     async def notify_new_user_discovered(self, *, user: User, message: TelegramMessage) -> None:
         if not self._is_enabled() or user.telegram_user_id <= 0:
@@ -118,13 +130,47 @@ class OwnerNotifier:
         )
         await self._safe_send(text)
 
+    async def notify_new_bot_peer_discovered(self, *, message: TelegramMessage) -> None:
+        if not self._is_enabled() or message.from_user.id <= 0:
+            return
+
+        chat = message.chat
+        topic_suffix = ""
+        if message.message_thread_id is not None:
+            topic_suffix = f" | topic_id={message.message_thread_id}"
+            if message.telegram_topic_name:
+                topic_suffix += f" topic={message.telegram_topic_name}"
+
+        bot_user = message.from_user
+        username = f"@{bot_user.username}" if bot_user.username else "-"
+        text = (
+            "Neuer Bot erkannt\n"
+            f"id: {bot_user.id}\n"
+            f"username: {username}\n"
+            f"name: {bot_user.first_name or '-'}\n"
+            f"kontext: chat_type={chat.type} chat_title={(chat.title or '-')}{topic_suffix}\n\n"
+            "Soll AMO mit diesem Bot kommunizieren duerfen?"
+        )
+        reply_markup: dict[str, object] = {
+            "inline_keyboard": [
+                [
+                    {"text": "Bot erlauben", "callback_data": f"bot_peer:allow:{bot_user.id}"},
+                    {"text": "Bot blockieren", "callback_data": f"bot_peer:block:{bot_user.id}"},
+                ]
+            ]
+        }
+        await self._safe_send(text, reply_markup=reply_markup)
+
     def _is_enabled(self) -> bool:
         return self._owner_telegram_user_id is not None and self._send_private_text is not None
 
-    async def _safe_send(self, text: str) -> None:
+    async def _safe_send(self, text: str, *, reply_markup: dict[str, object] | None = None) -> None:
         if not self._is_enabled() or self._owner_telegram_user_id is None or self._send_private_text is None:
             return
         try:
+            if reply_markup is not None and self._send_private_markup is not None:
+                await self._send_private_markup(self._owner_telegram_user_id, text, reply_markup)
+                return
             await self._send_private_text(self._owner_telegram_user_id, text)
         except Exception:
             logger.exception("Owner notification failed")

@@ -685,6 +685,41 @@ Der Bot sendet automatisch einen privaten Consent-Hinweis an Nutzer mit dem Stat
 
 ---
 
+### Bot-zu-Bot-Freigabe
+
+Wenn AMO Nachrichten anderer Telegram-Bots empfangen darf, werden neue Bot-Absender nicht automatisch beantwortet.
+
+**Test-Schritte:**
+
+1. **Neuen Bot-Absender testen:**
+   - Einen zweiten Test-Bot eine Nachricht oder ein Command an AMO senden lassen
+   - Erwartet: AMO antwortet dem Bot nicht
+   - Erwartet: Der Owner erhaelt privat eine Freigabe-DM mit `Bot erlauben` und `Bot blockieren`
+
+2. **One-Shot-Policy testen:**
+   - Denselben pending Bot erneut schreiben lassen
+   - Erwartet: Keine zweite Owner-DM fuer denselben Bot
+
+3. **Freigabe testen:**
+   - Owner klickt `Bot erlauben`
+   - Danach darf der Bot die Diagnose-Commands `/ping` und `/help` ausloesen
+
+4. **Blockieren testen:**
+   - Owner klickt `Bot blockieren`
+   - Danach bleiben Nachrichten dieses Bots unbeantwortet
+
+**Checkliste:**
+- [ ] Neue Bots werden als `pending` erkannt
+- [ ] Pending Bots erhalten keine Antwort
+- [ ] Owner-DM enthaelt Allow/Block-Buttons
+- [ ] Nur der Owner kann Bot-Freigaben aendern
+- [ ] Andere Commands wie `/accept` bleiben fuer Bot-Peers gesperrt
+- [ ] Blockierte Bots bleiben stumm
+- [ ] Human-Consent-Flows bleiben unveraendert
+- [ ] Audit/Logs enthalten nur Metadaten (keine Nachrichtentexte, keine Secrets)
+
+---
+
 ### WebUI: Topic Soul Editor (KI-F2)
 
 Die Gruppendetailseite enthält einen **Topic Soul Editor** zur Konfiguration von Themen-spezifischen KI-Verhaltensanweisungen.

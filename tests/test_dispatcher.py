@@ -7,9 +7,10 @@ from amo_bot.telegram.commands import CommandRegistry, StaticRoleResolver
 from amo_bot.auth.roles import Role
 from amo_bot.db.base import create_session_factory
 from amo_bot.db.init_db import init_db
-from amo_bot.db.models import ChatSeenUser, TelegramChat, TelegramTopic
+from amo_bot.db.models import BotPeer, ChatSeenUser, TelegramChat, TelegramTopic
 from amo_bot.telegram.commands import create_builtin_registry
 from amo_bot.telegram.dispatcher import Dispatcher, MessagePersistence
+from amo_bot.telegram.owner_notify import OwnerNotifier
 from amo_bot.telegram.role_resolver import InMemoryRoleResolver
 
 
@@ -271,6 +272,264 @@ def test_dispatcher_handles_test_callback_with_answer_callback() -> None:
     asyncio.run(dispatcher.handle_raw_update(raw_update))
 
     assert callback_answers == [("cb-1", "Button-Test ok")]
+
+
+def test_new_bot_peer_is_pending_and_owner_is_notified_once(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'bot_peer_pending.db'}"
+    init_db(db_url)
+    sent: list[tuple[int, str, int | None]] = []
+    owner_markup: list[tuple[int, str, dict[str, object]]] = []
+
+    async def fake_send(chat_id: int, text: str, message_thread_id: int | None = None) -> object:
+        sent.append((chat_id, text, message_thread_id))
+        return {"ok": True}
+
+    async def fake_owner_text(chat_id: int, text: str) -> object:
+        raise AssertionError("bot peer notification should use markup")
+
+    async def fake_owner_markup(chat_id: int, text: str, reply_markup: dict[str, object]) -> object:
+        owner_markup.append((chat_id, text, reply_markup))
+        return {"ok": True}
+
+    dispatcher = Dispatcher(
+        command_registry=create_builtin_registry(database_url=db_url),
+        role_resolver=InMemoryRoleResolver(default_role=Role.NORMAL),
+        send_text=fake_send,
+        bot_username="AmoBot",
+        database_url=db_url,
+        owner_notifier=OwnerNotifier(
+            owner_telegram_user_id=9999,
+            send_private_text=fake_owner_text,
+            send_private_markup=fake_owner_markup,
+        ),
+    )
+
+    raw_update = {
+        "update_id": 1001,
+        "message": {
+            "message_id": 11,
+            "from": {"id": 7001, "is_bot": True, "first_name": "PeerBot", "username": "peer_bot"},
+            "chat": {"id": -1001, "type": "supergroup", "title": "Testgruppe"},
+            "text": "/ping@AmoBot",
+        },
+    }
+
+    asyncio.run(dispatcher.handle_raw_update(raw_update))
+    asyncio.run(dispatcher.handle_raw_update({**raw_update, "update_id": 1002}))
+
+    assert sent == []
+    assert len(owner_markup) == 1
+    assert owner_markup[0][0] == 9999
+    assert "Neuer Bot erkannt" in owner_markup[0][1]
+    assert owner_markup[0][2] == {
+        "inline_keyboard": [
+            [
+                {"text": "Bot erlauben", "callback_data": "bot_peer:allow:7001"},
+                {"text": "Bot blockieren", "callback_data": "bot_peer:block:7001"},
+            ]
+        ]
+    }
+
+    with create_session_factory(db_url)() as session:
+        peer = session.query(BotPeer).filter(BotPeer.telegram_bot_id == 7001).one()
+        assert peer.status == "pending"
+
+
+def test_owner_can_allow_bot_peer_and_allowed_bot_command_runs(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'bot_peer_allowed.db'}"
+    init_db(db_url)
+    sent: list[tuple[int, str, int | None]] = []
+    callback_answers: list[tuple[str, str | None]] = []
+
+    async def fake_send(chat_id: int, text: str, message_thread_id: int | None = None) -> object:
+        sent.append((chat_id, text, message_thread_id))
+        return {"ok": True}
+
+    async def fake_owner_send(_chat_id: int, _text: str) -> object:
+        return {"ok": True}
+
+    async def fake_answer_callback(callback_query_id: str, text: str | None = None) -> object:
+        callback_answers.append((callback_query_id, text))
+        return {"ok": True}
+
+    dispatcher = Dispatcher(
+        command_registry=create_builtin_registry(database_url=db_url),
+        role_resolver=InMemoryRoleResolver(default_role=Role.NORMAL),
+        send_text=fake_send,
+        answer_callback=fake_answer_callback,
+        bot_username="AmoBot",
+        database_url=db_url,
+        owner_notifier=OwnerNotifier(owner_telegram_user_id=9999, send_private_text=fake_owner_send),
+    )
+
+    bot_update = {
+        "update_id": 1010,
+        "message": {
+            "message_id": 20,
+            "from": {"id": 7002, "is_bot": True, "first_name": "PeerBot", "username": "peer_bot"},
+            "chat": {"id": 7002, "type": "private"},
+            "text": "/ping",
+        },
+    }
+    allow_callback = {
+        "update_id": 1011,
+        "callback_query": {
+            "id": "cb-bot-allow",
+            "from": {"id": 9999, "is_bot": False, "first_name": "Owner"},
+            "message": {
+                "message_id": 21,
+                "chat": {"id": 9999, "type": "private"},
+                "from": {"id": 99, "is_bot": True, "first_name": "AmoBot"},
+                "text": "Neuer Bot erkannt",
+            },
+            "data": "bot_peer:allow:7002",
+        },
+    }
+
+    asyncio.run(dispatcher.handle_raw_update(bot_update))
+    asyncio.run(dispatcher.handle_raw_update(allow_callback))
+    asyncio.run(dispatcher.handle_raw_update({**bot_update, "update_id": 1012}))
+    asyncio.run(
+        dispatcher.handle_raw_update(
+            {
+                "update_id": 1013,
+                "message": {
+                    "message_id": 22,
+                    "from": {"id": 7002, "is_bot": True, "first_name": "PeerBot", "username": "peer_bot"},
+                    "chat": {"id": 7002, "type": "private"},
+                    "text": "/accept",
+                },
+            }
+        )
+    )
+
+    assert callback_answers == [("cb-bot-allow", "Bot erlaubt")]
+    assert sent == [(7002, "pong", None)]
+    with create_session_factory(db_url)() as session:
+        peer = session.query(BotPeer).filter(BotPeer.telegram_bot_id == 7002).one()
+        assert peer.status == "allowed"
+
+
+def test_non_owner_cannot_change_bot_peer_status(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'bot_peer_non_owner.db'}"
+    init_db(db_url)
+    callback_answers: list[tuple[str, str | None]] = []
+
+    async def fake_send(chat_id: int, text: str, message_thread_id: int | None = None) -> object:
+        return {"ok": True}
+
+    async def fake_owner_send(_chat_id: int, _text: str) -> object:
+        return {"ok": True}
+
+    async def fake_answer_callback(callback_query_id: str, text: str | None = None) -> object:
+        callback_answers.append((callback_query_id, text))
+        return {"ok": True}
+
+    dispatcher = Dispatcher(
+        command_registry=create_builtin_registry(database_url=db_url),
+        role_resolver=InMemoryRoleResolver(default_role=Role.NORMAL),
+        send_text=fake_send,
+        answer_callback=fake_answer_callback,
+        database_url=db_url,
+        owner_notifier=OwnerNotifier(owner_telegram_user_id=9999, send_private_text=fake_owner_send),
+    )
+
+    asyncio.run(
+        dispatcher.handle_raw_update(
+            {
+                "update_id": 1020,
+                "message": {
+                    "message_id": 20,
+                    "from": {"id": 7003, "is_bot": True, "first_name": "PeerBot"},
+                    "chat": {"id": 7003, "type": "private"},
+                    "text": "/ping",
+                },
+            }
+        )
+    )
+    asyncio.run(
+        dispatcher.handle_raw_update(
+            {
+                "update_id": 1021,
+                "callback_query": {
+                    "id": "cb-bot-non-owner",
+                    "from": {"id": 1234, "is_bot": False, "first_name": "NotOwner"},
+                    "message": {
+                        "message_id": 21,
+                        "chat": {"id": 1234, "type": "private"},
+                        "from": {"id": 99, "is_bot": True, "first_name": "AmoBot"},
+                        "text": "Neuer Bot erkannt",
+                    },
+                    "data": "bot_peer:allow:7003",
+                },
+            }
+        )
+    )
+
+    assert callback_answers == [("cb-bot-non-owner", "Nur der Owner darf Bot-Freigaben aendern")]
+    with create_session_factory(db_url)() as session:
+        peer = session.query(BotPeer).filter(BotPeer.telegram_bot_id == 7003).one()
+        assert peer.status == "pending"
+
+
+def test_blocked_bot_peer_is_ignored(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'bot_peer_blocked.db'}"
+    init_db(db_url)
+    sent: list[tuple[int, str, int | None]] = []
+    callback_answers: list[tuple[str, str | None]] = []
+
+    async def fake_send(chat_id: int, text: str, message_thread_id: int | None = None) -> object:
+        sent.append((chat_id, text, message_thread_id))
+        return {"ok": True}
+
+    async def fake_owner_send(_chat_id: int, _text: str) -> object:
+        return {"ok": True}
+
+    async def fake_answer_callback(callback_query_id: str, text: str | None = None) -> object:
+        callback_answers.append((callback_query_id, text))
+        return {"ok": True}
+
+    dispatcher = Dispatcher(
+        command_registry=create_builtin_registry(database_url=db_url),
+        role_resolver=InMemoryRoleResolver(default_role=Role.NORMAL),
+        send_text=fake_send,
+        answer_callback=fake_answer_callback,
+        database_url=db_url,
+        owner_notifier=OwnerNotifier(owner_telegram_user_id=9999, send_private_text=fake_owner_send),
+    )
+
+    bot_update = {
+        "update_id": 1030,
+        "message": {
+            "message_id": 20,
+            "from": {"id": 7004, "is_bot": True, "first_name": "PeerBot"},
+            "chat": {"id": 7004, "type": "private"},
+            "text": "/ping",
+        },
+    }
+    asyncio.run(dispatcher.handle_raw_update(bot_update))
+    asyncio.run(
+        dispatcher.handle_raw_update(
+            {
+                "update_id": 1031,
+                "callback_query": {
+                    "id": "cb-bot-block",
+                    "from": {"id": 9999, "is_bot": False, "first_name": "Owner"},
+                    "message": {
+                        "message_id": 21,
+                        "chat": {"id": 9999, "type": "private"},
+                        "from": {"id": 99, "is_bot": True, "first_name": "AmoBot"},
+                        "text": "Neuer Bot erkannt",
+                    },
+                    "data": "bot_peer:block:7004",
+                },
+            }
+        )
+    )
+    asyncio.run(dispatcher.handle_raw_update({**bot_update, "update_id": 1032}))
+
+    assert callback_answers == [("cb-bot-block", "Bot blockiert")]
+    assert sent == []
 
 
 

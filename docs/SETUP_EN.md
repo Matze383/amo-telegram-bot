@@ -568,6 +568,27 @@ python main.py
 3. Copy the token provided
 4. Set your bot username in `.env`
 
+### Bot-to-Bot Communication
+
+If Telegram is configured so AMO can receive messages from other bots, AMO uses a separate safety gate:
+
+- New bot senders are stored in `bot_peers` with status `pending`.
+- AMO sends the configured owner a private message with inline buttons to allow or block that bot.
+- `pending` and `blocked` bots are not answered.
+- `allowed` bots may only trigger the explicitly approved diagnostic commands `/ping` and `/help` in V1; normal human user consent flows are not reused for bots.
+- This approval is intentionally separate from the privacy consent flow for human users.
+
+**Audit Events (metadata-only):**
+- `bot_peer_detected` — When a new bot peer is first seen (payload: telegram_bot_id, username, first_name, chat_id, chat_type, message_thread_id)
+- `bot_peer_status_set` — When owner changes the bot status (payload: telegram_bot_id, previous_status, new_status)
+
+**Structured Runtime Logs:**
+- `bot_peer.message.denied` — Bot message denied (e.g., database unavailable)
+- `bot_peer.message.gate` — Gate check result (includes status, allowed flags)
+- `bot_peer.message.skipped` — Allowed bot sent non-command or disallowed command
+
+> **Privacy:** All bot-peer audit events and logs contain metadata only (IDs, status, timestamps). No message content, prompts, or secrets are logged.
+
 ---
 
 ## Preflight Tests

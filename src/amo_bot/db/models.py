@@ -44,6 +44,28 @@ class User(Base):
     role: Mapped[DbRole] = relationship()
 
 
+class BotPeer(Base):
+    __tablename__ = "bot_peers"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    telegram_bot_id: Mapped[int] = mapped_column(BigInteger, unique=True, index=True, nullable=False)
+    username: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    first_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending", server_default="pending")
+    first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    last_seen_chat_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    last_seen_chat_type: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    last_seen_chat_title: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    last_seen_message_thread_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    owner_decided_by_telegram_user_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    owner_decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
 class UpdateOffset(Base):
     __tablename__ = "update_offsets"
 

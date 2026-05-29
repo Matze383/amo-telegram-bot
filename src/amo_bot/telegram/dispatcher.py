@@ -21,7 +21,7 @@ from amo_bot.core.logging import (
     get_request_id,
 )
 from amo_bot.db.base import create_session_factory
-from amo_bot.db.repositories import PrivateChatPolicyRepository, TopicAgentMemoryRepository, TopicRecentMessageRecord, UserMemoryProfileRepository
+from amo_bot.db.repositories import BotPeerRepository, PrivateChatPolicyRepository, TopicAgentMemoryRepository, TopicRecentMessageRecord, UserMemoryProfileRepository
 from amo_bot.db.models import AuditEvent, User
 from amo_bot.plugins.command_runtime import CommandActor, CommandInvocation, PluginCommandExecutor
 from amo_bot.telegram.commands import CommandContext, CommandRegistry, RoleResolver, resolve_locale, t_text
@@ -33,6 +33,7 @@ from amo_bot.telegram.update_parser import TelegramMessage, parse_update
 _COMPONENT = "telegram.dispatcher"
 
 AUTOREPLY_ALLOWED_ROLES: set[Role] = {Role.OWNER, Role.ADMIN, Role.VIP}
+BOT_PEER_V1_ALLOWED_COMMANDS: set[str] = {"help", "ping"}
 AI_AUTOREPLY_ERROR_FALLBACK_TEXT = {
     "de": "Ich konnte gerade keine KI-Antwort erzeugen. Bitte versuch es gleich nochmal.",
     "en": "I couldn't generate an AI reply right now. Please try again in a moment.",
@@ -131,16 +132,41 @@ class Dispatcher:
             return
 
         message = update.message
+        command = message.parse_command(bot_username=self.bot_username)
         if message.from_user.is_bot:
-            return
-
-        if self.message_persistence is not None:
+            bot_peer_allowed = await self._handle_bot_peer_message(message=message, update_id=update.update_id)
+            if not bot_peer_allowed:
+                return
+            if command is None:
+                log_event(
+                    logger, logging.INFO,
+                    event="bot_peer.message.skipped",
+                    component=_COMPONENT,
+                    update_id=update.update_id,
+                    chat_id=message.chat.id,
+                    message_id=message.message_id,
+                    user_id=message.from_user.id,
+                    extra={"reason": "allowed_bot_non_command"},
+                )
+                return
+            if command.name not in BOT_PEER_V1_ALLOWED_COMMANDS:
+                log_event(
+                    logger, logging.INFO,
+                    event="bot_peer.message.skipped",
+                    component=_COMPONENT,
+                    update_id=update.update_id,
+                    chat_id=message.chat.id,
+                    message_id=message.message_id,
+                    user_id=message.from_user.id,
+                    command=command.name,
+                    extra={"reason": "command_not_allowed_for_bot_peer"},
+                )
+                return
+        elif self.message_persistence is not None:
             try:
                 await self.message_persistence.persist_message(message)
             except Exception:
                 logger.exception("Failed to persist Telegram message; continuing update handling")
-
-        command = message.parse_command(bot_username=self.bot_username)
 
         role = await self.role_resolver.resolve(
             message.from_user.id,
@@ -506,6 +532,10 @@ class Dispatcher:
 
         data = callback_query.data or ""
 
+        if data.startswith("bot_peer:"):
+            await self._handle_bot_peer_callback(callback_query=callback_query, role=role, data=data)
+            return
+
         if data in {"consent:accept", "consent:decline"}:
             await self._handle_consent_callback(callback_query=callback_query, role=role, data=data)
             return
@@ -610,6 +640,96 @@ class Dispatcher:
                 if self.answer_callback is not None:
                     await self.answer_callback(callback_query.id, self._consent_callback_message("declined", callback_query))
                 return
+
+    async def _handle_bot_peer_message(self, *, message: TelegramMessage, update_id: int) -> bool:
+        if self.database_url is None:
+            log_event(
+                logger, logging.INFO,
+                event="bot_peer.message.denied",
+                component=_COMPONENT,
+                update_id=update_id,
+                chat_id=message.chat.id,
+                message_id=message.message_id,
+                user_id=message.from_user.id,
+                extra={"reason": "database_unavailable"},
+            )
+            return False
+
+        session_factory = create_session_factory(self.database_url)
+        with session_factory() as session:
+            result = BotPeerRepository(session).mark_seen(
+                telegram_bot_id=message.from_user.id,
+                username=message.from_user.username,
+                first_name=message.from_user.first_name,
+                chat_id=message.chat.id,
+                chat_type=message.chat.type,
+                chat_title=message.chat.title,
+                message_thread_id=message.message_thread_id,
+            )
+            status = result.peer.status
+            created = result.created
+
+        if created and self.owner_notifier is not None:
+            await self.owner_notifier.notify_new_bot_peer_discovered(message=message)
+
+        allowed = status == "allowed"
+        log_event(
+            logger, logging.INFO,
+            event="bot_peer.message.gate",
+            component=_COMPONENT,
+            update_id=update_id,
+            chat_id=message.chat.id,
+            message_id=message.message_id,
+            user_id=message.from_user.id,
+            extra={"status": status, "created": created, "allowed": allowed},
+        )
+        return allowed
+
+    async def _handle_bot_peer_callback(self, *, callback_query: Any, role: Role, data: str) -> None:
+        if self.database_url is None:
+            if self.answer_callback is not None:
+                await self.answer_callback(callback_query.id, "Bot-Freigabe nicht verfuegbar")
+            return
+
+        if not self._is_owner_callback_actor(callback_query=callback_query, role=role):
+            if self.answer_callback is not None:
+                await self.answer_callback(callback_query.id, "Nur der Owner darf Bot-Freigaben aendern")
+            return
+
+        parts = data.split(":")
+        if len(parts) != 3 or parts[1] not in {"allow", "block"}:
+            if self.answer_callback is not None:
+                await self.answer_callback(callback_query.id, "Ungueltige Bot-Freigabe")
+            return
+
+        try:
+            telegram_bot_id = int(parts[2])
+        except ValueError:
+            if self.answer_callback is not None:
+                await self.answer_callback(callback_query.id, "Ungueltige Bot-ID")
+            return
+
+        status = "allowed" if parts[1] == "allow" else "blocked"
+        session_factory = create_session_factory(self.database_url)
+        with session_factory() as session:
+            peer = BotPeerRepository(session).set_status(
+                telegram_bot_id=telegram_bot_id,
+                status=status,
+                owner_telegram_user_id=callback_query.from_user.id,
+            )
+
+        if self.answer_callback is not None:
+            if peer is None:
+                await self.answer_callback(callback_query.id, "Bot nicht gefunden")
+            else:
+                action = "erlaubt" if status == "allowed" else "blockiert"
+                await self.answer_callback(callback_query.id, f"Bot {action}")
+
+    def _is_owner_callback_actor(self, *, callback_query: Any, role: Role) -> bool:
+        owner_id = self.owner_notifier.owner_telegram_user_id if self.owner_notifier is not None else None
+        if owner_id is not None:
+            return callback_query.from_user.id == owner_id
+        return role is Role.OWNER
 
     @staticmethod
     def _is_consent_command(command_name: str) -> bool:

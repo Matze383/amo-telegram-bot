@@ -106,6 +106,25 @@ def init_db(database_url: str) -> None:
                 updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
         """,
+        "bot_peers": """
+            CREATE TABLE bot_peers (
+                id INTEGER NOT NULL PRIMARY KEY,
+                telegram_bot_id BIGINT NOT NULL UNIQUE,
+                username VARCHAR(255),
+                first_name VARCHAR(255),
+                status VARCHAR(32) NOT NULL DEFAULT 'pending',
+                first_seen_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                last_seen_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                last_seen_chat_id BIGINT,
+                last_seen_chat_type VARCHAR(32),
+                last_seen_chat_title VARCHAR(255),
+                last_seen_message_thread_id INTEGER,
+                owner_decided_by_telegram_user_id BIGINT,
+                owner_decided_at DATETIME,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """,
         "user_memory_profiles": """
             CREATE TABLE user_memory_profiles (
                 id INTEGER NOT NULL PRIMARY KEY,
@@ -412,6 +431,11 @@ def init_db(database_url: str) -> None:
             existing_indexes = {index["name"] for index in inspector.get_indexes("image_analyze_role_quotas")}
             if "ix_image_analyze_role_quotas_role" not in existing_indexes:
                 connection.execute(text("CREATE INDEX ix_image_analyze_role_quotas_role ON image_analyze_role_quotas (role)"))
+
+        if "bot_peers" in existing_tables:
+            existing_indexes = {index["name"] for index in inspector.get_indexes("bot_peers")}
+            if "ix_bot_peers_telegram_bot_id" not in existing_indexes:
+                connection.execute(text("CREATE INDEX ix_bot_peers_telegram_bot_id ON bot_peers (telegram_bot_id)"))
 
         for table_name, migrations in table_column_migrations.items():
             if table_name not in existing_tables:

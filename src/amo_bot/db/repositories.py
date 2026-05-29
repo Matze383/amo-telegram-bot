@@ -13,6 +13,7 @@ from amo_bot.auth.roles import Role
 from amo_bot.consent import ConsentService
 from amo_bot.db.models import (
     AuditEvent,
+    BotPeer,
     ChatSeenUser,
     ChatUserRole,
     DbRole,
@@ -85,6 +86,13 @@ class PluginPolicyOverrideSnapshot:
 
 
 PRIVATE_CHAT_THRESHOLD_ROLES: tuple[Role, ...] = (Role.OWNER, Role.ADMIN, Role.VIP, Role.NORMAL)
+BOT_PEER_ALLOWED_STATUSES: tuple[str, ...] = ("pending", "allowed", "blocked")
+
+
+@dataclass(slots=True)
+class BotPeerSeenResult:
+    peer: BotPeer
+    created: bool
 
 
 @dataclass(slots=True)
@@ -92,6 +100,109 @@ class PrivateChatPolicySnapshot:
     min_ai_role: Role
     min_general_command_role: Role
     min_plugin_command_role: Role
+
+
+class BotPeerRepository:
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def get_by_telegram_id(self, telegram_bot_id: int) -> BotPeer | None:
+        return self._session.scalar(select(BotPeer).where(BotPeer.telegram_bot_id == telegram_bot_id))
+
+    def mark_seen(
+        self,
+        *,
+        telegram_bot_id: int,
+        username: str | None,
+        first_name: str | None,
+        chat_id: int | None,
+        chat_type: str | None,
+        chat_title: str | None,
+        message_thread_id: int | None,
+        seen_at: datetime | None = None,
+    ) -> BotPeerSeenResult:
+        seen = seen_at or datetime.now(timezone.utc)
+        row = self.get_by_telegram_id(telegram_bot_id)
+        created = row is None
+        if row is None:
+            row = BotPeer(
+                telegram_bot_id=telegram_bot_id,
+                username=username,
+                first_name=first_name,
+                status="pending",
+                first_seen_at=seen,
+                last_seen_at=seen,
+                last_seen_chat_id=chat_id,
+                last_seen_chat_type=chat_type,
+                last_seen_chat_title=chat_title,
+                last_seen_message_thread_id=message_thread_id,
+            )
+            self._session.add(row)
+            self._session.add(
+                AuditEvent(
+                    actor_telegram_user_id=telegram_bot_id,
+                    event_type="bot_peer_detected",
+                    payload_json=json.dumps(
+                        {
+                            "telegram_bot_id": telegram_bot_id,
+                            "username": username,
+                            "first_name": first_name,
+                            "chat_id": chat_id,
+                            "chat_type": chat_type,
+                            "message_thread_id": message_thread_id,
+                        }
+                    ),
+                )
+            )
+        else:
+            row.username = username
+            row.first_name = first_name
+            row.last_seen_at = seen
+            row.last_seen_chat_id = chat_id
+            row.last_seen_chat_type = chat_type
+            row.last_seen_chat_title = chat_title
+            row.last_seen_message_thread_id = message_thread_id
+
+        self._session.commit()
+        self._session.refresh(row)
+        return BotPeerSeenResult(peer=row, created=created)
+
+    def set_status(
+        self,
+        *,
+        telegram_bot_id: int,
+        status: str,
+        owner_telegram_user_id: int,
+        decided_at: datetime | None = None,
+    ) -> BotPeer | None:
+        normalized_status = (status or "").strip().lower()
+        if normalized_status not in BOT_PEER_ALLOWED_STATUSES:
+            raise ValueError("invalid bot peer status")
+
+        row = self.get_by_telegram_id(telegram_bot_id)
+        if row is None:
+            return None
+
+        previous_status = row.status
+        row.status = normalized_status
+        row.owner_decided_by_telegram_user_id = owner_telegram_user_id
+        row.owner_decided_at = decided_at or datetime.now(timezone.utc)
+        self._session.add(
+            AuditEvent(
+                actor_telegram_user_id=owner_telegram_user_id,
+                event_type="bot_peer_status_set",
+                payload_json=json.dumps(
+                    {
+                        "telegram_bot_id": telegram_bot_id,
+                        "previous_status": previous_status,
+                        "new_status": normalized_status,
+                    }
+                ),
+            )
+        )
+        self._session.commit()
+        self._session.refresh(row)
+        return row
 
 
 class PrivateChatPolicyRepository:
