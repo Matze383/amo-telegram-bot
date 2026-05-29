@@ -64,17 +64,6 @@ This document tracks public-facing repository metadata requirements for the AMO 
 
 ---
 
-### Release / Publication Hard Stop
-
-- [ ] All implementation blocks complete
-- [ ] Full test suite passing
-- [ ] Security/privacy audit clean
-- [ ] Documentation bilingual and complete
-- [ ] Cross-platform smoke validation (RR-13)
-- [ ] **Matze explicit approval obtained**
-
-**Current status:** Not approved for release.
-
 ---
 
 ## Deutsch
@@ -138,17 +127,6 @@ Dieses Dokument erfasst öffentliche Repository-Metadaten-Anforderungen für das
 | Feature request (EN/DE) | Pending (RR-09) |
 
 ---
-
-### Release / Publication Hard Stop
-
-- [ ] Alle Implementierungsblöcke komplett
-- [ ] Full test suite bestanden
-- [ ] Security/Privacy-Audit clean
-- [ ] Dokumentation bilingual und vollständig
-- [ ] Cross-Platform Smoke-Validierung (RR-13)
-- [ ] **Matze-Explizitfreigabe erhalten**
-
-**Aktueller Status:** Nicht für Release freigegeben.
 
 ---
 
