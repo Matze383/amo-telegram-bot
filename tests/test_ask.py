@@ -5,7 +5,7 @@ from amo_bot.ai.service import AIService
 from amo_bot.auth.roles import Role
 from amo_bot.db.base import create_session_factory
 from amo_bot.db.init_db import init_db
-from amo_bot.db.repositories import TopicAgentMemoryRepository
+from amo_bot.db.repositories import TopicAgentMemoryRepository, UserMemoryProfileRepository
 from amo_bot.telegram.commands import CommandContext, create_builtin_registry
 
 
@@ -18,6 +18,15 @@ class FakeAIService:
         if self.fail:
             raise OllamaError("boom")
         return self.answer
+
+
+class CapturingAIService:
+    def __init__(self) -> None:
+        self.prompt = ""
+
+    async def ask(self, prompt: str) -> str:
+        self.prompt = prompt
+        return "ok"
 
 
 def test_ask_permissions_and_help_visibility() -> None:
@@ -63,6 +72,41 @@ def test_ask_returns_answer_from_service() -> None:
         ask_cmd.handler(CommandContext(chat_id=1, user_id=1, role=Role.ADMIN, command_name="ask", argument="Hi?"))
     )
     assert out == "hello from ollama"
+
+
+def test_ask_includes_only_current_scoped_user_profile(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'ask_profile_scope.db'}"
+    init_db(db_url)
+    sf = create_session_factory(db_url)
+    with sf() as session:
+        profile_repo = UserMemoryProfileRepository(session)
+        profile_repo.replace_profile(scope_type="topic", chat_id=-9001, topic_id=7, user_id=42, profile={"language": "de"})
+        profile_repo.replace_profile(scope_type="topic", chat_id=-9001, topic_id=8, user_id=42, profile={"language": "en"})
+        profile_repo.replace_profile(scope_type="private_user", user_id=42, profile={"tone_preference": "direct"})
+
+    ai = CapturingAIService()
+    reg = create_builtin_registry(database_url=db_url, ai_service=ai)
+    ask_cmd = reg.get("ask")
+    assert ask_cmd is not None
+
+    out = asyncio.run(
+        ask_cmd.handler(
+            CommandContext(
+                chat_id=-9001,
+                user_id=42,
+                role=Role.VIP,
+                command_name="ask",
+                argument="Hi?",
+                message_thread_id=7,
+            )
+        )
+    )
+
+    assert out == "ok"
+    assert "language" in ai.prompt
+    assert "de" in ai.prompt
+    assert "language=\":\"en\"" not in ai.prompt, "topic scope should not leak other topic language"
+    assert "tone_preference" not in ai.prompt, "private_user scope should not leak private profile to topic"
 
 
 def test_ask_handles_service_error_cleanly() -> None:

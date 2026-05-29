@@ -3,7 +3,7 @@ from datetime import UTC, datetime
 from amo_bot.ai.router import AIRouter, AIRouterContextV1, AIRouterDecision, AIRouterReasonCode
 from amo_bot.db.base import create_session_factory
 from amo_bot.db.init_db import init_db
-from amo_bot.db.repositories import TopicAgentMemoryRepository
+from amo_bot.db.repositories import TopicAgentMemoryRepository, UserMemoryProfileRepository
 
 
 def _mk_repo(tmp_path) -> TopicAgentMemoryRepository:
@@ -11,6 +11,14 @@ def _mk_repo(tmp_path) -> TopicAgentMemoryRepository:
     init_db(database_url=db_url)
     session_factory = create_session_factory(db_url)
     return TopicAgentMemoryRepository(session_factory())
+
+
+def _mk_memory_and_profile_repos(tmp_path) -> tuple[TopicAgentMemoryRepository, UserMemoryProfileRepository]:
+    db_url = f"sqlite:///{tmp_path / 'ai_router_profiles.sqlite'}"
+    init_db(database_url=db_url)
+    session_factory = create_session_factory(db_url)
+    session = session_factory()
+    return TopicAgentMemoryRepository(session), UserMemoryProfileRepository(session)
 
 
 def test_default_decision_is_passthrough_noop() -> None:
@@ -955,3 +963,64 @@ def test_long_memory_review_audit_metadata_transitions_without_content_leak(tmp_
     archived = repo.list_long_memories(scope_type="private_user", user_id=5101, active_only=False)[0]
     assert archived.promotion_status == "none"
     assert archived.answer_status == "archived"
+
+
+def test_user_profile_context_includes_only_current_scope_participants(tmp_path) -> None:
+    memory_repo, profile_repo = _mk_memory_and_profile_repos(tmp_path)
+    memory_repo.upsert_config(scope_type="topic", chat_id=-6100, topic_id=1, ai_enabled=True)
+    memory_repo.append_message(
+        scope_type="topic",
+        chat_id=-6100,
+        topic_id=1,
+        telegram_author_user_id=2,
+        message_text="participant two",
+    )
+    memory_repo.append_message(
+        scope_type="topic",
+        chat_id=-6100,
+        topic_id=1,
+        telegram_author_user_id=3,
+        message_text="participant three",
+    )
+    profile_repo.replace_profile(scope_type="topic", chat_id=-6100, topic_id=1, user_id=1, profile={"language": "de"})
+    profile_repo.replace_profile(scope_type="topic", chat_id=-6100, topic_id=1, user_id=2, profile={"context_role": "tester"})
+    profile_repo.replace_profile(scope_type="topic", chat_id=-6100, topic_id=2, user_id=1, profile={"language": "en"})
+    profile_repo.replace_profile(scope_type="private_user", user_id=1, profile={"tone_preference": "direct"})
+
+    router = AIRouter(topic_agent_memory_repository=memory_repo, user_memory_profile_repository=profile_repo)
+    decision = router.decide(
+        prompt="@bot hi",
+        chat_id=-6100,
+        topic_id=1,
+        user_id=1,
+        bot_username="bot",
+        reply_to_user_id=2,
+    )
+
+    text = decision.context.user_profile_context_text
+    assert "user_id=1" in text
+    assert "language=de" in text
+    assert "user_id=2" in text
+    assert "context_role=tester" in text
+    assert "language=en" not in text
+    assert "tone_preference=direct" not in text
+    assert "user_id=3" not in text
+
+
+def test_user_profile_context_caps_participants(tmp_path) -> None:
+    memory_repo, profile_repo = _mk_memory_and_profile_repos(tmp_path)
+    memory_repo.upsert_config(scope_type="group_chat", chat_id=-6200, ai_enabled=True)
+    for user_id in range(10, 17):
+        memory_repo.append_message(
+            scope_type="group_chat",
+            chat_id=-6200,
+            telegram_author_user_id=user_id,
+            message_text=f"participant {user_id}",
+        )
+        profile_repo.replace_profile(scope_type="group_chat", chat_id=-6200, user_id=user_id, profile={"language": "de"})
+
+    router = AIRouter(topic_agent_memory_repository=memory_repo, user_memory_profile_repository=profile_repo)
+    decision = router.decide(prompt="@bot hi", chat_id=-6200, user_id=99, bot_username="bot")
+
+    text = decision.context.user_profile_context_text
+    assert text.count("user_id=") == 5

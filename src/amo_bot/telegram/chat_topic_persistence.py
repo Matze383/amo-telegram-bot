@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import logging
+import json
+import re
 
 from sqlalchemy.orm import sessionmaker
 
+from amo_bot.ai.memory_c2_service import MemoryC2Service, MemoryScope
 from amo_bot.consent.prompt_service import ConsentPromptService
-from amo_bot.db.models import GROUP_CHAT_TYPES
-from amo_bot.db.repositories import ChatSeenUserRepository, ChatTopicRepository, TopicAgentMemoryRepository, UserRoleRepository
+from amo_bot.db.models import GROUP_CHAT_TYPES, AuditEvent
+from amo_bot.db.repositories import ChatSeenUserRepository, ChatTopicRepository, TopicAgentMemoryRepository, UserMemoryProfileRepository, UserRoleRepository
 from amo_bot.telegram.owner_notify import OwnerNotifier
 from amo_bot.telegram.update_parser import TelegramMessage, TelegramUser
 
@@ -30,6 +33,53 @@ GROUP_CONSENT_TEXTS: dict[str, str] = {
 
 
 logger = logging.getLogger(__name__)
+
+
+def _extract_coarse_profile_candidate(text: str) -> dict[str, object]:
+    normalized = re.sub(r"\s+", " ", (text or "").strip())
+    if not normalized:
+        return {}
+
+    lower = normalized.casefold()
+    candidate: dict[str, object] = {}
+
+    if any(marker in lower for marker in ("sprich deutsch", "antworte auf deutsch", "antwort auf deutsch", "rede deutsch")):
+        candidate["language"] = "de"
+    elif any(marker in lower for marker in ("speak english", "answer in english", "reply in english")):
+        candidate["language"] = "en"
+
+    if any(marker in lower for marker in ("halte dich kurz", "antworte mir lieber kurz", "bitte kurz", "keep it short", "short answers")):
+        candidate["verbosity"] = "low"
+        candidate["communication_style"] = "brief"
+    elif any(marker in lower for marker in ("ausführlich", "detailliert", "detailed answer", "explain in detail")):
+        candidate["verbosity"] = "high"
+        candidate["communication_style"] = "detailed"
+
+    if any(marker in lower for marker in ("sei direkt", "direkt mit mir", "be direct")):
+        candidate["tone_preference"] = "direct"
+    elif any(marker in lower for marker in ("freundlich", "sei freundlich", "friendly tone")):
+        candidate["tone_preference"] = "friendly"
+    elif any(marker in lower for marker in ("formal", "förmlich", "formell")):
+        candidate["tone_preference"] = "formal"
+
+    if any(marker in lower for marker in ("stichpunkte", "bullet points", "als liste")):
+        candidate["format_preference"] = "bullet_points"
+    elif any(marker in lower for marker in ("schritt für schritt", "step by step")):
+        candidate["format_preference"] = "step_by_step"
+
+    role_patterns = (
+        (r"\bich bin (?:hier )?(tester|entwickler|developer|admin|moderator)\b", 1),
+        (r"\bi am (?:a |an )?(tester|developer|admin|moderator)\b", 1),
+    )
+    for pattern, group_idx in role_patterns:
+        match = re.search(pattern, lower)
+        if match:
+            role = match.group(group_idx)
+            role_map = {"entwickler": "developer"}
+            candidate["context_role"] = role_map.get(role, role)
+            break
+
+    return candidate
 
 
 class ChatTopicPersistenceService:
@@ -93,6 +143,15 @@ class ChatTopicPersistenceService:
                     text=text,
                     source="bot" if message.from_user.is_bot else "user",
                 )
+                if not message.from_user.is_bot:
+                    self._maybe_update_user_profile_from_message(
+                        session=session,
+                        chat_type=message.chat.type,
+                        chat_id=message.chat.id,
+                        message_thread_id=message.message_thread_id,
+                        user_id=message.from_user.id,
+                        text=text,
+                    )
 
             reply_to = message.reply_to_message
             reply_text = (message.reply_to_message_text or "").strip()
@@ -151,6 +210,53 @@ class ChatTopicPersistenceService:
                             logger.exception("group consent fallback send failed: chat_id=%s user_id=%s", message.chat.id, message.from_user.id)
 
             session.commit()
+
+    def _maybe_update_user_profile_from_message(
+        self,
+        *,
+        session,
+        chat_type: str,
+        chat_id: int,
+        message_thread_id: int | None,
+        user_id: int,
+        text: str,
+    ) -> None:
+        candidate = _extract_coarse_profile_candidate(text)
+        if not candidate:
+            return
+
+        if chat_type in GROUP_CHAT_TYPES:
+            if message_thread_id is not None:
+                scope = MemoryScope(scope_type="topic", chat_id=chat_id, topic_id=message_thread_id, user_id=user_id)
+            else:
+                scope = MemoryScope(scope_type="group_chat", chat_id=chat_id, user_id=user_id)
+        elif chat_type == "private":
+            scope = MemoryScope(scope_type="private_user", user_id=user_id)
+        else:
+            return
+
+        profile_repo = UserMemoryProfileRepository(session)
+        service = MemoryC2Service(repository=TopicAgentMemoryRepository(session), profile_repository=profile_repo)
+        result = service.apply_profile_candidate(scope=scope, candidate=candidate)
+        if not result.accepted_keys and not result.rejected_keys:
+            return
+
+        session.add(
+            AuditEvent(
+                actor_telegram_user_id=user_id,
+                event_type="user_profile_auto_update",
+                payload_json=json.dumps(
+                    {
+                        "scope_type": scope.scope_type,
+                        "chat_id": scope.chat_id,
+                        "topic_id": scope.topic_id,
+                        "user_id": user_id,
+                        "accepted_keys": list(result.accepted_keys),
+                        "rejected_keys": list(result.rejected_keys),
+                    }
+                ),
+            )
+        )
 
     def _persist_recent_message(
         self,

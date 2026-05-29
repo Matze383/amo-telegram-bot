@@ -21,7 +21,7 @@ from amo_bot.core.logging import (
     get_request_id,
 )
 from amo_bot.db.base import create_session_factory
-from amo_bot.db.repositories import PrivateChatPolicyRepository, TopicAgentMemoryRepository, TopicRecentMessageRecord
+from amo_bot.db.repositories import PrivateChatPolicyRepository, TopicAgentMemoryRepository, TopicRecentMessageRecord, UserMemoryProfileRepository
 from amo_bot.db.models import AuditEvent, User
 from amo_bot.plugins.command_runtime import CommandActor, CommandInvocation, PluginCommandExecutor
 from amo_bot.telegram.commands import CommandContext, CommandRegistry, RoleResolver, resolve_locale, t_text
@@ -399,6 +399,7 @@ class Dispatcher:
             role=role,
             command_name=command.name,
             argument=command.argument,
+            message_thread_id=message.message_thread_id,
             locale=resolve_locale(
                 explicit_arg=command.argument if command.name.casefold() in {"start", "help", "consent", "accept", "decline", "ask", "webui", "test", "ping", "role", "setrole"} else None,
                 telegram_language_code=getattr(message.from_user, "language_code", None),
@@ -829,10 +830,14 @@ class Dispatcher:
                 chat_type=message.chat.type,
                 bot_username=bot_username,
                 reply_to_is_bot=self._is_reply_to_current_bot(message=message, bot_username=bot_username),
+                reply_to_user_id=getattr(message, "reply_to_user_id", None),
             )
         else:
             with create_session_factory(self.database_url)() as session:
-                router = AIRouter(topic_agent_memory_repository=__import__("amo_bot.db.repositories", fromlist=["TopicAgentMemoryRepository"]).TopicAgentMemoryRepository(session))
+                router = AIRouter(
+                    topic_agent_memory_repository=TopicAgentMemoryRepository(session),
+                    user_memory_profile_repository=UserMemoryProfileRepository(session),
+                )
                 topic_id = message.message_thread_id
                 normalized_text, mention_removed = self._sanitize_prompt_for_autoreply(text=text, bot_username=bot_username)
                 decision = router.decide(
@@ -843,6 +848,7 @@ class Dispatcher:
                     chat_type=message.chat.type,
                     bot_username=bot_username,
                     reply_to_is_bot=self._is_reply_to_current_bot(message=message, bot_username=bot_username),
+                    reply_to_user_id=getattr(message, "reply_to_user_id", None),
                 )
 
         allowed_reason_codes = {
@@ -992,6 +998,10 @@ class Dispatcher:
             recent_messages_text = _normalize_context_lines(recent_messages_text, drop_exact_line=drop_exact_line)
             if recent_messages_text:
                 prompt_sections.append(f"Relevant recent chat context (same scope):\n{recent_messages_text}")
+
+        user_profile_context_text = (decision.context.user_profile_context_text or "").strip()
+        if user_profile_context_text:
+            prompt_sections.append(f"Known coarse user profile context (same scope, current participants only):\n{user_profile_context_text}")
 
         assembled_soul_text = (decision.context.assembled_soul_text or "").strip()
         if assembled_soul_text:

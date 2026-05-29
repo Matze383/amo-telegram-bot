@@ -247,7 +247,7 @@ class PluginSandboxRunner:
     def _build_env(self) -> dict[str, str]:
         # Default-deny environment for worker process.
         # Keep only strict minimum for deterministic runtime.
-        return {
+        env = {
             "PATH": "/usr/bin:/bin",
             "LANG": "C.UTF-8",
             "LC_ALL": "C.UTF-8",
@@ -259,6 +259,14 @@ class PluginSandboxRunner:
             "AMO_PLUGIN_SANDBOX": "1",
             "AMO_SANDBOX_PLUGIN_DIR": str(self._plugins_dir or self._resolve_plugin_dir()),
         }
+        # Make the installed amo_bot package reachable by the worker subprocess.
+        # When installed via `pip install -e .` (as in CI), the package lives under
+        # sys.prefix/site-packages.  We add it to PYTHONPATH so that the worker can
+        # `import amo_bot.ai` without relying on the current working directory.
+        site_packages = Path(sys.prefix) / "lib" / f"python{sys.version_info.major}.{sys.version_info.minor}" / "site-packages"
+        if site_packages.exists():
+            env["PYTHONPATH"] = str(site_packages)
+        return env
 
     @staticmethod
     def _resolve_plugin_dir() -> Path:

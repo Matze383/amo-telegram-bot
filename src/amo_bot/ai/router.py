@@ -7,7 +7,7 @@ import logging
 import re
 
 from amo_bot.core.logging import log_event
-from amo_bot.db.repositories import TopicAgentMemoryRepository
+from amo_bot.db.repositories import TopicAgentMemoryRepository, UserMemoryProfileRepository
 
 logger = logging.getLogger(__name__)
 _COMPONENT = "ai.router"
@@ -43,6 +43,7 @@ class AIRouterContextV1:
     long_memory_text: str = ""
     recent_messages_text: str = ""
     recall_memory_text: str = ""
+    user_profile_context_text: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,6 +66,9 @@ class AIRouter:
     _RECALL_MAX_RECORDS = 20
     _RECALL_MAX_CHARS = 1200
     _RECALL_TIMEOUT_MS = 150
+    _PROFILE_MAX_USERS = 5
+    _PROFILE_MAX_BULLETS_PER_USER = 5
+    _PROFILE_MAX_CHARS = 1200
     _SUSPICIOUS_SOUL_MARKERS = (
         "system prompt",
         "system message",
@@ -106,8 +110,14 @@ class AIRouter:
     _EMAIL_RE = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
     _PHONE_RE = re.compile(r"(?<!\w)(?:\+?\d[\d\s().-]{8,}\d)(?!\w)")
 
-    def __init__(self, *, topic_agent_memory_repository: TopicAgentMemoryRepository | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        topic_agent_memory_repository: TopicAgentMemoryRepository | None = None,
+        user_memory_profile_repository: UserMemoryProfileRepository | None = None,
+    ) -> None:
         self._topic_agent_memory_repository = topic_agent_memory_repository
+        self._user_memory_profile_repository = user_memory_profile_repository
 
     def decide(
         self,
@@ -119,6 +129,7 @@ class AIRouter:
         chat_type: str | None = None,
         bot_username: str | None = None,
         reply_to_is_bot: bool = False,
+        reply_to_user_id: int | None = None,
     ) -> AIRouterDecision:
         _ = chat_type
 
@@ -129,6 +140,7 @@ class AIRouter:
         long_memory_text = ""
         recent_messages_text = ""
         recall_memory_text = ""
+        user_profile_context_text = ""
         base_context = self._build_context(
             scope=scope,
             user_id=user_id,
@@ -142,6 +154,7 @@ class AIRouter:
             long_memory_text=long_memory_text,
             recent_messages_text=recent_messages_text,
             recall_memory_text=recall_memory_text,
+            user_profile_context_text=user_profile_context_text,
         )
 
         repo = self._topic_agent_memory_repository
@@ -184,13 +197,19 @@ class AIRouter:
             user_id=scope["user_id"] if isinstance(scope["user_id"], int) else None,
             limit=recent_window_size,
         )
+        user_profile_context_text, profile_error = self._read_user_profile_context_text(
+            scope=scope,
+            current_user_id=user_id,
+            reply_to_user_id=reply_to_user_id,
+            recent_limit=recent_window_size,
+        )
         recall_text, recall_error, recall_meta = self._read_active_recall_text(
             scope=scope,
             daily_memory_text=daily_memory_text,
             long_memory_text=long_memory_text,
             recent_messages_text=recent_messages_text,
         )
-        context_error = ",".join(part for part in (daily_error, long_error, recent_error, recall_error) if part)
+        context_error = ",".join(part for part in (daily_error, long_error, recent_error, profile_error, recall_error) if part)
         if recall_meta:
             self._audit_recall(scope=scope, meta=recall_meta)
 
@@ -213,6 +232,7 @@ class AIRouter:
                     long_memory_text=long_memory_text,
                     recent_messages_text=recent_messages_text,
                     recall_memory_text=recall_text,
+                    user_profile_context_text=user_profile_context_text,
                     context_error=context_error,
                 ),
             )
@@ -236,6 +256,7 @@ class AIRouter:
                     long_memory_text=long_memory_text,
                     recent_messages_text=recent_messages_text,
                     recall_memory_text=recall_text,
+                    user_profile_context_text=user_profile_context_text,
                     context_error=context_error,
                 ),
             )
@@ -262,6 +283,7 @@ class AIRouter:
                 long_memory_text=long_memory_text,
                 recent_messages_text=recent_messages_text,
                 recall_memory_text=recall_text,
+                user_profile_context_text=user_profile_context_text,
                 context_error=context_error,
             ),
         )
@@ -281,6 +303,7 @@ class AIRouter:
         long_memory_text: str,
         recent_messages_text: str,
         recall_memory_text: str,
+        user_profile_context_text: str,
         context_error: str = "",
     ) -> AIRouterContextV1:
         if scope is None:
@@ -297,6 +320,7 @@ class AIRouter:
                 long_memory_text=long_memory_text,
                 recent_messages_text=recent_messages_text,
                 recall_memory_text=recall_memory_text,
+                user_profile_context_text=user_profile_context_text,
             )
 
         return AIRouterContextV1(
@@ -316,6 +340,7 @@ class AIRouter:
             long_memory_text=long_memory_text,
             recent_messages_text=recent_messages_text,
             recall_memory_text=recall_memory_text,
+            user_profile_context_text=user_profile_context_text,
         )
 
     @staticmethod
@@ -327,6 +352,9 @@ class AIRouter:
     ) -> dict[str, int | str | None] | None:
         if chat_id is not None and chat_id < 0 and topic_id is not None:
             return {"scope_type": "topic", "chat_id": chat_id, "topic_id": topic_id, "user_id": None}
+
+        if chat_id is not None and chat_id < 0:
+            return {"scope_type": "group_chat", "chat_id": chat_id, "topic_id": None, "user_id": None}
 
         if (chat_id is not None and chat_id > 0) or user_id is not None:
             private_user_id = user_id if user_id is not None else chat_id
@@ -535,6 +563,103 @@ class AIRouter:
             meta["reason"] = "exception"
             meta["error_class"] = exc.__class__.__name__
             return "", "", meta
+
+
+    def _read_user_profile_context_text(
+        self,
+        *,
+        scope: dict[str, int | str | None] | None,
+        current_user_id: int | None,
+        reply_to_user_id: int | None,
+        recent_limit: int,
+    ) -> tuple[str, str]:
+        profile_repo = self._user_memory_profile_repository
+        memory_repo = self._topic_agent_memory_repository
+        if profile_repo is None or memory_repo is None or scope is None:
+            return "", ""
+
+        scope_type = str(scope.get("scope_type") or "")
+        chat_id = scope.get("chat_id") if isinstance(scope.get("chat_id"), int) else None
+        topic_id = scope.get("topic_id") if isinstance(scope.get("topic_id"), int) else None
+        scope_user_id = scope.get("user_id") if isinstance(scope.get("user_id"), int) else None
+        if scope_type not in {"private_user", "topic", "group_chat"}:
+            return "", ""
+
+        participant_ids: list[int] = []
+        if isinstance(current_user_id, int) and current_user_id > 0:
+            participant_ids.append(current_user_id)
+        if isinstance(reply_to_user_id, int) and reply_to_user_id > 0:
+            participant_ids.append(reply_to_user_id)
+        if isinstance(scope_user_id, int) and scope_user_id > 0:
+            participant_ids.append(scope_user_id)
+
+        try:
+            rows = memory_repo.list_recent(
+                scope_type=scope_type,
+                chat_id=chat_id,
+                topic_id=topic_id,
+                user_id=scope_user_id if scope_type == "private_user" else None,
+                limit=max(1, min(recent_limit, self._PROFILE_MAX_USERS * 20)),
+                max_age_seconds=self._RECENT_WINDOW_MAX_AGE_SECONDS,
+            )
+            for row in rows:
+                author_id = row.telegram_author_user_id
+                if isinstance(author_id, int) and author_id > 0:
+                    participant_ids.append(author_id)
+
+            # Deduplicate while preserving order; collect a wide pool first,
+            # then cap before calling list_profiles_for_users so we don't
+            # accidentally exclude message authors who have real profiles.
+            unique_participants = list(dict.fromkeys(participant_ids))
+
+            if not unique_participants:
+                return "", ""
+
+            profiles = profile_repo.list_profiles_for_users(
+                scope_type=scope_type,
+                chat_id=chat_id,
+                topic_id=topic_id,
+                user_ids=unique_participants,
+                limit_users=self._PROFILE_MAX_USERS,
+            )
+            if not profiles:
+                return "", ""
+
+            lines = ["Known coarse user preferences for current participants:"]
+            for record in profiles:
+                bullets = self._format_profile_bullets(record.profile)
+                if not bullets:
+                    continue
+                lines.append(f"user_id={record.user_id}: " + "; ".join(bullets[: self._PROFILE_MAX_BULLETS_PER_USER]))
+            text = "\n".join(lines).strip()
+            if text == lines[0]:
+                return "", ""
+            return text[: self._PROFILE_MAX_CHARS].rstrip(), ""
+        except Exception:
+            return "", "user_profile_error"
+
+    @staticmethod
+    def _format_profile_bullets(profile: dict[str, object]) -> list[str]:
+        bullets: list[str] = []
+        for key in (
+            "language",
+            "context_role",
+            "communication_style",
+            "tone_preference",
+            "format_preference",
+            "verbosity",
+            "interests",
+            "interaction_preferences",
+            "avoid_topics",
+        ):
+            value = profile.get(key)
+            if isinstance(value, str) and value.strip():
+                bullets.append(f"{key}={value.strip()}")
+            elif isinstance(value, list):
+                items = [str(item).strip() for item in value if str(item).strip()]
+                if items:
+                    bullets.append(f"{key}={', '.join(items[:3])}")
+        return bullets
 
 
     def _read_recent_messages_text(
