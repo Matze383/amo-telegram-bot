@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import timedelta
 import logging
 
-from flask import Flask, abort, jsonify, request, session, url_for
+from flask import Flask, abort, g, jsonify, request, session, url_for
 
 from amo_bot.webui.i18n import resolve_lang, translate
 from flask_wtf import CSRFProtect
@@ -120,8 +120,7 @@ def create_flask_app(
         req_id = new_request_id()
         set_request_id(req_id)
         # Store on g so handlers can append it to responses if needed
-        import flask.g
-        flask.g.request_id = req_id
+        g.request_id = req_id
         log_event(
             logging.getLogger("amo_bot.webui"),
             logging.INFO,
