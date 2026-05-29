@@ -153,17 +153,6 @@ Aktuelle Beta-Bereiche:
 - [ ] Security/privacy audit clean
 - [ ] Documentation bilingual and complete
 - [ ] Cross-platform smoke validation (RR-13)
-- [ ] **Matze explicit approval obtained**
-
-### Hard Stop
-
-```
-┌─────────────────────────────────────────────────────────┐
-│           ohne explizite Matze-Freigabe.                │
-│                                                         │
-│           without explicit Matze approval.              │
-└─────────────────────────────────────────────────────────┘
-```
 
 ---
 
