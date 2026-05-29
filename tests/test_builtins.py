@@ -110,3 +110,73 @@ def test_memory_profile_set_rejects_when_no_allowed_fields() -> None:
         assert set_cmd
         out = asyncio.run(set_cmd.handler(CommandContext(chat_id=1, user_id=1, role=Role.NORMAL, command_name="memory_profile_set", argument="password=abc,token=def")))
         assert "Keine erlaubten" in out or "No allowed" in out
+
+
+def test_memory_profile_commands_are_scoped_in_group_topics() -> None:
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        db_url = f"sqlite:///{tmp}/mem.sqlite3"
+        reg = create_builtin_registry(database_url=db_url)
+        set_cmd = reg.get("memory_profile_set")
+        view_cmd = reg.get("memory_profile")
+        del_cmd = reg.get("memory_profile_delete")
+        assert set_cmd and view_cmd and del_cmd
+
+        topic_ctx = CommandContext(
+            chat_id=-1001,
+            user_id=77,
+            role=Role.NORMAL,
+            command_name="memory_profile_set",
+            argument="language=de,context_role=tester",
+            message_thread_id=42,
+        )
+        out_set = asyncio.run(set_cmd.handler(topic_ctx))
+        assert "Gespeichert" in out_set or "Stored" in out_set
+
+        out_topic = asyncio.run(
+            view_cmd.handler(
+                CommandContext(
+                    chat_id=-1001,
+                    user_id=77,
+                    role=Role.NORMAL,
+                    command_name="memory_profile",
+                    argument=None,
+                    message_thread_id=42,
+                )
+            )
+        )
+        assert "context_role" in out_topic
+
+        out_sibling = asyncio.run(
+            view_cmd.handler(
+                CommandContext(
+                    chat_id=-1001,
+                    user_id=77,
+                    role=Role.NORMAL,
+                    command_name="memory_profile",
+                    argument=None,
+                    message_thread_id=43,
+                )
+            )
+        )
+        assert "Kein Profil" in out_sibling or "No profile" in out_sibling
+
+        out_private = asyncio.run(
+            view_cmd.handler(CommandContext(chat_id=77, user_id=77, role=Role.NORMAL, command_name="memory_profile", argument=None))
+        )
+        assert "Kein Profil" in out_private or "No profile" in out_private
+
+        out_del = asyncio.run(
+            del_cmd.handler(
+                CommandContext(
+                    chat_id=-1001,
+                    user_id=77,
+                    role=Role.NORMAL,
+                    command_name="memory_profile_delete",
+                    argument=None,
+                    message_thread_id=42,
+                )
+            )
+        )
+        assert "gelöscht" in out_del or "deleted" in out_del

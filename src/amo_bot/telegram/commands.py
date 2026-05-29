@@ -28,6 +28,7 @@ class CommandContext:
     role: Role
     command_name: str
     argument: str | None
+    message_thread_id: int | None = None
     locale: Locale = "de"
 
     @property
@@ -56,7 +57,17 @@ AI_SESSION_IDLE_TIMEOUT = timedelta(hours=8)
 def _ai_scope_from_ctx(ctx: CommandContext) -> tuple[str, int | None, int | None, int | None]:
     if ctx.chat_type == "private":
         return ("private_user", None, None, ctx.user_id)
+    if ctx.message_thread_id is not None:
+        return ("topic", ctx.chat_id, ctx.message_thread_id, None)
     return ("group_chat", ctx.chat_id, None, None)
+
+
+def _profile_scope_from_ctx(ctx: CommandContext) -> MemoryScope:
+    if ctx.chat_type == "private":
+        return MemoryScope(scope_type="private_user", user_id=ctx.user_id)
+    if ctx.message_thread_id is not None:
+        return MemoryScope(scope_type="topic", chat_id=ctx.chat_id, topic_id=ctx.message_thread_id, user_id=ctx.user_id)
+    return MemoryScope(scope_type="group_chat", chat_id=ctx.chat_id, user_id=ctx.user_id)
 
 
 def _ai_scope_key(scope_type: str, chat_id: int | None, topic_id: int | None, user_id: int | None) -> str:
@@ -464,6 +475,7 @@ def create_builtin_registry(
 
         now = datetime.now(timezone.utc)
         scope_type, scope_chat_id, scope_topic_id, scope_user_id = _ai_scope_from_ctx(ctx)
+        ai_prompt = ctx.argument
         if session_factory is not None:
             with session_factory() as session:
                 repo = TopicAgentMemoryRepository(session)
@@ -475,6 +487,19 @@ def create_builtin_registry(
                     user_id=scope_user_id,
                     now=now,
                 )
+                profile_scope = _profile_scope_from_ctx(ctx)
+                profile = UserMemoryProfileRepository(session).get_profile(
+                    scope_type=profile_scope.scope_type,
+                    chat_id=profile_scope.chat_id,
+                    topic_id=profile_scope.topic_id,
+                    user_id=ctx.user_id,
+                ).profile
+                if profile:
+                    ai_prompt = (
+                        "Known coarse user profile context for the current user in this scope:\n"
+                        f"{_profile_to_text(profile)}\n\n"
+                        f"User message:\n{ctx.argument}"
+                    )
             logger.info(
                 "ai_session_lifecycle event=resolve resolver_path=ask scope_type=%s scope_key=%s action=%s",
                 scope_type,
@@ -483,7 +508,7 @@ def create_builtin_registry(
             )
 
         try:
-            return await ai_service.ask(ctx.argument)
+            return await ai_service.ask(ai_prompt)
         except OllamaError:
             logger.exception("/ask failed: ollama runtime error user_id=%s chat_id=%s", ctx.user_id, ctx.chat_id)
             return _lang(ctx, "Sorry, ich kann gerade nicht antworten. Bitte versuche es später erneut.", "Sorry, I cannot answer right now. Please try again later.")
@@ -659,28 +684,48 @@ def create_builtin_registry(
         return candidate if candidate else None
 
     async def memory_profile_handler(ctx: CommandContext) -> str:
-        if ctx.chat_type != "private":
-            return t_text("memory_profile.private_only", ctx.locale)
         if session_factory is None:
             return t_text("memory_profile.empty", ctx.locale)
+        scope = _profile_scope_from_ctx(ctx)
         with session_factory() as session:
-            profile = UserMemoryProfileRepository(session).get_profile(scope_type="private_user", user_id=ctx.user_id).profile
+            profile = UserMemoryProfileRepository(session).get_profile(
+                scope_type=scope.scope_type,
+                chat_id=scope.chat_id,
+                topic_id=scope.topic_id,
+                user_id=ctx.user_id,
+            ).profile
         if not profile:
             return t_text("memory_profile.empty", ctx.locale)
         return t_text("memory_profile.current", ctx.locale, profile=_profile_to_text(profile))
 
     async def memory_profile_set_handler(ctx: CommandContext) -> str:
-        if ctx.chat_type != "private":
-            return t_text("memory_profile.private_only", ctx.locale)
         candidate = _parse_profile_candidate(ctx.argument)
         if candidate is None:
             return t_text("memory_profile.set.usage", ctx.locale)
         if session_factory is None:
             return t_text("memory_profile.set.rejected", ctx.locale, allowed=", ".join(UserMemoryProfileRepository.ALLOWED_PROFILE_FIELDS))
+        scope = _profile_scope_from_ctx(ctx)
         with session_factory() as session:
             profile_repo = UserMemoryProfileRepository(session)
             service = MemoryC2Service(repository=TopicAgentMemoryRepository(session), profile_repository=profile_repo)
-            result = service.apply_profile_candidate(scope=MemoryScope(scope_type="private_user", user_id=ctx.user_id), candidate=candidate)
+            result = service.apply_profile_candidate(scope=scope, candidate=candidate)
+            session.add(
+                AuditEvent(
+                    actor_telegram_user_id=ctx.user_id,
+                    event_type="user_profile_command_update",
+                    payload_json=json.dumps(
+                        {
+                            "scope_type": scope.scope_type,
+                            "chat_id": scope.chat_id,
+                            "topic_id": scope.topic_id,
+                            "user_id": ctx.user_id,
+                            "accepted_keys": list(result.accepted_keys),
+                            "rejected_keys": list(result.rejected_keys),
+                        }
+                    ),
+                )
+            )
+            session.commit()
 
         if not result.accepted_keys:
             return t_text("memory_profile.set.rejected", ctx.locale, allowed=", ".join(UserMemoryProfileRepository.ALLOWED_PROFILE_FIELDS))
@@ -691,12 +736,32 @@ def create_builtin_registry(
         return t_text("memory_profile.set.updated", ctx.locale, accepted=accepted)
 
     async def memory_profile_delete_handler(ctx: CommandContext) -> str:
-        if ctx.chat_type != "private":
-            return t_text("memory_profile.private_only", ctx.locale)
         if session_factory is None:
             return t_text("memory_profile.delete.done", ctx.locale)
+        scope = _profile_scope_from_ctx(ctx)
         with session_factory() as session:
-            UserMemoryProfileRepository(session).replace_profile(scope_type="private_user", user_id=ctx.user_id, profile={})
+            UserMemoryProfileRepository(session).replace_profile(
+                scope_type=scope.scope_type,
+                chat_id=scope.chat_id,
+                topic_id=scope.topic_id,
+                user_id=ctx.user_id,
+                profile={},
+            )
+            session.add(
+                AuditEvent(
+                    actor_telegram_user_id=ctx.user_id,
+                    event_type="user_profile_command_delete",
+                    payload_json=json.dumps(
+                        {
+                            "scope_type": scope.scope_type,
+                            "chat_id": scope.chat_id,
+                            "topic_id": scope.topic_id,
+                            "user_id": ctx.user_id,
+                        }
+                    ),
+                )
+            )
+            session.commit()
         return t_text("memory_profile.delete.done", ctx.locale)
 
     async def help_handler(ctx: CommandContext) -> str:

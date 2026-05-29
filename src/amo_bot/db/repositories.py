@@ -1473,6 +1473,7 @@ class UserMemoryProfileRepository:
     ALLOWED_PROFILE_FIELDS: tuple[str, ...] = (
         "language",
         "timezone",
+        "context_role",
         "communication_style",
         "tone_preference",
         "format_preference",
@@ -1533,10 +1534,10 @@ class UserMemoryProfileRepository:
                 continue
             value = profile[key]
 
-            if key in {"language", "timezone"}:
+            if key in {"language", "timezone", "context_role"}:
                 if isinstance(value, str):
                     cleaned = value.strip()
-                    if 1 <= len(cleaned) <= 64:
+                    if 1 <= len(cleaned) <= 80:
                         sanitized[key] = cleaned
                 continue
 
@@ -1559,7 +1560,7 @@ class UserMemoryProfileRepository:
                         if len(cleaned) > 80:
                             cleaned = cleaned[:80]
                         items.append(cleaned)
-                    deduped = list(dict.fromkeys(items))[:10]
+                    deduped = list(dict.fromkeys(items))[:5]
                     if deduped:
                         sanitized[key] = deduped
                 continue
@@ -1701,6 +1702,43 @@ class UserMemoryProfileRepository:
                 profile={},
             )
         return self._to_record(row)
+
+    def list_profiles_for_users(
+        self,
+        *,
+        scope_type: str,
+        user_ids: list[int] | tuple[int, ...],
+        chat_id: int | None = None,
+        topic_id: int | None = None,
+        limit_users: int = 5,
+    ) -> list[UserMemoryProfileRecord]:
+        safe_limit = max(1, min(limit_users, 20))
+        # Do NOT pre-truncate user_ids before the DB query; let the DB return
+        # all matching rows, then cap the final result so we don't accidentally
+        # exclude users at the tail who have real profiles.
+        all_valid_users = list(dict.fromkeys(int(user_id) for user_id in user_ids if int(user_id) > 0))
+        if not all_valid_users:
+            return []
+
+        first_user = all_valid_users[0]
+        normalized_scope, normalized_chat_id, normalized_topic_id, _ = self._normalize_scope(
+            scope_type=scope_type,
+            chat_id=chat_id,
+            topic_id=topic_id,
+            user_id=first_user,
+        )
+        rows = self._session.scalars(
+            select(UserMemoryProfile).where(
+                UserMemoryProfile.scope_type == normalized_scope,
+                UserMemoryProfile.chat_id == normalized_chat_id,
+                UserMemoryProfile.topic_id == normalized_topic_id,
+                UserMemoryProfile.user_id.in_(all_valid_users),
+            )
+        ).all()
+        by_user = {int(row.user_id): self._to_record(row) for row in rows}
+        # Filter to users with non-empty profiles and respect limit_users
+        result = [by_user[uid] for uid in all_valid_users if uid in by_user and by_user[uid].profile][:safe_limit]
+        return result
 
 
 class TopicAgentMemoryRepository:

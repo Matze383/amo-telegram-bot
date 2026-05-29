@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from amo_bot.db.models import Base
 from amo_bot.ai.memory_c2_service import MemoryC2Service, MemoryScope
 from amo_bot.db.repositories import TopicAgentMemoryRepository, UserMemoryProfileRepository
+from amo_bot.telegram.chat_topic_persistence import _extract_coarse_profile_candidate
 
 
 def _repos() -> tuple[UserMemoryProfileRepository, TopicAgentMemoryRepository]:
@@ -188,3 +189,50 @@ def test_profile_scope_validation_denies_invalid_scope_shape() -> None:
         assert False, "expected ValueError"
     except ValueError:
         pass
+
+
+def test_list_profiles_for_users_returns_only_requested_scope_and_users() -> None:
+    repo = _repo()
+
+    repo.replace_profile(scope_type="topic", chat_id=-100, topic_id=1, user_id=1, profile={"language": "de"})
+    repo.replace_profile(scope_type="topic", chat_id=-100, topic_id=1, user_id=2, profile={"verbosity": "low"})
+    repo.replace_profile(scope_type="topic", chat_id=-100, topic_id=2, user_id=1, profile={"language": "en"})
+    repo.replace_profile(scope_type="private_user", user_id=1, profile={"tone_preference": "direct"})
+
+    rows = repo.list_profiles_for_users(scope_type="topic", chat_id=-100, topic_id=1, user_ids=[2, 1, 999], limit_users=5)
+
+    assert [row.user_id for row in rows] == [2, 1]
+    assert rows[0].profile == {"verbosity": "low"}
+    assert rows[1].profile == {"language": "de"}
+
+
+def test_profile_allows_context_role_but_still_rejects_sensitive_details() -> None:
+    profile_repo, memory_repo = _repos()
+    service = MemoryC2Service(repository=memory_repo, profile_repository=profile_repo)
+
+    result = service.apply_profile_candidate(
+        scope=MemoryScope(scope_type="topic", chat_id=-200, topic_id=3, user_id=44),
+        candidate={
+            "context_role": "tester",
+            "language": "de",
+            "email": "person@example.org",
+            "notes": "full private dossier",
+        },
+    )
+
+    assert result.applied is True
+    assert result.profile == {"context_role": "tester", "language": "de"}
+    assert "email" in result.rejected_keys
+    assert "notes" in result.rejected_keys
+
+
+def test_auto_coarse_profile_candidate_extracts_only_clear_preferences() -> None:
+    candidate = _extract_coarse_profile_candidate("Ich bin hier Tester, sprich deutsch mit mir und antworte mir lieber kurz in Stichpunkte.")
+
+    assert candidate["context_role"] == "tester"
+    assert candidate["language"] == "de"
+    assert candidate["verbosity"] == "low"
+    assert candidate["communication_style"] == "brief"
+    assert candidate["format_preference"] == "bullet_points"
+
+    assert _extract_coarse_profile_candidate("Meine Telefonnummer ist +49 170 1234567") == {}

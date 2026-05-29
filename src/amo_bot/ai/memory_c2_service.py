@@ -85,6 +85,7 @@ class SafeProfileCandidatePolicy:
     SAFE_KEYS: tuple[str, ...] = (
         "language",
         "timezone",
+        "context_role",
         "communication_style",
         "tone_preference",
         "format_preference",
