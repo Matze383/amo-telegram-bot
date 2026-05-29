@@ -39,6 +39,7 @@ AMO ist ein erweiterbarer Telegram-Bot für Gruppen und private Chats. Er bietet
 | 🤖 **KI-Integration** | Optionales `/ask`-Kommando mit gescopten Sessions, `/new` und `/reset` für Session-Management, Auto-Antworten via Ollama, OpenAI, Anthropic, Google, OpenRouter, Groq, Mistral, xAI, DeepSeek, Together AI, Fireworks AI, LiteLLM, LM Studio, vLLM oder SGLang |
 | 🧠 **Memory-System** | Tägliche Langzeitgedächtnis-Kuratierung mit Datenschutz-Defaults; **Neu:** Scoped Memory mit C2-Review-Service für verbesserte Datenschutzkontrolle; **Neu:** Scoped User Profile Memory mit Scope-Isolation (keine Cross-Scope-Leaks, nur aktuelle Teilnehmer) |
 | 🖼️ **Bildanalyse & -sendung** | Image-Analysis-Interface (IMG) mit send_photo/send_document Wrappern; WebUI pro-Topic Bilderkennungs-Toggle (inherit/enabled/disabled); WebUI Rollen-Quotas für Bildanalyse (IMG-B7); Runtime Quota-Enforcement mit Rolling-24h-Fenster (IMG-B8); **Neu:** Follow-up Bildanalyse für Kontext-Fortführung |
+| 🔍 **Webtool-Quotas** | Rollenbasierte Nutzungsquotas für Websearch/Webscraping über `/webtoolquota` und WebUI; Metadata-only Audit-Logging (keine Queries/URLs/Prompts) |
 | 🔒 **Sandbox-Runtime** | **Neu:** Plugin-Ausführung über Sandbox-Worker mit Capability-Gating für Commands, Scheduled- und Worker-Plugins (Command/Scheduled/Worker-Runtime isoliert) |
 | 📺 **YT-RSS Plugin** | YouTube-Kanal-Abos via RSS mit verbesserter Handle/Channel-ID-Auflösung und robusterem Scheduler |
 
@@ -137,6 +138,7 @@ AMO is an extensible Telegram bot for groups and private chats. It provides a ro
 | 🤖 **AI Integration** | Optional `/ask` command with scoped sessions, `/new` and `/reset` for session management, auto-replies via Ollama, OpenAI, Anthropic, Google, OpenRouter, Groq, Mistral, xAI, DeepSeek, Together AI, Fireworks AI, LiteLLM, LM Studio, vLLM, or SGLang |
 | 🧠 **Memory System** | Daily long-term memory curation with privacy-first defaults; **New:** Scoped memory with C2 review service for enhanced privacy control; **New:** Scoped user profile memory with scope isolation (no cross-scope leaks, current participants only) |
 | 🖼️ **Image Analysis & Sending** | Image Analysis interface (IMG) with send_photo/send_document wrappers; WebUI per-topic image recognition toggle (inherit/enabled/disabled); WebUI role quotas for image analysis (IMG-B7); Runtime quota enforcement with rolling 24h window (IMG-B8); **New:** Follow-up image analysis for context continuation |
+| 🔍 **Webtool Quotas** | Role-based usage quotas for websearch/webscraping via `/webtoolquota` and WebUI; metadata-only audit logging (no queries/URLs/prompts) |
 | 🔒 **Sandbox Runtime** | **New:** Plugin execution via sandbox workers with capability gating for commands, scheduled, and worker plugins (command/scheduled/worker runtime isolated) |
 | 📺 **YT-RSS Plugin** | YouTube channel subscriptions via RSS with improved handle/channel ID resolution and more robust scheduler |
 
@@ -220,6 +222,7 @@ python main.py
 - **Sandbox-Runtime:** Commands, Scheduled- und Worker-Plugins laufen isoliert mit Capability-Prüfung
 - **Memory-C2-Review:** Scoped Memory mit internem C2-Review-Service (Foundation für zukünftige Datenschutz-Workflows)
 - **Scoped User Profile Memory:** Profil-Daten sind strikt scope-gebunden; keine Cross-Scope-Leaks; nur aktuelle Scope-Teilnehmer als Memory-Kandidaten
+- **Metadata-only Logging:** Audit-Logs enthalten keine Queries, URLs, Prompt-/Nachrichtentexte, Secrets, Tokens oder Memory-Inhalte (Webtools, Bildanalyse)
 
 **EN:**
 - WebUI is **local-only** (`127.0.0.1`) — never expose to the internet
@@ -229,6 +232,7 @@ python main.py
 - **Sandbox Runtime:** Commands, scheduled, and worker plugins run isolated with capability checking
 - **Memory C2 Review:** Scoped memory with internal C2 review service (foundation for future privacy workflows)
 - **Scoped User Profile Memory:** Profile data is strictly scope-bound; no cross-scope leaks; only current scope participants as memory candidates
+- **Metadata-only logging:** Audit logs contain no queries, URLs, prompt/message text, secrets, tokens, or memory content (webtools, image analysis)
 
 ---
 

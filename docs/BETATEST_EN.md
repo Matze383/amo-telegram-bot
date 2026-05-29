@@ -1054,6 +1054,45 @@ The bot supports sending images via Telegram with policy/role/topic gates.
 
 ---
 
+### Webtool Quotas (Issue #48)
+
+Role-based usage quotas for webtools (websearch, webscraping). **Note:** These quotas apply only to webtools, not to normal AI responses via `/ask`.
+
+**Quota Modes:**
+| Mode | Description |
+|------|-------------|
+| `disabled` | Webtool usage disabled |
+| `unlimited` | No limit (owner only) |
+| `limited` | Daily limit with positive value |
+
+**Command Test:**
+- Send: `/webtoolquota`
+- Expected: Shows current webtool usage and remaining quota per role
+
+**WebUI Test:**
+1. Open http://127.0.0.1:8080 and log in
+2. Navigate to the "Users" page
+3. Scroll to the "Webtool Role Quotas" section
+4. Configure for each role (owner, admin, vip, normal, ignore):
+   - **Disabled:** No webtool usage
+   - **Unlimited:** Recommended for owner only
+   - **Limited:** Positive limit (e.g., 10)
+
+**Privacy/Security:**
+- Audit logging is **metadata-only**
+- No queries, URLs, prompt/message text, secrets, tokens, or memory content in audit
+- Only metadata (role, outcome, timestamp) is logged
+
+**Checklist:**
+- [ ] `/webtoolquota` shows current usage
+- [ ] WebUI /users shows webtool quota section
+- [ ] All 5 roles configurable (disabled/unlimited/limited)
+- [ ] Limited requires positive integer
+- [ ] Changes take effect immediately (no restart)
+- [ ] Audit contains no queries/URLs/prompts (metadata only)
+
+---
+
 ### Future Features (Not Yet Implemented)
 
 The following features are planned for future releases and are **not available** in the current beta:
@@ -1173,6 +1212,8 @@ Use this checklist for your test:
 - [ ] IMG-B5 WebUI image analysis per topic (inherit/enabled/disabled): OK / Not tested
 - [ ] IMG-B7 WebUI Image Analysis Role Quotas (/users page, disabled/unlimited/limited): OK / Not tested
 - [ ] Security headers present (check browser dev tools): OK
+- [ ] Issue #48 Webtool Quotas (`/webtoolquota` command, WebUI disabled/unlimited/limited): OK / Not tested
+- [ ] Issue #48 Webtool Metadata-only Logging (no queries/URLs/prompts in audit): OK / Not tested
 
 **Notes:**
 

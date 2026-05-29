@@ -3,7 +3,14 @@ from __future__ import annotations
 from sqlalchemy import inspect, select, text
 
 from amo_bot.db.base import Base, create_session_factory
-from amo_bot.db.models import DEFAULT_ROLES, DbRole, ImageAnalyzeRoleQuota, PrivateChatPolicy, UpdateOffset
+from amo_bot.db.models import (
+    DEFAULT_ROLES,
+    DbRole,
+    ImageAnalyzeRoleQuota,
+    PrivateChatPolicy,
+    UpdateOffset,
+    WebToolRoleQuota,
+)
 
 
 def init_db(database_url: str) -> None:
@@ -188,6 +195,50 @@ def init_db(database_url: str) -> None:
                 created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 CONSTRAINT uq_image_analyze_role_quota_role UNIQUE (role)
+            )
+        """,
+        "webtool_role_quotas": """
+            CREATE TABLE webtool_role_quotas (
+                id INTEGER NOT NULL PRIMARY KEY,
+                role VARCHAR(32) NOT NULL,
+                mode VARCHAR(16) NOT NULL DEFAULT 'unlimited',
+                daily_limit INTEGER,
+                updated_by_telegram_user_id BIGINT,
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                CONSTRAINT uq_webtool_role_quota_role UNIQUE (role)
+            )
+        """,
+        "webtool_quota_counters": """
+            CREATE TABLE webtool_quota_counters (
+                id INTEGER NOT NULL PRIMARY KEY,
+                user_id BIGINT NOT NULL,
+                role VARCHAR(32) NOT NULL,
+                chat_id BIGINT NOT NULL,
+                message_thread_id INTEGER,
+                day VARCHAR(10) NOT NULL,
+                count INTEGER NOT NULL DEFAULT 0,
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                CONSTRAINT uq_webtool_quota_counter UNIQUE (user_id, role, chat_id, message_thread_id, day)
+            )
+        """,
+        "webtool_audit_events": """
+            CREATE TABLE webtool_audit_events (
+                id INTEGER NOT NULL PRIMARY KEY,
+                user_id BIGINT NOT NULL,
+                role VARCHAR(32) NOT NULL,
+                chat_id BIGINT NOT NULL,
+                message_thread_id INTEGER,
+                day VARCHAR(10) NOT NULL,
+                count INTEGER NOT NULL,
+                operation_type VARCHAR(64) NOT NULL,
+                decision VARCHAR(32) NOT NULL,
+                remaining INTEGER,
+                reason VARCHAR(128),
+                error VARCHAR(128),
+                timing_ms INTEGER,
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
         """,
     }
@@ -432,6 +483,25 @@ def init_db(database_url: str) -> None:
             if "ix_image_analyze_role_quotas_role" not in existing_indexes:
                 connection.execute(text("CREATE INDEX ix_image_analyze_role_quotas_role ON image_analyze_role_quotas (role)"))
 
+        if "webtool_role_quotas" in existing_tables:
+            existing_indexes = {index["name"] for index in inspector.get_indexes("webtool_role_quotas")}
+            if "ix_webtool_role_quotas_role" not in existing_indexes:
+                connection.execute(text("CREATE INDEX ix_webtool_role_quotas_role ON webtool_role_quotas (role)"))
+
+        if "webtool_quota_counters" in existing_tables:
+            existing_indexes = {index["name"] for index in inspector.get_indexes("webtool_quota_counters")}
+            if "ix_webtool_quota_counters_user_id" not in existing_indexes:
+                connection.execute(text("CREATE INDEX ix_webtool_quota_counters_user_id ON webtool_quota_counters (user_id)"))
+            if "ix_webtool_quota_counters_chat_id" not in existing_indexes:
+                connection.execute(text("CREATE INDEX ix_webtool_quota_counters_chat_id ON webtool_quota_counters (chat_id)"))
+
+        if "webtool_audit_events" in existing_tables:
+            existing_indexes = {index["name"] for index in inspector.get_indexes("webtool_audit_events")}
+            if "ix_webtool_audit_events_user_id" not in existing_indexes:
+                connection.execute(text("CREATE INDEX ix_webtool_audit_events_user_id ON webtool_audit_events (user_id)"))
+            if "ix_webtool_audit_events_chat_id" not in existing_indexes:
+                connection.execute(text("CREATE INDEX ix_webtool_audit_events_chat_id ON webtool_audit_events (chat_id)"))
+
         if "bot_peers" in existing_tables:
             existing_indexes = {index["name"] for index in inspector.get_indexes("bot_peers")}
             if "ix_bot_peers_telegram_bot_id" not in existing_indexes:
@@ -534,6 +604,38 @@ def init_db(database_url: str) -> None:
             row = session.scalar(select(ImageAnalyzeRoleQuota).where(ImageAnalyzeRoleQuota.role == role_name))
             if row is None:
                 session.add(ImageAnalyzeRoleQuota(role=role_name, mode=mode, daily_limit=daily_limit))
+                continue
+
+            normalized_mode = (row.mode or "").strip().lower()
+            if normalized_mode not in {"disabled", "unlimited", "limited"}:
+                normalized_mode = mode
+
+            if normalized_mode == "limited":
+                if row.daily_limit is None or int(row.daily_limit) < 1:
+                    normalized_mode = "disabled"
+                    row.daily_limit = None
+                else:
+                    row.daily_limit = int(row.daily_limit)
+            else:
+                row.daily_limit = None
+
+            if role_name == "ignore" and normalized_mode == "unlimited":
+                normalized_mode = "disabled"
+                row.daily_limit = None
+
+            row.mode = normalized_mode
+
+        webtool_quota_defaults = {
+            "owner": ("unlimited", None),
+            "admin": ("unlimited", None),
+            "vip": ("unlimited", None),
+            "normal": ("unlimited", None),
+            "ignore": ("disabled", None),
+        }
+        for role_name, (mode, daily_limit) in webtool_quota_defaults.items():
+            row = session.scalar(select(WebToolRoleQuota).where(WebToolRoleQuota.role == role_name))
+            if row is None:
+                session.add(WebToolRoleQuota(role=role_name, mode=mode, daily_limit=daily_limit))
                 continue
 
             normalized_mode = (row.mode or "").strip().lower()

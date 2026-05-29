@@ -21,6 +21,7 @@ from amo_bot.db.repositories import (
     ChatTopicRepository,
     TopicAgentMemoryRepository,
     UserRoleRepository,
+    WebToolRoleQuotaRepository,
 )
 
 F = TypeVar("F", bound=Callable[..., Any])
@@ -81,6 +82,16 @@ class ImageAnalyzeRoleQuotaForm(FlaskForm):
         "Mode",
         validators=[DataRequired()],
         choices=[(m, m) for m in IMAGE_ANALYZE_ROLE_QUOTA_MODES],
+    )
+    daily_limit = IntegerField("Daily limit")
+
+
+class WebToolRoleQuotaForm(FlaskForm):
+    role = SelectField("Role", validators=[DataRequired()], choices=[(r, r) for r in ALLOWED_ROLES])
+    mode = SelectField(
+        "Mode",
+        validators=[DataRequired()],
+        choices=[("disabled", "disabled"), ("unlimited", "unlimited"), ("limited", "limited")],
     )
     daily_limit = IntegerField("Daily limit")
 
@@ -196,7 +207,8 @@ def users_page():
     with session_factory() as db_session:
         rows = db_session.query(User).order_by(User.telegram_user_id.asc()).all()
         policy = PrivateChatPolicyRepository(db_session).get_policy()
-        role_quotas = ImageAnalyzeRoleQuotaRepository(db_session).list_role_quotas()
+        image_analyze_quotas = ImageAnalyzeRoleQuotaRepository(db_session).list_role_quotas()
+        webtool_quotas = WebToolRoleQuotaRepository(db_session).list_role_quotas()
         users = [
             {
                 "telegram_user_id": row.telegram_user_id,
@@ -225,12 +237,21 @@ def users_page():
                 "mode": quota.mode,
                 "daily_limit": quota.daily_limit,
             }
-            for quota in role_quotas
+            for quota in image_analyze_quotas
+        ],
+        webtool_role_quotas=[
+            {
+                "role": quota.role.value,
+                "mode": quota.mode,
+                "daily_limit": quota.daily_limit,
+            }
+            for quota in webtool_quotas
         ],
         image_analyze_modes=IMAGE_ANALYZE_ROLE_QUOTA_MODES,
         role_form=UserRoleForm(),
         private_chat_policy_form=PrivateChatPolicyForm(),
         image_analyze_role_quota_form=ImageAnalyzeRoleQuotaForm(),
+        webtool_role_quota_form=WebToolRoleQuotaForm(),
         owner_mutation_enabled=settings.webui_owner_telegram_id is not None,
         error_message=request.args.get("error", ""),
     ), 200
@@ -254,6 +275,37 @@ def update_image_analyze_role_quota():
     session_factory = current_app.extensions["amo.plugin_service"]._session_factory
     with session_factory() as db_session:
         repo = ImageAnalyzeRoleQuotaRepository(db_session)
+        try:
+            repo.upsert_role_quota(
+                role=role_name,
+                mode=mode,
+                daily_limit=daily_limit,
+                updated_by_telegram_user_id=settings.webui_owner_telegram_id,
+            )
+        except ValueError as exc:
+            abort(400, description=str(exc))
+
+    return redirect(url_for("ui.users_page"), code=302)
+
+
+@ui_bp.post("/users/webtool-role-quotas")
+@login_required
+def update_webtool_role_quota():
+    form = WebToolRoleQuotaForm()
+    if not form.validate_on_submit():
+        abort(400, description="invalid webtool role quota payload")
+
+    settings: Settings = current_app.extensions["amo.settings"]
+    if settings.webui_owner_telegram_id is None:
+        abort(403, description="WEBUI_OWNER_TELEGRAM_ID not configured; webtool role quota mutation is disabled")
+
+    role_name = (form.role.data or "").strip().lower()
+    mode = (form.mode.data or "").strip().lower()
+    daily_limit = form.daily_limit.data
+
+    session_factory = current_app.extensions["amo.plugin_service"]._session_factory
+    with session_factory() as db_session:
+        repo = WebToolRoleQuotaRepository(db_session)
         try:
             repo.upsert_role_quota(
                 role=role_name,

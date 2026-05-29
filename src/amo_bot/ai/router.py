@@ -8,9 +8,43 @@ import re
 
 from amo_bot.core.logging import log_event
 from amo_bot.db.repositories import TopicAgentMemoryRepository, UserMemoryProfileRepository
+from amo_bot.ai.webtool_dispatcher import WebtoolCapabilityDispatcher, WebtoolCapabilityRequest, WebtoolCapabilityResult
 
 logger = logging.getLogger(__name__)
 _COMPONENT = "ai.router"
+
+
+# ---------------------------------------------------------------------------
+# AI Tool Dispatch Integration Seam (Issue #48)
+#
+# The router provides a clean integration boundary for AI-initiated webtool
+# calls. After AIRouter.decide() activates AI scope, callers can optionally
+# invoke tools via WebtoolCapabilityDispatcher with quota-first enforcement:
+#
+#   dispatcher = WebtoolCapabilityDispatcher(quota_repo=quota_repo)
+#   result = dispatcher.execute(WebtoolCapabilityRequest(
+#       capability="websearch",
+#       user_id=user_id, role=role, chat_id=chat_id,
+#       query="search terms",
+#   ))
+#
+# Call flow:
+#   capability_request → WebtoolCapabilityDispatcher.execute()
+#                            ↓ quota check (role, quota counter)
+#                       WebtoolSubagentService.execute()
+#                            ↓ provider call (only if quota passed)
+#                       RealWebsearchProviderAdapter / RealWebscrapeProviderAdapter
+#                            ↓
+#                       execute_websearch_provider_mvp() / execute_webscraping_static_html()
+#
+# Quota gates:
+#   disabled role → TOOL_DENIED_DISABLED → provider never called
+#   quota_exceeded → TOOL_DENIED_QUOTA → provider never called
+#   no provider configured → provider_unavailable → fail-closed
+#
+# Audit: metadata-only (role, user_id, operation_type, timing_ms, decision).
+#   No query, URL, or prompt content stored.
+# ---------------------------------------------------------------------------
 
 
 class AIRouterReasonCode(StrEnum):
@@ -21,6 +55,12 @@ class AIRouterReasonCode(StrEnum):
     MENTION_IN_ACTIVE_SCOPE = "mention_in_active_scope"
     REPLY_TO_BOT_IN_ACTIVE_SCOPE = "reply_to_bot_in_active_scope"
     CONTEXT_GUARD_FALLBACK = "context_guard_fallback"
+    # Tool allow/deny codes for AI-initiated tool dispatch (Issue #48 integration seam)
+    TOOL_ALLOWED = "tool_allowed"
+    TOOL_DENIED_SCOPE = "tool_denied_scope"
+    TOOL_DENIED_NOT_CAPABLE = "tool_denied_not_capable"
+    TOOL_DENIED_DISABLED = "tool_denied_disabled"
+    TOOL_DENIED_QUOTA = "tool_denied_quota"
 
 
 @dataclass(frozen=True, slots=True)

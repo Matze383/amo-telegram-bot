@@ -21,7 +21,13 @@ from amo_bot.core.logging import (
     get_request_id,
 )
 from amo_bot.db.base import create_session_factory
-from amo_bot.db.repositories import BotPeerRepository, PrivateChatPolicyRepository, TopicAgentMemoryRepository, TopicRecentMessageRecord, UserMemoryProfileRepository
+from amo_bot.db.repositories import (
+    BotPeerRepository,
+    PrivateChatPolicyRepository,
+    TopicAgentMemoryRepository,
+    TopicRecentMessageRecord,
+    UserMemoryProfileRepository,
+)
 from amo_bot.db.models import AuditEvent, User
 from amo_bot.plugins.command_runtime import CommandActor, CommandInvocation, PluginCommandExecutor
 from amo_bot.telegram.commands import CommandContext, CommandRegistry, RoleResolver, resolve_locale, t_text
@@ -783,6 +789,11 @@ class Dispatcher:
         return t_text("dispatcher.unknown_command", locale, command_name=command_name)
 
     @staticmethod
+    def _rate_limit_message(locale: str = "de", role: str = "") -> str:
+        resolved_locale = "en" if locale == "en" else "de"
+        return t_text("dispatcher.rate_limit.message", resolved_locale, role=role)
+
+    @staticmethod
     def _consent_block_message(*, chat_type: str | None, blocked_as_unreachable: bool, locale: str = "de") -> str:
         resolved_locale = "en" if locale == "en" else "de"
         if chat_type in {"group", "supergroup"}:
@@ -790,7 +801,6 @@ class Dispatcher:
         if blocked_as_unreachable:
             return t_text("dispatcher.consent.block.unreachable", resolved_locale)
         return t_text("dispatcher.consent.block.default", resolved_locale)
-
 
     @staticmethod
     def _sanitize_prompt_for_autoreply(*, text: str, bot_username: str | None) -> tuple[str, bool]:
@@ -1147,6 +1157,7 @@ class Dispatcher:
         is_triggered_path = decision_reason_value in explicit_trigger_reason_values
 
         message_locale = self._locale_for_message(message)
+
 
         # Structured log: AI autoreply attempt
         timing: dict[str, Any] = {}

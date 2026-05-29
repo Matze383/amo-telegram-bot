@@ -402,6 +402,53 @@ class ImageAnalyzeQuotaCounter(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
 
 
+class WebToolRoleQuota(Base):
+    __tablename__ = "webtool_role_quotas"
+    __table_args__ = (UniqueConstraint("role", name="uq_webtool_role_quota_role"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    role: Mapped[str] = mapped_column(String(32), nullable=False)
+    mode: Mapped[str] = mapped_column(String(16), nullable=False, default="unlimited", server_default="unlimited")
+    daily_limit: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    updated_by_telegram_user_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+
+class WebToolQuotaCounter(Base):
+    __tablename__ = "webtool_quota_counters"
+    __table_args__ = (UniqueConstraint("user_id", "role", "chat_id", "message_thread_id", "day", name="uq_webtool_quota_counter"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    role: Mapped[str] = mapped_column(String(32), nullable=False)
+    chat_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    message_thread_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    day: Mapped[str] = mapped_column(String(10), nullable=False)
+    count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+
+class WebToolAuditEvent(Base):
+    __tablename__ = "webtool_audit_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    role: Mapped[str] = mapped_column(String(32), nullable=False)
+    chat_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    message_thread_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    day: Mapped[str] = mapped_column(String(10), nullable=False)
+    count: Mapped[int] = mapped_column(Integer, nullable=False)
+    operation_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    decision: Mapped[str] = mapped_column(String(32), nullable=False)
+    remaining: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    reason: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    error: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    timing_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
 class ImageAnalyzeAuditEvent(Base):
     __tablename__ = "image_analyze_audit_events"
 

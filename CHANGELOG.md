@@ -5,6 +5,56 @@
 
 ---
 
+## [Unreleased] – Webtool Quota per Role (Issue #48)
+
+**Datum / Date:** 2026-05-29
+
+### 🇩🇪 Deutsch
+
+#### Übersicht
+Rollenbasierte Nutzungsquotas für Webtools (Websearch, Webscraping). Separate Quota-Verwaltung für Webtools über `/webtoolquota` Command und WebUI.
+
+#### Neu
+- **`/webtoolquota` Command:** Zeigt aktuelle Webtool-Nutzung und verbleibende Quota pro Rolle.
+- **Webtool Role Quotas (WebUI):** Neue Sektion in WebUI "/users" zur Konfiguration von Webtool-Quotas pro Rolle.
+- **Quota-Modi:** `disabled` (keine Nutzung), `unlimited` (nur Owner), `limited` (tägliches Limit).
+- **Separate Dispatcher/Subagent-Architektur:** Webtools laufen über eigenen Dispatcher mit Provider-Adapter.
+
+#### Geltungsbereich
+- **Betroffen:** Webtools (Websearch, Webscraping)
+- **Nicht betroffen:** Normale `/ask` AI-Antworten (kein AI-Antwort-Limit)
+
+#### Sicherheit & Privacy
+- **Metadata-only Logging:** Audit-Events enthalten keine Queries, URLs, Prompt-/Nachrichtentexte, Secrets, Tokens oder Memory-Inhalte.
+
+#### Architektur / Interna (für Entwickler)
+- Webtool Dispatcher mit Subagent/Provider-Adapter-Grenze
+- Provider-Aufrufe über separate Adapter (nicht direkt im Core)
+
+### 🇬🇧 English
+
+#### Overview
+Role-based usage quotas for webtools (websearch, webscraping). Separate quota management for webtools via `/webtoolquota` command and WebUI.
+
+#### New
+- **`/webtoolquota` command:** Shows current webtool usage and remaining quota per role.
+- **Webtool role quotas (WebUI):** New section in WebUI "/users" for configuring webtool quotas per role.
+- **Quota modes:** `disabled` (no usage), `unlimited` (owner only), `limited` (daily limit).
+- **Separate dispatcher/subagent architecture:** Webtools run via dedicated dispatcher with provider adapter.
+
+#### Scope
+- **Affected:** Webtools (websearch, webscraping)
+- **Not affected:** Normal `/ask` AI responses (no AI response quota)
+
+#### Security & Privacy
+- **Metadata-only logging:** Audit events contain no queries, URLs, prompt/message text, secrets, tokens, or memory content.
+
+#### Architecture / Internal (for developers)
+- Webtool dispatcher with subagent/provider adapter boundary
+- Provider calls via separate adapters (not directly in core)
+
+---
+
 ## [2026.05.27] – Memory scoping, C2 review service, and image follow-up analysis
 
 **Datum / Date:** 2026-05-27

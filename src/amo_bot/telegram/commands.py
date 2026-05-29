@@ -16,7 +16,13 @@ from amo_bot.db.init_db import init_db
 from amo_bot.db.models import GROUP_CHAT_TYPES, AuditEvent, TelegramChat, User
 from amo_bot.consent import CONSENT_ACCEPTED, CONSENT_DECLINED, CONSENT_PENDING, CONSENT_UNREACHABLE, ConsentService
 from amo_bot.consent.prompt_service import ConsentPromptService
-from amo_bot.db.repositories import ChatScopedRoleRepository, TopicAgentMemoryRepository, UserMemoryProfileRepository, UserRoleRepository
+from amo_bot.db.repositories import (
+    ChatScopedRoleRepository,
+    TopicAgentMemoryRepository,
+    UserMemoryProfileRepository,
+    UserRoleRepository,
+    WebToolRoleQuotaRepository,
+)
 from amo_bot.telegram.owner_notify import OwnerNotifier
 from amo_bot.webui.access_window import WebuiAccessWindowService
 
@@ -178,6 +184,10 @@ TELEGRAM_TEXTS: dict[str, dict[Locale, str]] = {
     "dispatcher.consent.block.group": {"de": "Bitte kläre Consent privat mit dem Bot.", "en": "Please resolve consent privately with the bot."},
     "dispatcher.consent.block.unreachable": {"de": "Bitte starte den Bot privat und bestätige mit /accept.", "en": "Please start the bot in private and confirm with /accept."},
     "dispatcher.consent.block.default": {"de": "Bitte bestätige zuerst mit /accept oder prüfe /consent.", "en": "Please confirm with /accept first or check /consent."},
+    "dispatcher.rate_limit.message": {
+        "de": "Rate-Limit für deine Rolle ({role}) erreicht. Bitte warte bis morgen für weitere Webtool-Anfragen.",
+        "en": "Rate limit for your role ({role}) reached. Please wait until tomorrow for more webtool requests.",
+    },
     "role.current": {"de": "deine rolle: {role}", "en": "your role: {role}"},
     "setrole.permission_denied": {"de": "keine berechtigung", "en": "permission denied"},
     "setrole.usage": {"de": "nutzung: /setrole <telegram_user_id> <rolle>", "en": "usage: /setrole <telegram_user_id> <role>"},
@@ -339,6 +349,78 @@ def create_builtin_registry(
 
     async def role_handler(ctx: CommandContext) -> str:
         return t_text("role.current", ctx.locale, role=ctx.role.value)
+
+    async def webtoolquota_handler(ctx: CommandContext) -> str:
+        """Display or set webtool rate limits per role.
+
+        Owner/admin can set with: /webtoolquota <role> <mode> [daily_limit]
+        Everyone can view with: /webtoolquota
+        """
+        if session_factory is None:
+            return _lang(ctx, "Datenbank nicht konfiguriert.", "Database not configured.")
+
+        parts = (ctx.argument or "").strip().split()
+        # Parse: /webtoolquota [role [mode [limit]]]
+        if len(parts) >= 1 and parts[0]:
+            # Setting/quering a specific role
+            role_raw = parts[0]
+            try:
+                target_role = Role(role_raw.casefold())
+            except ValueError:
+                allowed = ", ".join(r.value for r in Role)
+                return t_text("setrole.invalid_role", ctx.locale, allowed=allowed)
+
+            if len(parts) >= 2:
+                # Setting mode + optional limit
+                if ctx.role not in {Role.OWNER, Role.ADMIN}:
+                    return t_text("setrole.permission_denied", ctx.locale)
+
+                mode_raw = parts[1].casefold()
+                if mode_raw not in {"disabled", "unlimited", "limited"}:
+                    return _lang(ctx, "Modus muss: disabled | unlimited | limited", "Mode must be: disabled | unlimited | limited")
+
+                daily_limit: int | None = None
+                if mode_raw == "limited":
+                    if len(parts) >= 3:
+                        try:
+                            daily_limit = int(parts[2])
+                        except ValueError:
+                            return _lang(ctx, "Limit muss eine positive Zahl sein.", "Limit must be a positive number.")
+                        if daily_limit < 1:
+                            return _lang(ctx, "Limit muss >= 1 sein.", "Limit must be >= 1.")
+                    else:
+                        return _lang(ctx, "Limited-Modus braucht ein daily_limit.", "Limited mode requires a daily_limit.")
+
+                with session_factory() as session:
+                    repo = WebToolRoleQuotaRepository(session)
+                    record = repo.upsert_role_quota(
+                        role=target_role,
+                        mode=mode_raw,
+                        daily_limit=daily_limit,
+                        updated_by_telegram_user_id=ctx.user_id,
+                    )
+                    mode_label = record.mode
+                    limit_label = str(record.daily_limit) if record.daily_limit else "-"
+                    locale = ctx.locale
+                    return f"{locale == 'de' and 'Rolle' or 'Role'} {target_role.value}: mode={mode_label} limit={limit_label}"
+            else:
+                # Just query this role's quota
+                with session_factory() as session:
+                    repo = WebToolRoleQuotaRepository(session)
+                    record = repo.get_role_quota(target_role)
+                    mode_label = record.mode
+                    limit_label = str(record.daily_limit) if record.daily_limit else "-"
+                    return f"{target_role.value}: mode={mode_label} limit={limit_label}"
+        else:
+            # No args: list all role quotas
+            with session_factory() as session:
+                repo = WebToolRoleQuotaRepository(session)
+                all_quotas = repo.list_role_quotas()
+            lines = [(_lang(ctx, "Webtool Rate-Limits:", "Webtool Rate Limits:"))]
+            for q in all_quotas:
+                limit_label = str(q.daily_limit) if q.daily_limit else "-"
+                lines.append(f"  {q.role.value}: mode={q.mode} limit={limit_label}")
+            return "\n".join(lines)
 
     async def setrole_handler(ctx: CommandContext) -> str:
         if ctx.role not in {Role.OWNER, Role.ADMIN}:
@@ -783,6 +865,7 @@ def create_builtin_registry(
     registry.register(Command(name="ping", description="Health check", description_de="Bot-Erreichbarkeit prüfen", description_en="Check bot health", allowed_roles=normal_plus, handler=ping_handler))
     registry.register(Command(name="help", description="List available commands", description_de="Verfügbare Befehle anzeigen", description_en="List available commands", allowed_roles=normal_plus, handler=help_handler))
     registry.register(Command(name="role", description="Show your current role", description_de="Deine aktuelle Rolle anzeigen", description_en="Show your current role", allowed_roles=normal_plus, handler=role_handler))
+    registry.register(Command(name="webtoolquota", description="View or set webtool rate limits per role", description_de="Webtool Rate-Limits pro Rolle anzeigen oder setzen", description_en="View or set webtool rate limits per role", allowed_roles=admin_plus, handler=webtoolquota_handler))
     registry.register(Command(name="start", description="Start consent flow in private chat", description_de="Consent-Flow im privaten Chat starten", description_en="Start consent flow in private chat", allowed_roles=normal_plus, handler=start_handler))
     registry.register(Command(name="accept", description="Accept consent", description_de="Consent akzeptieren", description_en="Accept consent", allowed_roles=normal_plus, handler=accept_handler))
     registry.register(Command(name="decline", description="Decline consent", description_de="Consent ablehnen", description_en="Decline consent", allowed_roles=normal_plus, handler=decline_handler))

@@ -33,6 +33,9 @@ from amo_bot.db.models import (
     TopicLongMemory,
     TopicRecentMessage,
     User,
+    WebToolAuditEvent,
+    WebToolQuotaCounter,
+    WebToolRoleQuota,
 )
 
 if TYPE_CHECKING:
@@ -395,6 +398,343 @@ class ImageAnalyzeRoleQuotaRepository:
         self._session.commit()
         self._session.refresh(row)
         return self._to_record(row)
+
+
+@dataclass(slots=True)
+class WebToolRoleQuotaRecord:
+    role: Role
+    mode: str
+    daily_limit: int | None
+    updated_by_telegram_user_id: int | None
+
+
+@dataclass(slots=True)
+class WebToolQuotaDecision:
+    """Result of a webtool quota check.
+
+    Attributes:
+        allowed: whether the operation is permitted.
+        decision: one of allow, deny, disabled, quota_exceeded, not_configured.
+        role: the role that was evaluated.
+        operation_type: the type of webtool operation (e.g. websearch, webscraping, browser).
+        current_count: current daily counter value (0 if not yet counted or disabled).
+        limit: daily limit from role config (0 if unlimited or not configured).
+        remaining: remaining requests today (None if unlimited or disabled).
+        reason: human-readable short reason code.
+        error: error message if something went wrong during the check.
+        timing_ms: milliseconds elapsed in the check (None if not timed).
+    """
+
+    allowed: bool
+    decision: str
+    role: Role
+    operation_type: str
+    current_count: int
+    limit: int
+    remaining: int | None
+    reason: str
+    error: str | None = None
+    timing_ms: int | None = None
+
+
+class WebToolRoleQuotaRepository:
+    """Repository for webtool role quotas.
+
+    Mirrors the ImageAnalyzeRoleQuotaRepository pattern. Owner/admin/vip/normal are
+    unlimited by default; ignore role is disabled by default. Quota is enforced
+    before webtool/subagent execution.
+
+    Audit is metadata-only: role, user_id, chat_id, operation_type, decision,
+    count/limit/remaining, reason/error/timing. No query content, URLs, prompts,
+    or secrets.
+    """
+
+    ALLOWED_MODES = {"disabled", "unlimited", "limited"}
+    DEFAULTS: dict[Role, tuple[str, int | None]] = {
+        Role.OWNER: ("unlimited", None),
+        Role.ADMIN: ("unlimited", None),
+        Role.VIP: ("unlimited", None),
+        Role.NORMAL: ("unlimited", None),
+        Role.IGNORE: ("disabled", None),
+    }
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    @classmethod
+    def _validate_role(cls, role: str | Role) -> Role:
+        try:
+            normalized = role if isinstance(role, Role) else Role(str(role).strip().lower())
+        except ValueError as exc:
+            raise ValueError("invalid role") from exc
+        return normalized
+
+    @classmethod
+    def _validate_mode_and_limit(cls, *, role: Role, mode: str, daily_limit: int | None) -> tuple[str, int | None]:
+        normalized_mode = (mode or "").strip().lower()
+        if normalized_mode not in cls.ALLOWED_MODES:
+            raise ValueError("invalid mode")
+
+        if role is Role.IGNORE and normalized_mode == "unlimited":
+            raise ValueError("ignore role cannot be unlimited")
+
+        if normalized_mode == "limited":
+            if not isinstance(daily_limit, int) or daily_limit < 1:
+                raise ValueError("limited mode requires daily_limit >= 1")
+            return normalized_mode, int(daily_limit)
+
+        return normalized_mode, None
+
+    @classmethod
+    def _to_record(cls, row: WebToolRoleQuota) -> WebToolRoleQuotaRecord:
+        return WebToolRoleQuotaRecord(
+            role=Role(row.role),
+            mode=row.mode,
+            daily_limit=row.daily_limit,
+            updated_by_telegram_user_id=row.updated_by_telegram_user_id,
+        )
+
+    def get_role_quota(self, role: str | Role) -> WebToolRoleQuotaRecord:
+        normalized_role = self._validate_role(role)
+        row = self._session.scalar(select(WebToolRoleQuota).where(WebToolRoleQuota.role == normalized_role.value))
+        if row is None:
+            default_mode, default_limit = self.DEFAULTS[normalized_role]
+            return WebToolRoleQuotaRecord(
+                role=normalized_role,
+                mode=default_mode,
+                daily_limit=default_limit,
+                updated_by_telegram_user_id=None,
+            )
+        return self._to_record(row)
+
+    def list_role_quotas(self) -> list[WebToolRoleQuotaRecord]:
+        rows = self._session.scalars(select(WebToolRoleQuota).order_by(WebToolRoleQuota.role.asc())).all()
+        by_role = {Role(row.role): self._to_record(row) for row in rows}
+        result: list[WebToolRoleQuotaRecord] = []
+        for role in Role:
+            if role in by_role:
+                result.append(by_role[role])
+            else:
+                default_mode, default_limit = self.DEFAULTS[role]
+                result.append(
+                    WebToolRoleQuotaRecord(
+                        role=role,
+                        mode=default_mode,
+                        daily_limit=default_limit,
+                        updated_by_telegram_user_id=None,
+                    )
+                )
+        return result
+
+    def upsert_role_quota(
+        self,
+        *,
+        role: str | Role,
+        mode: str,
+        daily_limit: int | None = None,
+        updated_by_telegram_user_id: int | None = None,
+    ) -> WebToolRoleQuotaRecord:
+        normalized_role = self._validate_role(role)
+        normalized_mode, normalized_limit = self._validate_mode_and_limit(
+            role=normalized_role,
+            mode=mode,
+            daily_limit=daily_limit,
+        )
+
+        row = self._session.scalar(select(WebToolRoleQuota).where(WebToolRoleQuota.role == normalized_role.value))
+        if row is None:
+            row = WebToolRoleQuota(
+                role=normalized_role.value,
+                mode=normalized_mode,
+                daily_limit=normalized_limit,
+                updated_by_telegram_user_id=updated_by_telegram_user_id,
+            )
+            self._session.add(row)
+        else:
+            row.mode = normalized_mode
+            row.daily_limit = normalized_limit
+            row.updated_by_telegram_user_id = updated_by_telegram_user_id
+
+        self._session.commit()
+        self._session.refresh(row)
+        return self._to_record(row)
+
+    def get_current_count(self, *, user_id: int, role: Role, chat_id: int, message_thread_id: int | None, day: str) -> int:
+        """Return the current daily counter for the given scope. Returns 0 if no counter exists."""
+        row = self._session.scalar(
+            select(WebToolQuotaCounter).where(
+                WebToolQuotaCounter.user_id == user_id,
+                WebToolQuotaCounter.role == role.value,
+                WebToolQuotaCounter.chat_id == chat_id,
+                WebToolQuotaCounter.message_thread_id == message_thread_id,
+                WebToolQuotaCounter.day == day,
+            )
+        )
+        return 0 if row is None else int(row.count)
+
+    def increment_count(self, *, user_id: int, role: Role, chat_id: int, message_thread_id: int | None, day: str) -> int:
+        """Increment and return the new counter. Creates the counter row if it doesn't exist."""
+        row = self._session.scalar(
+            select(WebToolQuotaCounter).where(
+                WebToolQuotaCounter.user_id == user_id,
+                WebToolQuotaCounter.role == role.value,
+                WebToolQuotaCounter.chat_id == chat_id,
+                WebToolQuotaCounter.message_thread_id == message_thread_id,
+                WebToolQuotaCounter.day == day,
+            )
+        )
+        if row is None:
+            row = WebToolQuotaCounter(
+                user_id=user_id,
+                role=role.value,
+                chat_id=chat_id,
+                message_thread_id=message_thread_id,
+                day=day,
+                count=1,
+            )
+            self._session.add(row)
+        else:
+            row.count = int(row.count) + 1
+        self._session.commit()
+        return int(row.count)
+
+    def check_quota(
+        self,
+        *,
+        user_id: int,
+        role: Role,
+        chat_id: int,
+        message_thread_id: int | None,
+        operation_type: str,
+        day: str,
+    ) -> WebToolQuotaDecision:
+        """Evaluate whether the given user/role may perform the webtool operation.
+
+        Returns a WebToolQuotaDecision with the result, metadata, and (on allow)
+        updated counter. Writes a metadata-only audit event on every call.
+        """
+        import time
+
+        start_ms = int(time.perf_counter() * 1000)
+
+        quota_record = self.get_role_quota(role)
+        mode = quota_record.mode
+        limit = quota_record.daily_limit or 0
+
+        # Determine decision and remaining
+        if mode == "disabled":
+            decision = "disabled"
+            allowed = False
+            reason = "role_disabled"
+            current_count = 0
+            remaining = None
+        elif mode == "unlimited":
+            decision = "allow"
+            allowed = True
+            reason = "unlimited"
+            current_count = 0
+            remaining = None
+        elif mode == "limited":
+            current_count = self.get_current_count(
+                user_id=user_id,
+                role=role,
+                chat_id=chat_id,
+                message_thread_id=message_thread_id,
+                day=day,
+            )
+            if limit > 0 and current_count >= limit:
+                decision = "quota_exceeded"
+                allowed = False
+                reason = "daily_limit_reached"
+                remaining = 0
+            else:
+                decision = "allow"
+                allowed = True
+                reason = "within_limit"
+                new_count = self.increment_count(
+                    user_id=user_id,
+                    role=role,
+                    chat_id=chat_id,
+                    message_thread_id=message_thread_id,
+                    day=day,
+                )
+                current_count = new_count
+                remaining = max(0, limit - new_count) if limit > 0 else None
+        else:
+            decision = "not_configured"
+            allowed = False
+            reason = "quota_not_configured"
+            current_count = 0
+            remaining = None
+
+        timing_ms = int(time.perf_counter() * 1000) - start_ms
+
+        # Write metadata-only audit event
+        self.write_audit(
+            user_id=user_id,
+            role=role,
+            chat_id=chat_id,
+            message_thread_id=message_thread_id,
+            day=day,
+            count=current_count,
+            operation_type=operation_type,
+            decision=decision,
+            remaining=remaining,
+            reason=reason,
+            error=None,
+            timing_ms=timing_ms,
+        )
+
+        return WebToolQuotaDecision(
+            allowed=allowed,
+            decision=decision,
+            role=role,
+            operation_type=operation_type,
+            current_count=current_count,
+            limit=limit if mode == "limited" else 0,
+            remaining=remaining,
+            reason=reason,
+            error=None,
+            timing_ms=timing_ms,
+        )
+
+    def write_audit(
+        self,
+        *,
+        user_id: int,
+        role: Role,
+        chat_id: int,
+        message_thread_id: int | None,
+        day: str,
+        count: int,
+        operation_type: str,
+        decision: str,
+        remaining: int | None,
+        reason: str,
+        error: str | None,
+        timing_ms: int,
+    ) -> None:
+        """Write a metadata-only audit event for a webtool quota decision.
+
+        No query content, URLs, prompts, or secrets are stored.
+        """
+        self._session.add(
+            WebToolAuditEvent(
+                user_id=user_id,
+                role=role.value,
+                chat_id=chat_id,
+                message_thread_id=message_thread_id,
+                day=day,
+                count=count,
+                operation_type=operation_type,
+                decision=decision,
+                remaining=remaining,
+                reason=reason,
+                error=error,
+                timing_ms=timing_ms,
+            )
+        )
+        self._session.commit()
 
 
 class PluginPolicyOverrideRepository:

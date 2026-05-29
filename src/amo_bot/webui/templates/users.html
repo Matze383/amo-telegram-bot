@@ -101,6 +101,55 @@
     </form>
   </section>
 
+  <section>
+    <h2>{{ t('users.webtool_quota_title') }}</h2>
+    <p>{{ t('users.webtool_quota_note') }}</p>
+    <table>
+      <thead>
+        <tr>
+          <th>{{ t('users.quota_role') }}</th>
+          <th>{{ t('users.quota_mode') }}</th>
+          <th>{{ t('users.quota_daily_limit') }}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for quota in webtool_role_quotas %}
+          <tr>
+            <td>{{ quota.role }}</td>
+            <td>{{ quota.mode }}</td>
+            <td>{{ quota.daily_limit if quota.daily_limit is not none else '-' }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+    <h3>{{ t('users.update_webtool_role_quota') }}</h3>
+    <form method="post" action="{{ url_for('ui.update_webtool_role_quota') }}">
+      {{ webtool_role_quota_form.csrf_token }}
+      <p>
+        <label for="wt_role">{{ t('users.quota_role') }}</label>
+        <select id="wt_role" name="role">
+          {% for role_name in roles %}
+            <option value="{{ role_name }}">{{ role_name }}</option>
+          {% endfor %}
+        </select>
+      </p>
+      <p>
+        <label for="wt_mode">{{ t('users.quota_mode') }}</label>
+        <select id="wt_mode" name="mode">
+          <option value="disabled">disabled</option>
+          <option value="unlimited">unlimited</option>
+          <option value="limited">limited</option>
+        </select>
+      </p>
+      <p>
+        <label for="wt_daily_limit">{{ t('users.daily_limit_limited_mode') }}</label>
+        <input id="wt_daily_limit" name="daily_limit" type="number" min="1" step="1" />
+      </p>
+      <button type="submit" {% if not owner_mutation_enabled %}disabled{% endif %}>{{ t('users.save_role_quota') }}</button>
+    </form>
+  </section>
+
   {% if users %}
     <table>
       <thead>

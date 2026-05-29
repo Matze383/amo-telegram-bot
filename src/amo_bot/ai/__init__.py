@@ -232,6 +232,14 @@ __all__ = [
     "invoke_tool_noop",
     "validate_capability_call_envelope",
     "validate_tool_invocation_request",
+    "WebtoolOperationType",
+    "WebtoolSanitizedResult",
+    "WebtoolSubagentRequest",
+    "WebtoolSubagentResult",
+    "WebtoolSubagentService",
+    "FakeSearchProvider",
+    "FakeScrapeProvider",
+    "create_webtool_subagent_service",
 ]
 
 from .rss_coreplugin import (
@@ -279,4 +287,15 @@ from .webscraping_coreplugin import (
     WebscrapingValidationResult,
     execute_webscraping_noop,
     validate_webscraping_input,
+)
+
+from .webtool_subagent import (
+    WebtoolOperationType,
+    WebtoolSanitizedResult,
+    WebtoolSubagentRequest,
+    WebtoolSubagentResult,
+    WebtoolSubagentService,
+    FakeSearchProvider,
+    FakeScrapeProvider,
+    create_webtool_subagent_service,
 )

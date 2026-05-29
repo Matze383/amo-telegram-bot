@@ -1054,6 +1054,45 @@ Der Bot unterstützt das Senden von Bildern über Telegram mit Policy/Role/Topic
 
 ---
 
+### Webtool-Quotas (Issue #48)
+
+Rollenbasierte Nutzungsquotas für Webtools (Websearch, Webscraping). **Hinweis:** Diese Quotas gelten nur für Webtools, nicht für normale AI-Antworten via `/ask`.
+
+**Quota-Modi:**
+| Modus | Beschreibung |
+|-------|--------------|
+| `disabled` | Webtool-Nutzung deaktiviert |
+| `unlimited` | Keine Begrenzung (nur Owner erlaubt) |
+| `limited` | Tägliches Limit mit positivem Wert |
+
+**Command-Test:**
+- Sende: `/webtoolquota`
+- Erwartet: Zeigt aktuelle Webtool-Nutzung und verbleibende Quota pro Rolle
+
+**WebUI-Test:**
+1. Öffne http://127.0.0.1:8080 und melde dich an
+2. Navigiere zur Seite "Users"
+3. Scrolle zum Abschnitt "Webtool Role Quotas"
+4. Konfiguriere für jede Rolle (owner, admin, vip, normal, ignore):
+   - **Disabled:** Keine Webtool-Nutzung
+   - **Unlimited:** Nur für Owner empfohlen
+   - **Limited:** Positives Limit (z.B. 10)
+
+**Privacy/Security:**
+- Audit-Logging ist **metadata-only**
+- Keine Queries, URLs, Prompt-/Nachrichtentexte, Secrets, Tokens oder Memory-Inhalte im Audit
+- Nur Metadaten (Rolle, Outcome, Timestamp) werden protokolliert
+
+**Checkliste:**
+- [ ] `/webtoolquota` zeigt aktuelle Nutzung
+- [ ] WebUI /users zeigt Webtool-Quota-Sektion
+- [ ] Alle 5 Rollen konfigurierbar (disabled/unlimited/limited)
+- [ ] Limited erfordert positive Ganzzahl
+- [ ] Änderungen wirken sofort (kein Neustart)
+- [ ] Audit enthält keine Queries/URLs/Prompts (nur Metadaten)
+
+---
+
 ### Zukünftige Features (Noch nicht implementiert)
 
 Folgende Features sind für zukünftige Releases geplant und im aktuellen Beta **nicht verfügbar**:
@@ -1173,6 +1212,8 @@ Nutze diese Checkliste für deinen Test:
 - [ ] IMG-B5 WebUI Bildanalyse pro Topic (inherit/enabled/disabled): OK / Nicht getestet
 - [ ] IMG-B7 WebUI Image Analysis Role Quotas (/users Seite, disabled/unlimited/limited): OK / Nicht getestet
 - [ ] Security Headers vorhanden (Browser-Dev-Tools prüfen): OK
+- [ ] Issue #48 Webtool-Quotas (`/webtoolquota` Command, WebUI disabled/unlimited/limited): OK / Nicht getestet
+- [ ] Issue #48 Webtool Metadata-only Logging (keine Queries/URLs/Prompts im Audit): OK / Nicht getestet
 
 **Notizen:**
 
