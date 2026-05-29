@@ -191,3 +191,35 @@ Einheitliches strukturiertes Logging mit Konfigurationsoptionen und Datenschutz-
 - Keine Memory-Inhalte
 - Keine Bildinhalte, nur Metadaten
 - Deterministische Redaction für sensible Werte
+
+### Dreaming / Memory-Curation Runtime (GitHub #45)
+
+**Commit:** Aktiviert den periodischen Memory-Curation-Hintergrundtask
+
+Neues Dreaming-System für automatische Kuratierung von täglichen Memory-Einträgen:
+
+- **Periodische Ausführung**: Automatischer Hintergrundtask zur Memory-Kuratierung
+- **Default-Off**: Standardmäßig deaktiviert (`DREAMING_ENABLED=0`) — explizite Aktivierung erforderlich
+- **Konfigurierbare Intervalle**: `DREAMING_INTERVAL_SECONDS` (Standard: 3600s)
+- **Timeout-Schutz**: `DREAMING_TIMEOUT_SECONDS` (Standard: 300s)
+- **Begrenzte Kandidaten**: `DREAMING_MAX_DAILY_CANDIDATES_PER_SCOPE` (Standard: 3)
+- **Begrenzte Promotions**: `DREAMING_MAX_PROMOTIONS_PER_SCOPE` (Standard: 2)
+- **Auto-Approve-Modus**: `DREAMING_AUTO_APPROVE_MODE` (Standard: 0) — `1` überspringt menschliche Review
+
+**Sicherheitsverhalten:**
+- Explizite Aktivierung erforderlich (opt-in)
+- Scope-Isolation: Kein Cross-Topic/Chat-Zugriff
+- Begrenzte Ressourcennutzung durch Kandidaten- und Promotions-Limits
+- Audit-Events enthalten nur Metadaten, keine Memory-Inhalte
+- Auto-Approve deaktiviert by default — menschliche Review bei Aktivierung empfohlen
+- **No-Overlap Enforcement:** Es kann nur ein Kuratierungsdurchlauf gleichzeitig ausgeführt werden; parallele Durchläufe werden durch eine interne Sperre blockiert
+
+**Konfiguration:**
+```ini
+DREAMING_ENABLED=1
+DREAMING_INTERVAL_SECONDS=3600
+DREAMING_TIMEOUT_SECONDS=300
+DREAMING_MAX_DAILY_CANDIDATES_PER_SCOPE=3
+DREAMING_MAX_PROMOTIONS_PER_SCOPE=2
+DREAMING_AUTO_APPROVE_MODE=0
+```

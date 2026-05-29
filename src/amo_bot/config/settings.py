@@ -128,6 +128,14 @@ class Settings(BaseSettings):
     webui_login_delay_base_seconds: float = Field(default=0.25, alias="WEBUI_LOGIN_DELAY_BASE_SECONDS", ge=0)
     webui_login_delay_max_seconds: float = Field(default=2.0, alias="WEBUI_LOGIN_DELAY_MAX_SECONDS", ge=0)
 
+    # Dreaming / Memory-Curation Runtime
+    dreaming_enabled: bool = Field(default=False, alias="DREAMING_ENABLED")
+    dreaming_interval_seconds: int = Field(default=3600, alias="DREAMING_INTERVAL_SECONDS", ge=60)
+    dreaming_timeout_seconds: float = Field(default=300.0, alias="DREAMING_TIMEOUT_SECONDS", gt=0)
+    dreaming_max_daily_candidates_per_scope: int = Field(default=3, alias="DREAMING_MAX_DAILY_CANDIDATES_PER_SCOPE", ge=1, le=30)
+    dreaming_max_promotions_per_scope: int = Field(default=2, alias="DREAMING_MAX_PROMOTIONS_PER_SCOPE", ge=1, le=20)
+    dreaming_auto_approve_mode: bool = Field(default=False, alias="DREAMING_AUTO_APPROVE_MODE")
+
     @model_validator(mode="after")
     def _validate_login_delay_bounds(self) -> Settings:
         if self.webui_login_delay_max_seconds < self.webui_login_delay_base_seconds:

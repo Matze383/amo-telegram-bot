@@ -192,6 +192,38 @@ Unified structured logging with configuration options and privacy features:
 - No image contents, only metadata
 - Deterministic redaction for sensitive values
 
+### Dreaming / Memory-Curation Runtime (GitHub #45)
+
+**Commit:** Activates the periodic memory curation background task
+
+New Dreaming system for automatic curation of daily memory entries:
+
+- **Periodic Execution**: Automatic background task for memory curation
+- **Default-Off**: Disabled by default (`DREAMING_ENABLED=0`) — explicit activation required
+- **Configurable Intervals**: `DREAMING_INTERVAL_SECONDS` (default: 3600s)
+- **Timeout Protection**: `DREAMING_TIMEOUT_SECONDS` (default: 300s)
+- **Bounded Candidates**: `DREAMING_MAX_DAILY_CANDIDATES_PER_SCOPE` (default: 3)
+- **Bounded Promotions**: `DREAMING_MAX_PROMOTIONS_PER_SCOPE` (default: 2)
+- **Auto-Approve Mode**: `DREAMING_AUTO_APPROVE_MODE` (default: 0) — `1` bypasses human review
+
+**Safety Behavior:**
+- Explicit activation required (opt-in)
+- Scope isolation: No cross-topic/chat access
+- Limited resource usage through candidate and promotion limits
+- Audit events contain only metadata, no memory contents
+- Auto-approve disabled by default — human review recommended when enabled
+- **No-Overlap Enforcement:** Only one curation run executes at a time; concurrent runs are blocked by an internal lock
+
+**Configuration:**
+```ini
+DREAMING_ENABLED=1
+DREAMING_INTERVAL_SECONDS=3600
+DREAMING_TIMEOUT_SECONDS=300
+DREAMING_MAX_DAILY_CANDIDATES_PER_SCOPE=3
+DREAMING_MAX_PROMOTIONS_PER_SCOPE=2
+DREAMING_AUTO_APPROVE_MODE=0
+```
+
 ---
 
 ---

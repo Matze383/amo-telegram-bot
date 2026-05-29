@@ -330,6 +330,60 @@ The bot uses structured logging with configurable output format and filtering.
 | `LOG_DEBUG_SCOPES` | *(none)* | Comma-separated component names to force DEBUG level (e.g., `ai.router,plugin.runtime`) |
 | `LOG_INCLUDE_PRIVATE_IDS` | `0` | Set to `1`/`true`/`yes` to include unmasked IDs in structured logs. **Privacy warning:** Enabling this may expose sensitive identifiers in log files. |
 
+---
+
+## Dreaming / Memory-Curation Runtime (KI-F4)
+
+The Dreaming system periodically performs automatic curation of daily memory entries. It identifies relevant conversation patterns and promotes important information to long-term memory.
+
+### Activation
+
+By default, the Dreaming system is **disabled** (`DREAMING_ENABLED=0`). To activate it:
+
+```ini
+# Dreaming / Memory-Curation Runtime (disabled by default)
+DREAMING_ENABLED=1
+```
+
+### Configuration Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DREAMING_ENABLED` | `0` | `1` to enable automatic memory curation |
+| `DREAMING_INTERVAL_SECONDS` | `3600` | Interval between curation runs (seconds) |
+| `DREAMING_TIMEOUT_SECONDS` | `300` | Timeout for a single curation run |
+| `DREAMING_MAX_DAILY_CANDIDATES_PER_SCOPE` | `3` | Maximum candidates per scope per day |
+| `DREAMING_MAX_PROMOTIONS_PER_SCOPE` | `2` | Maximum promotions per scope per day |
+| `DREAMING_AUTO_APPROVE_MODE` | `0` | `1` bypasses human review — **use with extreme caution** |
+
+### Safety Behavior
+
+- **Default-Off:** The system is disabled by default — explicit activation required
+- **Scope-Isolation:** Memory curation happens strictly per topic/private chat — no cross-scope access
+- **Bounded Candidates:** Maximum number of candidates and promotions per scope is limited
+- **Timeout Protection:** Individual runs have fixed timeouts to prevent infinite loops
+- **Auto-Approve:** Disabled by default; enabling bypasses human review and should only be used in trusted environments
+- **No-Overlap Enforcement:** Only one curation run executes at a time; concurrent runs are blocked by an internal lock
+
+### Recommended Configuration
+
+**For local testing:**
+```ini
+DREAMING_ENABLED=0  # Disabled (default)
+```
+
+**For activated Dreaming with secure defaults:**
+```ini
+DREAMING_ENABLED=1
+DREAMING_INTERVAL_SECONDS=3600
+DREAMING_TIMEOUT_SECONDS=300
+DREAMING_MAX_DAILY_CANDIDATES_PER_SCOPE=3
+DREAMING_MAX_PROMOTIONS_PER_SCOPE=2
+DREAMING_AUTO_APPROVE_MODE=0  # Human review required
+```
+
+> **Note:** When Dreaming is enabled, curation runs as a background task. Results are logged to audit events (no memory contents, only metadata).
+
 **Privacy Note:**
 - By default, `LOG_INCLUDE_PRIVATE_IDS` is disabled to protect user privacy
 - When enabled, sensitive identifiers (user IDs, chat IDs) are logged without masking

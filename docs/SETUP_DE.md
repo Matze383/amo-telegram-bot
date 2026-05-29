@@ -330,6 +330,60 @@ Der Bot verwendet strukturiertes Logging mit konfigurierbarem Ausgabeformat und 
 | `LOG_DEBUG_SCOPES` | *(keiner)* | Komma-separierte Komponentennamen für DEBUG-Level (z.B. `ai.router,plugin.runtime`) |
 | `LOG_INCLUDE_PRIVATE_IDS` | `0` | Auf `1`/`true`/`yes` setzen für unmaskierte IDs in strukturierten Logs. **Datenschutz-Warnung:** Aktivierung kann sensible Kennungen in Log-Dateien offenlegen. |
 
+---
+
+## Dreaming / Memory-Curation Runtime (KI-F4)
+
+Das Dreaming-System führt periodisch eine automatische Kuratierung von täglichen Memory-Einträgen durch. Es identifiziert relevante Gesprächsmuster und hebt wichtige Informationen in das Langzeitgedächtnis.
+
+### Aktivierung
+
+Standardmäßig ist das Dreaming-System **deaktiviert** (`DREAMING_ENABLED=0`). Um es zu aktivieren:
+
+```ini
+# Dreaming / Memory-Curation Runtime (deaktiviert by default)
+DREAMING_ENABLED=1
+```
+
+### Konfigurationsvariablen
+
+| Variable | Standard | Beschreibung |
+|----------|----------|--------------|
+| `DREAMING_ENABLED` | `0` | `1` zum Aktivieren der automatischen Memory-Kuratierung |
+| `DREAMING_INTERVAL_SECONDS` | `3600` | Intervall zwischen Kuratierungsläufen (Sekunden) |
+| `DREAMING_TIMEOUT_SECONDS` | `300` | Timeout für einen einzelnen Kuratierungslauf |
+| `DREAMING_MAX_DAILY_CANDIDATES_PER_SCOPE` | `3` | Maximale Kandidaten pro Scope pro Tag |
+| `DREAMING_MAX_PROMOTIONS_PER_SCOPE` | `2` | Maximale Promotions pro Scope pro Tag |
+| `DREAMING_AUTO_APPROVE_MODE` | `0` | `1` überspringt menschliche Review — **mit extremster Vorsicht verwenden** |
+
+### Sicherheitsverhalten
+
+- **Default-Off:** Das System ist standardmäßig deaktiviert — explizite Aktivierung erforderlich
+- **Scope-Isolation:** Memory-Kuratierung erfolgt strikt pro Topic/Private-Chat — kein Cross-Scope-Zugriff
+- **Begrenzte Kandidaten:** Maximale Anzahl von Kandidaten und Promotions pro Scope begrenzt
+- **Timeout-Schutz:** Einzelne Läufe haben feste Timeouts, um Endlosschleifen zu vermeiden
+- **Auto-Approve:** Standardmäßig deaktiviert; Aktivierung überspringt menschliche Review und sollte nur in vertrauenswürdigen Umgebungen erfolgen
+- **No-Overlap Enforcement:** Es kann nur ein Kuratierungsdurchlauf gleichzeitig ausgeführt werden; parallele Durchläufe werden durch eine interne Sperre blockiert
+
+### Empfohlene Konfiguration
+
+**Für lokale Tests:**
+```ini
+DREAMING_ENABLED=0  # Deaktiviert (Standard)
+```
+
+**Für aktiviertes Dreaming mit sicheren Defaults:**
+```ini
+DREAMING_ENABLED=1
+DREAMING_INTERVAL_SECONDS=3600
+DREAMING_TIMEOUT_SECONDS=300
+DREAMING_MAX_DAILY_CANDIDATES_PER_SCOPE=3
+DREAMING_MAX_PROMOTIONS_PER_SCOPE=2
+DREAMING_AUTO_APPROVE_MODE=0  # Menschliche Review erforderlich
+```
+
+> **Hinweis:** Bei aktiviertem Dreaming läuft die Kuratierung als Hintergrundtask. Die Ergebnisse werden in Audit-Events protokolliert (keine Memory-Inhalte, nur Metadaten).
+
 **Datenschutz-Hinweis:**
 - Standardmäßig ist `LOG_INCLUDE_PRIVATE_IDS` deaktiviert zum Schutz der Privatsphäre
 - Bei Aktivierung werden sensible Kennungen (User-IDs, Chat-IDs) unmaskiert protokolliert

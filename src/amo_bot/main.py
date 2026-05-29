@@ -11,7 +11,7 @@ from amo_bot.core.logging import setup_logging, log_event
 from amo_bot.db.base import create_session_factory
 from amo_bot.db.init_db import init_db
 from amo_bot.plugins.command_runtime import PluginCommandExecutor
-from amo_bot.db.repositories import UserRoleRepository
+from amo_bot.db.repositories import TopicAgentMemoryRepository, UserRoleRepository
 from amo_bot.plugins.loader import PluginLoader
 from amo_bot.plugins.scheduled_runtime import ScheduledPluginExecutor
 from amo_bot.telegram.client import TelegramClient
@@ -23,9 +23,37 @@ from amo_bot.telegram.owner_notify import OwnerNotifier
 from amo_bot.telegram.polling import OffsetStore, run_polling
 from amo_bot.telegram.role_resolver import DBRoleResolver
 from amo_bot.webui.flask_app import create_flask_app
+from amo_bot.ai.dreaming_runtime import DreamingRuntime
 
 
 logger = logging.getLogger(__name__)
+
+
+async def _run_polling_with_dreaming(
+    *,
+    dreaming_runtime: DreamingRuntime,
+    tg: TelegramClient,
+    offset_store: OffsetStore,
+    timeout_seconds: int,
+    limit: int,
+    retry_max_seconds: int,
+    dispatcher: Dispatcher,
+    scheduled_tick,
+) -> None:
+    """Start dreaming inside the active polling event loop and shut it down cleanly."""
+    dreaming_runtime.start()
+    try:
+        await run_polling(
+            tg,
+            offset_store,
+            timeout_seconds=timeout_seconds,
+            limit=limit,
+            retry_max_seconds=retry_max_seconds,
+            dispatcher=dispatcher,
+            scheduled_tick=scheduled_tick,
+        )
+    finally:
+        await dreaming_runtime.stop()
 
 
 def _build_parser() -> ArgumentParser:
@@ -230,6 +258,18 @@ def run(argv: list[str] | None = None) -> None:
         owner_notifier=owner_notifier,
     )
 
+    # Dreaming / Memory-Curation Runtime — disabled by default.
+    dreaming_repo = TopicAgentMemoryRepository(session_factory())
+    dreaming_runtime = DreamingRuntime(
+        repository=dreaming_repo,
+        enabled=settings.dreaming_enabled,
+        interval_seconds=settings.dreaming_interval_seconds,
+        timeout_seconds=settings.dreaming_timeout_seconds,
+        max_daily_candidates_per_scope=settings.dreaming_max_daily_candidates_per_scope,
+        max_promotions_per_scope=settings.dreaming_max_promotions_per_scope,
+        auto_approve=settings.dreaming_auto_approve_mode,
+    )
+
     if args.webui:
         app = create_flask_app(settings=settings)
         log_event(
@@ -263,9 +303,10 @@ def run(argv: list[str] | None = None) -> None:
             extra={"mode": "webui_plus_polling", "webui_host": settings.webui_host, "webui_port": settings.webui_port},
         )
         asyncio.run(
-            run_polling(
-                tg,
-                offset_store,
+            _run_polling_with_dreaming(
+                dreaming_runtime=dreaming_runtime,
+                tg=tg,
+                offset_store=offset_store,
                 timeout_seconds=settings.poll_timeout_seconds,
                 limit=settings.poll_limit,
                 retry_max_seconds=settings.poll_retry_max_seconds,
@@ -282,9 +323,10 @@ def run(argv: list[str] | None = None) -> None:
         extra={"mode": "polling_only"},
     )
     asyncio.run(
-        run_polling(
-            tg,
-            offset_store,
+        _run_polling_with_dreaming(
+            dreaming_runtime=dreaming_runtime,
+            tg=tg,
+            offset_store=offset_store,
             timeout_seconds=settings.poll_timeout_seconds,
             limit=settings.poll_limit,
             retry_max_seconds=settings.poll_retry_max_seconds,

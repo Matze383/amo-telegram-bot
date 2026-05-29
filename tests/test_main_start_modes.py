@@ -102,6 +102,72 @@ def test_run_serve_mode_starts_webui_and_runs_polling(monkeypatch, tmp_path) -> 
     assert polling_call == {"created": True, "awaited": True}
 
 
+def test_run_dreaming_starts_inside_polling_event_loop(monkeypatch, tmp_path) -> None:
+    _set_env(monkeypatch, tmp_path)
+    monkeypatch.setenv("DREAMING_ENABLED", "1")
+
+    lifecycle: list[tuple[str, bool]] = []
+
+    class _DummyDreamingRuntime:
+        def __init__(self, **kwargs) -> None:  # noqa: ANN003
+            self.is_running = False
+            lifecycle.append(("init", kwargs["enabled"]))
+
+        def start(self) -> None:
+            asyncio.get_running_loop()
+            self.is_running = True
+            lifecycle.append(("start", True))
+
+        async def stop(self) -> None:
+            self.is_running = False
+            lifecycle.append(("stop", False))
+
+    class _DummyDispatcher:
+        def __init__(self, **kwargs) -> None:  # noqa: ANN003
+            pass
+
+    async def _fake_run_polling(*args, **kwargs):  # noqa: ANN002,ANN003
+        lifecycle.append(("polling", True))
+        raise _StopFlow()
+
+    monkeypatch.setattr(main_module, "DreamingRuntime", _DummyDreamingRuntime)
+    monkeypatch.setattr(main_module, "Dispatcher", _DummyDispatcher)
+    monkeypatch.setattr(main_module, "run_polling", _fake_run_polling)
+
+    try:
+        main_module.run([])
+    except _StopFlow:
+        pass
+
+    assert lifecycle == [("init", True), ("start", True), ("polling", True), ("stop", False)]
+
+
+def test_run_webui_mode_does_not_start_dreaming(monkeypatch, tmp_path) -> None:
+    _set_env(monkeypatch, tmp_path)
+    monkeypatch.setenv("DREAMING_ENABLED", "1")
+    app = _DummyApp()
+    lifecycle: list[str] = []
+
+    class _DummyDreamingRuntime:
+        def __init__(self, **kwargs) -> None:  # noqa: ANN003
+            lifecycle.append("init")
+
+        def start(self) -> None:
+            lifecycle.append("start")
+
+        async def stop(self) -> None:
+            lifecycle.append("stop")
+
+    monkeypatch.setattr(main_module, "create_flask_app", lambda **kwargs: app)
+    monkeypatch.setattr(main_module, "Dispatcher", _StubDispatcher)
+    monkeypatch.setattr(main_module, "DreamingRuntime", _DummyDreamingRuntime)
+
+    main_module.run(["--webui"])
+
+    assert lifecycle == ["init"]
+    assert app.run_calls == [("127.0.0.1", 8080, None)]
+
+
 def test_run_wires_dispatcher_with_non_none_ai_service(monkeypatch, tmp_path) -> None:
     _set_env(monkeypatch, tmp_path)
 
