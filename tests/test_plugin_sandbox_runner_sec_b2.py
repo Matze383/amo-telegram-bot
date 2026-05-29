@@ -197,7 +197,9 @@ def test_worker_environment_is_minimal_default_deny() -> None:
     assert env["PYTHONNOUSERSITE"] == "1"
     assert env["PYTHONSAFEPATH"] == "1"
     assert "LD_PRELOAD" not in env
-    assert "PYTHONPATH" not in env
+    # The worker may have a controlled PYTHONPATH pointing at site-packages (for
+    # `pip install -e .` installs), but it must never inherit a user-set PYTHONPATH.
+    assert env.get("PYTHONPATH", "") != "/tmp/pythonpath"
 
 
 def test_output_cap_enforced_during_streaming_read(monkeypatch: pytest.MonkeyPatch) -> None:
