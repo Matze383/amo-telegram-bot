@@ -28,6 +28,11 @@ from amo_bot.ai.webtool_subagent import (
 )
 
 
+class _EmptySearchProvider:
+    def search(self, *, query: str, locale: str, max_results: int):
+        return []
+
+
 @pytest.fixture
 def db_url(tmp_path):
     url = f"sqlite:///{tmp_path / 'webtool_subagent.db'}"
@@ -155,6 +160,36 @@ class TestWebtoolSubagentAllowed:
         assert result.allowed is True
         # Should have at most 2 results
         assert result.sanitized.text.count("\n") < 2
+
+
+class TestWebtoolSubagentEmptyProvider:
+    def test_empty_provider_results_fail_closed(self, session_factory):
+        with session_factory() as s:
+            quota_repo = WebToolRoleQuotaRepository(s)
+            service = create_webtool_subagent_service(
+                quota_repo,
+                use_fake_providers=False,
+                search_provider=_EmptySearchProvider(),
+            )
+
+        request = WebtoolSubagentRequest(
+            operation_type=WebtoolOperationType.WEBSEARCH,
+            user_id=42,
+            role=Role.OWNER,
+            chat_id=-100,
+            topic_id=None,
+            day="2026-05-29",
+            query="bitcoin price",
+            locale="en",
+            max_results=3,
+        )
+
+        result = service.execute(request)
+        assert result.allowed is False
+        assert result.decision == "deny"
+        assert result.reason == "empty_result"
+        assert result.sanitized.text == ""
+        assert result.sanitized.sources == ()
 
 
 class TestWebtoolSubagentDisabled:

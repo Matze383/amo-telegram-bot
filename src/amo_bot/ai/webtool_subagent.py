@@ -289,6 +289,15 @@ class WebtoolSubagentService:
 
             # Build sanitized result
             sanitized = self._sanitize_search_results(results)
+            if not sanitized.text.strip() or not sanitized.sources:
+                return WebtoolSubagentResult(
+                    allowed=False,
+                    decision="deny",
+                    reason="empty_result",
+                    sanitized=self._empty_result(),
+                    metadata=metadata,
+                    error="Search provider returned no usable results",
+                )
 
             return WebtoolSubagentResult(
                 allowed=True,

@@ -64,7 +64,8 @@ class RealWebsearchProviderAdapter:
 
 
 class _CorepluginSearchProviderAdapter:
-    _ENDPOINT = "https://html.duckduckgo.com/html/"
+    _HTML_ENDPOINT = "https://html.duckduckgo.com/html/"
+    _LITE_ENDPOINT = "https://lite.duckduckgo.com/lite/"
     _UA = "amo-bot-websearch/1.0"
 
     def search(self, *, query: str, locale: str, safesearch: str, max_results: int) -> tuple[WebsearchProviderResult, ...]:
@@ -76,18 +77,24 @@ class _CorepluginSearchProviderAdapter:
         }
         try:
             with httpx.Client(timeout=1.5, follow_redirects=False, headers={"User-Agent": self._UA}) as client:
-                response = client.get(self._ENDPOINT, params=params)
+                lite_response = client.get(self._LITE_ENDPOINT, params=params)
+                lite_results = _parse_ddg_lite_results(lite_response.text, limit) if lite_response.status_code < 400 else []
+                if lite_response.status_code < 500 and lite_results:
+                    return tuple(lite_results)
+
+                html_response = client.get(self._HTML_ENDPOINT, params=params)
+                if html_response.status_code >= 500:
+                    raise RuntimeError("websearch provider server error")
+                if html_response.status_code >= 400:
+                    if lite_response.status_code >= 500:
+                        raise RuntimeError("websearch provider server error")
+                    return ()
+
+                return tuple(_parse_ddg_html_results(html_response.text, limit))
         except httpx.TimeoutException as exc:
             raise TimeoutError("websearch provider timeout") from exc
         except httpx.HTTPError as exc:
             raise RuntimeError("websearch provider request failed") from exc
-
-        if response.status_code >= 500:
-            raise RuntimeError("websearch provider server error")
-        if response.status_code >= 400:
-            return ()
-
-        return tuple(_parse_ddg_html_results(response.text, limit))
 
 
 def _normalize_ddg_locale(locale: str) -> str:
@@ -111,8 +118,8 @@ def _normalize_ddg_safesearch(safesearch: str) -> str:
 def _parse_ddg_html_results(html: str, limit: int) -> list[WebsearchProviderResult]:
     results: list[WebsearchProviderResult] = []
     for match in re.finditer(r'<a[^>]*class="[^"]*result__a[^"]*"[^>]*href="([^"]+)"[^>]*>(.*?)</a>', html, flags=re.I | re.S):
-        href = _strip_html(unescape(match.group(1))).strip()
-        title = _strip_html(unescape(match.group(2))).strip()
+        href = _bound_text(_strip_html(unescape(match.group(1))).strip(), 1000)
+        title = _bound_text(_strip_html(unescape(match.group(2))).strip(), 200)
         if not href or not title or not href.startswith("http"):
             continue
 
@@ -120,7 +127,7 @@ def _parse_ddg_html_results(html: str, limit: int) -> list[WebsearchProviderResu
         tail = html[match.end(): match.end() + 2000]
         snippet_match = re.search(r'<a[^>]*class="[^"]*result__snippet[^"]*"[^>]*>(.*?)</a>|<div[^>]*class="[^"]*result__snippet[^"]*"[^>]*>(.*?)</div>', tail, flags=re.I | re.S)
         if snippet_match:
-            snippet = _strip_html(unescape(snippet_match.group(1) or snippet_match.group(2) or "")).strip()
+            snippet = _bound_text(_strip_html(unescape(snippet_match.group(1) or snippet_match.group(2) or "")).strip(), 400)
 
         results.append(WebsearchProviderResult(title=title, url=href, snippet=snippet))
         if len(results) >= limit:
@@ -128,8 +135,36 @@ def _parse_ddg_html_results(html: str, limit: int) -> list[WebsearchProviderResu
     return results
 
 
+def _parse_ddg_lite_results(html: str, limit: int) -> list[WebsearchProviderResult]:
+    results: list[WebsearchProviderResult] = []
+    for match in re.finditer(r'<a[^>]*class="[^"]*result-link[^"]*"[^>]*href="([^"]+)"[^>]*>(.*?)</a>', html, flags=re.I | re.S):
+        href = _bound_text(_strip_html(unescape(match.group(1))).strip(), 1000)
+        title = _bound_text(_strip_html(unescape(match.group(2))).strip(), 200)
+        if not href or not title or not href.startswith("http"):
+            continue
+
+        snippet = ""
+        tail = html[match.end(): match.end() + 2500]
+        snippet_match = re.search(r'<td[^>]*class="[^"]*result-snippet[^"]*"[^>]*>(.*?)</td>|<td[^>]*>(.*?)</td>', tail, flags=re.I | re.S)
+        if snippet_match:
+            snippet_candidate = _strip_html(unescape(snippet_match.group(1) or snippet_match.group(2) or "")).strip()
+            if snippet_candidate and not snippet_candidate.startswith("http"):
+                snippet = _bound_text(snippet_candidate, 400)
+
+        results.append(WebsearchProviderResult(title=title, url=href, snippet=snippet))
+        if len(results) >= limit:
+            break
+    return results
+
 def _strip_html(value: str) -> str:
     return re.sub(r"<[^>]+>", "", value)
+
+
+def _bound_text(value: str, max_len: int) -> str:
+    text = " ".join((value or "").split()).strip()
+    if len(text) <= max_len:
+        return text
+    return text[:max_len].rstrip()
 
 
 def _build_websearch_provider_config(

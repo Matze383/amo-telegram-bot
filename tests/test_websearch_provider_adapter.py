@@ -8,8 +8,8 @@ class _DummyResponse:
 
 
 class _DummyClient:
-    def __init__(self, response: _DummyResponse) -> None:
-        self._response = response
+    def __init__(self, responses: dict[str, _DummyResponse]) -> None:
+        self._responses = responses
 
     def __enter__(self):
         return self
@@ -20,7 +20,7 @@ class _DummyClient:
     def get(self, url: str, params: dict[str, str]):
         assert url.startswith("https://")
         assert "q" in params
-        return self._response
+        return self._responses[url]
 
 
 DDG_HTML = '''
@@ -37,7 +37,16 @@ DDG_HTML = '''
 def test_ddg_adapter_parses_and_bounds_results(monkeypatch):
     import amo_bot.ai.webtool_provider_adapter as m
 
-    monkeypatch.setattr(m.httpx, "Client", lambda **kwargs: _DummyClient(_DummyResponse(DDG_HTML)))
+    monkeypatch.setattr(
+        m.httpx,
+        "Client",
+        lambda **kwargs: _DummyClient(
+            {
+                "https://lite.duckduckgo.com/lite/": _DummyResponse("", status_code=403),
+                "https://html.duckduckgo.com/html/": _DummyResponse(DDG_HTML),
+            }
+        ),
+    )
 
     adapter = _CorepluginSearchProviderAdapter()
     results = adapter.search(query="bitcoin price now", locale="en", safesearch="moderate", max_results=2)
@@ -51,7 +60,46 @@ def test_ddg_adapter_parses_and_bounds_results(monkeypatch):
 def test_ddg_adapter_handles_4xx_as_empty(monkeypatch):
     import amo_bot.ai.webtool_provider_adapter as m
 
-    monkeypatch.setattr(m.httpx, "Client", lambda **kwargs: _DummyClient(_DummyResponse("", status_code=403)))
+    monkeypatch.setattr(
+        m.httpx,
+        "Client",
+        lambda **kwargs: _DummyClient(
+            {
+                "https://lite.duckduckgo.com/lite/": _DummyResponse("", status_code=403),
+                "https://html.duckduckgo.com/html/": _DummyResponse("", status_code=403),
+            }
+        ),
+    )
 
     adapter = _CorepluginSearchProviderAdapter()
     assert adapter.search(query="x", locale="en", safesearch="moderate", max_results=3) == ()
+
+
+def test_ddg_lite_adapter_parses_result_links(monkeypatch):
+    import amo_bot.ai.webtool_provider_adapter as m
+
+    lite_html = '''
+    <html><body>
+      <a class="result-link" href="https://example.org/news">Example News</a>
+      <td class="result-snippet">Fresh update from lite index.</td>
+    </body></html>
+    '''
+
+    monkeypatch.setattr(
+        m.httpx,
+        "Client",
+        lambda **kwargs: _DummyClient(
+            {
+                "https://lite.duckduckgo.com/lite/": _DummyResponse(lite_html, status_code=200),
+                "https://html.duckduckgo.com/html/": _DummyResponse("", status_code=200),
+            }
+        ),
+    )
+
+    adapter = _CorepluginSearchProviderAdapter()
+    results = adapter.search(query="bitcoin", locale="en", safesearch="moderate", max_results=3)
+
+    assert len(results) == 1
+    assert results[0].url == "https://example.org/news"
+    assert results[0].title == "Example News"
+    assert "Fresh update" in results[0].snippet
