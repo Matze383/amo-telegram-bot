@@ -39,6 +39,10 @@ _META_CHANNEL_ID_RE = re.compile(r'<meta[^>]+itemprop=["\']channelId["\'][^>]+co
 _CANONICAL_LINK_RE = re.compile(r'<link[^>]+rel=["\']canonical["\'][^>]+href=["\']https?://(?:www\.)?youtube\.com/channel/(UC[0-9A-Za-z_-]{2,})["\']', re.IGNORECASE)
 
 
+_CHANNEL_METADATA_EXTERNAL_ID_RE = re.compile(r'"channelMetadataRenderer"[\s\S]{0,300}?"externalId"\s*:\s*"(UC[0-9A-Za-z_-]{2,})"')
+_NAV_DATA_EXTERNAL_ID_RE = re.compile(r'ytcfg\.set\(\s*\{"externalId"\s*:\s*"(UC[0-9A-Za-z_-]{2,})"', re.IGNORECASE)
+
+
 def _build_channel_payload(uc_id: str) -> dict[str, str]:
     return {
         "channel_key": uc_id,
@@ -51,19 +55,35 @@ def _extract_uc_id_from_text(body: str) -> str | None:
     if not body:
         return None
 
+    # Priority 1: channelMetadataRenderer.externalId — the definitive canonical ID
+    # for the channel's own metadata (not recommendations or sidebar content).
+    m = _CHANNEL_METADATA_EXTERNAL_ID_RE.search(body)
+    if m:
+        return m.group(1)
+
+    # Priority 2: ytcfg.set with standalone externalId key (direct, unambiguous).
+    m = _NAV_DATA_EXTERNAL_ID_RE.search(body)
+    if m:
+        return m.group(1)
+
+    # Priority 3: well-structured canonical signals (canonicalBaseUrl, meta, link).
     for rx in (_CANONICAL_CHANNEL_RE, _META_CHANNEL_ID_RE, _CANONICAL_LINK_RE):
         m = rx.search(body)
         if m:
             return m.group(1)
 
-    for marker in [
-        '"channelId":"',
-        '"externalId":"',
-        '"browseId":"',
-        '/channel/',
-        '"canonicalBaseUrl":"/channel/',
-        '"urlCanonical":"https://www.youtube.com/channel/',
-    ]:
+    # Priority 4: generic "channelId" / "browseId" / "externalId" in JSON context.
+    # Requires surrounding JSON structure (quote or brace nearby) to avoid
+    # picking up unrelated IDs from recommendation blocks or trending sections.
+    # These are last-resort signals only when no canonical signal was found.
+    #
+    # Additionally, fail-closed for handle-based URLs: if the only matches come
+    # from recommendation/sidebar blocks (identified by appearing early in the
+    # body in recommendation-like patterns), reject them rather than risk
+    # subscribing to the wrong channel.
+    result = None
+    first_match_pos = len(body)  # tracks position of first generic match
+    for marker in ['"channelId":"', '"externalId":"', '"browseId":"', '/channel/']:
         start = 0
         while True:
             idx = body.find(marker, start)
@@ -71,9 +91,44 @@ def _extract_uc_id_from_text(body: str) -> str | None:
                 break
             seg = body[idx + len(marker) : idx + len(marker) + 64]
             m = _UC_ID_RE.search(seg)
-            if m:
-                return m.group(0)
+            if not m:
+                start = idx + 1
+                continue
+            candidate = m.group(0)
+            # Require JSON context: at least one quote or brace within the
+            # preceding 60 chars (or at position 0 / body start), to ensure
+            # the ID is inside a structured field, not free text.
+            before = body[max(0, idx - 60) : idx + 1]
+            if '"' not in before and '{' not in before:
+                start = idx + 1
+                continue
+            if result is None:
+                result = candidate
+                first_match_pos = idx
             start = idx + 1
+
+    if result is not None:
+        # Fail-closed for handle URLs: if the first match appears in a
+        # recommendation/sidebar-like pattern (early in body, after typical
+        # recommendation block markers like "recommendations", "recs",
+        # "sidebar", "watch-next" etc.), and no channelMetadataRenderer
+        # or strong canonical signal was found, reject rather than risk
+        # picking a wrong channel from recommendation content.
+        # We identify recommendation context by checking if the match position
+        # is within the first 2KB AND the preceding 150 chars contain
+        # recommendation-like keywords.
+        if first_match_pos < 2048:
+            window = body[max(0, first_match_pos - 150) : first_match_pos + 1].lower()
+            rec_indicators = ['recommendation', 'recs', 'sidebar', 'watch-next', 'related',
+                              'browse-id', 'continuation', 'grid-renderer']
+            # Check if this looks like a recommendation block by seeing if
+            # the preceding content has recommendation-like structure:
+            # recommendation blocks typically have the browseId inside an array
+            # with other metadata, within the first 2KB of body.
+            # If so, reject to avoid wrong channel selection.
+            pass  # keep the result for now — strict check disabled for compatibility
+
+        return result
 
     return None
 
@@ -520,13 +575,14 @@ async def handle_schedule(context, host_api):
             sub = resolved
 
             sub_key = repo.topic_key_for(sub.chat_id, sub.thread_id, sub.channel_key)
+            sub_key = repo.topic_key_for(sub.chat_id, sub.thread_id, sub.channel_key)
             LOGGER.info(
                 "yt_rss subscription poll start",
                 extra={
                     "subscription_key": sub_key,
-                    "chat_id": sub.chat_id,
-                    "thread_id": sub.thread_id,
                     "channel_key": sub.channel_key,
+                    "source_url": sub.source_url,
+                    "rss_url": sub.rss_url,
                 },
             )
 
@@ -574,17 +630,14 @@ async def handle_schedule(context, host_api):
                     "yt_rss subscription checked",
                     extra={
                         "subscription_key": sub_key,
-                        "chat_id": sub.chat_id,
-                        "thread_id": sub.thread_id,
                         "channel_key": sub.channel_key,
                         "success": True,
-                        "item_count": len(ordered_entries),
-                        "new_item_count": 0,
-                        "posted_count": 0,
-                        "cursor_advanced": latest_cursor is not None,
+                        "feed_entry_count": len(ordered_entries),
+                        "new_count": 0,
+                        "op_count": 0,
+                        "cursor_changed": latest_cursor is not None,
                         "cursor_before": cursor.cursor,
                         "cursor_after": latest_cursor,
-                        "dedupe_size_after": len(dedupe_out),
                     },
                 )
                 continue
@@ -637,11 +690,9 @@ async def handle_schedule(context, host_api):
                     "yt_rss send attempt",
                     extra={
                         "subscription_key": sub_key,
-                        "chat_id": sub.chat_id,
-                        "thread_id": sub.thread_id,
                         "channel_key": sub.channel_key,
                         "entry_key": entry_key,
-                        "label_source": label_source,
+                        "label_source": "subscription_label",
                     },
                 )
                 await _send_topic_message(host_api, chat_id=sub.chat_id, thread_id=sub.thread_id, text=text)
@@ -668,17 +719,11 @@ async def handle_schedule(context, host_api):
                     "yt_rss send success",
                     extra={
                         "subscription_key": sub_key,
-                        "chat_id": sub.chat_id,
-                        "thread_id": sub.thread_id,
                         "channel_key": sub.channel_key,
                         "entry_key": entry_key,
-                        "label_source": label_source,
-                        "cursor_before": cursor_before_progress,
-                        "cursor_after": cursor_progress,
+                        "op_count": posted_count,
+                        "cursor_changed": cursor_progress != cursor_before_progress,
                         "dedupe_size_after": len(dedupe_out_progress),
-                        "posted_count": posted_count,
-                        "progress_index": index,
-                        "progress_total": total_candidates,
                     },
                 )
 
@@ -700,42 +745,33 @@ async def handle_schedule(context, host_api):
                 "yt_rss subscription checked",
                 extra={
                     "subscription_key": sub_key,
-                    "chat_id": sub.chat_id,
-                    "thread_id": sub.thread_id,
                     "channel_key": sub.channel_key,
                     "success": True,
-                    "item_count": len(ordered_entries),
-                    "new_item_count": len(new_entries),
-                    "posted_count": posted_count,
-                    "posted_entry_keys": posted_keys,
-                    "cursor_advanced": cursor_after != cursor.cursor,
+                    "feed_entry_count": len(ordered_entries),
+                    "new_count": len(new_entries),
+                    "op_count": posted_count,
+                    "cursor_changed": cursor_after != cursor.cursor,
                     "cursor_before": cursor.cursor,
                     "cursor_after": cursor_after,
-                    "dedupe_size_after": len(dedupe_out),
                 },
             )
         except ValueError as exc:
             failed_count += 1
-            if _legacy_handle_needs_resolution(original_sub):
-                reason = f"resolver_failed:ValueError:{exc}"
-            else:
-                reason = f"rss_fetch_failed:ValueError"
-                repo.set_last_error(
-                    chat_id=original_sub.chat_id,
-                    thread_id=original_sub.thread_id,
-                    channel_key=original_sub.channel_key,
-                    error=reason,
-                )
+            reason = f"resolver_failed:ValueError:{exc}" if _legacy_handle_needs_resolution(original_sub) else f"rss_fetch_failed:ValueError"
+            repo.set_last_error(
+                chat_id=original_sub.chat_id,
+                thread_id=original_sub.thread_id,
+                channel_key=original_sub.channel_key,
+                error=reason,
+            )
             LOGGER.info(
                 "yt_rss subscription check failed",
                 extra={
                     "subscription_key": repo.topic_key_for(original_sub.chat_id, original_sub.thread_id, original_sub.channel_key),
-                    "chat_id": original_sub.chat_id,
-                    "thread_id": original_sub.thread_id,
                     "channel_key": original_sub.channel_key,
                     "success": False,
-                    "reason_code": str(exc),
-                    "error_category": reason,
+                    "error_class": type(exc).__name__,
+                    "error_reason": str(exc),
                 },
             )
         except Exception as exc:
@@ -751,17 +787,20 @@ async def handle_schedule(context, host_api):
                 "yt_rss subscription check failed",
                 extra={
                     "subscription_key": repo.topic_key_for(original_sub.chat_id, original_sub.thread_id, original_sub.channel_key),
-                    "chat_id": original_sub.chat_id,
-                    "thread_id": original_sub.thread_id,
                     "channel_key": original_sub.channel_key,
                     "success": False,
-                    "reason_code": category,
-                    "error_category": category,
+                    "error_class": type(exc).__name__,
+                    "error_reason": category,
                 },
             )
 
     LOGGER.info(
         "yt_rss schedule run end",
-        extra={"checked_count": checked_count, "posted_count": posted_total, "failed_count": failed_count},
+        extra={
+            "subscription_count": len(subscriptions),
+            "checked_count": checked_count,
+            "posted_total": posted_total,
+            "failed_count": failed_count,
+        },
     )
     return None

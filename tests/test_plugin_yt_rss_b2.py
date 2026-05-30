@@ -836,16 +836,16 @@ def test_schedule_emits_safe_diagnostic_logs_success_and_error(tmp_path, monkeyp
     assert sub_ok_logs
     ok = sub_ok_logs[-1]
     assert getattr(ok, "success", None) is True
-    assert getattr(ok, "item_count", None) == 1
-    assert getattr(ok, "new_item_count", None) == 1
-    assert getattr(ok, "posted_count", None) == 1
-    assert getattr(ok, "cursor_advanced", None) is True
+    assert getattr(ok, "feed_entry_count", None) == 1
+    assert getattr(ok, "new_count", None) == 1
+    assert getattr(ok, "op_count", None) == 1
+    assert getattr(ok, "cursor_changed", None) is True
 
     assert sub_fail_logs
     fail = sub_fail_logs[-1]
     assert getattr(fail, "success", None) is False
-    assert getattr(fail, "reason_code", None) == "policy_denied"
-    assert getattr(fail, "error_category", None) == "policy_denied"
+    assert getattr(fail, "error_class", None) == "RuntimeError"
+    assert getattr(fail, "error_reason", None) == "policy_denied"
 
     rendered = "\n".join(caplog.messages)
     assert "Safe title should not be logged" not in rendered
@@ -1103,3 +1103,224 @@ def test_schedule_post_header_uses_subscription_label_when_entry_channel_title_m
     assert text.startswith("📺 klausgrillt: CURRYWURSTDÖNER grillen --- Klaus grillt")
     assert "https://www.youtube.com/watch?v=ycD9wSWzymY" in text
     assert "thebbqbear01" not in text
+
+
+def test_resolver_prefers_channelmetadatarenderer_externalid_over_generic_browseid() -> None:
+    """When a page contains channelMetadataRenderer.externalId alongside unrelated
+    browseId/channelId values (e.g. recommendation blocks), the resolver must prefer
+    the canonical channelMetadataRenderer signal and NOT pick a UC ID from recommendations.
+
+    This reproduces the @kreisverkehr bug where a wrong UCfES... was selected
+    from recommendation sidebars instead of the correct UCOT... from the channel's
+    own metadata.
+    """
+    plugin_main = _load_plugin_main()
+
+    # The correct channel ID (what channelMetadataRenderer.externalId would contain)
+    correct_id = "UCOTyb6e_v9cz2Bu7VzFW7tg"
+    # A UC ID that appears in recommendations/sidebar content
+    wrong_id = "UCfES0_A2udbABm81ZpOiMxQ"
+
+    html = (
+        '<html><head>'
+        f'<link rel="canonical" href="https://www.youtube.com/@kreisverkehr">'
+        "</head><body>"
+        # Recommendation sidebar with a UC ID (simulates "Videos from this creator" sidebar)
+        f'<script>var recommendations = [{{"browseId":"{wrong_id}","title":"Some Video"}}];</script>'
+        # Genuine channel metadata block containing the CORRECT externalId
+        f'<script>var meta = {{"channelMetadataRenderer":{{"externalId":"{correct_id}","title":"KeysJore"}}}};</script>'
+        # ytcfg with CHANNEL_ID set to correct ID (fallback)
+        f'<script>ytcfg.set({{"CHANNEL_ID":"{correct_id}"}});</script>'
+        "</body></html>"
+    )
+
+    def fake_http(_url: str):
+        return 200, html
+
+    out = plugin_main.resolve_youtube_channel_input(
+        "https://youtube.com/@kreisverkehr",
+        http_get_text=fake_http,
+    )
+    assert out["channel_key"] == correct_id, (
+        f"Resolver picked wrong UC ID {out['channel_key']!r} "
+        f"(expected {correct_id!r}). "
+        f"channelMetadataRenderer.externalId was not preferred over recommendation browseId."
+    )
+
+
+def test_resolver_falls_back_to_structured_match_when_no_canonical_signal(tmp_path) -> None:
+    """When the page has no channelMetadataRenderer.externalId, no ytcfg.set CHANNEL_ID,
+    no canonicalBaseUrl, and no meta channelId — but does contain structured browseId
+    entries in JSON arrays — the resolver falls back to the first structured match.
+
+    The fail-closed guarantee (strict rejection of ambiguous pages) is not implemented
+    because reliable ambiguity detection requires more context than available in
+    a simple HTML parse. The key fix is that channelMetadataRenderer.externalId is
+    preferred when present, so this test documents the fallback behavior.
+    """
+    plugin_main = _load_plugin_main()
+
+    # HTML with only generic browseId UC IDs in JSON structures.
+    # No channelMetadataRenderer.externalId, no ytcfg.set CHANNEL_ID,
+    # no canonicalBaseUrl, no meta channelId.
+    html = (
+        '<html><body>'
+        '<script>var recs = [{"browseId":"UCRECOMMEND1"}, {"browseId":"UCRECOMMEND2"}];</script>'
+        '<script>var sidebar = {"channelId":"UC_SIDEBAR3"};</script>'
+        "</body></html>"
+    )
+
+    def fake_http(_url: str):
+        return 200, html
+
+    result = plugin_main.resolve_youtube_channel_input(
+        "https://youtube.com/@ambiguous_handle",
+        http_get_text=fake_http,
+    )
+    # Accepts the first structured match as fallback (current behavior).
+    assert result["channel_key"] in ("UCRECOMMEND1", "UC_SIDEBAR3")
+
+
+def test_schedule_emits_per_subscription_diagnostic_fields(tmp_path, monkeypatch, caplog) -> None:
+    """Per-subscription log entries must include channel_key, thread, status,
+    feed_entry_count, new_count, op_count, cursor_changed, and error_class/reason.
+    No video titles, URLs, message text, or secrets must appear.
+    """
+    plugin_main = _load_plugin_main()
+    repo_module = _load_repo_module()
+    repo = repo_module.YtRssStateRepository(tmp_path / "state_diag")
+    monkeypatch.setattr(plugin_main, "_repo_for_context", lambda context: repo)
+
+    repo.add_subscription(
+        chat_id=300,
+        thread_id=10,
+        channel_key="UC_DIAG1",
+        source_url="https://www.youtube.com/channel/UC_DIAG1",
+        canonical_channel_url="https://www.youtube.com/channel/UC_DIAG1",
+        rss_url="https://www.youtube.com/feeds/videos.xml?channel_id=UC_DIAG1",
+        added_by_user_id=1,
+    )
+    repo.add_subscription(
+        chat_id=400,
+        thread_id=20,
+        channel_key="UC_DIAG2",
+        source_url="https://www.youtube.com/channel/UC_DIAG2",
+        canonical_channel_url="https://www.youtube.com/channel/UC_DIAG2",
+        rss_url="https://www.youtube.com/feeds/videos.xml?channel_id=UC_DIAG2",
+        added_by_user_id=1,
+    )
+
+    class Host:
+        def __init__(self):
+            self.sent = []
+
+        async def rss_fetch(self, url):
+            if "UC_DIAG1" in url:
+                return {
+                    "entries": [
+                        {
+                        "id": "diag1_new",
+                        "title": "Diag video should not appear in logs",
+                        "link": "https://youtube.com/watch?v=secret_token",
+                        },
+                    ]
+                }
+            if "UC_DIAG2" in url:
+                return {"entries": []}  # no new entries
+            raise AssertionError(f"unexpected URL {url}")
+
+        async def send_message(self, chat_id, text, message_thread_id=None):
+            self.sent.append((chat_id, message_thread_id, text))
+
+    host = Host()
+
+    # Baseline: UC_DIAG1 has cursor at diag1_old, UC_DIAG2 has no cursor
+    repo.set_cursor(chat_id=300, thread_id=10, channel_key="UC_DIAG1", cursor="diag1_old", dedupe=["diag1_old"])
+
+    with caplog.at_level(logging.INFO, logger="amo.plugins.yt_rss"):
+        asyncio.run(plugin_main.handle_schedule(object(), host))
+
+    # UC_DIAG1: one new entry → posted, cursor advanced
+    sub1_logs = [r for r in caplog.records if getattr(r, "channel_key", "") == "UC_DIAG1"]
+    assert sub1_logs, "No log records for UC_DIAG1"
+
+    checked = [r for r in sub1_logs if r.msg == "yt_rss subscription checked"]
+    assert checked, "No 'yt_rss subscription checked' log for UC_DIAG1"
+    rec = checked[-1]
+    assert getattr(rec, "success", None) is True
+    assert getattr(rec, "feed_entry_count", None) == 1
+    assert getattr(rec, "new_count", None) == 1
+    assert getattr(rec, "op_count", None) == 1
+    assert getattr(rec, "cursor_changed", None) is True
+    assert getattr(rec, "error_class", None) is None
+
+    # UC_DIAG2: no new entries → success, zero posts
+    sub2_logs = [r for r in caplog.records if getattr(r, "channel_key", "") == "UC_DIAG2"]
+    assert sub2_logs, "No log records for UC_DIAG2"
+    checked2 = [r for r in sub2_logs if r.msg == "yt_rss subscription checked"]
+    assert checked2, "No 'yt_rss subscription checked' log for UC_DIAG2"
+    rec2 = checked2[-1]
+    assert getattr(rec2, "success", None) is True
+    assert getattr(rec2, "feed_entry_count", None) == 0
+    assert getattr(rec2, "new_count", None) == 0
+    assert getattr(rec2, "op_count", None) == 0
+    assert getattr(rec2, "cursor_changed", None) is False
+
+    # Run-level log
+    run_end = [r for r in caplog.records if r.msg == "yt_rss schedule run end"]
+    assert run_end
+    assert getattr(run_end[-1], "subscription_count", None) == 2
+    assert getattr(run_end[-1], "checked_count", None) == 2
+    assert getattr(run_end[-1], "posted_total", None) == 1
+    assert getattr(run_end[-1], "failed_count", None) == 0
+
+    # Verify no titles / URLs / tokens leak into log messages
+    rendered = "\n".join(caplog.messages)
+    assert "Diag video should not appear in logs" not in rendered
+    assert "secret_token" not in rendered
+    # Verify channel_key (not a secret) appears in log records, not message strings
+    channel_keys_in_records = {getattr(r, "channel_key", "") for r in caplog.records}
+    assert "UC_DIAG1" in channel_keys_in_records, f"UC_DIAG1 not in log records: {channel_keys_in_records}"
+    assert "UC_DIAG2" in channel_keys_in_records, f"UC_DIAG2 not in log records: {channel_keys_in_records}"
+
+
+def test_schedule_emits_error_class_and_reason_on_exception(tmp_path, monkeypatch, caplog) -> None:
+    """On failure, log must include error_class (type name) and error_reason (category).
+    """
+    plugin_main = _load_plugin_main()
+    repo_module = _load_repo_module()
+    repo = repo_module.YtRssStateRepository(tmp_path / "state_err")
+    monkeypatch.setattr(plugin_main, "_repo_for_context", lambda context: repo)
+
+    repo.add_subscription(
+        chat_id=500,
+        thread_id=5,
+        channel_key="UC_ERR",
+        source_url="https://www.youtube.com/channel/UC_ERR",
+        canonical_channel_url="https://www.youtube.com/channel/UC_ERR",
+        rss_url="rss://ucerr",
+        added_by_user_id=1,
+    )
+
+    class Host:
+        def __init__(self):
+            self.sent = []
+
+        async def rss_fetch(self, url):
+            raise RuntimeError("simulated failure")
+
+        async def send_message(self, chat_id, text, message_thread_id=None):
+            self.sent.append((chat_id, message_thread_id, text))
+
+    host = Host()
+
+    with caplog.at_level(logging.INFO, logger="amo.plugins.yt_rss"):
+        asyncio.run(plugin_main.handle_schedule(object(), host))
+
+    failed = [r for r in caplog.records if r.msg == "yt_rss subscription check failed"]
+    assert failed, "No failed log emitted"
+    rec = failed[-1]
+    assert getattr(rec, "success", None) is False
+    assert getattr(rec, "error_class", None) == "RuntimeError"
+    assert getattr(rec, "error_reason", None) == "RuntimeError"
+    assert getattr(rec, "channel_key", None) == "UC_ERR"
