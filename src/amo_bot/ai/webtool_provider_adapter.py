@@ -12,6 +12,7 @@ import httpx
 
 from .websearch_coreplugin import (
     WebsearchInput,
+    WebsearchProviderConfig,
     WebsearchProviderResult,
     execute_websearch_provider_mvp,
 )
@@ -37,7 +38,7 @@ class RealWebsearchProviderAdapter:
         self._provider_name = provider_name
         self._timeout = timeout_seconds
         self._retry_count = retry_count
-        self._quota_limiter = quota_limiter
+        self._quota_limiter = quota_limiter if hasattr(quota_limiter, "evaluate") else _AllowAllCoreQuotaLimiter()
         self._audit_trail = audit_trail
         effective_allowlist = provider_allowlist or frozenset({provider_name})
         self._provider_config = _build_websearch_provider_config(
@@ -133,26 +134,22 @@ def _strip_html(value: str) -> str:
 
 def _build_websearch_provider_config(
     *, provider_name: str, provider_allowlist: frozenset[str], timeout_seconds: float, retry_count: int
-) -> Any:
-    from dataclasses import dataclass as _dc
-
-    @_dc(frozen=True, slots=True)
-    class _WebsearchProviderConfig:
-        provider_name: str
-        provider_allowlist: frozenset[str]
-        timeout_seconds: float
-        retry_count: int
-
-        @property
-        def normalized_provider_name(self) -> str:
-            return self.provider_name.strip().lower()
-
-    return _WebsearchProviderConfig(
+) -> WebsearchProviderConfig:
+    return WebsearchProviderConfig(
         provider_name=provider_name,
         provider_allowlist=provider_allowlist,
         timeout_seconds=timeout_seconds,
         retry_count=retry_count,
     )
+
+
+class _AllowAllCoreQuotaLimiter:
+    class _Decision:
+        allowed = True
+        reason_code = "ok"
+
+    def evaluate(self, _request: Any):
+        return self._Decision()
 
 
 class RealWebscrapeProviderAdapter:
