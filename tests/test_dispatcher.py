@@ -1524,7 +1524,7 @@ def test_dispatcher_ping_uses_locale_neutral_pong_for_de_and_en() -> None:
     ]
 
 
-def test_dispatcher_does_not_invoke_auto_image_for_plain_photo_without_addressing() -> None:
+def test_dispatcher_private_photo_invokes_auto_image_without_addressing() -> None:
     sent: list[tuple[int, str, int | None]] = []
     calls: list[tuple[int, int | None, int, int, int]] = []
 
@@ -1549,9 +1549,8 @@ def test_dispatcher_does_not_invoke_auto_image_for_plain_photo_without_addressin
         "update_id": 268708375,
         "message": {
             "message_id": 95,
-            "message_thread_id": 6845,
             "from": {"id": 900000001, "is_bot": False, "first_name": "T"},
-            "chat": {"id": -1002003580909, "type": "supergroup"},
+            "chat": {"id": 900000001, "type": "private"},
             "photo": [
                 {"file_id": "redacted-small", "file_unique_id": "u-small", "width": 90, "height": 90, "file_size": 1000},
                 {"file_id": "redacted-large", "file_unique_id": "u-large", "width": 800, "height": 800, "file_size": 2000},
@@ -1561,7 +1560,7 @@ def test_dispatcher_does_not_invoke_auto_image_for_plain_photo_without_addressin
 
     asyncio.run(dispatcher.handle_raw_update(raw_update))
 
-    assert calls == []
+    assert calls == [(900000001, None, 95, 900000001, 1)]
     assert sent == []
 
 
@@ -1678,6 +1677,47 @@ def test_dispatcher_auto_image_followup_bridge_ignores_wrong_scope_or_too_old() 
     }))
 
     assert calls == []
+
+
+def test_dispatcher_group_plain_photo_without_addressing_does_not_invoke_auto_image() -> None:
+    sent: list[tuple[int, str, int | None]] = []
+    calls: list[tuple[int, int | None, int, int, int]] = []
+
+    async def fake_send(chat_id: int, text: str, message_thread_id: int | None = None) -> object:
+        sent.append((chat_id, text, message_thread_id))
+        return {"ok": True}
+
+    class _AutoImageExecutor:
+        async def analyze_image_automatically(self, *, actor, invocation):
+            calls.append((invocation.chat_id, invocation.message_thread_id, invocation.message_id, actor.telegram_user_id, len(invocation.attachments)))
+            return True
+
+    dispatcher = Dispatcher(
+        command_registry=create_builtin_registry(),
+        role_resolver=InMemoryRoleResolver({900000001: Role.NORMAL}),
+        send_text=fake_send,
+        bot_username="AmoBot",
+        plugin_command_executor=_AutoImageExecutor(),
+    )
+
+    raw_update = {
+        "update_id": 268708376,
+        "message": {
+            "message_id": 96,
+            "message_thread_id": 6845,
+            "from": {"id": 900000001, "is_bot": False, "first_name": "T"},
+            "chat": {"id": -1002003580909, "type": "supergroup"},
+            "photo": [
+                {"file_id": "redacted-small", "file_unique_id": "u-small", "width": 90, "height": 90, "file_size": 1000},
+                {"file_id": "redacted-large", "file_unique_id": "u-large", "width": 800, "height": 800, "file_size": 2000},
+            ],
+        },
+    }
+
+    asyncio.run(dispatcher.handle_raw_update(raw_update))
+
+    assert calls == []
+    assert sent == []
 
 
 def test_consent_block_message_is_localized() -> None:

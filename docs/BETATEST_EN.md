@@ -141,6 +141,11 @@ POLL_TIMEOUT_SECONDS=30
 POLL_LIMIT=100
 POLL_RETRY_MAX_SECONDS=30
 OFFSET_STATE_FILE=.state/offset.json
+
+# SearXNG Websearch (optional – for websearch feature)
+# SEARXNG_BASE_URL=https://your-searxng-instance.com  # Primary configuration
+# AMO_WEBSEARCH_SEARXNG_BASE_URL=https://fallback.com  # Fallback (optional)
+# Note: Only HTTPS URLs allowed for public endpoints. HTTP only for loopback/private.
 ```
 
 ---

@@ -2,6 +2,44 @@
 
 ---
 
+## [Unreleased] – Bugfix Weekend: Telegram Image Analysis + Websearch/SearXNG
+
+**Datum / Date:** 2026-05-30
+
+### 🇩🇪 Deutsch
+
+#### Übersicht
+Wochenend-Release mit Korrekturen für Bildanalyse-Verhalten in privaten Chats und Websearch/SearXNG-Konfiguration.
+
+#### Bildanalyse-Verhalten (Telegram)
+- **Private Chats (1:1):** Fotos und Bild-Dokumente werden automatisch in den Bildanalyse-Pfad geleitet, ohne explizite Adressierung.
+- **Gruppen:** Bildanalyse bleibt defensiv – nur bei Adressierung/Antwort/Caption/Follow-up-Regeln.
+- **Vision-Provider-Fehler:** Wenn der Vision-Provider nicht verfügbar oder nicht konfiguriert ist, bestätigt der Bot den Empfang des Bildes und teilt mit, dass die Analyse nicht verfügbar/nicht konfiguriert ist. Der Bot behauptet nicht mehr fälschlicherweise, dass Telegram kein Bild gesendet hat oder dass keine Bilder empfangen werden können.
+
+#### Websearch/SearXNG
+- **Konfiguration:** Websearch nutzt primär `SEARXNG_BASE_URL`, mit Fallback auf `AMO_WEBSEARCH_SEARXNG_BASE_URL`.
+- **Fail-closed:** Ohne konfigurierten SearXNG-Endpoint wird keine öffentliche Fallback-Suche verwendet; stattdessen wird leer/abgelehnt zurückgegeben. Wenn SearXNG konfiguriert ist, wird ausschließlich SearXNG verwendet – auch bei leeren/fehlerhaften Ergebnissen.
+- **URL-Sicherheit:** Öffentliche HTTP-URLs werden abgelehnt; HTTPS-URLs sind erlaubt. HTTP nur für Loopback/Private/Interne Netzwerke.
+- **Browser-Provider-Abhängigkeit:** Playwright-Runtime-Abhängigkeit und System-Chromium-Fallback, falls relevant.
+
+### 🇬🇧 English
+
+#### Overview
+Weekend release with fixes for image analysis behavior in private chats and websearch/SearXNG configuration.
+
+#### Image Analysis Behavior (Telegram)
+- **Private Chats (1:1):** Photos and image documents now automatically enter the image analysis path without explicit addressing.
+- **Groups:** Image analysis remains defensive — only when addressing/reply/caption/follow-up rules apply.
+- **Vision Provider Errors:** When the vision provider is unavailable or not configured, the bot acknowledges the image was received and states that analysis is unavailable/not configured. The bot no longer falsely claims that Telegram sent no image or that images cannot be received.
+
+#### Websearch/SearXNG
+- **Configuration:** Websearch uses configured SearXNG JSON endpoint via `SEARXNG_BASE_URL` primary, with fallback to `AMO_WEBSEARCH_SEARXNG_BASE_URL`.
+- **Fail-Closed:** If no SearXNG endpoint is configured, no public fallback search is used; returns empty/denied instead. If SearXNG is configured, it is SearXNG-only, even when empty/error.
+- **URL Safety:** Public HTTP is rejected; HTTPS public is allowed; HTTP only for loopback/private/internal networks.
+- **Browser Provider Dependency:** Playwright runtime dependency and system Chromium fallback if relevant.
+
+---
+
 ## [Unreleased] – Webtool Quota per Role (Issue #48)
 
 **Datum / Date:** 2026-05-29

@@ -260,6 +260,14 @@ class PluginCommandExecutor:
             },
         )
         if not gate_result.allowed or gate_result.provider_result is None:
+            if gate_result.outcome in {"provider_timeout", "provider_error", "provider_empty"}:
+                await self._reply(
+                    invocation.chat_id,
+                    invocation.message_id,
+                    "Bild empfangen, aber Bildanalyse ist aktuell nicht verfügbar oder nicht konfiguriert.",
+                    invocation.message_thread_id,
+                )
+                return True
             return False
 
         await self._reply(

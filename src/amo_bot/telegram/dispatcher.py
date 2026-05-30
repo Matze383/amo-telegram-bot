@@ -274,7 +274,7 @@ class Dispatcher:
                         "attachment_count": attachment_count,
                     },
                 )
-            elif not is_addressed_for_auto_image:
+            elif message.chat.type != "private" and not is_addressed_for_auto_image:
                 log_event(
                     logger, logging.INFO,
                     event="auto_image.decision",
@@ -1123,7 +1123,8 @@ class Dispatcher:
         identity_instruction = (
             f"System note: You are the Telegram topic assistant @{identity_label}. "
             "The message was addressed to this bot; treat own-bot mentions as routing triggers, not user intent. "
-            "Do not claim to be the underlying model/provider unless explicitly asked."
+            "Do not claim to be the underlying model/provider unless explicitly asked. "
+            "Telegram messages can include photos and image documents; if users ask about image capability, answer truthfully: the bot can receive images, and analysis depends on current vision provider/runtime configuration."
         )
 
         def _normalize_context_lines(value: str, *, drop_exact_line: str) -> str:
@@ -1270,16 +1271,19 @@ class Dispatcher:
                     compact_text = " ".join(tool_result.text.split())[:700]
                     hosts = ", ".join((tool_result.hosts or ())[:5])
                     auto_note = (
-                        "Aktueller Recherche-Kontext (automatisch, kurz):\n"
+                        "AUTO-RESEARCH (LIVE WEB) — STRICT INSTRUCTION:\n"
+                        "You have fresh web research context from this turn. Treat it as primary evidence for current facts.\n"
+                        "Do NOT override it with stale memory/priors, and do NOT invent dates/prices/levels not supported by that context.\n"
+                        "If the context lacks an exact current value (e.g., exact BTC price), state uncertainty clearly, mention related findings/sources, and avoid fabricating a precise number.\n"
+                        "If sources conflict, say so transparently.\n"
                         f"Operation: {decision_auto.capability}\n"
-                        f"Zusammenfassung: {compact_text}\n"
-                        f"Quellen-Hosts: {hosts}\n"
-                        "Nutze dies nur als aktuelle Ergänzung; bei Widersprüchen transparent bleiben."
+                        f"Research summary: {compact_text}\n"
+                        f"Source hosts: {hosts}"
                     )
                 else:
                     auto_note = (
-                        "Aktueller Recherche-Kontext: Live-Webzugriff ist gerade nicht verfügbar "
-                        "(z. B. Limit/Provider/Timeout). Antworte transparent und erfinde keine aktuellen Fakten."
+                        "AUTO-RESEARCH STATUS: no usable live result in this turn (e.g., limit/provider/timeout/empty). "
+                        "Be transparent that you have no reliable live confirmation right now and do NOT invent current facts, dates, or prices."
                     )
 
         if auto_note:

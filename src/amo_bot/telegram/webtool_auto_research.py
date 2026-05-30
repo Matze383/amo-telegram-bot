@@ -20,8 +20,8 @@ _DATE_RE = re.compile(r"\b\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b")
 
 _CURRENT_KEYWORDS = (
     "aktuell", "heute", "jetzt", "news", "neueste", "latest", "breaking",
-    "wetter", "version", "release", "preis", "kurs", "stand", "update",
-    "changelog", "lage", "status", "live",
+    "wetter", "version", "release", "preis", "price", "kurs", "stand", "update",
+    "changelog", "lage", "status", "live", "current", "right now",
 )
 
 _SMALLTALK_PATTERNS = (

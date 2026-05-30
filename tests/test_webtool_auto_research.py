@@ -11,6 +11,13 @@ def test_auto_research_triggers_on_current_question():
     assert d.capability == "websearch"
 
 
+def test_auto_research_triggers_on_crypto_current_price_de_and_en():
+    d_de = decide_auto_research("Was ist der aktuelle Bitcoin Preis in USD?")
+    d_en = decide_auto_research("What's the current Bitcoin price right now?")
+    assert d_de.enabled is True and d_de.capability == "websearch"
+    assert d_en.enabled is True and d_en.capability == "websearch"
+
+
 def test_auto_research_triggers_on_url():
     d = decide_auto_research("Bitte prüfe https://example.com/news")
     assert d.enabled is True

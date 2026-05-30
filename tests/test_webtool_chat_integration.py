@@ -117,9 +117,9 @@ def test_provider_success_returns_sanitized_compact_output(monkeypatch):
     assert sent[0] == "Websearch: foo bar"
 
 
-def test_auto_research_injects_context_and_calls_dispatcher_once(monkeypatch):
+def test_auto_research_injects_strict_context_and_calls_dispatcher_once(monkeypatch):
     monkeypatch.setattr("amo_bot.telegram.dispatcher.AIRouter.decide", lambda self, **kwargs: _allowing_router_decision())
-    result = SimpleNamespace(allowed=True, decision="allow", reason="search_completed", text="fresh facts", sources=("https://a",), hosts=("a",), error=None)
+    result = SimpleNamespace(allowed=True, decision="allow", reason="search_completed", text="fresh facts", sources=("https://a", "https://b"), hosts=("a", "b"), error=None)
     d, sent = _mk_dispatcher(result)
     calls = []
 
@@ -138,7 +138,32 @@ def test_auto_research_injects_context_and_calls_dispatcher_once(monkeypatch):
     )
     assert len(d.webtool_dispatcher.calls) == 1
     assert sent[0] == "normal ai"
-    assert calls and "Aktueller Recherche-Kontext" in calls[0]
+    assert calls and "AUTO-RESEARCH (LIVE WEB) — STRICT INSTRUCTION" in calls[0]
+    assert "Do NOT override it with stale memory/priors" in calls[0]
+    assert "do NOT invent dates/prices/levels" in calls[0]
+
+
+def test_auto_research_empty_result_injects_no_live_warning(monkeypatch):
+    monkeypatch.setattr("amo_bot.telegram.dispatcher.AIRouter.decide", lambda self, **kwargs: _allowing_router_decision())
+    result = SimpleNamespace(allowed=False, decision="provider_unavailable", reason="search_provider_not_configured", text="", sources=(), hosts=(), error=None)
+    d, sent = _mk_dispatcher(result)
+    calls = []
+
+    async def _ask(prompt: str) -> str:
+        calls.append(prompt)
+        return "normal ai"
+
+    d.ai_service.ask = _ask
+    asyncio.run(
+        d._maybe_handle_ai_autoreply(
+            message=_mk_message("@amo_bot current bitcoin price now?", reply_to_is_bot=False, reply_to_user_is_bot=False, reply_to_username=""),
+            role=Role.ADMIN,
+            bot_username="amo_bot",
+            from_parsed_update=True,
+        )
+    )
+    assert sent[0] == "normal ai"
+    assert calls and "AUTO-RESEARCH STATUS: no usable live result" in calls[0]
 
 
 def test_normal_autoreply_without_trigger_not_quota_limited(monkeypatch):
