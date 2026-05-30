@@ -1,4 +1,6 @@
-from amo_bot.ai.webtool_provider_adapter import _CorepluginSearchProviderAdapter
+from collections.abc import Callable
+
+from amo_bot.ai.webtool_provider_adapter import _CorepluginSearchProviderAdapter, _normalize_ddg_locale
 
 
 class _DummyResponse:
@@ -8,9 +10,15 @@ class _DummyResponse:
 
 
 class _DummyClient:
-    def __init__(self, responses: dict[str, _DummyResponse], headers: dict[str, str] | None = None) -> None:
+    def __init__(
+        self,
+        responses: dict[str, _DummyResponse],
+        headers: dict[str, str] | None = None,
+        on_get: Callable[[str, dict[str, str]], None] | None = None,
+    ) -> None:
         self._responses = responses
         self.headers = headers or {}
+        self._on_get = on_get
 
     def __enter__(self):
         return self
@@ -21,6 +29,8 @@ class _DummyClient:
     def get(self, url: str, params: dict[str, str]):
         assert url.startswith("https://")
         assert "q" in params
+        if self._on_get is not None:
+            self._on_get(url, params)
         return self._responses[url]
 
 
@@ -99,6 +109,43 @@ def test_ddg_adapter_uses_browserlike_user_agent(monkeypatch):
     ua = captured.get("User-Agent", "")
     assert "Mozilla/5.0" in ua
     assert "amo-bot-websearch" not in ua
+
+
+def test_normalize_ddg_locale_maps_en_and_de_to_safe_values():
+    assert _normalize_ddg_locale("en") == "en-us"
+    assert _normalize_ddg_locale("de") == "de-de"
+
+
+def test_ddg_adapter_never_sends_unsafe_en_en_locale(monkeypatch):
+    import amo_bot.ai.webtool_provider_adapter as m
+
+    observed_kl: list[str] = []
+
+    def _on_get(_url: str, params: dict[str, str]) -> None:
+        observed_kl.append(params.get("kl", ""))
+
+    monkeypatch.setattr(
+        m.httpx,
+        "Client",
+        lambda **kwargs: _DummyClient(
+            {
+                "https://lite.duckduckgo.com/lite/": _DummyResponse(
+                    '<html><body><a class="result-link" href="https://example.org/news">Example News</a></body></html>',
+                    status_code=200,
+                ),
+                "https://html.duckduckgo.com/html/": _DummyResponse("", status_code=200),
+            },
+            on_get=_on_get,
+        ),
+    )
+
+    adapter = _CorepluginSearchProviderAdapter()
+    results = adapter.search(query="bitcoin", locale="en", safesearch="moderate", max_results=3)
+
+    assert results
+    assert observed_kl
+    assert all(value != "en-en" for value in observed_kl)
+    assert "en-us" in observed_kl
 
 
 def test_ddg_lite_adapter_parses_result_links(monkeypatch):

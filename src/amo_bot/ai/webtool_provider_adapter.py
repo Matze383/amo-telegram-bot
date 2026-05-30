@@ -101,9 +101,22 @@ def _normalize_ddg_locale(locale: str) -> str:
     candidate = (locale or "").strip().lower()
     if not candidate:
         return "en-us"
-    if "-" not in candidate:
-        return f"{candidate}-{candidate}"
-    return candidate
+
+    normalized = candidate.replace("_", "-")
+    safe_map = {
+        "en": "en-us",
+        "en-us": "en-us",
+        "en-gb": "en-gb",
+        "de": "de-de",
+        "de-de": "de-de",
+    }
+    if normalized in safe_map:
+        return safe_map[normalized]
+
+    if re.fullmatch(r"[a-z]{2}-[a-z]{2}", normalized):
+        return normalized
+
+    return "en-us"
 
 
 def _normalize_ddg_safesearch(safesearch: str) -> str:
