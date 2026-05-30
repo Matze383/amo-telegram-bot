@@ -117,6 +117,30 @@ def test_provider_success_returns_sanitized_compact_output(monkeypatch):
     assert sent[0] == "Websearch: foo bar"
 
 
+def test_auto_research_injects_context_and_calls_dispatcher_once(monkeypatch):
+    monkeypatch.setattr("amo_bot.telegram.dispatcher.AIRouter.decide", lambda self, **kwargs: _allowing_router_decision())
+    result = SimpleNamespace(allowed=True, decision="allow", reason="search_completed", text="fresh facts", sources=("https://a",), hosts=("a",), error=None)
+    d, sent = _mk_dispatcher(result)
+    calls = []
+
+    async def _ask(prompt: str) -> str:
+        calls.append(prompt)
+        return "normal ai"
+
+    d.ai_service.ask = _ask
+    asyncio.run(
+        d._maybe_handle_ai_autoreply(
+            message=_mk_message("@amo_bot Wie ist der aktuelle wetter stand heute?", reply_to_is_bot=False, reply_to_user_is_bot=False, reply_to_username=""),
+            role=Role.ADMIN,
+            bot_username="amo_bot",
+            from_parsed_update=True,
+        )
+    )
+    assert len(d.webtool_dispatcher.calls) == 1
+    assert sent[0] == "normal ai"
+    assert calls and "Aktueller Recherche-Kontext" in calls[0]
+
+
 def test_normal_autoreply_without_trigger_not_quota_limited(monkeypatch):
     monkeypatch.setattr("amo_bot.telegram.dispatcher.AIRouter.decide", lambda self, **kwargs: _allowing_router_decision())
     result = SimpleNamespace(allowed=False, decision="quota_exceeded", reason="quota_exceeded", text="", sources=(), hosts=(), error=None)

@@ -34,6 +34,7 @@ from amo_bot.telegram.commands import CommandContext, CommandRegistry, RoleResol
 from amo_bot.telegram.live_edit_adapter import DisabledTelegramLiveEditAdapter, TelegramLiveEditAdapter
 from amo_bot.telegram.owner_notify import OwnerNotifier
 from amo_bot.telegram.update_parser import TelegramMessage, parse_update
+from amo_bot.telegram.webtool_auto_research import decide_auto_research
 from amo_bot.telegram.webtool_chat_integration import (
     build_webtool_request,
     format_webtool_fail_text,
@@ -1227,6 +1228,62 @@ class Dispatcher:
             )
             return
 
+        auto_note = ""
+        if trigger is None and self.webtool_dispatcher is not None:
+            decision_auto = decide_auto_research(normalized_text)
+            if decision_auto.enabled:
+                req = build_webtool_request(
+                    trigger=type("_T", (), {
+                        "capability": decision_auto.capability,
+                        "query": decision_auto.query,
+                        "url": decision_auto.url,
+                    })(),
+                    user_id=message.from_user.id,
+                    role=role,
+                    chat_id=message.chat.id,
+                    topic_id=message.message_thread_id,
+                    locale=message_locale,
+                )
+                tool_result = self.webtool_dispatcher.execute(req)
+                log_event(
+                    logger,
+                    logging.INFO,
+                    event="ai.webtool.auto_research",
+                    component=_COMPONENT,
+                    chat_id=message.chat.id,
+                    message_id=message.message_id,
+                    message_thread_id=message.message_thread_id,
+                    user_id=message.from_user.id,
+                    extra={
+                        "mode": "auto",
+                        "operation": decision_auto.capability,
+                        "decision": decision_auto.reason,
+                        "status": "allow" if tool_result.allowed else "deny",
+                        "reason": tool_result.reason,
+                        "error_class": type(tool_result.error).__name__ if tool_result.error else None,
+                        "source_count": len(tool_result.sources),
+                        "host_count": len(tool_result.hosts),
+                        "scope": decision.context.scope_type,
+                    },
+                )
+                if tool_result.allowed and (tool_result.text or "").strip():
+                    compact_text = " ".join(tool_result.text.split())[:700]
+                    hosts = ", ".join((tool_result.hosts or ())[:5])
+                    auto_note = (
+                        "Aktueller Recherche-Kontext (automatisch, kurz):\n"
+                        f"Operation: {decision_auto.capability}\n"
+                        f"Zusammenfassung: {compact_text}\n"
+                        f"Quellen-Hosts: {hosts}\n"
+                        "Nutze dies nur als aktuelle Ergänzung; bei Widersprüchen transparent bleiben."
+                    )
+                else:
+                    auto_note = (
+                        "Aktueller Recherche-Kontext: Live-Webzugriff ist gerade nicht verfügbar "
+                        "(z. B. Limit/Provider/Timeout). Antworte transparent und erfinde keine aktuellen Fakten."
+                    )
+
+        if auto_note:
+            llm_prompt = f"{auto_note}\n\n{llm_prompt}"
 
         # Structured log: AI autoreply attempt
         timing: dict[str, Any] = {}
