@@ -24,6 +24,8 @@ from amo_bot.telegram.polling import OffsetStore, run_polling
 from amo_bot.telegram.role_resolver import DBRoleResolver
 from amo_bot.webui.flask_app import create_flask_app
 from amo_bot.ai.dreaming_runtime import DreamingRuntime
+from amo_bot.ai.webtool_dispatcher import WebtoolCapabilityDispatcher
+from amo_bot.db.repositories import WebToolRoleQuotaRepository
 
 
 logger = logging.getLogger(__name__)
@@ -244,6 +246,20 @@ def run(argv: list[str] | None = None) -> None:
         bot_username=settings.bot_username,
     )
 
+    class _SessionBoundWebtoolCapabilityDispatcher:
+        """Create quota repo + capability dispatcher per execute call using fresh DB session."""
+
+        def __init__(self, *, session_factory) -> None:
+            self._session_factory = session_factory
+
+        def execute(self, request):
+            with self._session_factory() as session:
+                quota_repo = WebToolRoleQuotaRepository(session)
+                dispatcher = WebtoolCapabilityDispatcher(quota_repo=quota_repo)
+                return dispatcher.execute(request)
+
+    webtool_dispatcher = _SessionBoundWebtoolCapabilityDispatcher(session_factory=session_factory)
+
     dispatcher = Dispatcher(
         command_registry=command_registry,
         role_resolver=role_resolver,
@@ -257,6 +273,7 @@ def run(argv: list[str] | None = None) -> None:
         database_url=settings.database_url,
         ai_service=ai_service,
         owner_notifier=owner_notifier,
+        webtool_dispatcher=webtool_dispatcher,
     )
 
     # Dreaming / Memory-Curation Runtime — disabled by default.

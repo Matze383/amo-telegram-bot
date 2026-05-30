@@ -34,6 +34,13 @@ from amo_bot.telegram.commands import CommandContext, CommandRegistry, RoleResol
 from amo_bot.telegram.live_edit_adapter import DisabledTelegramLiveEditAdapter, TelegramLiveEditAdapter
 from amo_bot.telegram.owner_notify import OwnerNotifier
 from amo_bot.telegram.update_parser import TelegramMessage, parse_update
+from amo_bot.telegram.webtool_chat_integration import (
+    build_webtool_request,
+    format_webtool_fail_text,
+    format_webtool_quota_text,
+    format_webtool_success_text,
+    parse_webtool_chat_trigger,
+)
 
 
 _COMPONENT = "telegram.dispatcher"
@@ -91,6 +98,7 @@ class Dispatcher:
     database_url: str | None = None
     owner_notifier: OwnerNotifier | None = None
     ai_service: Any | None = None
+    webtool_dispatcher: Any | None = None
     live_edit_adapter: TelegramLiveEditAdapter | None = None
     auto_image_followup_ttl_seconds: int = 180
     _recent_auto_image_candidates: list[_RecentAutoImageCandidate] = field(default_factory=list)
@@ -947,7 +955,17 @@ class Dispatcher:
 
         if self.database_url is None:
             class _NoopTopicAgentMemoryRepository:
-                pass
+                def get_config(self, **_kwargs: object) -> None:
+                    return None
+
+                def list_recent_messages(self, **_kwargs: object) -> list[Any]:
+                    return []
+
+                def get_daily_memory(self, **_kwargs: object) -> Any | None:
+                    return None
+
+                def list_long_memories(self, **_kwargs: object) -> list[Any]:
+                    return []
 
             router = AIRouter(topic_agent_memory_repository=_NoopTopicAgentMemoryRepository())
             topic_id = message.message_thread_id
@@ -1157,6 +1175,57 @@ class Dispatcher:
         is_triggered_path = decision_reason_value in explicit_trigger_reason_values
 
         message_locale = self._locale_for_message(message)
+
+        trigger = parse_webtool_chat_trigger(normalized_text)
+        if trigger is not None and self.webtool_dispatcher is not None:
+            req = build_webtool_request(
+                trigger=trigger,
+                user_id=message.from_user.id,
+                role=role,
+                chat_id=message.chat.id,
+                topic_id=message.message_thread_id,
+                locale=message_locale,
+            )
+            tool_result = self.webtool_dispatcher.execute(req)
+
+            log_event(
+                logger,
+                logging.INFO,
+                event="ai.webtool.chat_dispatch",
+                component=_COMPONENT,
+                chat_id=message.chat.id,
+                message_id=message.message_id,
+                message_thread_id=message.message_thread_id,
+                user_id=message.from_user.id,
+                extra={
+                    "operation": trigger.capability,
+                    "scope": decision.context.scope_type,
+                    "status": "allow" if tool_result.allowed else "deny",
+                    "decision": tool_result.decision,
+                    "reason": tool_result.reason,
+                    "error_class": type(tool_result.error).__name__ if tool_result.error else None,
+                    "source_count": len(tool_result.sources),
+                    "host_count": len(tool_result.hosts),
+                },
+            )
+
+            if not tool_result.allowed:
+                if tool_result.decision in {"deny", "quota_exceeded", "disabled"} or "quota" in tool_result.reason:
+                    await self._send_text(message.chat.id, format_webtool_quota_text(message_locale, role), message.message_thread_id)
+                else:
+                    await self._send_text(message.chat.id, format_webtool_fail_text(message_locale), message.message_thread_id)
+                return
+
+            if not (tool_result.text or "").strip():
+                await self._send_text(message.chat.id, format_webtool_fail_text(message_locale), message.message_thread_id)
+                return
+
+            await self._send_text(
+                message.chat.id,
+                format_webtool_success_text(locale=message_locale, capability=trigger.capability, text=tool_result.text),
+                message.message_thread_id,
+            )
+            return
 
 
         # Structured log: AI autoreply attempt
