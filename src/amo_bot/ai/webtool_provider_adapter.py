@@ -77,7 +77,7 @@ class _CorepluginSearchProviderAdapter:
         }
         try:
             with httpx.Client(timeout=1.5, follow_redirects=False, headers={"User-Agent": self._UA}) as client:
-                lite_response = client.get(self._LITE_ENDPOINT, params=params)
+                lite_response = client.post(self._LITE_ENDPOINT, data=params)
                 lite_results = _parse_ddg_lite_results(lite_response.text, limit) if lite_response.status_code < 400 else []
                 if lite_response.status_code < 500 and lite_results:
                     return tuple(lite_results)

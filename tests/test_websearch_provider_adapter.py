@@ -15,10 +15,12 @@ class _DummyClient:
         responses: dict[str, _DummyResponse],
         headers: dict[str, str] | None = None,
         on_get: Callable[[str, dict[str, str]], None] | None = None,
+        on_post: Callable[[str, dict[str, str]], None] | None = None,
     ) -> None:
         self._responses = responses
         self.headers = headers or {}
         self._on_get = on_get
+        self._on_post = on_post
 
     def __enter__(self):
         return self
@@ -31,6 +33,13 @@ class _DummyClient:
         assert "q" in params
         if self._on_get is not None:
             self._on_get(url, params)
+        return self._responses[url]
+
+    def post(self, url: str, data: dict[str, str]):
+        assert url.startswith("https://")
+        assert "q" in data
+        if self._on_post is not None:
+            self._on_post(url, data)
         return self._responses[url]
 
 
@@ -121,8 +130,8 @@ def test_ddg_adapter_never_sends_unsafe_en_en_locale(monkeypatch):
 
     observed_kl: list[str] = []
 
-    def _on_get(_url: str, params: dict[str, str]) -> None:
-        observed_kl.append(params.get("kl", ""))
+    def _on_post(_url: str, data: dict[str, str]) -> None:
+        observed_kl.append(data.get("kl", ""))
 
     monkeypatch.setattr(
         m.httpx,
@@ -135,7 +144,7 @@ def test_ddg_adapter_never_sends_unsafe_en_en_locale(monkeypatch):
                 ),
                 "https://html.duckduckgo.com/html/": _DummyResponse("", status_code=200),
             },
-            on_get=_on_get,
+            on_post=_on_post,
         ),
     )
 
@@ -148,7 +157,7 @@ def test_ddg_adapter_never_sends_unsafe_en_en_locale(monkeypatch):
     assert "en-us" in observed_kl
 
 
-def test_ddg_lite_adapter_parses_result_links(monkeypatch):
+def test_ddg_lite_adapter_parses_result_links_and_uses_post_form(monkeypatch):
     import amo_bot.ai.webtool_provider_adapter as m
 
     lite_html = '''
@@ -158,6 +167,11 @@ def test_ddg_lite_adapter_parses_result_links(monkeypatch):
     </body></html>
     '''
 
+    observed_posts: list[tuple[str, dict[str, str]]] = []
+
+    def _on_post(url: str, data: dict[str, str]) -> None:
+        observed_posts.append((url, data))
+
     monkeypatch.setattr(
         m.httpx,
         "Client",
@@ -165,7 +179,8 @@ def test_ddg_lite_adapter_parses_result_links(monkeypatch):
             {
                 "https://lite.duckduckgo.com/lite/": _DummyResponse(lite_html, status_code=200),
                 "https://html.duckduckgo.com/html/": _DummyResponse("", status_code=200),
-            }
+            },
+            on_post=_on_post,
         ),
     )
 
@@ -173,6 +188,9 @@ def test_ddg_lite_adapter_parses_result_links(monkeypatch):
     results = adapter.search(query="bitcoin", locale="en", safesearch="moderate", max_results=3)
 
     assert len(results) == 1
+    assert observed_posts
+    assert observed_posts[0][0] == "https://lite.duckduckgo.com/lite/"
+    assert observed_posts[0][1].get("q") == "bitcoin"
     assert results[0].url == "https://example.org/news"
     assert results[0].title == "Example News"
     assert "Fresh update" in results[0].snippet
