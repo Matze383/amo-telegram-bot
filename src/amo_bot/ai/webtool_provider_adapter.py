@@ -6,7 +6,8 @@ import socket
 from dataclasses import dataclass
 from html import unescape
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
+import base64
 
 import httpx
 
@@ -66,7 +67,9 @@ class RealWebsearchProviderAdapter:
 class _CorepluginSearchProviderAdapter:
     _HTML_ENDPOINT = "https://html.duckduckgo.com/html/"
     _LITE_ENDPOINT = "https://lite.duckduckgo.com/lite/"
-    _UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+    _BING_ENDPOINT = "https://www.bing.com/search"
+    _DDG_UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+    _BING_UA = "Mozilla/5.0"
 
     def search(self, *, query: str, locale: str, safesearch: str, max_results: int) -> tuple[WebsearchProviderResult, ...]:
         limit = min(max(int(max_results), 1), 5)
@@ -76,7 +79,11 @@ class _CorepluginSearchProviderAdapter:
             "kp": _normalize_ddg_safesearch(safesearch),
         }
         try:
-            with httpx.Client(timeout=1.5, follow_redirects=False, headers={"User-Agent": self._UA}) as client:
+            with httpx.Client(
+                timeout=1.5,
+                follow_redirects=False,
+                headers={"User-Agent": self._DDG_UA, "Accept-Language": "en-US,en;q=0.9"},
+            ) as client:
                 lite_response = client.post(self._LITE_ENDPOINT, data=params)
                 lite_results = _parse_ddg_lite_results(lite_response.text, limit) if lite_response.status_code < 400 else []
                 if lite_response.status_code < 500 and lite_results:
@@ -85,12 +92,23 @@ class _CorepluginSearchProviderAdapter:
                 html_response = client.get(self._HTML_ENDPOINT, params=params)
                 if html_response.status_code >= 500:
                     raise RuntimeError("websearch provider server error")
-                if html_response.status_code >= 400:
-                    if lite_response.status_code >= 500:
-                        raise RuntimeError("websearch provider server error")
-                    return ()
 
-                return tuple(_parse_ddg_html_results(html_response.text, limit))
+                ddg_results = (
+                    _parse_ddg_html_results(html_response.text, limit) if html_response.status_code < 400 else []
+                )
+                if ddg_results:
+                    return tuple(ddg_results)
+
+                bing_response = client.get(
+                    self._BING_ENDPOINT,
+                    params={"q": query},
+                    headers={"User-Agent": self._BING_UA},
+                )
+                if bing_response.status_code >= 500:
+                    raise RuntimeError("websearch provider server error")
+                if bing_response.status_code >= 400:
+                    return ()
+                return tuple(_parse_bing_html_results(bing_response.text, limit))
         except httpx.TimeoutException as exc:
             raise TimeoutError("websearch provider timeout") from exc
         except httpx.HTTPError as exc:
@@ -168,6 +186,72 @@ def _parse_ddg_lite_results(html: str, limit: int) -> list[WebsearchProviderResu
         if len(results) >= limit:
             break
     return results
+
+
+def _parse_bing_html_results(html: str, limit: int) -> list[WebsearchProviderResult]:
+    results: list[WebsearchProviderResult] = []
+    for block in re.finditer(r"<li[^>]*class=\"[^\"]*b_algo[^\"]*\"[^>]*>(.*?)</li>", html, flags=re.I | re.S):
+        li_html = block.group(1)
+        link_match = re.search(r"<h2[^>]*>\s*<a[^>]*href=\"([^\"]+)\"[^>]*>(.*?)</a>", li_html, flags=re.I | re.S)
+        if not link_match:
+            continue
+
+        raw_href = _bound_text(_strip_html(unescape(link_match.group(1))).strip(), 1000)
+        title = _bound_text(_strip_html(unescape(link_match.group(2))).strip(), 200)
+        if not raw_href or not title:
+            continue
+
+        resolved = _resolve_bing_result_url(raw_href)
+        if not resolved:
+            continue
+
+        snippet_match = re.search(
+            r'<div[^>]*class="[^\"]*b_caption[^\"]*"[^>]*>.*?<p[^>]*>(.*?)</p>|<p[^>]*>(.*?)</p>',
+            li_html,
+            flags=re.I | re.S,
+        )
+        snippet = ""
+        if snippet_match:
+            snippet = _bound_text(_strip_html(unescape(snippet_match.group(1) or snippet_match.group(2) or "")).strip(), 400)
+
+        results.append(WebsearchProviderResult(title=title, url=resolved, snippet=snippet))
+        if len(results) >= limit:
+            break
+
+    return results
+
+
+def _resolve_bing_result_url(url: str) -> str:
+    parsed = urlparse(url)
+    if parsed.scheme in {"http", "https"} and parsed.netloc and "bing.com/ck/a" not in url:
+        return _bound_text(parsed.geturl(), 1000)
+
+    host = (parsed.netloc or "").lower()
+    if not host.endswith("bing.com"):
+        return ""
+    if not parsed.path.startswith("/ck/a"):
+        return ""
+
+    raw_u = (parse_qs(parsed.query).get("u") or [""])[0]
+    if not raw_u.startswith("a1"):
+        return ""
+
+    payload = raw_u[2:]
+    if not payload:
+        return ""
+
+    try:
+        padded = payload + "=" * ((4 - len(payload) % 4) % 4)
+        decoded = base64.urlsafe_b64decode(padded.encode("ascii")).decode("utf-8", errors="ignore").strip()
+    except Exception:
+        return ""
+
+    target = decoded
+    if target.lower().startswith("http://") or target.lower().startswith("https://"):
+        parsed_target = urlparse(target)
+        if parsed_target.scheme in {"http", "https"} and parsed_target.netloc:
+            return _bound_text(parsed_target.geturl(), 1000)
+    return ""
 
 def _strip_html(value: str) -> str:
     return re.sub(r"<[^>]+>", "", value)

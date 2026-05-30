@@ -14,7 +14,7 @@ class _DummyClient:
         self,
         responses: dict[str, _DummyResponse],
         headers: dict[str, str] | None = None,
-        on_get: Callable[[str, dict[str, str]], None] | None = None,
+        on_get: Callable[[str, dict[str, str], dict[str, str]], None] | None = None,
         on_post: Callable[[str, dict[str, str]], None] | None = None,
     ) -> None:
         self._responses = responses
@@ -28,11 +28,11 @@ class _DummyClient:
     def __exit__(self, exc_type, exc, tb):
         return False
 
-    def get(self, url: str, params: dict[str, str]):
+    def get(self, url: str, params: dict[str, str], headers: dict[str, str] | None = None):
         assert url.startswith("https://")
         assert "q" in params
         if self._on_get is not None:
-            self._on_get(url, params)
+            self._on_get(url, params, headers or {})
         return self._responses[url]
 
     def post(self, url: str, data: dict[str, str]):
@@ -86,7 +86,8 @@ def test_ddg_adapter_handles_4xx_as_empty(monkeypatch):
         lambda **kwargs: _DummyClient(
             {
                 "https://lite.duckduckgo.com/lite/": _DummyResponse("", status_code=403),
-                "https://html.duckduckgo.com/html/": _DummyResponse("", status_code=403),
+                "https://html.duckduckgo.com/html/": _DummyResponse("", status_code=200),
+                "https://www.bing.com/search": _DummyResponse("", status_code=403),
             }
         ),
     )
@@ -95,19 +96,26 @@ def test_ddg_adapter_handles_4xx_as_empty(monkeypatch):
     assert adapter.search(query="x", locale="en", safesearch="moderate", max_results=3) == ()
 
 
-def test_ddg_adapter_uses_browserlike_user_agent(monkeypatch):
+def test_ddg_and_bing_use_split_user_agents(monkeypatch):
     import amo_bot.ai.webtool_provider_adapter as m
 
     captured: dict[str, str] = {}
+    bing_ua: list[str] = []
+
+    def _on_get(url: str, _params: dict[str, str], headers: dict[str, str]) -> None:
+        if url == "https://www.bing.com/search":
+            bing_ua.append(headers.get("User-Agent", ""))
 
     def _client_factory(**kwargs):
         captured.update(kwargs.get("headers") or {})
         return _DummyClient(
             {
                 "https://lite.duckduckgo.com/lite/": _DummyResponse("", status_code=403),
-                "https://html.duckduckgo.com/html/": _DummyResponse("", status_code=403),
+                "https://html.duckduckgo.com/html/": _DummyResponse("", status_code=200),
+                "https://www.bing.com/search": _DummyResponse("", status_code=403),
             },
             headers=kwargs.get("headers"),
+            on_get=_on_get,
         )
 
     monkeypatch.setattr(m.httpx, "Client", _client_factory)
@@ -115,9 +123,11 @@ def test_ddg_adapter_uses_browserlike_user_agent(monkeypatch):
     adapter = _CorepluginSearchProviderAdapter()
     adapter.search(query="x", locale="en", safesearch="moderate", max_results=3)
 
-    ua = captured.get("User-Agent", "")
-    assert "Mozilla/5.0" in ua
-    assert "amo-bot-websearch" not in ua
+    ddg_ua = captured.get("User-Agent", "")
+    assert "Mozilla/5.0" in ddg_ua
+    assert "Chrome/124" in ddg_ua
+    assert "amo-bot-websearch" not in ddg_ua
+    assert bing_ua == ["Mozilla/5.0"]
 
 
 def test_normalize_ddg_locale_maps_en_and_de_to_safe_values():
@@ -194,3 +204,36 @@ def test_ddg_lite_adapter_parses_result_links_and_uses_post_form(monkeypatch):
     assert results[0].url == "https://example.org/news"
     assert results[0].title == "Example News"
     assert "Fresh update" in results[0].snippet
+
+
+def test_fallback_to_bing_after_ddg_lite_403_and_ddg_html_202(monkeypatch):
+    import amo_bot.ai.webtool_provider_adapter as m
+
+    bing_html = '''
+    <html><body>
+      <li class="b_algo">
+        <h2><a href="https://www.bing.com/ck/a?!&&p=xyz&u=a1aHR0cHM6Ly9leGFtcGxlLm9yZy9uZXdz&ntb=1">Example Result</a></h2>
+        <div class="b_caption"><p>Bing snippet text about topic.</p></div>
+      </li>
+    </body></html>
+    '''
+
+    monkeypatch.setattr(
+        m.httpx,
+        "Client",
+        lambda **kwargs: _DummyClient(
+            {
+                "https://lite.duckduckgo.com/lite/": _DummyResponse("", status_code=403),
+                "https://html.duckduckgo.com/html/": _DummyResponse("", status_code=202),
+                "https://www.bing.com/search": _DummyResponse(bing_html, status_code=200),
+            }
+        ),
+    )
+
+    adapter = _CorepluginSearchProviderAdapter()
+    results = adapter.search(query="bitcoin", locale="en", safesearch="moderate", max_results=5)
+
+    assert len(results) == 1
+    assert results[0].url == "https://example.org/news"
+    assert results[0].title == "Example Result"
+    assert "Bing snippet" in results[0].snippet
