@@ -8,8 +8,9 @@ class _DummyResponse:
 
 
 class _DummyClient:
-    def __init__(self, responses: dict[str, _DummyResponse]) -> None:
+    def __init__(self, responses: dict[str, _DummyResponse], headers: dict[str, str] | None = None) -> None:
         self._responses = responses
+        self.headers = headers or {}
 
     def __enter__(self):
         return self
@@ -73,6 +74,31 @@ def test_ddg_adapter_handles_4xx_as_empty(monkeypatch):
 
     adapter = _CorepluginSearchProviderAdapter()
     assert adapter.search(query="x", locale="en", safesearch="moderate", max_results=3) == ()
+
+
+def test_ddg_adapter_uses_browserlike_user_agent(monkeypatch):
+    import amo_bot.ai.webtool_provider_adapter as m
+
+    captured: dict[str, str] = {}
+
+    def _client_factory(**kwargs):
+        captured.update(kwargs.get("headers") or {})
+        return _DummyClient(
+            {
+                "https://lite.duckduckgo.com/lite/": _DummyResponse("", status_code=403),
+                "https://html.duckduckgo.com/html/": _DummyResponse("", status_code=403),
+            },
+            headers=kwargs.get("headers"),
+        )
+
+    monkeypatch.setattr(m.httpx, "Client", _client_factory)
+
+    adapter = _CorepluginSearchProviderAdapter()
+    adapter.search(query="x", locale="en", safesearch="moderate", max_results=3)
+
+    ua = captured.get("User-Agent", "")
+    assert "Mozilla/5.0" in ua
+    assert "amo-bot-websearch" not in ua
 
 
 def test_ddg_lite_adapter_parses_result_links(monkeypatch):

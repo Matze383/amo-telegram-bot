@@ -66,7 +66,7 @@ class RealWebsearchProviderAdapter:
 class _CorepluginSearchProviderAdapter:
     _HTML_ENDPOINT = "https://html.duckduckgo.com/html/"
     _LITE_ENDPOINT = "https://lite.duckduckgo.com/lite/"
-    _UA = "amo-bot-websearch/1.0"
+    _UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 
     def search(self, *, query: str, locale: str, safesearch: str, max_results: int) -> tuple[WebsearchProviderResult, ...]:
         limit = min(max(int(max_results), 1), 5)
