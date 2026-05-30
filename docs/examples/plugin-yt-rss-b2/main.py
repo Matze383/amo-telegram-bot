@@ -108,25 +108,21 @@ def _extract_uc_id_from_text(body: str) -> str | None:
             start = idx + 1
 
     if result is not None:
-        # Fail-closed for handle URLs: if the first match appears in a
-        # recommendation/sidebar-like pattern (early in body, after typical
-        # recommendation block markers like "recommendations", "recs",
-        # "sidebar", "watch-next" etc.), and no channelMetadataRenderer
-        # or strong canonical signal was found, reject rather than risk
-        # picking a wrong channel from recommendation content.
-        # We identify recommendation context by checking if the match position
-        # is within the first 2KB AND the preceding 150 chars contain
-        # recommendation-like keywords.
-        if first_match_pos < 2048:
-            window = body[max(0, first_match_pos - 150) : first_match_pos + 1].lower()
-            rec_indicators = ['recommendation', 'recs', 'sidebar', 'watch-next', 'related',
-                              'browse-id', 'continuation', 'grid-renderer']
-            # Check if this looks like a recommendation block by seeing if
-            # the preceding content has recommendation-like structure:
-            # recommendation blocks typically have the browseId inside an array
-            # with other metadata, within the first 2KB of body.
-            # If so, reject to avoid wrong channel selection.
-            pass  # keep the result for now — strict check disabled for compatibility
+        # Fail-closed for recommendation/sidebar context:
+        # If the first match appears early in the body within recommendation-like
+        # patterns (within the first 3 KB and preceded by recommendation indicators),
+        # reject it — we have no strong canonical signal, so picking a generic
+        # browseId from recommendation blocks risks subscribing to the wrong channel.
+        if first_match_pos < 3072:
+            window = body[max(0, first_match_pos - 200) : first_match_pos + 1].lower()
+            rec_indicators = [
+                "recommendation", "recs", "sidebar", "watch-next", "related",
+                "browse-id", "continuation", "grid-renderer", "videoRenderer",
+                "compact-video", "item-section",
+            ]
+            if any(indicator in window for indicator in rec_indicators):
+                # Recommendation-only page — fail closed rather than pick wrong channel.
+                return None
 
         return result
 
@@ -581,8 +577,6 @@ async def handle_schedule(context, host_api):
                 extra={
                     "subscription_key": sub_key,
                     "channel_key": sub.channel_key,
-                    "source_url": sub.source_url,
-                    "rss_url": sub.rss_url,
                 },
             )
 

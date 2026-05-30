@@ -1151,22 +1151,25 @@ def test_resolver_prefers_channelmetadatarenderer_externalid_over_generic_browse
 def test_resolver_falls_back_to_structured_match_when_no_canonical_signal(tmp_path) -> None:
     """When the page has no channelMetadataRenderer.externalId, no ytcfg.set CHANNEL_ID,
     no canonicalBaseUrl, and no meta channelId — but does contain structured browseId
-    entries in JSON arrays — the resolver falls back to the first structured match.
+    entries in non-recommendation JSON context — the resolver falls back to the first
+    structured match.
 
-    The fail-closed guarantee (strict rejection of ambiguous pages) is not implemented
-    because reliable ambiguity detection requires more context than available in
-    a simple HTML parse. The key fix is that channelMetadataRenderer.externalId is
-    preferred when present, so this test documents the fallback behavior.
+    The recommendation-only case (recommendation/sidebar/watch-next context) is handled
+    by test_resolver_fails_closed_on_recommendation_only_page and correctly returns
+    resolver_no_channel_id. This test uses browseId/channelId in a neutral context
+    (no recommendation indicators in the preceding 200 chars), so fail-closed does not
+    trigger and the first structured match is accepted.
     """
     plugin_main = _load_plugin_main()
 
-    # HTML with only generic browseId UC IDs in JSON structures.
-    # No channelMetadataRenderer.externalId, no ytcfg.set CHANNEL_ID,
-    # no canonicalBaseUrl, no meta channelId.
+    # HTML where UC IDs appear in structured JSON but NOT in recommendation/sidebar
+    # patterns — no rec_indicators in the preceding window. The resolver accepts
+    # the first structured match as a fallback since there is no canonical signal
+    # AND no recommendation context to trigger fail-closed.
     html = (
         '<html><body>'
-        '<script>var recs = [{"browseId":"UCRECOMMEND1"}, {"browseId":"UCRECOMMEND2"}];</script>'
-        '<script>var sidebar = {"channelId":"UC_SIDEBAR3"};</script>'
+        '<script>var config = {"channelId":"UCSTRUCTURED1"};</script>'
+        '<script>var nav = {"browseId":"UCSTRUCTURED2"};</script>'
         "</body></html>"
     )
 
@@ -1174,14 +1177,111 @@ def test_resolver_falls_back_to_structured_match_when_no_canonical_signal(tmp_pa
         return 200, html
 
     result = plugin_main.resolve_youtube_channel_input(
-        "https://youtube.com/@ambiguous_handle",
+        "https://youtube.com/@some_handle",
         http_get_text=fake_http,
     )
-    # Accepts the first structured match as fallback (current behavior).
-    assert result["channel_key"] in ("UCRECOMMEND1", "UC_SIDEBAR3")
+    # Accepts the first structured match as fallback (no canonical signal, no rec context).
+    assert result["channel_key"] == "UCSTRUCTURED1"
 
 
-def test_schedule_emits_per_subscription_diagnostic_fields(tmp_path, monkeypatch, caplog) -> None:
+def test_resolver_fails_closed_on_recommendation_only_page() -> None:
+    """When the page contains UC IDs only in recommendation/sidebar/watch-next
+    contexts and has NO strong canonical signal (no channelMetadataRenderer.externalId,
+    no ytcfg.set CHANNEL_ID, no canonicalBaseUrl, no meta channelId), the resolver
+    must fail with resolver_no_channel_id rather than pick a wrong channel ID.
+
+    This is the fail-closed guarantee for ambiguous/generic HTML where only
+    recommendation-block browseIds are found.
+    """
+    plugin_main = _load_plugin_main()
+
+    # HTML simulating a recommendation-only page (e.g. watch-next sidebar)
+    # with UC IDs only in videoRenderer/browseId contexts — no canonical signal.
+    html = (
+        '<html><body>'
+        '<script>var recs = [{"browseId":"UCSIDEBAR1","title":"Video A"},'
+        '{"browseId":"UCSIDEBAR2","title":"Video B"}];</script>'
+        '<script>var renderer = {"videoRenderer":{"videoId":"abc","browseId":"UCWRONGGG"}};</script>'
+        '<script>var itemSection = {"itemSectionRenderer":{"contents":[{"compact-video-renderer":{"browseId":"UCRECOMEND3"}}]}};</script>'
+        '</body></html>'
+    )
+
+    def fake_http(_url: str):
+        return 200, html
+
+    try:
+        plugin_main.resolve_youtube_channel_input(
+            "https://youtube.com/@some_handle",
+            http_get_text=fake_http,
+        )
+        assert False, "expected ValueError 'resolver_no_channel_id'"
+    except ValueError as exc:
+        assert str(exc) == "resolver_no_channel_id", (
+            f"Expected resolver_no_channel_id for recommendation-only page, got {exc!r}"
+        )
+
+
+def test_schedule_poll_start_log_excludes_source_url_and_rss_url(tmp_path, monkeypatch, caplog) -> None:
+    """yt_rss subscription poll start must not include source_url or rss_url fields.
+    Only safe metadata fields (subscription_key, channel_key) are permitted.
+    """
+    plugin_main = _load_plugin_main()
+    repo_module = _load_repo_module()
+    repo = repo_module.YtRssStateRepository(tmp_path / "state_poll")
+    monkeypatch.setattr(plugin_main, "_repo_for_context", lambda context: repo)
+
+    repo.add_subscription(
+        chat_id=600,
+        thread_id=60,
+        channel_key="UC_POLLSTART",
+        source_url="https://youtube.com/@secret_channel",
+        canonical_channel_url="https://www.youtube.com/channel/UC_POLLSTART",
+        rss_url="https://www.youtube.com/feeds/videos.xml?channel_id=UC_POLLSTART",
+        added_by_user_id=1,
+    )
+
+    class Host:
+        def __init__(self):
+            self.sent = []
+
+        async def rss_fetch(self, url):
+            return {"entries": [{"id": "p1", "title": "posted", "link": "https://x/p1"}]}
+
+        async def send_message(self, chat_id, text, message_thread_id=None):
+            self.sent.append((chat_id, message_thread_id, text))
+
+    host = Host()
+    repo.set_cursor(chat_id=600, thread_id=60, channel_key="UC_POLLSTART", cursor="old", dedupe=["old"])
+
+    with caplog.at_level(logging.INFO, logger="amo.plugins.yt_rss"):
+        asyncio.run(plugin_main.handle_schedule(object(), host))
+
+    poll_start_logs = [r for r in caplog.records if r.msg == "yt_rss subscription poll start"]
+    assert poll_start_logs, "No 'yt_rss subscription poll start' log emitted"
+    rec = poll_start_logs[0]
+
+    # Allowed fields only
+    assert hasattr(rec, "subscription_key"), "poll start must have subscription_key"
+    assert hasattr(rec, "channel_key"), "poll start must have channel_key"
+
+    # Forbidden fields must not exist on the record
+    extra_dict = getattr(rec, "extra", {})
+    assert "source_url" not in extra_dict, (
+        f"source_url must not appear in poll start log. "
+        f"Fields: {list(extra_dict.keys())}"
+    )
+    assert "rss_url" not in extra_dict, (
+        f"rss_url must not appear in poll start log. "
+        f"Fields: {list(extra_dict.keys())}"
+    )
+
+    # Verify no URL strings leaked into any log message
+    rendered = "\n".join(caplog.messages)
+    assert "@secret_channel" not in rendered, "source URL leaked into logs"
+    assert "feeds/videos.xml" not in rendered, "rss URL leaked into logs"
+
+
+
     """Per-subscription log entries must include channel_key, thread, status,
     feed_entry_count, new_count, op_count, cursor_changed, and error_class/reason.
     No video titles, URLs, message text, or secrets must appear.
