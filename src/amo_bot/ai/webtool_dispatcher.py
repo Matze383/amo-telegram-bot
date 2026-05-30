@@ -98,6 +98,8 @@ def _map_operation_type(capability: str) -> str:
         return WebtoolOperationType.WEBSEARCH
     if normalized == "webscraping":
         return WebtoolOperationType.WEBSCRAPING
+    if normalized == "browser":
+        return WebtoolOperationType.BROWSER
     return normalized
 
 

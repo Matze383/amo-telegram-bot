@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from amo_bot.ai.webtool_dispatcher import WebtoolCapabilityRequest
+from amo_bot.ai.webtool_provider_adapter import RealBrowserProviderAdapter
+from amo_bot.ai.webtool_subagent import create_webtool_subagent_service
 from amo_bot.auth.roles import Role
 from amo_bot.db.base import create_session_factory
 from amo_bot.db.init_db import init_db
@@ -22,7 +24,12 @@ def test_runtime_like_webtool_dispatcher_wrapper_uses_fresh_session(tmp_path):
 
             with self._session_factory() as session:
                 repo = WebToolRoleQuotaRepository(session)
-                dispatcher = WebtoolCapabilityDispatcher(quota_repo=repo)
+                browser_provider = None
+                candidate = RealBrowserProviderAdapter(deps=None)
+                if candidate.available:
+                    browser_provider = candidate
+                service = create_webtool_subagent_service(quota_repo=repo, browser_provider=browser_provider)
+                dispatcher = WebtoolCapabilityDispatcher(quota_repo=repo, service=service)
                 return dispatcher.execute(request)
 
     wrapper = _SessionBoundWebtoolCapabilityDispatcher(session_factory=session_factory)

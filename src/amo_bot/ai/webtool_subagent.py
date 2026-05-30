@@ -150,6 +150,15 @@ class WebtoolScrapeProvider(Protocol):
         ...
 
 
+
+
+class WebtoolBrowserProvider(Protocol):
+    """Protocol for browser provider implementations."""
+
+    def render(self, *, url: str, timeout_seconds: float) -> dict[str, object]:
+        """Return dict with url/status_code/text."""
+        ...
+
 class WebtoolSubagentService:
     """Service for executing webtools with quota checks and sanitization.
 
@@ -173,12 +182,14 @@ class WebtoolSubagentService:
         quota_repo: WebToolRoleQuotaRepository,
         search_provider: WebtoolSearchProvider | None = None,
         scrape_provider: WebtoolScrapeProvider | None = None,
+        browser_provider: WebtoolBrowserProvider | None = None,
         search_timeout_seconds: float = _DEFAULT_SEARCH_TIMEOUT_SECONDS,
         scrape_timeout_seconds: float = _DEFAULT_SCRAPE_TIMEOUT_SECONDS,
     ) -> None:
         self._quota_repo = quota_repo
         self._search_provider = search_provider
         self._scrape_provider = scrape_provider
+        self._browser_provider = browser_provider
         self._search_timeout = search_timeout_seconds
         self._scrape_timeout = scrape_timeout_seconds
 
@@ -236,8 +247,7 @@ class WebtoolSubagentService:
             elif request.operation_type == WebtoolOperationType.WEBSCRAPING:
                 return self._execute_webscraping(request, metadata)
             elif request.operation_type == WebtoolOperationType.BROWSER:
-                # Browser is unsupported/fail-closed by default
-                return self._unsupported_result(request, metadata, "browser_not_implemented")
+                return self._execute_browser(request, metadata)
             else:
                 return self._unsupported_result(request, metadata, "unknown_operation_type")
         except Exception as exc:
@@ -382,6 +392,63 @@ class WebtoolSubagentService:
                 sanitized=self._empty_result(),
                 metadata=metadata,
                 error=f"Scrape failed: {type(exc).__name__}",
+            )
+
+    def _execute_browser(
+        self, request: WebtoolSubagentRequest, metadata: dict
+    ) -> WebtoolSubagentResult:
+        if self._browser_provider is None:
+            return WebtoolSubagentResult(
+                allowed=False,
+                decision="provider_unavailable",
+                reason="browser_provider_not_configured",
+                sanitized=self._empty_result(),
+                metadata=metadata,
+                error="No browser provider configured",
+            )
+        try:
+            result = self._browser_provider.render(url=request.url, timeout_seconds=self._scrape_timeout)
+            status_code = int(result.get("status_code", 0) or 0)
+            if not (200 <= status_code < 300):
+                return WebtoolSubagentResult(
+                    allowed=False,
+                    decision="deny",
+                    reason=f"http_error_{status_code}",
+                    sanitized=self._empty_result(),
+                    metadata=metadata,
+                    error=f"HTTP error: {status_code}",
+                )
+            sanitized = self._sanitize_scrape_result(result)
+            return WebtoolSubagentResult(
+                allowed=True,
+                decision="allow",
+                reason="browser_completed",
+                sanitized=WebtoolSanitizedResult(
+                    text=sanitized.text,
+                    sources=sanitized.sources,
+                    hosts=sanitized.hosts,
+                    result_type="browser_text",
+                ),
+                metadata=metadata,
+                error=None,
+            )
+        except TimeoutError:
+            return WebtoolSubagentResult(
+                allowed=False,
+                decision="deny",
+                reason="browser_timeout",
+                sanitized=self._empty_result(),
+                metadata=metadata,
+                error="Browser operation timed out",
+            )
+        except Exception as exc:
+            return WebtoolSubagentResult(
+                allowed=False,
+                decision="deny",
+                reason="browser_failed",
+                sanitized=self._empty_result(),
+                metadata=metadata,
+                error=f"Browser failed: {type(exc).__name__}",
             )
 
     def _sanitize_search_results(self, results: list[dict[str, str]]) -> WebtoolSanitizedResult:
@@ -566,6 +633,7 @@ def create_webtool_subagent_service(
     use_fake_providers: bool = False,
     search_provider: WebtoolSearchProvider | None = None,
     scrape_provider: WebtoolScrapeProvider | None = None,
+    browser_provider: WebtoolBrowserProvider | None = None,
 ) -> WebtoolSubagentService:
     """Factory to create webtool subagent service.
 
@@ -590,6 +658,7 @@ def create_webtool_subagent_service(
             quota_repo=quota_repo,
             search_provider=search_provider,
             scrape_provider=scrape_provider,
+            browser_provider=browser_provider,
         )
 
     if use_fake_providers:
@@ -601,4 +670,5 @@ def create_webtool_subagent_service(
         quota_repo=quota_repo,
         search_provider=search_provider,
         scrape_provider=scrape_provider,
+        browser_provider=browser_provider,
     )

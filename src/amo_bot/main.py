@@ -25,6 +25,8 @@ from amo_bot.telegram.role_resolver import DBRoleResolver
 from amo_bot.webui.flask_app import create_flask_app
 from amo_bot.ai.dreaming_runtime import DreamingRuntime
 from amo_bot.ai.webtool_dispatcher import WebtoolCapabilityDispatcher
+from amo_bot.ai.webtool_provider_adapter import RealBrowserProviderAdapter
+from amo_bot.ai.webtool_subagent import create_webtool_subagent_service
 from amo_bot.db.repositories import WebToolRoleQuotaRepository
 
 
@@ -255,7 +257,15 @@ def run(argv: list[str] | None = None) -> None:
         def execute(self, request):
             with self._session_factory() as session:
                 quota_repo = WebToolRoleQuotaRepository(session)
-                dispatcher = WebtoolCapabilityDispatcher(quota_repo=quota_repo)
+                browser_provider = None
+                candidate = RealBrowserProviderAdapter()
+                if candidate.available:
+                    browser_provider = candidate
+                service = create_webtool_subagent_service(
+                    quota_repo=quota_repo,
+                    browser_provider=browser_provider,
+                )
+                dispatcher = WebtoolCapabilityDispatcher(quota_repo=quota_repo, service=service)
                 return dispatcher.execute(request)
 
     webtool_dispatcher = _SessionBoundWebtoolCapabilityDispatcher(session_factory=session_factory)

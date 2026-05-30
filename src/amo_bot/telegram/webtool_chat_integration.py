@@ -16,6 +16,7 @@ class WebtoolChatTrigger:
 
 _WEBSEARCH_PREFIX_RE = re.compile(r"^\s*websearch\s*:\s*(.+)$", re.IGNORECASE | re.DOTALL)
 _WEBSCRAPE_PREFIX_RE = re.compile(r"^\s*webscrape\s*:\s*(.+)$", re.IGNORECASE | re.DOTALL)
+_WEBBROWSER_PREFIX_RE = re.compile(r"^\s*(?:webbrowser|browser)\s*:\s*(.+)$", re.IGNORECASE | re.DOTALL)
 
 
 def parse_webtool_chat_trigger(text: str) -> WebtoolChatTrigger | None:
@@ -35,6 +36,13 @@ def parse_webtool_chat_trigger(text: str) -> WebtoolChatTrigger | None:
         payload = m_scrape.group(1).strip()
         if payload and (payload.startswith("http://") or payload.startswith("https://")):
             return WebtoolChatTrigger(capability="webscraping", query="", url=payload)
+        return None
+
+    m_browser = _WEBBROWSER_PREFIX_RE.match(raw)
+    if m_browser:
+        payload = m_browser.group(1).strip()
+        if payload and payload.startswith("https://"):
+            return WebtoolChatTrigger(capability="browser", query="", url=payload)
         return None
 
     return None
@@ -75,7 +83,12 @@ def format_webtool_quota_text(locale: str, role: Role) -> str:
 
 
 def format_webtool_success_text(*, locale: str, capability: str, text: str) -> str:
-    label = "Websearch" if capability == "websearch" else "Webscrape"
+    if capability == "websearch":
+        label = "Websearch"
+    elif capability == "webscraping":
+        label = "Webscrape"
+    else:
+        label = "Browser"
     prefix = f"{label}: " if locale == "en" else f"{label}: "
     compact = " ".join((text or "").split())
     if len(compact) > 700:
