@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import ipaddress
+import re
 import socket
 from dataclasses import dataclass
+from html import unescape
 from typing import Any
 from urllib.parse import urlparse
+
+import httpx
 
 from .websearch_coreplugin import (
     WebsearchInput,
@@ -59,8 +63,72 @@ class RealWebsearchProviderAdapter:
 
 
 class _CorepluginSearchProviderAdapter:
+    _ENDPOINT = "https://html.duckduckgo.com/html/"
+    _UA = "amo-bot-websearch/1.0"
+
     def search(self, *, query: str, locale: str, safesearch: str, max_results: int) -> tuple[WebsearchProviderResult, ...]:
-        return ()
+        limit = min(max(int(max_results), 1), 5)
+        params = {
+            "q": query,
+            "kl": _normalize_ddg_locale(locale),
+            "kp": _normalize_ddg_safesearch(safesearch),
+        }
+        try:
+            with httpx.Client(timeout=1.5, follow_redirects=False, headers={"User-Agent": self._UA}) as client:
+                response = client.get(self._ENDPOINT, params=params)
+        except httpx.TimeoutException as exc:
+            raise TimeoutError("websearch provider timeout") from exc
+        except httpx.HTTPError as exc:
+            raise RuntimeError("websearch provider request failed") from exc
+
+        if response.status_code >= 500:
+            raise RuntimeError("websearch provider server error")
+        if response.status_code >= 400:
+            return ()
+
+        return tuple(_parse_ddg_html_results(response.text, limit))
+
+
+def _normalize_ddg_locale(locale: str) -> str:
+    candidate = (locale or "").strip().lower()
+    if not candidate:
+        return "en-us"
+    if "-" not in candidate:
+        return f"{candidate}-{candidate}"
+    return candidate
+
+
+def _normalize_ddg_safesearch(safesearch: str) -> str:
+    normalized = (safesearch or "moderate").strip().lower()
+    if normalized == "strict":
+        return "1"
+    if normalized == "off":
+        return "-1"
+    return "-1"
+
+
+def _parse_ddg_html_results(html: str, limit: int) -> list[WebsearchProviderResult]:
+    results: list[WebsearchProviderResult] = []
+    for match in re.finditer(r'<a[^>]*class="[^"]*result__a[^"]*"[^>]*href="([^"]+)"[^>]*>(.*?)</a>', html, flags=re.I | re.S):
+        href = _strip_html(unescape(match.group(1))).strip()
+        title = _strip_html(unescape(match.group(2))).strip()
+        if not href or not title or not href.startswith("http"):
+            continue
+
+        snippet = ""
+        tail = html[match.end(): match.end() + 2000]
+        snippet_match = re.search(r'<a[^>]*class="[^"]*result__snippet[^"]*"[^>]*>(.*?)</a>|<div[^>]*class="[^"]*result__snippet[^"]*"[^>]*>(.*?)</div>', tail, flags=re.I | re.S)
+        if snippet_match:
+            snippet = _strip_html(unescape(snippet_match.group(1) or snippet_match.group(2) or "")).strip()
+
+        results.append(WebsearchProviderResult(title=title, url=href, snippet=snippet))
+        if len(results) >= limit:
+            break
+    return results
+
+
+def _strip_html(value: str) -> str:
+    return re.sub(r"<[^>]+>", "", value)
 
 
 def _build_websearch_provider_config(

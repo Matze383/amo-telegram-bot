@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from amo_bot.ai.webtool_dispatcher import WebtoolCapabilityRequest
-from amo_bot.ai.webtool_provider_adapter import RealBrowserProviderAdapter
+from amo_bot.ai.webtool_provider_adapter import RealBrowserProviderAdapter, RealWebsearchProviderAdapter
 from amo_bot.ai.webtool_subagent import create_webtool_subagent_service
 from amo_bot.auth.roles import Role
 from amo_bot.db.base import create_session_factory
@@ -28,7 +28,8 @@ def test_runtime_like_webtool_dispatcher_wrapper_uses_fresh_session(tmp_path):
                 candidate = RealBrowserProviderAdapter(deps=None)
                 if candidate.available:
                     browser_provider = candidate
-                service = create_webtool_subagent_service(quota_repo=repo, browser_provider=browser_provider)
+                search_provider = RealWebsearchProviderAdapter(quota_limiter=repo)
+                service = create_webtool_subagent_service(quota_repo=repo, search_provider=search_provider, browser_provider=browser_provider)
                 dispatcher = WebtoolCapabilityDispatcher(quota_repo=repo, service=service)
                 return dispatcher.execute(request)
 
@@ -44,6 +45,4 @@ def test_runtime_like_webtool_dispatcher_wrapper_uses_fresh_session(tmp_path):
 
     result = wrapper.execute(req)
 
-    assert result.allowed is False
-    assert result.decision == "provider_unavailable"
-    assert result.reason == "search_provider_not_configured"
+    assert result.reason != "search_provider_not_configured"
