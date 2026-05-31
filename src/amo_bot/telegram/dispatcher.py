@@ -214,6 +214,7 @@ class Dispatcher:
         if command is None:
             is_addressed_for_auto_image = self._is_addressed_for_auto_image(message=message, bot_username=self.bot_username)
             followup_candidate = self._resolve_auto_image_followup_candidate(message=message)
+            reply_to_attachment_source = self._resolve_reply_to_auto_image_attachments(message=message)
             followup_source = "none"
             followup_candidate_age_seconds: int | None = None
             effective_attachments = message.attachments
@@ -224,8 +225,11 @@ class Dispatcher:
                     int((datetime.now(UTC) - followup_candidate.observed_at).total_seconds()),
                 )
                 effective_attachments = followup_candidate.attachments
+            elif reply_to_attachment_source is not None:
+                followup_source = "reply_to_message"
+                effective_attachments = reply_to_attachment_source
 
-            if not message.attachments and followup_candidate is None:
+            if not message.attachments and followup_candidate is None and reply_to_attachment_source is None:
                 log_event(
                     logger, logging.INFO,
                     event="auto_image.decision",
@@ -331,6 +335,22 @@ class Dispatcher:
                             "source": followup_source,
                             "image_message_id": followup_candidate.message_id,
                             "age_seconds": followup_candidate_age_seconds,
+                            "attachment_count": len(effective_attachments),
+                        },
+                    )
+                elif reply_to_attachment_source is not None:
+                    log_event(
+                        logger, logging.INFO,
+                        event="auto_image.followup_bridge",
+                        component=_COMPONENT,
+                        update_id=update.update_id,
+                        chat_id=message.chat.id,
+                        message_id=message.message_id,
+                        message_thread_id=message.message_thread_id,
+                        user_id=message.from_user.id,
+                        extra={
+                            "source": followup_source,
+                            "image_message_id": getattr(message, "reply_to_message_id", None),
                             "attachment_count": len(effective_attachments),
                         },
                     )
@@ -1417,6 +1437,29 @@ class Dispatcher:
         )
         pruned.sort(key=lambda item: item.observed_at, reverse=True)
         setattr(self, "_recent_auto_image_candidates", pruned[:128])
+
+    def _resolve_reply_to_auto_image_attachments(self, *, message: TelegramMessage) -> tuple[Any, ...] | None:
+        if message.attachments:
+            return None
+        if message.chat.type == "private":
+            return None
+        if not self._is_addressed_for_auto_image(message=message, bot_username=self.bot_username):
+            return None
+
+        reply_to_message = getattr(message, "reply_to_message", None)
+        if reply_to_message is None:
+            return None
+        if reply_to_message.chat_id != message.chat.id:
+            return None
+        if reply_to_message.message_thread_id != message.message_thread_id:
+            return None
+
+        attachments = tuple(
+            item
+            for item in getattr(reply_to_message, "attachments", ())
+            if getattr(item, "type_hint", None) in {"image", "image_document"}
+        )
+        return attachments or None
 
     def _resolve_auto_image_followup_candidate(self, *, message: TelegramMessage) -> _RecentAutoImageCandidate | None:
         if message.attachments:

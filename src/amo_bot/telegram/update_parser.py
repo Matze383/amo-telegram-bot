@@ -48,6 +48,7 @@ class TelegramReplyToMessage:
     text: str = ""
     chat_id: int | None = None
     message_thread_id: int | None = None
+    attachments: tuple[TelegramAttachment, ...] = ()
 
 
 @dataclass(slots=True)
@@ -296,6 +297,7 @@ def _parse_message(raw: Any) -> TelegramMessage | None:
                 text=reply_to_message_text,
                 chat_id=chat.id,
                 message_thread_id=message_thread_id,
+                attachments=_parse_attachments(reply_to_message_raw),
             )
 
         if reply_to_is_bot and message_thread_id is not None:

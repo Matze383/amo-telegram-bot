@@ -1721,6 +1721,96 @@ def test_dispatcher_group_photo_with_caption_addressing_invokes_auto_image() -> 
     assert sent == []
 
 
+def test_dispatcher_group_reply_to_photo_with_addressing_invokes_auto_image() -> None:
+    sent: list[tuple[int, str, int | None]] = []
+    calls: list[tuple[int, int | None, int, int, int, str]] = []
+
+    async def fake_send(chat_id: int, text: str, message_thread_id: int | None = None) -> object:
+        sent.append((chat_id, text, message_thread_id))
+        return {"ok": True}
+
+    class _AutoImageExecutor:
+        async def analyze_image_automatically(self, *, actor, invocation):
+            calls.append((invocation.chat_id, invocation.message_thread_id, invocation.message_id, actor.telegram_user_id, len(invocation.attachments), invocation.attachments[0].file_id))
+            return True
+
+    dispatcher = Dispatcher(
+        command_registry=create_builtin_registry(),
+        role_resolver=InMemoryRoleResolver({900000001: Role.NORMAL}),
+        send_text=fake_send,
+        bot_username="AmoBot",
+        plugin_command_executor=_AutoImageExecutor(),
+    )
+
+    raw_update = {
+        "update_id": 2687083760,
+        "message": {
+            "message_id": 8198,
+            "message_thread_id": 6845,
+            "from": {"id": 900000001, "is_bot": False, "first_name": "T"},
+            "chat": {"id": -1002003580909, "type": "supergroup"},
+            "text": "@AmoBot erklär das Bild",
+            "reply_to_message": {
+                "message_id": 8197,
+                "from": {"id": 12345, "is_bot": False, "first_name": "U"},
+                "chat": {"id": -1002003580909, "type": "supergroup"},
+                "message_thread_id": 6845,
+                "photo": [{"file_id": "reply-photo", "width": 800, "height": 600}],
+            },
+        },
+    }
+
+    asyncio.run(dispatcher.handle_raw_update(raw_update))
+
+    assert calls == [(-1002003580909, 6845, 8198, 900000001, 1, "reply-photo")]
+    assert sent == []
+
+
+def test_dispatcher_group_reply_to_photo_without_addressing_does_not_invoke_auto_image() -> None:
+    sent: list[tuple[int, str, int | None]] = []
+    calls: list[tuple[int, int | None, int, int, int]] = []
+
+    async def fake_send(chat_id: int, text: str, message_thread_id: int | None = None) -> object:
+        sent.append((chat_id, text, message_thread_id))
+        return {"ok": True}
+
+    class _AutoImageExecutor:
+        async def analyze_image_automatically(self, *, actor, invocation):
+            calls.append((invocation.chat_id, invocation.message_thread_id, invocation.message_id, actor.telegram_user_id, len(invocation.attachments)))
+            return True
+
+    dispatcher = Dispatcher(
+        command_registry=create_builtin_registry(),
+        role_resolver=InMemoryRoleResolver({900000001: Role.NORMAL}),
+        send_text=fake_send,
+        bot_username="AmoBot",
+        plugin_command_executor=_AutoImageExecutor(),
+    )
+
+    raw_update = {
+        "update_id": 2687083761,
+        "message": {
+            "message_id": 8199,
+            "message_thread_id": 6845,
+            "from": {"id": 900000001, "is_bot": False, "first_name": "T"},
+            "chat": {"id": -1002003580909, "type": "supergroup"},
+            "text": "erklär das Bild",
+            "reply_to_message": {
+                "message_id": 8197,
+                "from": {"id": 12345, "is_bot": False, "first_name": "U"},
+                "chat": {"id": -1002003580909, "type": "supergroup"},
+                "message_thread_id": 6845,
+                "photo": [{"file_id": "reply-photo", "width": 800, "height": 600}],
+            },
+        },
+    }
+
+    asyncio.run(dispatcher.handle_raw_update(raw_update))
+
+    assert calls == []
+    assert sent == []
+
+
 def test_dispatcher_group_plain_photo_without_addressing_does_not_invoke_auto_image() -> None:
     sent: list[tuple[int, str, int | None]] = []
     calls: list[tuple[int, int | None, int, int, int]] = []

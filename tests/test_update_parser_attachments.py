@@ -127,6 +127,28 @@ def test_parse_non_image_document_is_ignored() -> None:
     assert update.message.attachments == ()
 
 
+def test_parse_reply_to_photo_attachment_is_stored_on_reply_to_message() -> None:
+    raw = _mk_base_update()
+    raw["message"]["reply_to_message"] = {  # type: ignore[index]
+        "message_id": 55,
+        "from": {"id": 7, "is_bot": False, "first_name": "Other"},
+        "photo": [
+            {"file_id": "r-small", "width": 64, "height": 64},
+            {"file_id": "r-large", "width": 640, "height": 480},
+        ],
+    }
+
+    update = parse_update(raw)
+    assert update is not None
+    assert update.message is not None
+    assert update.message.reply_to_message is not None
+    assert len(update.message.reply_to_message.attachments) == 1
+    attachment = update.message.reply_to_message.attachments[0]
+    assert attachment.source_kind == "photo"
+    assert attachment.type_hint == "image"
+    assert attachment.file_id == "r-large"
+
+
 def test_parse_malformed_media_is_safe_noop() -> None:
     raw = _mk_base_update()
     raw["message"]["photo"] = [  # type: ignore[index]
