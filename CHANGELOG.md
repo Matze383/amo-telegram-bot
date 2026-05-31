@@ -2,6 +2,56 @@
 
 ---
 
+## [Unreleased] – Daily Memory Runtime (OpenClaw-like Light Memory)
+
+**Datum / Date:** 2026-05-31
+
+### 🇩🇪 Deutsch
+
+#### Übersicht
+Neues OpenClaw-ähnliches Daily/Light Memory Runtime-System als leichtere Alternative zu Dreaming. Erstellt begrenzte tägliche Zusammenfassungen pro Scope (Topic/Private-Chat) ohne vollständige Memory-Kuratierung. Kann parallel zu Dreaming oder standalone betrieben werden.
+
+#### Neu
+- **Daily Memory Runtime:** Leichtgewichtiges Memory-System mit begrenzten täglichen Zusammenfassungen
+  - Neue Konfigurationsfelder: `MEMORY_DAILY_ENABLED` (Standard: 0), `MEMORY_DAILY_INTERVAL_SECONDS` (Standard: 21600), `MEMORY_DAILY_MAX_INPUT_MESSAGES` (Standard: 200), `MEMORY_DAILY_MAX_CHARS_PER_MESSAGE` (Standard: 500), `MEMORY_DAILY_MAX_SUMMARY_CHARS` (Standard: 6000), `MEMORY_DAILY_MIN_MESSAGES` (Standard: 1), `MEMORY_DAILY_MAX_SCOPES_PER_RUN` (Standard: 10)
+  - Läuft im gleichen Nachtfenster wie Dreaming (02:00–05:00 Europe/Berlin)
+  - Bounded Input/Output: Nachrichtenanzahl und Zusammenfassungslänge sind konfigurierbar begrenzt
+  - No-Overlap mit Dreaming: Respektiert interne Sperre (max. ein Memory-Job gleichzeitig)
+- **Dreaming erhalten:** Nightly Long Memory Curation (Dreaming) bleibt vollständig erhalten und unabhängig
+
+#### Sicherheit & Privacy
+- **Bounded Output:** Zusammenfassungen sind strikt zeichenbegrenzt (`MEMORY_DAILY_MAX_SUMMARY_CHARS`)
+- **Metadata-only Logs:** Audit-Events enthalten nur Metadaten (Scope, Nachrichtenanzahl, Timestamp); kein Rohtext in Logs
+- **Summary Privacy:** Zusammenfassungen werden in DB gespeichert (Digest möglich), Logs enthalten nur Metadaten
+- **No Secrets in Config:** Alle neuen Konfigurationsfelder sind environment-basiert; keine Secrets erforderlich
+
+#### Konfiguration
+Siehe `.env.example` und `docs/SETUP_DE.md` für vollständige Dokumentation der neuen Daily Memory Einstellungen.
+
+### 🇬🇧 English
+
+#### Overview
+New OpenClaw-like Daily/Light Memory runtime system as a lighter alternative to Dreaming. Creates bounded daily summaries per scope (topic/private chat) without full memory curation. Can run alongside Dreaming or standalone.
+
+#### New
+- **Daily Memory Runtime:** Lightweight memory system with bounded daily summaries
+  - New config fields: `MEMORY_DAILY_ENABLED` (default: 0), `MEMORY_DAILY_INTERVAL_SECONDS` (default: 21600), `MEMORY_DAILY_MAX_INPUT_MESSAGES` (default: 200), `MEMORY_DAILY_MAX_CHARS_PER_MESSAGE` (default: 500), `MEMORY_DAILY_MAX_SUMMARY_CHARS` (default: 6000), `MEMORY_DAILY_MIN_MESSAGES` (default: 1), `MEMORY_DAILY_MAX_SCOPES_PER_RUN` (default: 10)
+  - Runs during same night window as Dreaming (02:00–05:00 Europe/Berlin)
+  - Bounded Input/Output: Message count and summary length are configurable and capped
+  - No-overlap with Dreaming: Respects internal lock (at most one memory job at a time)
+- **Dreaming Preserved:** Nightly Long Memory Curation (Dreaming) remains fully intact and independent
+
+#### Security & Privacy
+- **Bounded Output:** Summaries are strictly character-limited (`MEMORY_DAILY_MAX_SUMMARY_CHARS`)
+- **Metadata-only Logs:** Audit events contain only metadata (scope, message count, timestamp); no raw text in logs
+- **Summary Privacy:** Summaries stored in DB (digest possible), logs contain metadata only
+- **No Secrets in Config:** All new configuration fields are environment-based; no secrets required
+
+#### Configuration
+See `.env.example` and `docs/SETUP_EN.md` for complete documentation of new Daily Memory settings.
+
+---
+
 ## [Unreleased] – Bugfix Weekend: Telegram Image Analysis + Websearch/SearXNG
 
 **Datum / Date:** 2026-05-30

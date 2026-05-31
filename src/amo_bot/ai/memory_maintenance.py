@@ -59,6 +59,11 @@ class MemoryMaintenanceService:
         *,
         now: datetime | None = None,
         scopes: list[TopicAgentConfig] | None = None,
+        daily_max_input_messages: int | None = None,
+        daily_max_chars_per_message: int | None = None,
+        daily_max_summary_chars: int | None = None,
+        daily_min_messages: int | None = None,
+        daily_max_scopes: int | None = None,
     ) -> MemoryMaintenanceResult:
         """Run one maintenance cycle.
 
@@ -82,6 +87,9 @@ class MemoryMaintenanceService:
         if scopes is None:
             scopes = self._repository._session.scalars(select(TopicAgentConfig)).all()  # noqa: SLF001
 
+        if daily_max_scopes is not None:
+            scopes = scopes[: max(0, int(daily_max_scopes))]
+
         for scope in scopes:
             scopes_scanned += 1
 
@@ -93,6 +101,10 @@ class MemoryMaintenanceService:
                     topic_id=scope.topic_id,
                     user_id=scope.user_id,
                     now=run_at,
+                    max_input_messages=daily_max_input_messages,
+                    max_chars_per_message=daily_max_chars_per_message,
+                    max_summary_chars=daily_max_summary_chars,
+                    min_messages=daily_min_messages,
                 )
                 recent_rows_seen += aggregation.recent_rows_seen
                 daily_rows_upserted += aggregation.daily_rows_upserted

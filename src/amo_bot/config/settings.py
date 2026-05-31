@@ -142,6 +142,15 @@ class Settings(BaseSettings):
     dreaming_max_promotions_per_scope: int = Field(default=2, alias="DREAMING_MAX_PROMOTIONS_PER_SCOPE", ge=1, le=20)
     dreaming_auto_approve_mode: bool = Field(default=False, alias="DREAMING_AUTO_APPROVE_MODE")
 
+    # Daily memory runtime
+    memory_daily_enabled: bool = Field(default=False, alias="MEMORY_DAILY_ENABLED")
+    memory_daily_interval_seconds: int = Field(default=21600, alias="MEMORY_DAILY_INTERVAL_SECONDS", ge=300)
+    memory_daily_max_input_messages: int = Field(default=200, alias="MEMORY_DAILY_MAX_INPUT_MESSAGES", ge=1, le=5000)
+    memory_daily_max_chars_per_message: int = Field(default=500, alias="MEMORY_DAILY_MAX_CHARS_PER_MESSAGE", ge=50, le=5000)
+    memory_daily_max_summary_chars: int = Field(default=6000, alias="MEMORY_DAILY_MAX_SUMMARY_CHARS", ge=500, le=50000)
+    memory_daily_min_messages: int = Field(default=1, alias="MEMORY_DAILY_MIN_MESSAGES", ge=0)
+    memory_daily_max_scopes_per_run: int = Field(default=10, alias="MEMORY_DAILY_MAX_SCOPES_PER_RUN", ge=1, le=100)
+
     # Nightly dreaming window (Europe/Berlin default)
     dreaming_window_start: str = Field(default="02:00", alias="DREAMING_WINDOW_START")
     dreaming_window_end: str = Field(default="05:00", alias="DREAMING_WINDOW_END")

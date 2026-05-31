@@ -2294,16 +2294,25 @@ class TopicAgentMemoryRepository:
         topic_id: int | None = None,
         user_id: int | None = None,
         now: datetime | None = None,
+        max_input_messages: int | None = None,
+        max_chars_per_message: int | None = None,
+        max_summary_chars: int | None = None,
+        min_messages: int | None = None,
     ) -> DailyMemoryAggregationResult:
         current_now = now or datetime.now(UTC)
         fallback_day_key = current_now.date().isoformat()
+
+        effective_max_input_messages = 1000 if max_input_messages is None else max(1, min(int(max_input_messages), 5000))
+        effective_max_chars_per_message = 200 if max_chars_per_message is None else max(1, min(int(max_chars_per_message), 5000))
+        effective_max_summary_chars = 6000 if max_summary_chars is None else max(1, min(int(max_summary_chars), 50000))
+        effective_min_messages = 0 if min_messages is None else max(0, int(min_messages))
 
         rows = self.list_recent(
             scope_type=scope_type,
             chat_id=chat_id,
             topic_id=topic_id,
             user_id=user_id,
-            limit=1000,
+            limit=effective_max_input_messages,
         )
         recent_rows_seen = len(rows)
         if recent_rows_seen == 0:
@@ -2350,6 +2359,9 @@ class TopicAgentMemoryRepository:
                 memory_date=day_key,
             )
 
+            if len(day_rows) < effective_min_messages:
+                continue
+
             author_ids = sorted({int(r.telegram_author_user_id) for r in day_rows if r.telegram_author_user_id is not None})
             distinct_author_count = len(author_ids)
             bots_count = sum(1 for r in day_rows if r.telegram_author_is_bot)
@@ -2365,8 +2377,8 @@ class TopicAgentMemoryRepository:
                 clean_text = " ".join((row.message_text or "").strip().split())
                 if not clean_text:
                     continue
-                line = clean_text[:200]
-                if len(clean_text) > 200:
+                line = clean_text[:effective_max_chars_per_message]
+                if len(clean_text) > effective_max_chars_per_message:
                     line += "…"
                 content_lines.append(f"- {line}")
                 if len(content_lines) >= 20:
@@ -2392,7 +2404,7 @@ class TopicAgentMemoryRepository:
             ]
 
             summary_text = "\n".join(summary_lines)
-            summary_text = summary_text[:6000]
+            summary_text = summary_text[:effective_max_summary_chars]
             tokens_estimate = max(1, min(4000, len(summary_text.split())))
 
             if existing is not None and existing.summary_text == summary_text and int(existing.tokens_estimate) == int(tokens_estimate):

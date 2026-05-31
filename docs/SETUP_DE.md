@@ -411,6 +411,86 @@ DREAMING_AUTO_APPROVE_MODE=0  # Menschliche Review erforderlich
 
 ---
 
+## Daily Memory Runtime (OpenClaw-ähnliches Light Memory)
+
+Das Daily Memory System bietet eine **leichtere Alternative zu Dreaming** — es erstellt begrenzte tägliche Zusammenfassungen pro Scope (Topic/Private-Chat) ohne vollständige Memory-Kuratierung/Promotion. Wie Dreaming läuft es während des Nachtfensters, produziert aber andere Ausgaben (verdauliche Zusammenfassungen vs. Langzeitgedächtnis-Einträge). Es kann parallel zu Dreaming oder standalone betrieben werden.
+
+### Vergleich: Daily Memory vs Dreaming
+
+| Feature | Daily Memory | Dreaming (Long Memory) |
+|---------|--------------|------------------------|
+| Ausgabe | Begrenzte tägliche Zusammenfassungen | Kuratierte Langzeitgedächtnis-Einträge |
+| Scope | Pro Scope (Topic/Private) | Pro Scope (Topic/Private) |
+| Auto-Approve | Immer begrenzt; kein Approve nötig | Optionale menschliche Review-Gate |
+| Laufzeit | Gleiches Nachtfenster | Gleiches Nachtfenster |
+| Speicherung | DB-Summary-Tabelle (begrenzt) | Langzeitgedächtnis-Tabelle |
+| Privacy | Nur Summary-Metadaten; Logs metadata-only | Metadata-only Logs |
+
+### Aktivierung
+
+Standardmäßig ist Daily Memory **deaktiviert** (`MEMORY_DAILY_ENABLED=0`). Zum Aktivieren:
+
+```ini
+# Daily Memory Runtime (standardmäßig deaktiviert)
+MEMORY_DAILY_ENABLED=1
+```
+
+### Konfigurationsvariablen
+
+| Variable | Standard | Beschreibung |
+|----------|----------|--------------|
+| `MEMORY_DAILY_ENABLED` | `0` | `1` zum Aktivieren der täglichen Memory-Zusammenfassung |
+| `MEMORY_DAILY_INTERVAL_SECONDS` | `21600` | Intervall zwischen Läufen in Sekunden (6 Stunden) |
+| `MEMORY_DAILY_MAX_INPUT_MESSAGES` | `200` | Max. Nachrichten pro Scope pro Lauf |
+| `MEMORY_DAILY_MAX_CHARS_PER_MESSAGE` | `500` | Nachrichten über dieser Länge werden abgeschnitten |
+| `MEMORY_DAILY_MAX_SUMMARY_CHARS` | `6000` | Maximale Länge der generierten Zusammenfassung |
+| `MEMORY_DAILY_MIN_MESSAGES` | `1` | Mindestanzahl Nachrichten für Zusammenfassung |
+| `MEMORY_DAILY_MAX_SCOPES_PER_RUN` | `10` | Max. Scopes pro Lauf |
+
+### Sicherheitsverhalten
+
+- **Default-Off:** Standardmäßig deaktiviert — explizite Aktivierung erforderlich
+- **Begrenzte Eingabe:** Nachrichten pro Scope sind begrenzt; lange Nachrichten werden abgeschnitten
+- **Begrenzte Ausgabe:** Zusammenfassungslänge ist strikt begrenzt
+- **Mindestschwelle:** Scopes mit weniger als `MIN_MESSAGES` Nachrichten werden übersprungen
+- **No Overlap:** Läufe respektieren die gleiche interne Sperre wie Dreaming (max. ein Memory-Job gleichzeitig)
+- **Metadata-only Logs:** Audit-Events enthalten nur Metadaten (Scope, Nachrichtenanzahl, Zusammenfassungslänge); kein Nachrichteninhalt in Logs
+- **Gleiches Fenster:** Verwendet die Dreaming-Nachtfenster-Konfiguration (teilt `DREAMING_WINDOW_*` Einstellungen)
+
+### Empfohlene Konfiguration
+
+**Für lokale Tests (deaktiviert):**
+```ini
+MEMORY_DAILY_ENABLED=0  # Deaktiviert (Standard)
+```
+
+**Für aktiviertes Daily Memory mit sicheren Defaults:**
+```ini
+MEMORY_DAILY_ENABLED=1
+MEMORY_DAILY_MAX_INPUT_MESSAGES=200
+MEMORY_DAILY_MAX_CHARS_PER_MESSAGE=500
+MEMORY_DAILY_MAX_SUMMARY_CHARS=6000
+MEMORY_DAILY_MIN_MESSAGES=1
+MEMORY_DAILY_MAX_SCOPES_PER_RUN=10
+```
+
+**Um Daily Memory und Dreaming parallel zu betreiben:**
+```ini
+# Daily Memory (leichte Zusammenfassungen)
+MEMORY_DAILY_ENABLED=1
+MEMORY_DAILY_MAX_INPUT_MESSAGES=200
+MEMORY_DAILY_MAX_SUMMARY_CHARS=6000
+
+# Dreaming (Langzeit-Kuratierung) — optional
+DREAMING_ENABLED=1
+DREAMING_WINDOW_START=02:00
+DREAMING_WINDOW_END=05:00
+```
+
+> **Datenschutz-Hinweis:** Daily Memory Zusammenfassungen können begrenzte Auszüge aus Konversationen enthalten. Roher Nachrichteninhalt wird niemals geloggt. Ergebnisse werden in der Datenbank mit konfigurierbarer Aufbewahrung gespeichert; Logs enthalten nur Metadaten (Nachrichtenanzahl, Timestamps, Scope-IDs).
+
+---
+
 ## Security Headers
 
 Die WebUI setzt folgende HTTP-Security-Header:
