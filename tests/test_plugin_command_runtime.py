@@ -1058,6 +1058,89 @@ async def handle_command(context, host_api):
     assert audits[-1].outcome == "allowed"
 
 
+def test_auto_image_provider_refusal_output_acknowledges_received_image(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'plugin_runtime_auto_image_provider_refusal.db'}"
+    init_db(db_url)
+    executor, sent, replied, _, _ = _mk_executor(
+        tmp_path,
+        db_url,
+        "unrelated_provider_refusal_demo",
+        """
+async def handle_command(context, host_api):
+    await host_api.reply(context.chat_id, context.message_id, "should-not-run")
+""",
+        commands=["plug"],
+    )
+    executor._enable_image_attachments = True
+
+    class _MediaResult:
+        ok = True
+        reason_code = "ok"
+        mime_type = "image/png"
+        bytes_stored = 99
+
+    class _MediaStore:
+        async def download_image(self, *, attachment):
+            return _MediaResult()
+
+    class _RefusalProvider:
+        name = "refusal"
+
+        async def analyze_async(self, request):
+            return type("_R", (), {"provider": "ollama", "summary": "Ich kann auf diesen Tweet nicht antworten, da er ein NSFW-Bild enthält. Tsubasa Ozora"})()
+
+    executor._image_media_store = _MediaStore()
+    executor._image_analyze_orchestrator = ImageAnalyzeOrchestrator(
+        provider=_RefusalProvider(),
+        session_factory=executor._session_factory,
+        role_daily_quota={Role.IGNORE: 0, Role.OWNER: None, Role.ADMIN: None, Role.VIP: 5, Role.NORMAL: 2},
+        max_image_bytes=8 * 1024 * 1024,
+        allowed_mime_types={"image/jpeg", "image/png", "image/webp", "image/gif", "image/*"},
+    )
+
+    sf = create_session_factory(db_url)
+    with sf() as session:
+        from amo_bot.db.repositories import TopicAgentMemoryRepository
+
+        repo = TopicAgentMemoryRepository(session)
+        repo.upsert_config(scope_type="topic", chat_id=-1002003580909, topic_id=6845, image_analysis_mode="enabled")
+        session.commit()
+
+    handled = asyncio.run(
+        executor.analyze_image_automatically(
+            actor=CommandActor(telegram_user_id=100, role=Role.ADMIN),
+            invocation=CommandInvocation(
+                command_name="auto_image",
+                argument=None,
+                chat_id=-1002003580909,
+                message_id=97,
+                message_thread_id=6845,
+                attachments=(
+                    TelegramAttachment(
+                        source_kind="photo",
+                        type_hint="image",
+                        file_id="f1",
+                        file_unique_id="u1",
+                        width=100,
+                        height=80,
+                        size=123,
+                    ),
+                ),
+            ),
+        )
+    )
+
+    assert handled is True
+    assert sent == []
+    assert replied == [
+        (-1002003580909, 97, "Bild empfangen, aber Bildanalyse ist aktuell nicht verfügbar oder nicht konfiguriert.", 6845)
+    ]
+
+    with sf() as session:
+        audits = session.scalars(select(ImageAnalyzeAuditEvent).order_by(ImageAnalyzeAuditEvent.id)).all()
+    assert audits[-1].outcome == "provider_refusal"
+
+
 def test_auto_image_provider_unavailable_acknowledges_received_image(tmp_path) -> None:
     db_url = f"sqlite:///{tmp_path / 'plugin_runtime_auto_image_provider_unavailable.db'}"
     init_db(db_url)

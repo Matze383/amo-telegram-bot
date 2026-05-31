@@ -4,6 +4,21 @@ from dataclasses import dataclass
 import asyncio
 from typing import Protocol
 
+
+def _parse_model_allowlist(value: str) -> tuple[str, ...]:
+    return tuple(part.strip().casefold() for part in value.split(",") if part.strip())
+
+
+def _is_ollama_vision_model_allowed(model_name: str, allowed_models: tuple[str, ...]) -> bool:
+    name = model_name.strip().casefold()
+    if not name:
+        return False
+    for allowed in allowed_models:
+        if name == allowed or name.startswith(f"{allowed}:"):
+            return True
+    return False
+
+
 from amo_bot.ai.image_analyze_orchestrator import ImageAnalyzeProviderRequest, ImageAnalyzeProviderResult
 
 from amo_bot.ai.ollama import OllamaClient
@@ -33,6 +48,8 @@ class AIProvider(Protocol):
 @dataclass(frozen=True, slots=True)
 class OllamaProvider:
     service: AIService
+    model_name: str
+    vision_model_allowlist: tuple[str, ...]
 
     @property
     def name(self) -> str:
@@ -42,6 +59,8 @@ class OllamaProvider:
         return await self.service.ask(prompt)
 
     async def analyze_async(self, request: ImageAnalyzeProviderRequest) -> ImageAnalyzeProviderResult:
+        if not _is_ollama_vision_model_allowed(self.model_name, self.vision_model_allowlist):
+            raise RuntimeError("ollama vision model not configured")
         if not request.image_path:
             raise RuntimeError("missing image path")
         summary = await self.service.ask_with_images(
@@ -257,7 +276,9 @@ def _build_ollama_provider(settings: Settings) -> OllamaProvider:
             retry_on_transient_error=settings.ollama_retry_on_transient_error,
             retry_delay_seconds=settings.ollama_retry_delay_seconds,
             fallback_model=settings.ollama_fallback_model,
-        )
+        ),
+        model_name=settings.ollama_model,
+        vision_model_allowlist=_parse_model_allowlist(settings.image_analysis_ollama_vision_models),
     )
 
 

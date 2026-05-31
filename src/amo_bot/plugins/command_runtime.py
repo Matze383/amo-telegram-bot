@@ -276,7 +276,7 @@ class PluginCommandExecutor:
                     invocation.message_thread_id,
                 )
                 return True
-            if gate_result.outcome in {"provider_timeout", "provider_error", "provider_empty"}:
+            if gate_result.outcome in {"provider_timeout", "provider_error", "provider_empty", "provider_refusal", "provider_unusable_output"}:
                 await self._reply(
                     invocation.chat_id,
                     invocation.message_id,

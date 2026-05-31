@@ -41,7 +41,7 @@ def test_openai_provider_selection_builds_provider_config_only() -> None:
 
 
 def test_ollama_provider_selection_builds_provider() -> None:
-    settings = _settings(AI_PROVIDER="ollama")
+    settings = _settings(AI_PROVIDER="ollama", OLLAMA_MODEL="llava")
     provider = build_ai_provider(settings)
     assert isinstance(provider.service, AIService)
 
@@ -141,7 +141,7 @@ def test_groq_api_key_is_trimmed_not_logged() -> None:
 
 
 def test_ollama_provider_analyze_uses_image_path(monkeypatch, tmp_path) -> None:
-    settings = _settings(AI_PROVIDER="ollama")
+    settings = _settings(AI_PROVIDER="ollama", OLLAMA_MODEL="llava:latest")
     provider = build_ai_provider(settings)
     image_path = tmp_path / "img.png"
     image_path.write_bytes(b"abc")
@@ -469,3 +469,65 @@ def test_lmstudio_regression_openai_still_works() -> None:
     settings = _settings(AI_PROVIDER="openai", OPENAI_API_KEY="sk-test")
     provider = build_ai_provider(settings)
     assert isinstance(provider, OpenAIProvider)
+
+
+def test_ollama_provider_analyze_non_vision_model_denies_before_provider_call(monkeypatch, tmp_path) -> None:
+    settings = _settings(AI_PROVIDER="ollama", OLLAMA_MODEL="kimi-k2.5:cloud")
+    provider = build_ai_provider(settings)
+    image_path = tmp_path / "img.png"
+    image_path.write_bytes(b"abc")
+
+    async def _ask_with_images(self, prompt: str, *, image_paths: tuple[str, ...]):
+        raise AssertionError("ask_with_images must not be called for non-vision model")
+
+    monkeypatch.setattr(AIService, "ask_with_images", _ask_with_images)
+
+    from amo_bot.ai.image_analyze_orchestrator import ImageAnalyzeProviderRequest
+
+    with pytest.raises(RuntimeError, match="ollama vision model not configured"):
+        provider.analyze(
+            ImageAnalyzeProviderRequest(
+                image_ref="telegram-file:u1",
+                prompt="describe",
+                user_id=1,
+                chat_id=2,
+                message_thread_id=3,
+                image_path=str(image_path),
+            )
+        )
+
+
+def test_ollama_provider_analyze_allowlist_model_calls_provider(monkeypatch, tmp_path) -> None:
+    settings = _settings(
+        AI_PROVIDER="ollama",
+        OLLAMA_MODEL="kimi-k2.5:cloud",
+        IMAGE_ANALYSIS_OLLAMA_VISION_MODELS="kimi-k2.5",
+    )
+    provider = build_ai_provider(settings)
+    image_path = tmp_path / "img.png"
+    image_path.write_bytes(b"abc")
+    seen: dict[str, object] = {}
+
+    async def _ask_with_images(self, prompt: str, *, image_paths: tuple[str, ...]):
+        seen["prompt"] = prompt
+        seen["image_paths"] = image_paths
+        return "summary"
+
+    monkeypatch.setattr(AIService, "ask_with_images", _ask_with_images)
+
+    from amo_bot.ai.image_analyze_orchestrator import ImageAnalyzeProviderRequest
+
+    result = provider.analyze(
+        ImageAnalyzeProviderRequest(
+            image_ref="telegram-file:u1",
+            prompt="describe",
+            user_id=1,
+            chat_id=2,
+            message_thread_id=3,
+            image_path=str(image_path),
+        )
+    )
+
+    assert result.provider == "ollama"
+    assert result.summary == "summary"
+    assert seen == {"prompt": "describe", "image_paths": (str(image_path),)}

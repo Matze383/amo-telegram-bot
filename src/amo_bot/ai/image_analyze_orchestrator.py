@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime
 import mimetypes
+import re
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -157,8 +158,12 @@ class ImageAnalyzeOrchestrator:
         except Exception:
             return self._audit_and_result(request=request, day=day, count=count_before, outcome="provider_error", allowed=False)
 
-        if not provider_result.summary.strip():
+        summary = provider_result.summary.strip()
+        if not summary:
             return self._audit_and_result(request=request, day=day, count=count_before, outcome="provider_empty", allowed=False)
+        unusable_reason = _provider_unusable_output_reason(summary)
+        if unusable_reason is not None:
+            return self._audit_and_result(request=request, day=day, count=count_before, outcome=unusable_reason, allowed=False)
 
         new_count = self._increment_counter(request=request, day=day) if self._session_factory is not None else (count_before + 1)
         self._audit(request=request, day=day, count=new_count, outcome="allowed", provider=provider_result.provider)
@@ -229,8 +234,12 @@ class ImageAnalyzeOrchestrator:
         except Exception:
             return self._audit_and_result(request=request, day=day, count=count_before, outcome="provider_error", allowed=False)
 
-        if not provider_result.summary.strip():
+        summary = provider_result.summary.strip()
+        if not summary:
             return self._audit_and_result(request=request, day=day, count=count_before, outcome="provider_empty", allowed=False)
+        unusable_reason = _provider_unusable_output_reason(summary)
+        if unusable_reason is not None:
+            return self._audit_and_result(request=request, day=day, count=count_before, outcome=unusable_reason, allowed=False)
 
         new_count = self._increment_counter(request=request, day=day) if self._session_factory is not None else (count_before + 1)
         self._audit(request=request, day=day, count=new_count, outcome="allowed", provider=provider_result.provider)
@@ -393,6 +402,28 @@ def _mime_from_type_hint(type_hint: object) -> str | None:
         guessed, _ = mimetypes.guess_type(f"x{suffix}")
         if guessed:
             return guessed.lower()
+    return None
+
+
+def _provider_unusable_output_reason(summary: str) -> str | None:
+    normalized = re.sub(r"\s+", " ", summary).strip().lower()
+    if not normalized:
+        return "provider_empty"
+
+    refusal_markers = (
+        "ich kann auf diesen tweet nicht antworten",
+        "da er ein nsfw-bild enthält",
+        "i can't respond to this tweet",
+        "cannot respond to this tweet",
+        "can't help with that",
+        "i can't help with that",
+        "policy",
+    )
+    if any(marker in normalized for marker in refusal_markers):
+        return "provider_refusal"
+
+    if "tweet" in normalized and "nsfw" in normalized:
+        return "provider_unusable_output"
     return None
 
 

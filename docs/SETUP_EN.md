@@ -1003,6 +1003,26 @@ The `image_analyze` coreplugin provides a secure image analysis interface for AI
 - Default: disabled (no image analysis without explicit activation)
 - Database-managed (no `.env` configuration)
 
+**Vision Provider Configuration (Ollama):**
+When using Ollama for image analysis, the vision model must be explicitly allowlisted:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `IMAGE_ANALYSIS_OLLAMA_VISION_MODELS` | `llava,llama3.2-vision,qwen2.5vl` | Comma-separated list of vision-capable models allowed for image analysis |
+
+- Default allowlist includes common Ollama vision models: `llava`, `llama3.2-vision`, `qwen2.5vl`
+- Non-standard vision model names (e.g., `kimi-k2.5:cloud`) can be explicitly allowed by adding to the list
+- Generic refusal/policy/unusable responses from the provider are treated as failures and mapped to a truthful "unavailable" message
+
+**Example configuration:**
+```ini
+# Standard vision models (default)
+IMAGE_ANALYSIS_OLLAMA_VISION_MODELS=llava,llama3.2-vision,qwen2.5vl
+
+# With custom vision model
+IMAGE_ANALYSIS_OLLAMA_VISION_MODELS=llava,llama3.2-vision,qwen2.5vl,kimi-k2.5
+```
+
 **Input Validation:**
 - `image_ref` required and non-empty
 - `prompt` optional, max 512 characters

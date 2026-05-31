@@ -113,6 +113,11 @@ class Settings(BaseSettings):
     ollama_request_endpoint: str = Field(default="generate", alias="OLLAMA_REQUEST_ENDPOINT")
     ollama_streaming_mode: str = Field(default="off", alias="OLLAMA_STREAMING_MODE")
 
+    image_analysis_ollama_vision_models: str = Field(
+        default="llava,llama3.2-vision,qwen2.5vl",
+        alias="IMAGE_ANALYSIS_OLLAMA_VISION_MODELS",
+    )
+
     database_url: str = Field(default="sqlite:///./data/amo_bot.db", alias="DATABASE_URL")
     amo_plugin_dir: str = Field(default="./plugins", alias="AMO_PLUGIN_DIR")
     plugin_command_sandbox_enabled: bool = Field(default=False, alias="PLUGIN_COMMAND_SANDBOX_ENABLED")

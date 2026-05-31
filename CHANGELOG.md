@@ -15,6 +15,8 @@ Wochenend-Release mit Korrekturen für Bildanalyse-Verhalten in privaten Chats u
 - **Private Chats (1:1):** Fotos und Bild-Dokumente werden automatisch in den Bildanalyse-Pfad geleitet, ohne explizite Adressierung.
 - **Gruppen:** Bildanalyse bleibt defensiv – nur bei Adressierung/Antwort/Caption/Follow-up-Regeln.
 - **Vision-Provider-Fehler:** Wenn der Vision-Provider nicht verfügbar oder nicht konfiguriert ist, bestätigt der Bot den Empfang des Bildes und teilt mit, dass die Analyse nicht verfügbar/nicht konfiguriert ist. Der Bot behauptet nicht mehr fälschlicherweise, dass Telegram kein Bild gesendet hat oder dass keine Bilder empfangen werden können.
+- **Ollama Vision-Modelle:** Neue Einstellung `IMAGE_ANALYSIS_OLLAMA_VISION_MODELS` zur expliziten Freigabe von Vision-Modellen für die Bildanalyse. Standard: `llava,llama3.2-vision,qwen2.5vl`. Nicht-standardnamen (z.B. `kimi-k2.5:cloud`) können explizit erlaubt werden.
+- **Fail-Closed für unbrauchbare Antworten:** Generische Ablehnungs-/Policy-Antworten des Providers werden als Fehler behandelt und auf eine wahrheitsgemäße "Nicht verfügbar"-Nachricht abgebildet.
 
 #### Websearch/SearXNG
 - **Konfiguration:** Websearch nutzt primär `SEARXNG_BASE_URL`, mit Fallback auf `AMO_WEBSEARCH_SEARXNG_BASE_URL`.
@@ -31,6 +33,8 @@ Weekend release with fixes for image analysis behavior in private chats and webs
 - **Private Chats (1:1):** Photos and image documents now automatically enter the image analysis path without explicit addressing.
 - **Groups:** Image analysis remains defensive — only when addressing/reply/caption/follow-up rules apply.
 - **Vision Provider Errors:** When the vision provider is unavailable or not configured, the bot acknowledges the image was received and states that analysis is unavailable/not configured. The bot no longer falsely claims that Telegram sent no image or that images cannot be received.
+- **Ollama Vision Models:** New setting `IMAGE_ANALYSIS_OLLAMA_VISION_MODELS` for explicit allowlisting of vision models for image analysis. Default: `llava,llama3.2-vision,qwen2.5vl`. Non-standard names (e.g., `kimi-k2.5:cloud`) can be explicitly allowed.
+- **Fail-Closed for Unusable Responses:** Generic refusal/policy responses from the provider are treated as failures and mapped to a truthful "unavailable" message.
 
 #### Websearch/SearXNG
 - **Configuration:** Websearch uses configured SearXNG JSON endpoint via `SEARXNG_BASE_URL` primary, with fallback to `AMO_WEBSEARCH_SEARXNG_BASE_URL`.
