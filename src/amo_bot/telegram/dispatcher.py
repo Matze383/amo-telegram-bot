@@ -153,6 +153,7 @@ class Dispatcher:
             if not bot_peer_allowed:
                 return
             if command is None:
+                await self._persist_allowed_bot_peer_message(message=message, update_id=update.update_id)
                 log_event(
                     logger, logging.INFO,
                     event="bot_peer.message.skipped",
@@ -719,6 +720,22 @@ class Dispatcher:
             extra={"status": status, "created": created, "allowed": allowed},
         )
         return allowed
+
+    async def _persist_allowed_bot_peer_message(self, *, message: TelegramMessage, update_id: int) -> None:
+        if self.message_persistence is None:
+            return
+        try:
+            await self.message_persistence.persist_message(message)
+        except Exception:
+            log_event(
+                logger, logging.WARNING,
+                event="bot_peer.message.persist_failed",
+                component=_COMPONENT,
+                update_id=update_id,
+                chat_id=message.chat.id,
+                message_id=message.message_id,
+                user_id=message.from_user.id,
+            )
 
     async def _handle_bot_peer_callback(self, *, callback_query: Any, role: Role, data: str) -> None:
         if self.database_url is None:

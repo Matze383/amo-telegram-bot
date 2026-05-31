@@ -7,11 +7,12 @@ from amo_bot.telegram.commands import CommandRegistry, StaticRoleResolver
 from amo_bot.auth.roles import Role
 from amo_bot.db.base import create_session_factory
 from amo_bot.db.init_db import init_db
-from amo_bot.db.models import BotPeer, ChatSeenUser, TelegramChat, TelegramTopic
+from amo_bot.db.models import BotPeer, ChatSeenUser, TelegramChat, TelegramTopic, TopicRecentMessage
 from amo_bot.telegram.commands import create_builtin_registry
 from amo_bot.telegram.dispatcher import Dispatcher, MessagePersistence
 from amo_bot.telegram.owner_notify import OwnerNotifier
 from amo_bot.telegram.role_resolver import InMemoryRoleResolver
+from amo_bot.telegram.chat_topic_persistence import ChatTopicPersistenceService
 
 
 def test_dispatcher_routes_command_and_calls_send() -> None:
@@ -333,6 +334,97 @@ def test_new_bot_peer_is_pending_and_owner_is_notified_once(tmp_path) -> None:
     with create_session_factory(db_url)() as session:
         peer = session.query(BotPeer).filter(BotPeer.telegram_bot_id == 7001).one()
         assert peer.status == "pending"
+
+
+def test_owner_can_allow_bot_peer_and_allowed_bot_non_command_message_is_persisted(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'bot_peer_allowed_non_command.db'}"
+    init_db(db_url)
+    sent: list[tuple[int, str, int | None]] = []
+    callback_answers: list[tuple[str, str | None]] = []
+
+    async def fake_send(chat_id: int, text: str, message_thread_id: int | None = None) -> object:
+        sent.append((chat_id, text, message_thread_id))
+        return {"ok": True}
+
+    async def fake_owner_send(_chat_id: int, _text: str) -> object:
+        return {"ok": True}
+
+    async def fake_answer_callback(callback_query_id: str, text: str | None = None) -> object:
+        callback_answers.append((callback_query_id, text))
+        return {"ok": True}
+
+    dispatcher = Dispatcher(
+        command_registry=create_builtin_registry(database_url=db_url),
+        role_resolver=InMemoryRoleResolver(default_role=Role.NORMAL),
+        send_text=fake_send,
+        answer_callback=fake_answer_callback,
+        bot_username="AmoBot",
+        database_url=db_url,
+        message_persistence=ChatTopicPersistenceService(create_session_factory(db_url)),
+        owner_notifier=OwnerNotifier(owner_telegram_user_id=9999, send_private_text=fake_owner_send),
+    )
+
+    pending_update = {
+        "update_id": 1010,
+        "message": {
+            "message_id": 20,
+            "from": {"id": 7002, "is_bot": True, "first_name": "PeerBot", "username": "peer_bot"},
+            "chat": {"id": -1101, "type": "supergroup", "title": "Peer Group"},
+            "message_thread_id": 41,
+            "text": "first pending message",
+        },
+    }
+    allow_callback = {
+        "update_id": 1011,
+        "callback_query": {
+            "id": "cb-bot-allow",
+            "from": {"id": 9999, "is_bot": False, "first_name": "Owner"},
+            "message": {
+                "message_id": 21,
+                "chat": {"id": 9999, "type": "private"},
+                "from": {"id": 99, "is_bot": True, "first_name": "AmoBot"},
+                "text": "Neuer Bot erkannt",
+            },
+            "data": "bot_peer:allow:7002",
+        },
+    }
+    allowed_non_command_update = {
+        "update_id": 1012,
+        "message": {
+            "message_id": 22,
+            "from": {"id": 7002, "is_bot": True, "first_name": "PeerBot", "username": "peer_bot"},
+            "chat": {"id": -1101, "type": "supergroup", "title": "Peer Group"},
+            "message_thread_id": 41,
+            "text": "allowed bot context line",
+        },
+    }
+
+    asyncio.run(dispatcher.handle_raw_update(pending_update))
+    asyncio.run(dispatcher.handle_raw_update(allow_callback))
+    asyncio.run(dispatcher.handle_raw_update(allowed_non_command_update))
+
+    assert callback_answers == [("cb-bot-allow", "Bot erlaubt")]
+    assert sent == []
+    with create_session_factory(db_url)() as session:
+        peer = session.query(BotPeer).filter(BotPeer.telegram_bot_id == 7002).one()
+        assert peer.status == "allowed"
+
+        rows = (
+            session.query(TopicRecentMessage)
+            .filter(
+                TopicRecentMessage.chat_id == -1101,
+                TopicRecentMessage.topic_id == 41,
+            )
+            .all()
+        )
+        assert len(rows) == 1
+        row = rows[0]
+        assert row.telegram_message_id == 22
+        assert row.message_text == "allowed bot context line"
+        assert row.telegram_author_user_id == 7002
+        assert row.telegram_author_username == "peer_bot"
+        assert row.telegram_author_is_bot is True
+        assert row.source == "bot"
 
 
 def test_owner_can_allow_bot_peer_and_allowed_bot_command_runs(tmp_path) -> None:
