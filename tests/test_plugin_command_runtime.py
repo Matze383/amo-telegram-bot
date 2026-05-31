@@ -1137,6 +1137,70 @@ async def handle_command(context, host_api):
     ]
 
 
+
+
+def test_auto_image_topic_disabled_returns_handled_with_truthful_reply(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'plugin_runtime_auto_image_topic_disabled.db'}"
+    init_db(db_url)
+    executor, sent, replied, _, _ = _mk_executor(
+        tmp_path,
+        db_url,
+        "unrelated_demo",
+        """
+async def handle_command(context, host_api):
+    await host_api.reply(context.chat_id, context.message_id, "should-not-run")
+""",
+        commands=["plug"],
+    )
+    executor._enable_image_attachments = True
+
+    class _MediaResult:
+        ok = True
+        reason_code = "ok"
+        mime_type = "image/png"
+        bytes_stored = 99
+
+    class _MediaStore:
+        async def download_image(self, *, attachment):
+            return _MediaResult()
+
+    executor._image_media_store = _MediaStore()
+
+    handled = asyncio.run(
+        executor.analyze_image_automatically(
+            actor=CommandActor(telegram_user_id=100, role=Role.ADMIN),
+            invocation=CommandInvocation(
+                command_name="auto_image",
+                argument=None,
+                chat_id=-1002003580909,
+                message_id=94,
+                message_thread_id=6845,
+                attachments=(
+                    TelegramAttachment(
+                        source_kind="photo",
+                        type_hint="image",
+                        file_id="f1",
+                        file_unique_id="u1",
+                        width=100,
+                        height=80,
+                        size=123,
+                    ),
+                ),
+            ),
+        )
+    )
+
+    assert handled is True
+    assert sent == []
+    assert replied == [
+        (-1002003580909, 94, "Bild empfangen, aber Bildanalyse ist in diesem Topic aktuell nicht aktiviert.", 6845)
+    ]
+
+    sf = create_session_factory(db_url)
+    with sf() as session:
+        audits = session.scalars(select(ImageAnalyzeAuditEvent).order_by(ImageAnalyzeAuditEvent.id)).all()
+    assert audits[-1].outcome == "topic_disabled"
+
 def test_auto_image_inherit_topic_does_not_call_provider_or_reply(tmp_path) -> None:
     db_url = f"sqlite:///{tmp_path / 'plugin_runtime_auto_image_inherit.db'}"
     init_db(db_url)

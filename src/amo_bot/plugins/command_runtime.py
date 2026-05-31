@@ -260,6 +260,22 @@ class PluginCommandExecutor:
             },
         )
         if not gate_result.allowed or gate_result.provider_result is None:
+            if gate_result.outcome == "topic_disabled":
+                await self._reply(
+                    invocation.chat_id,
+                    invocation.message_id,
+                    "Bild empfangen, aber Bildanalyse ist in diesem Topic aktuell nicht aktiviert.",
+                    invocation.message_thread_id,
+                )
+                return True
+            if gate_result.outcome in {"role_disabled", "quota_exceeded", "invalid_image", "missing_image", "oversize", "invalid_type"}:
+                await self._reply(
+                    invocation.chat_id,
+                    invocation.message_id,
+                    "Bild empfangen, aber ich kann es aktuell nicht analysieren.",
+                    invocation.message_thread_id,
+                )
+                return True
             if gate_result.outcome in {"provider_timeout", "provider_error", "provider_empty"}:
                 await self._reply(
                     invocation.chat_id,
@@ -268,7 +284,7 @@ class PluginCommandExecutor:
                     invocation.message_thread_id,
                 )
                 return True
-            return False
+            return bool(reply_to_image and reply_to_image.get("ok") is True)
 
         await self._reply(
             invocation.chat_id,
