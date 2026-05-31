@@ -99,6 +99,11 @@ def test_kid5_curates_bounded_and_promotes_candidates() -> None:
 
     result = service.run_once(now=datetime(2026, 5, 14, 7, 0, tzinfo=UTC))
 
+    assert result.aggregation_scopes_attempted == 1
+    assert result.recent_rows_seen >= 0
+    assert result.daily_rows_upserted >= 0
+    assert result.aggregation_scopes_failed == 0
+    assert result.scopes_skipped_no_new_data >= 0
     assert result.curation_scopes_attempted == 1
     assert result.curation_candidates_considered == 2
     assert result.curation_promoted == 1
@@ -117,6 +122,7 @@ def test_kid5_disabled_mode_does_not_promote() -> None:
     service = MemoryMaintenanceService(repository=repo, auto_curate_long_memory=False, curator=_DeterministicFakeCurator())
     result = service.run_once(now=datetime(2026, 5, 14, 7, 5, tzinfo=UTC))
 
+    assert result.aggregation_scopes_attempted == 1
     assert result.curation_scopes_attempted == 0
     assert result.curation_promoted == 0
     assert repo.list_long_memories(scope_type="topic", chat_id=-1001, topic_id=7, limit=10) == []

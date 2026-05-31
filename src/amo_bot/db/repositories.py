@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from collections import defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta, timezone
@@ -1731,6 +1732,18 @@ class AuthAuditRepository:
         self._session.commit()
 
 
+
+
+@dataclass(slots=True)
+class DailyMemoryAggregationResult:
+    scope_type: str
+    chat_id: int | None
+    topic_id: int | None
+    user_id: int | None
+    recent_rows_seen: int
+    daily_rows_upserted: int
+    skipped_no_new_data: bool
+
 @dataclass(slots=True)
 class TopicAgentConfigRecord:
     scope_type: str
@@ -2273,6 +2286,139 @@ class TopicAgentMemoryRepository:
         self._session.commit()
         return deleted
 
+    def aggregate_recent_messages_to_daily_memory(
+        self,
+        *,
+        scope_type: str,
+        chat_id: int | None = None,
+        topic_id: int | None = None,
+        user_id: int | None = None,
+        now: datetime | None = None,
+    ) -> DailyMemoryAggregationResult:
+        current_now = now or datetime.now(UTC)
+        fallback_day_key = current_now.date().isoformat()
+
+        rows = self.list_recent(
+            scope_type=scope_type,
+            chat_id=chat_id,
+            topic_id=topic_id,
+            user_id=user_id,
+            limit=1000,
+        )
+        recent_rows_seen = len(rows)
+        if recent_rows_seen == 0:
+            return DailyMemoryAggregationResult(
+                scope_type=scope_type,
+                chat_id=chat_id,
+                topic_id=topic_id,
+                user_id=user_id,
+                recent_rows_seen=0,
+                daily_rows_upserted=0,
+                skipped_no_new_data=True,
+            )
+
+        rows_by_day: dict[str, list[TopicRecentMessageRecord]] = defaultdict(list)
+        rows_missing_created_at = 0
+        for row in rows:
+            created_at = row.created_at
+            if created_at is None:
+                rows_missing_created_at += 1
+                day_key = fallback_day_key
+            else:
+                day_key = created_at.date().isoformat()
+            rows_by_day[day_key].append(row)
+
+        if not rows_by_day:
+            return DailyMemoryAggregationResult(
+                scope_type=scope_type,
+                chat_id=chat_id,
+                topic_id=topic_id,
+                user_id=user_id,
+                recent_rows_seen=recent_rows_seen,
+                daily_rows_upserted=0,
+                skipped_no_new_data=True,
+            )
+
+        daily_rows_upserted = 0
+
+        for day_key, day_rows in sorted(rows_by_day.items()):
+            existing = self.get_daily_memory(
+                scope_type=scope_type,
+                chat_id=chat_id,
+                topic_id=topic_id,
+                user_id=user_id,
+                memory_date=day_key,
+            )
+
+            author_ids = sorted({int(r.telegram_author_user_id) for r in day_rows if r.telegram_author_user_id is not None})
+            distinct_author_count = len(author_ids)
+            bots_count = sum(1 for r in day_rows if r.telegram_author_is_bot)
+            source_user_count = sum(1 for r in day_rows if (r.source or 'user') == 'user')
+            source_assistant_count = sum(1 for r in day_rows if (r.source or 'user') == 'assistant')
+            first_ts = min((r.created_at for r in day_rows if r.created_at is not None), default=None)
+            last_ts = max((r.created_at for r in day_rows if r.created_at is not None), default=None)
+            first_iso = first_ts.isoformat() if first_ts is not None else None
+            last_iso = last_ts.isoformat() if last_ts is not None else None
+
+            content_lines: list[str] = []
+            for row in day_rows:
+                clean_text = " ".join((row.message_text or "").strip().split())
+                if not clean_text:
+                    continue
+                line = clean_text[:200]
+                if len(clean_text) > 200:
+                    line += "…"
+                content_lines.append(f"- {line}")
+                if len(content_lines) >= 20:
+                    break
+
+            if not content_lines:
+                content_lines.append("- [no text content]")
+
+            summary_lines = [
+                f"Daily memory summary for {day_key}",
+                f"- scope_type={scope_type}",
+                f"- chat_id={chat_id} topic_id={topic_id} user_id={user_id}",
+                f"- recent_rows={len(day_rows)}",
+                f"- distinct_authors={distinct_author_count}",
+                f"- bot_messages={bots_count}",
+                f"- source_user_messages={source_user_count}",
+                f"- source_assistant_messages={source_assistant_count}",
+                f"- window_start={first_iso}",
+                f"- window_end={last_iso}",
+                f"- rows_missing_created_at={rows_missing_created_at}",
+                "Content digest:",
+                *content_lines,
+            ]
+
+            summary_text = "\n".join(summary_lines)
+            summary_text = summary_text[:6000]
+            tokens_estimate = max(1, min(4000, len(summary_text.split())))
+
+            if existing is not None and existing.summary_text == summary_text and int(existing.tokens_estimate) == int(tokens_estimate):
+                continue
+
+            self.upsert_daily_memory(
+                scope_type=scope_type,
+                chat_id=chat_id,
+                topic_id=topic_id,
+                user_id=user_id,
+                memory_date=day_key,
+                summary_text=summary_text,
+                tokens_estimate=tokens_estimate,
+            )
+            daily_rows_upserted += 1
+
+        return DailyMemoryAggregationResult(
+            scope_type=scope_type,
+            chat_id=chat_id,
+            topic_id=topic_id,
+            user_id=user_id,
+            recent_rows_seen=recent_rows_seen,
+            daily_rows_upserted=daily_rows_upserted,
+            skipped_no_new_data=(daily_rows_upserted == 0),
+        )
+
     def count_recent_daily_memories_for_scope(
         self,
         *,
@@ -2507,6 +2653,7 @@ class TopicAgentMemoryRepository:
         telegram_author_username: str | None = None,
         telegram_author_is_bot: bool = False,
         source: str = "user",
+        created_at: datetime | None = None,
     ) -> TopicRecentMessageRecord:
         row = TopicRecentMessage(
             scope_type=scope_type,
@@ -2519,6 +2666,7 @@ class TopicAgentMemoryRepository:
             telegram_author_username=telegram_author_username,
             telegram_author_is_bot=telegram_author_is_bot,
             source=source,
+            created_at=created_at,
         )
         self._session.add(row)
         self._session.flush()
@@ -2538,6 +2686,7 @@ class TopicAgentMemoryRepository:
         telegram_author_username: str | None = None,
         telegram_author_is_bot: bool = False,
         source: str = "user",
+        created_at: datetime | None = None,
     ) -> TopicRecentMessageRecord:
         record = self.add_message(
             scope_type=scope_type,
@@ -2550,6 +2699,7 @@ class TopicAgentMemoryRepository:
             telegram_author_username=telegram_author_username,
             telegram_author_is_bot=telegram_author_is_bot,
             source=source,
+            created_at=created_at,
         )
         self._session.commit()
         return record

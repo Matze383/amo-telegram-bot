@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import re
 import unicodedata
 from dataclasses import dataclass
@@ -19,10 +20,18 @@ class MemoryMaintenanceResult:
     scopes_scanned: int
     scopes_pruned: int
     deleted_daily_memories: int
+    aggregation_scopes_attempted: int
+    recent_rows_seen: int
+    daily_rows_upserted: int
+    scopes_skipped_no_new_data: int
+    aggregation_scopes_failed: int
     curation_scopes_attempted: int
     curation_candidates_considered: int
     curation_promoted: int
     curation_scopes_failed: int
+
+
+logger = logging.getLogger(__name__)
 
 
 class MemoryMaintenanceService:
@@ -60,6 +69,11 @@ class MemoryMaintenanceService:
         scopes_scanned = 0
         scopes_pruned = 0
         deleted_daily_memories = 0
+        aggregation_scopes_attempted = 0
+        recent_rows_seen = 0
+        daily_rows_upserted = 0
+        scopes_skipped_no_new_data = 0
+        aggregation_scopes_failed = 0
         curation_scopes_attempted = 0
         curation_candidates_considered = 0
         curation_promoted = 0
@@ -70,6 +84,33 @@ class MemoryMaintenanceService:
 
         for scope in scopes:
             scopes_scanned += 1
+
+            aggregation_scopes_attempted += 1
+            try:
+                aggregation = self._repository.aggregate_recent_messages_to_daily_memory(
+                    scope_type=scope.scope_type,
+                    chat_id=scope.chat_id,
+                    topic_id=scope.topic_id,
+                    user_id=scope.user_id,
+                    now=run_at,
+                )
+                recent_rows_seen += aggregation.recent_rows_seen
+                daily_rows_upserted += aggregation.daily_rows_upserted
+                if aggregation.skipped_no_new_data:
+                    scopes_skipped_no_new_data += 1
+            except Exception as exc:
+                aggregation_scopes_failed += 1
+                logger.warning(
+                    "daily_memory_aggregation_failed",
+                    extra={
+                        "scope_type": scope.scope_type,
+                        "chat_id": scope.chat_id,
+                        "topic_id": scope.topic_id,
+                        "user_id": scope.user_id,
+                        "error_class": exc.__class__.__name__,
+                    },
+                )
+
             deleted = self._repository.prune_daily_memories(
                 scope_type=scope.scope_type,
                 chat_id=scope.chat_id,
@@ -94,6 +135,11 @@ class MemoryMaintenanceService:
             scopes_scanned=scopes_scanned,
             scopes_pruned=scopes_pruned,
             deleted_daily_memories=deleted_daily_memories,
+            aggregation_scopes_attempted=aggregation_scopes_attempted,
+            recent_rows_seen=recent_rows_seen,
+            daily_rows_upserted=daily_rows_upserted,
+            scopes_skipped_no_new_data=scopes_skipped_no_new_data,
+            aggregation_scopes_failed=aggregation_scopes_failed,
             curation_scopes_attempted=curation_scopes_attempted,
             curation_candidates_considered=curation_candidates_considered,
             curation_promoted=curation_promoted,
