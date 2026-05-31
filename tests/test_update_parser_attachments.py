@@ -55,6 +55,21 @@ def test_parse_photo_picks_largest_variant_and_safe_fields() -> None:
     assert attachment.size == 4567
 
 
+def test_parse_photo_caption_is_used_as_message_text_when_text_absent() -> None:
+    raw = _mk_base_update()
+    raw["message"].pop("text", None)  # type: ignore[index]
+    raw["message"]["caption"] = "@AmoBot analysiere das Bild"  # type: ignore[index]
+    raw["message"]["photo"] = [  # type: ignore[index]
+        {"file_id": "caption-photo", "width": 100, "height": 100}
+    ]
+
+    update = parse_update(raw)
+    assert update is not None
+    assert update.message is not None
+    assert update.message.text == "@AmoBot analysiere das Bild"
+    assert len(update.message.attachments) == 1
+
+
 def test_parse_image_document_creates_attachment() -> None:
     raw = _mk_base_update()
     raw["message"]["document"] = {  # type: ignore[index]
@@ -79,6 +94,22 @@ def test_parse_image_document_creates_attachment() -> None:
     assert attachment.width == 512
     assert attachment.height == 256
     assert attachment.size == 999
+
+
+def test_parse_image_document_caption_is_used_as_message_text_when_text_absent() -> None:
+    raw = _mk_base_update()
+    raw["message"].pop("text", None)  # type: ignore[index]
+    raw["message"]["caption"] = "@AmoBot analysiere das Dokument"  # type: ignore[index]
+    raw["message"]["document"] = {  # type: ignore[index]
+        "file_id": "doc-file-id",
+        "mime_type": "image/jpeg",
+    }
+
+    update = parse_update(raw)
+    assert update is not None
+    assert update.message is not None
+    assert update.message.text == "@AmoBot analysiere das Dokument"
+    assert len(update.message.attachments) == 1
 
 
 def test_parse_non_image_document_is_ignored() -> None:

@@ -224,6 +224,8 @@ def _parse_message(raw: Any) -> TelegramMessage | None:
     from_user = _parse_user(raw.get("from"))
     chat = _parse_chat(raw.get("chat"))
     text = raw.get("text")
+    if not isinstance(text, str):
+        text = raw.get("caption")
 
     if from_user is None or chat is None:
         return None
