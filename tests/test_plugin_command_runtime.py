@@ -1252,9 +1252,11 @@ async def handle_command(context, host_api):
         )
     )
 
-    assert handled is False
+    assert handled is True
     assert sent == []
-    assert replied == []
+    assert replied == [
+        (-1002003580909, 94, "Bild empfangen, aber Bildanalyse ist in diesem Topic aktuell nicht aktiviert.", 6845)
+    ]
 
     sf = create_session_factory(db_url)
     with sf() as session:
