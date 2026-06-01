@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 from amo_bot.ai.router import AIRouterDecision, AIRouterReasonCode
 from amo_bot.auth.roles import Role
-from amo_bot.telegram.dispatcher import Dispatcher, _format_auto_research_no_result_note
+from amo_bot.telegram.dispatcher import Dispatcher, _format_auto_research_no_result_note, _format_auto_research_success_note
 from amo_bot.telegram.update_parser import TelegramChat, TelegramMessage, TelegramUser
 
 
@@ -139,8 +139,15 @@ def test_auto_research_injects_strict_context_and_calls_dispatcher_once(monkeypa
     assert len(d.webtool_dispatcher.calls) == 1
     assert sent[0] == "normal ai"
     assert calls and "AUTO-RESEARCH (LIVE WEB) — STRICT INSTRUCTION" in calls[0]
-    assert "Do NOT override it with stale memory/priors" in calls[0]
-    assert "do NOT invent dates/prices/levels" in calls[0]
+    assert "A live websearch/web tool result is available in this turn" in calls[0]
+    assert "Do NOT claim or imply that the bot has no web tools" in calls[0]
+    assert "no live data capability" in calls[0]
+    assert "cannot search the web" in calls[0]
+    assert "Use the supplied web summary as primary evidence" in calls[0]
+    assert "do NOT override it with stale memory/priors" in calls[0]
+    assert "do NOT invent dates, prices, levels" in calls[0]
+    assert "available live sources do not confirm that exact value" in calls[0]
+    assert "Source hosts: a, b" in calls[0]
 
 
 def test_auto_research_empty_result_injects_no_live_warning(monkeypatch):
@@ -169,6 +176,20 @@ def test_auto_research_empty_result_injects_no_live_warning(monkeypatch):
     assert "Do NOT say or imply that the bot has no web tools" in calls[0]
     assert "Die Websuche wurde versucht" in calls[0]
     assert "do NOT invent current facts" in calls[0]
+
+
+def test_auto_research_success_note_forbids_no_tool_claims_and_prefers_live_sources():
+    note = _format_auto_research_success_note(capability="websearch", text="fresh\nsummary", hosts=("a", "b"))
+
+    assert "LIVE WEB" in note
+    assert "A live websearch/web tool result is available in this turn" in note
+    assert "Do NOT claim or imply that the bot has no web tools" in note
+    assert "no live data capability" in note
+    assert "cannot search the web" in note
+    assert "Use the supplied web summary as primary evidence" in note
+    assert "available live sources do not confirm that exact value" in note
+    assert "do not say no webtools" in note
+    assert "Source hosts: a, b" in note
 
 
 def test_auto_research_no_result_note_is_reason_specific_and_forbids_no_tool_claims():

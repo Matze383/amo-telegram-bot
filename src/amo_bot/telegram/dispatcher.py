@@ -64,6 +64,23 @@ _AUTO_RESEARCH_NO_RESULT_TEXT = {
 }
 
 
+def _format_auto_research_success_note(*, capability: str, text: str, hosts: tuple[str, ...]) -> str:
+    compact_text = " ".join(text.split())[:700]
+    host_text = ", ".join(hosts[:5])
+    return (
+        "AUTO-RESEARCH (LIVE WEB) — STRICT INSTRUCTION:\n"
+        f"A live {capability}/web tool result is available in this turn. Treat this fresh web context as primary evidence for current facts.\n"
+        "Do NOT claim or imply that the bot has no web tools, no live data capability, or cannot search the web.\n"
+        "Use the supplied web summary as primary evidence, cite or mention the source hosts when relevant, and do NOT override it with stale memory/priors.\n"
+        "Strict anti-hallucination: do NOT invent dates, prices, levels, or news not supported by the supplied live summary. "
+        "If exact values are not in the supplied summary, state that the available live sources do not confirm that exact value; do not say no webtools.\n"
+        "If sources conflict, say so transparently.\n"
+        f"Operation: {capability}\n"
+        f"Research summary: {compact_text}\n"
+        f"Source hosts: {host_text}"
+    )
+
+
 def _format_auto_research_no_result_note(*, capability: str, reason: str | None) -> str:
     normalized_reason = (reason or "").strip() or "no_usable_result"
     reason_text = _AUTO_RESEARCH_NO_RESULT_TEXT.get(normalized_reason, "the attempt returned no usable live result")
@@ -1368,17 +1385,10 @@ class Dispatcher:
                     },
                 )
                 if tool_result.allowed and (tool_result.text or "").strip():
-                    compact_text = " ".join(tool_result.text.split())[:700]
-                    hosts = ", ".join((tool_result.hosts or ())[:5])
-                    auto_note = (
-                        "AUTO-RESEARCH (LIVE WEB) — STRICT INSTRUCTION:\n"
-                        "You have fresh web research context from this turn. Treat it as primary evidence for current facts.\n"
-                        "Do NOT override it with stale memory/priors, and do NOT invent dates/prices/levels not supported by that context.\n"
-                        "If the context lacks an exact current value (e.g., exact BTC price), state uncertainty clearly, mention related findings/sources, and avoid fabricating a precise number.\n"
-                        "If sources conflict, say so transparently.\n"
-                        f"Operation: {decision_auto.capability}\n"
-                        f"Research summary: {compact_text}\n"
-                        f"Source hosts: {hosts}"
+                    auto_note = _format_auto_research_success_note(
+                        capability=decision_auto.capability,
+                        text=tool_result.text,
+                        hosts=tuple(tool_result.hosts or ()),
                     )
                 else:
                     auto_note = _format_auto_research_no_result_note(capability=decision_auto.capability, reason=tool_result.reason)
