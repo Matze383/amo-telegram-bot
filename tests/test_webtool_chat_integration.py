@@ -6,7 +6,12 @@ from types import SimpleNamespace
 
 from amo_bot.ai.router import AIRouterDecision, AIRouterReasonCode
 from amo_bot.auth.roles import Role
-from amo_bot.telegram.dispatcher import Dispatcher, _format_auto_research_no_result_note, _format_auto_research_success_note
+from amo_bot.telegram.dispatcher import (
+    Dispatcher,
+    _format_auto_research_no_result_note,
+    _format_auto_research_success_note,
+    should_chain_auto_research,
+)
 from amo_bot.telegram.update_parser import TelegramChat, TelegramMessage, TelegramUser
 
 
@@ -28,6 +33,18 @@ class _WebtoolDispatcher:
     def execute(self, request):
         self.calls.append(request)
         return self.result
+
+
+class _SequenceWebtoolDispatcher:
+    def __init__(self, results):
+        self.results = list(results)
+        self.calls = []
+
+    def execute(self, request):
+        self.calls.append(request)
+        if self.results:
+            return self.results.pop(0)
+        return SimpleNamespace(allowed=False, decision="deny", reason="empty_result", text="", sources=(), hosts=(), error=None)
 
 
 def _mk_message(text: str, *, reply_to_is_bot: bool = True, reply_to_user_is_bot: bool = True, reply_to_username: str = "amo_bot") -> TelegramMessage:
@@ -63,6 +80,12 @@ def _mk_dispatcher(webtool_result, *, database_url: str | None = None):
         webtool_dispatcher=_WebtoolDispatcher(webtool_result),
         database_url=database_url,
     )
+    return d, sent
+
+
+def _mk_sequence_dispatcher(webtool_results):
+    d, sent = _mk_dispatcher(SimpleNamespace(allowed=False, decision="deny", reason="unused", text="", sources=(), hosts=(), error=None))
+    d.webtool_dispatcher = _SequenceWebtoolDispatcher(webtool_results)
     return d, sent
 
 
@@ -176,6 +199,172 @@ def test_auto_research_empty_result_injects_no_live_warning(monkeypatch):
     assert "Do NOT say or imply that the bot has no web tools" in calls[0]
     assert "Die Websuche wurde versucht" in calls[0]
     assert "do NOT invent current facts" in calls[0]
+
+
+def test_auto_research_current_rate_query_chains_static_scrape_into_prompt(monkeypatch):
+    monkeypatch.setattr("amo_bot.telegram.dispatcher.AIRouter.decide", lambda self, **kwargs: _allowing_router_decision())
+    search = SimpleNamespace(
+        allowed=True,
+        decision="allow",
+        reason="search_completed",
+        text="USD EUR live rate summary",
+        sources=("https://rates.example/live", "https://other.example/eur-usd"),
+        hosts=("rates.example", "other.example"),
+        error=None,
+    )
+    scrape = SimpleNamespace(
+        allowed=True,
+        decision="allow",
+        reason="scrape_completed",
+        text="EUR USD current exchange rate is shown here with refreshed market data.",
+        sources=("https://rates.example/live",),
+        hosts=("rates.example",),
+        error=None,
+    )
+    scrape2 = SimpleNamespace(
+        allowed=True,
+        decision="allow",
+        reason="scrape_completed",
+        text="Second source also has enough live EUR USD market wording for extraction.",
+        sources=("https://other.example/eur-usd",),
+        hosts=("other.example",),
+        error=None,
+    )
+    d, sent = _mk_sequence_dispatcher([search, scrape, scrape2])
+    calls = []
+
+    async def _ask(prompt: str) -> str:
+        calls.append(prompt)
+        return "normal ai"
+
+    d.ai_service.ask = _ask
+    asyncio.run(
+        d._maybe_handle_ai_autoreply(
+            message=_mk_message("@amo_bot aktueller USD EUR Kurs jetzt?", reply_to_is_bot=False, reply_to_user_is_bot=False, reply_to_username=""),
+            role=Role.ADMIN,
+            bot_username="amo_bot",
+            from_parsed_update=True,
+        )
+    )
+    assert sent[0] == "normal ai"
+    assert [c.capability for c in d.webtool_dispatcher.calls] == ["websearch", "webscraping", "webscraping"]
+    assert calls and "AUTO-RESEARCH (LIVE WEB + PAGE EXTRACTION)" in calls[0]
+    assert "host=rates.example" in calls[0]
+    assert "EUR USD current exchange rate" in calls[0]
+
+
+def test_auto_research_non_current_ordinary_query_does_not_chain(monkeypatch):
+    monkeypatch.setattr("amo_bot.telegram.dispatcher.AIRouter.decide", lambda self, **kwargs: _allowing_router_decision())
+    result = SimpleNamespace(allowed=True, decision="allow", reason="search_completed", text="fresh facts", sources=("https://a.example",), hosts=("a.example",), error=None)
+    d, _sent = _mk_sequence_dispatcher([result])
+    calls = []
+
+    async def _ask(prompt: str) -> str:
+        calls.append(prompt)
+        return "normal ai"
+
+    d.ai_service.ask = _ask
+    asyncio.run(
+        d._maybe_handle_ai_autoreply(
+            message=_mk_message("@amo_bot was gibt es heute Neues zu Python?", reply_to_is_bot=False, reply_to_user_is_bot=False, reply_to_username=""),
+            role=Role.ADMIN,
+            bot_username="amo_bot",
+            from_parsed_update=True,
+        )
+    )
+    assert [c.capability for c in d.webtool_dispatcher.calls] == ["websearch"]
+    assert "PAGE EXTRACTION" not in calls[0]
+
+
+def test_auto_research_static_empty_then_browser_fallback_succeeds(monkeypatch):
+    monkeypatch.setattr("amo_bot.telegram.dispatcher.AIRouter.decide", lambda self, **kwargs: _allowing_router_decision())
+    search = SimpleNamespace(allowed=True, decision="allow", reason="search_completed", text="BTC live price", sources=("https://crypto.example/btc",), hosts=("crypto.example",), error=None)
+    empty_scrape = SimpleNamespace(allowed=True, decision="allow", reason="scrape_completed", text="", sources=("https://crypto.example/btc",), hosts=("crypto.example",), error=None)
+    browser = SimpleNamespace(allowed=True, decision="allow", reason="browser_completed", text="Bitcoin BTC live market price panel contains current exchange data.", sources=("https://crypto.example/btc",), hosts=("crypto.example",), error=None)
+    d, _sent = _mk_sequence_dispatcher([search, empty_scrape, browser])
+    calls = []
+
+    async def _ask(prompt: str) -> str:
+        calls.append(prompt)
+        return "normal ai"
+
+    d.ai_service.ask = _ask
+    asyncio.run(
+        d._maybe_handle_ai_autoreply(
+            message=_mk_message("@amo_bot current BTC price live?", reply_to_is_bot=False, reply_to_user_is_bot=False, reply_to_username=""),
+            role=Role.ADMIN,
+            bot_username="amo_bot",
+            from_parsed_update=True,
+        )
+    )
+    assert [c.capability for c in d.webtool_dispatcher.calls] == ["websearch", "webscraping", "browser"]
+    assert "- browser host=crypto.example" in calls[0]
+    assert "Bitcoin BTC live market price" in calls[0]
+
+
+def test_auto_research_followup_extraction_failure_is_truthful(monkeypatch):
+    monkeypatch.setattr("amo_bot.telegram.dispatcher.AIRouter.decide", lambda self, **kwargs: _allowing_router_decision())
+    search = SimpleNamespace(allowed=True, decision="allow", reason="search_completed", text="USD EUR live summary", sources=("https://rates.example/live",), hosts=("rates.example",), error=None)
+    failed_scrape = SimpleNamespace(allowed=False, decision="deny", reason="http_error_403", text="", sources=(), hosts=(), error="HTTP error")
+    failed_browser = SimpleNamespace(allowed=False, decision="provider_unavailable", reason="browser_provider_not_configured", text="", sources=(), hosts=(), error="No browser")
+    d, _sent = _mk_sequence_dispatcher([search, failed_scrape, failed_browser])
+    calls = []
+
+    async def _ask(prompt: str) -> str:
+        calls.append(prompt)
+        return "normal ai"
+
+    d.ai_service.ask = _ask
+    asyncio.run(
+        d._maybe_handle_ai_autoreply(
+            message=_mk_message("@amo_bot current EUR USD exchange rate now?", reply_to_is_bot=False, reply_to_user_is_bot=False, reply_to_username=""),
+            role=Role.ADMIN,
+            bot_username="amo_bot",
+            from_parsed_update=True,
+        )
+    )
+    assert "WEB SEARCH SUCCEEDED, FOLLOW-UP EXTRACTION UNCONFIRMED" in calls[0]
+    assert "follow-up page extraction produced no usable confirmation" in calls[0]
+    assert "Do NOT say or imply that the bot has no web tools" in calls[0]
+
+
+def test_auto_research_chain_caps_urls_browser_and_text(monkeypatch):
+    monkeypatch.setattr("amo_bot.telegram.dispatcher.AIRouter.decide", lambda self, **kwargs: _allowing_router_decision())
+    search = SimpleNamespace(
+        allowed=True,
+        decision="allow",
+        reason="search_completed",
+        text="stock live price",
+        sources=("https://one.example/a", "https://two.example/b", "https://three.example/c", "https://four.example/d"),
+        hosts=("one.example", "two.example", "three.example", "four.example"),
+        error=None,
+    )
+    fail = SimpleNamespace(allowed=False, decision="deny", reason="empty_result", text="", sources=(), hosts=(), error=None)
+    long_browser = SimpleNamespace(allowed=True, decision="allow", reason="browser_completed", text="X" * 3000, sources=("https://one.example/a",), hosts=("one.example",), error=None)
+    d, _sent = _mk_sequence_dispatcher([search, fail, long_browser, fail, fail, fail])
+    calls = []
+
+    async def _ask(prompt: str) -> str:
+        calls.append(prompt)
+        return "normal ai"
+
+    d.ai_service.ask = _ask
+    asyncio.run(
+        d._maybe_handle_ai_autoreply(
+            message=_mk_message("@amo_bot current stock price live?", reply_to_is_bot=False, reply_to_user_is_bot=False, reply_to_username=""),
+            role=Role.ADMIN,
+            bot_username="amo_bot",
+            from_parsed_update=True,
+        )
+    )
+    assert [c.capability for c in d.webtool_dispatcher.calls] == ["websearch", "webscraping", "browser"]
+    assert calls[0].count("X") < 1700
+
+
+def test_should_chain_auto_research_requires_freshness_and_market_terms():
+    assert should_chain_auto_research("current USD EUR rate now", capability="websearch")
+    assert not should_chain_auto_research("heute neues zu Python", capability="websearch")
+    assert not should_chain_auto_research("current USD EUR rate now", capability="browser")
 
 
 def test_auto_research_success_note_forbids_no_tool_claims_and_prefers_live_sources():

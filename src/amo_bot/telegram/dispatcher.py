@@ -7,6 +7,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any, Awaitable, Callable, Protocol
+from urllib.parse import urlparse
 
 from amo_bot.ai.router import AIRouter, AIRouterReasonCode
 from amo_bot.auth.permissions import can_use_bot
@@ -62,6 +63,103 @@ _AUTO_RESEARCH_NO_RESULT_TEXT = {
     "search_provider_not_configured": "the provider was unavailable",
     "empty_result": "the search returned no usable hits",
 }
+
+_AUTO_RESEARCH_CHAIN_MAX_URLS = 3
+_AUTO_RESEARCH_CHAIN_MAX_STATIC_SUCCESSES = 2
+_AUTO_RESEARCH_CHAIN_MAX_BROWSER_FALLBACKS = 1
+_AUTO_RESEARCH_CHAIN_PER_PAGE_TEXT_CAP = 1500
+_AUTO_RESEARCH_CHAIN_FINAL_CAP = 1600
+_AUTO_RESEARCH_CHAIN_MIN_EXTRACT_CHARS = 40
+
+_AUTO_RESEARCH_CHAIN_FRESHNESS_RE = re.compile(
+    r"\b(?:current|aktuell(?:e[nrms]?)?|jetzt|heute|live|realtime|real-time|right\s+now)\b",
+    re.IGNORECASE,
+)
+_AUTO_RESEARCH_CHAIN_MARKET_RE = re.compile(
+    r"\b(?:kurs|preis|price|rate|exchange|fx|eur|euro|usd|dollar|stock|aktie|crypto|btc|bitcoin|eth|ethereum)\b",
+    re.IGNORECASE,
+)
+
+
+def should_chain_auto_research(text: str, *, capability: str, reason: str | None = None) -> bool:
+    """Return True for bounded follow-up extraction on fresh market/rate/price websearches."""
+    if capability != "websearch":
+        return False
+    raw = text or ""
+    return bool(_AUTO_RESEARCH_CHAIN_FRESHNESS_RE.search(raw) and _AUTO_RESEARCH_CHAIN_MARKET_RE.search(raw))
+
+
+def _host_from_url(url: str) -> str:
+    try:
+        return (urlparse(url).hostname or "").lower()
+    except Exception:
+        return ""
+
+
+def _select_chain_urls(sources: tuple[str, ...] | list[str] | None, *, max_urls: int = _AUTO_RESEARCH_CHAIN_MAX_URLS) -> tuple[str, ...]:
+    selected: list[str] = []
+    seen_hosts: set[str] = set()
+    for source in sources or ():
+        raw = (source or "").strip()
+        if not raw.startswith(("http://", "https://")):
+            continue
+        host = _host_from_url(raw)
+        dedupe_key = host or raw
+        if dedupe_key in seen_hosts:
+            continue
+        selected.append(raw)
+        seen_hosts.add(dedupe_key)
+        if len(selected) >= max_urls:
+            break
+    return tuple(selected)
+
+
+def _compact_chain_text(text: str, *, cap: int = _AUTO_RESEARCH_CHAIN_PER_PAGE_TEXT_CAP) -> str:
+    compact = " ".join((text or "").split())
+    if len(compact) > cap:
+        compact = compact[:cap].rstrip() + " …"
+    return compact
+
+
+def _format_auto_research_chained_success_note(
+    *, capability: str, search_text: str, search_hosts: tuple[str, ...], extracts: tuple[tuple[str, str, str], ...]
+) -> str:
+    compact_search = " ".join(search_text.split())[:700]
+    host_text = ", ".join(search_hosts[:5])
+    evidence_lines: list[str] = []
+    for operation, host, text in extracts:
+        snippet = _compact_chain_text(text, cap=500)
+        if snippet:
+            evidence_lines.append(f"- {operation} host={host or 'unknown'}: {snippet}")
+    evidence = "\n".join(evidence_lines)
+    if len(evidence) > _AUTO_RESEARCH_CHAIN_FINAL_CAP:
+        evidence = evidence[:_AUTO_RESEARCH_CHAIN_FINAL_CAP].rstrip() + " …"
+    return (
+        "AUTO-RESEARCH (LIVE WEB + PAGE EXTRACTION) — STRICT INSTRUCTION:\n"
+        f"A live {capability}/web tool result and bounded follow-up page extraction are available in this turn. Treat this fresh web context as primary evidence for current facts.\n"
+        "Do NOT claim or imply that the bot has no web tools, no live data capability, or cannot search the web.\n"
+        "Use the supplied search summary and extracted page evidence; mention source hosts when relevant. Do NOT override it with stale memory/priors.\n"
+        "Strict anti-hallucination: do NOT invent exact prices, rates, dates, levels, or news not supported by the supplied evidence. If exact values are absent, say the live evidence does not confirm the exact value.\n"
+        f"Operation: {capability}\n"
+        f"Search summary: {compact_search}\n"
+        f"Search source hosts: {host_text}\n"
+        f"Extracted page evidence:\n{evidence}"
+    )
+
+
+def _format_auto_research_chain_no_confirmation_note(*, capability: str, search_text: str, search_hosts: tuple[str, ...]) -> str:
+    compact_search = " ".join(search_text.split())[:700]
+    host_text = ", ".join(search_hosts[:5])
+    return (
+        "AUTO-RESEARCH STATUS — WEB SEARCH SUCCEEDED, FOLLOW-UP EXTRACTION UNCONFIRMED:\n"
+        f"A live {capability} succeeded in this turn, but bounded follow-up page extraction produced no usable confirmation.\n"
+        "Be transparent: use the search summary only as limited live context, and say that follow-up page extraction did not confirm a concrete current value if asked for one.\n"
+        "Do NOT say or imply that the bot has no web tools, no live data capability, or cannot search the web.\n"
+        "Strict anti-hallucination: do NOT invent exact prices, rates, dates, levels, or news without reliable live confirmation from this turn.\n"
+        f"Operation: {capability}\n"
+        f"Search summary: {compact_search}\n"
+        f"Search source hosts: {host_text}"
+    )
 
 
 def _format_auto_research_success_note(*, capability: str, text: str, hosts: tuple[str, ...]) -> str:
@@ -1385,11 +1483,87 @@ class Dispatcher:
                     },
                 )
                 if tool_result.allowed and (tool_result.text or "").strip():
-                    auto_note = _format_auto_research_success_note(
-                        capability=decision_auto.capability,
-                        text=tool_result.text,
-                        hosts=tuple(tool_result.hosts or ()),
-                    )
+                    chain_extracts: list[tuple[str, str, str]] = []
+                    chain_urls = ()
+                    browser_fallbacks_used = 0
+                    if should_chain_auto_research(normalized_text, capability=decision_auto.capability, reason=decision_auto.reason):
+                        chain_urls = _select_chain_urls(tuple(tool_result.sources or ()))
+                        static_successes = 0
+                        browser_fallbacks_used = 0
+                        for url in chain_urls:
+                            if static_successes >= _AUTO_RESEARCH_CHAIN_MAX_STATIC_SUCCESSES:
+                                break
+                            chain_trigger = type("_T", (), {"capability": "webscraping", "query": "", "url": url})()
+                            chain_req = build_webtool_request(
+                                trigger=chain_trigger,
+                                user_id=message.from_user.id,
+                                role=role,
+                                chat_id=message.chat.id,
+                                topic_id=message.message_thread_id,
+                                locale=message_locale,
+                            )
+                            chain_result = self.webtool_dispatcher.execute(chain_req)
+                            chain_text = _compact_chain_text(chain_result.text or "")
+                            if chain_result.allowed and len(chain_text) >= _AUTO_RESEARCH_CHAIN_MIN_EXTRACT_CHARS:
+                                chain_extracts.append(("webscraping", (tuple(chain_result.hosts or ()) or (_host_from_url(url),))[0], chain_text))
+                                static_successes += 1
+                                continue
+                            if browser_fallbacks_used < _AUTO_RESEARCH_CHAIN_MAX_BROWSER_FALLBACKS:
+                                browser_trigger = type("_T", (), {"capability": "browser", "query": "", "url": url})()
+                                browser_req = build_webtool_request(
+                                    trigger=browser_trigger,
+                                    user_id=message.from_user.id,
+                                    role=role,
+                                    chat_id=message.chat.id,
+                                    topic_id=message.message_thread_id,
+                                    locale=message_locale,
+                                )
+                                browser_result = self.webtool_dispatcher.execute(browser_req)
+                                browser_fallbacks_used += 1
+                                browser_text = _compact_chain_text(browser_result.text or "")
+                                if browser_result.allowed and len(browser_text) >= _AUTO_RESEARCH_CHAIN_MIN_EXTRACT_CHARS:
+                                    chain_extracts.append(("browser", (tuple(browser_result.hosts or ()) or (_host_from_url(url),))[0], browser_text))
+                                    break
+
+                        log_event(
+                            logger,
+                            logging.INFO,
+                            event="ai.webtool.auto_research_chain",
+                            component=_COMPONENT,
+                            chat_id=message.chat.id,
+                            message_id=message.message_id,
+                            message_thread_id=message.message_thread_id,
+                            user_id=message.from_user.id,
+                            extra={
+                                "mode": "auto_chain",
+                                "status": "success" if chain_extracts else "no_usable_extraction",
+                                "url_count": len(chain_urls),
+                                "extract_count": len(chain_extracts),
+                                "browser_fallback_count": browser_fallbacks_used,
+                                "host_count": len({host for _, host, _ in chain_extracts if host}),
+                                "scope": decision.context.scope_type,
+                            },
+                        )
+
+                    if chain_extracts:
+                        auto_note = _format_auto_research_chained_success_note(
+                            capability=decision_auto.capability,
+                            search_text=tool_result.text,
+                            search_hosts=tuple(tool_result.hosts or ()),
+                            extracts=tuple(chain_extracts),
+                        )
+                    elif chain_urls:
+                        auto_note = _format_auto_research_chain_no_confirmation_note(
+                            capability=decision_auto.capability,
+                            search_text=tool_result.text,
+                            search_hosts=tuple(tool_result.hosts or ()),
+                        )
+                    else:
+                        auto_note = _format_auto_research_success_note(
+                            capability=decision_auto.capability,
+                            text=tool_result.text,
+                            hosts=tuple(tool_result.hosts or ()),
+                        )
                 else:
                     auto_note = _format_auto_research_no_result_note(capability=decision_auto.capability, reason=tool_result.reason)
 

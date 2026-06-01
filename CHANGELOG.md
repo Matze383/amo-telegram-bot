@@ -2,6 +2,56 @@
 
 ---
 
+## [Unreleased] – Auto Web Research (Search→Scrape Chain v1)
+
+**Datum / Date:** 2026-06-01
+
+### 🇩🇪 Deutsch
+
+#### Übersicht
+Verbesserte automatische Web-Recherche für aktuelle Markt-, Kurs- und Preis-Fragen. Die Recherche startet mit SearXNG-Websearch und kann bei Bedarf mit bounded statischer Seitenextraktion und optional einem Browser-Fallback fortgesetzt werden.
+
+#### Neu
+- **Search→Scrape Chain:** Automatische Folge von Websuche → statische Extraktion → optionaler Browser-Fallback (max. eine URL).
+- **Bounded/Transparent:** Verhalten ist begrenzt (max. eine URL bei static-extraction-miss) und transparent (keine Behauptungen über fehlende Tools).
+- **Keine neue Config:** Funktioniert mit bestehender SearXNG-Konfiguration (`SEARXNG_BASE_URL`).
+- **Keine neuen Commands:** Vollständig automatisch bei entsprechenden Intents (Fragen zu aktuellen Werten).
+
+#### Verhalten
+- Bei Fragen nach aktuellen Kursen/Preisen wird zuerst SearXNG-Websearch verwendet.
+- Bei "freshness + market/rate/price"-Intents folgt ggf. statische Extraktion der Top-URL.
+- Falls static extraction leer/unbrauchbar: maximal ein Chromium/Browser-Fallback für eine URL.
+- Kann keine exakten aktuellen Werte bestätigen → Bot antwortet wahrheitsgemäß, dass Websuche erfolgreich war, Extraktion aber keine exakten Werte lieferte.
+
+#### Sicherheit & Privacy
+- Bounded: Max. eine URL pro Anfrage bei Browser-Fallback.
+- Transparent: Keine Behauptungen über "fehlende Webtools".
+- Keine Rohinhalte in Audit-Logs (nur Metadaten).
+
+### 🇬🇧 English
+
+#### Overview
+Enhanced automatic web research for current market, rate, and price questions. Research starts with SearXNG websearch and can continue with bounded static page extraction and optional browser fallback.
+
+#### New
+- **Search→Scrape Chain:** Automatic sequence of web search → static extraction → optional browser fallback (max one URL).
+- **Bounded/Transparent:** Behavior is bounded (max one URL on static-extraction-miss) and transparent (no claims about missing tools).
+- **No new config:** Works with existing SearXNG configuration (`SEARXNG_BASE_URL`).
+- **No new commands:** Fully automatic for relevant intents (current value questions).
+
+#### Behavior
+- For current rate/price questions, SearXNG websearch is used first.
+- For "freshness + market/rate/price" intents, static extraction of top URL may follow.
+- If static extraction is empty/unusable: max one Chromium/browser fallback for one URL.
+- If exact current values cannot be confirmed → bot truthfully states web search succeeded but extraction did not provide exact values.
+
+#### Security & Privacy
+- Bounded: Max one URL per request on browser fallback.
+- Transparent: No claims about "missing webtools".
+- No raw content in audit logs (metadata only).
+
+---
+
 ## [Unreleased] – Admin Prompt Context Docs Commands
 
 **Datum / Date:** 2026-06-01

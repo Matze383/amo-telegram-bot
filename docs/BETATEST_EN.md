@@ -1059,6 +1059,10 @@ The bot supports sending images via Telegram with policy/role/topic gates.
 
 ---
 
+### Auto Web Research (Search→Scrape Chain)
+
+Enhanced automatic web research for current market/rate/price questions. Starts with configured SearXNG websearch. For freshness-critical intents only, it can follow up with bounded static page extraction from top URLs and Chromium/browser fallback for max one URL if static extraction is empty/unusable. No new user/admin commands, no new config required. Behavior is bounded/transparent. If extraction cannot confirm exact current values, the bot states web search succeeded but follow-up extraction did not confirm the exact value.
+
 ### Webtool Quotas (Issue #48)
 
 Role-based usage quotas for webtools (websearch, webscraping). **Note:** These quotas apply only to webtools, not to normal AI responses via `/ask`.
