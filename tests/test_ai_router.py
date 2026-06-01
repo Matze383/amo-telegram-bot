@@ -1024,3 +1024,114 @@ def test_user_profile_context_caps_participants(tmp_path) -> None:
 
     text = decision.context.user_profile_context_text
     assert text.count("user_id=") == 5
+
+
+def test_recent_messages_prioritizes_humans_and_caps_bot_authored_rows(tmp_path) -> None:
+    repo = _mk_repo(tmp_path)
+    repo.upsert_config(scope_type="topic", chat_id=-9200, topic_id=92, ai_enabled=True, recent_context_window_size=5)
+
+    for i in range(6):
+        repo.append_message(
+            scope_type="topic",
+            chat_id=-9200,
+            topic_id=92,
+            message_text=f"bot crypto analysis {i}",
+            telegram_author_is_bot=True,
+            source="bot",
+        )
+    repo.append_message(scope_type="topic", chat_id=-9200, topic_id=92, message_text="human asks about Nvidia GPUs")
+    repo.append_message(scope_type="topic", chat_id=-9200, topic_id=92, message_text="human asks about CUDA drivers")
+
+    decision = AIRouter(topic_agent_memory_repository=repo).decide(
+        prompt="@bot Nvidia CUDA",
+        chat_id=-9200,
+        topic_id=92,
+        user_id=1,
+        chat_type="supergroup",
+        bot_username="bot",
+    )
+
+    lines = decision.context.recent_messages_text.splitlines()
+    assert "human asks about Nvidia GPUs" in lines
+    assert "human asks about CUDA drivers" in lines
+    assert sum(1 for line in lines if line.startswith("bot crypto analysis")) <= AIRouter._RECENT_CONTEXT_MAX_BOT_MESSAGES
+
+
+def test_recall_skips_crypto_heavy_context_for_nvidia_prompt(tmp_path) -> None:
+    repo = _mk_repo(tmp_path)
+    repo.upsert_config(scope_type="topic", chat_id=-9300, topic_id=104, ai_enabled=True)
+    today = datetime.now(UTC).date().isoformat()
+    repo.upsert_daily_memory(
+        scope_type="topic",
+        chat_id=-9300,
+        topic_id=104,
+        memory_date=today,
+        summary_text="ZEC wave XRP chart setup and crypto market rotation",
+        tokens_estimate=10,
+    )
+    repo.append_message(
+        scope_type="topic",
+        chat_id=-9300,
+        topic_id=104,
+        message_text="ZEC wave XRP bot analysis remains bullish",
+        telegram_author_is_bot=True,
+        source="bot",
+    )
+
+    router = AIRouter(topic_agent_memory_repository=repo)
+    decision = router.decide(
+        prompt="@bot was ist mit Nvidia Aktie?",
+        chat_id=-9300,
+        topic_id=104,
+        user_id=7,
+        bot_username="bot",
+    )
+
+    assert decision.context.recall_memory_text == ""
+    _, _, meta = router._read_active_recall_text(
+        scope={"scope_type": "topic", "chat_id": -9300, "topic_id": 104, "user_id": None},
+        prompt="was ist mit Nvidia Aktie?",
+        daily_memory_text="ZEC wave XRP chart setup and crypto market rotation",
+        long_memory_text="",
+        recent_messages_text="ZEC wave XRP bot analysis remains bullish",
+    )
+    assert meta["decision"] == "skip"
+    assert meta["reason"] == "low_prompt_overlap"
+
+
+def test_recall_includes_matching_context_for_prompt(tmp_path) -> None:
+    repo = _mk_repo(tmp_path)
+    repo.upsert_config(scope_type="private_user", user_id=9400, ai_enabled=True)
+    today = datetime.now(UTC).date().isoformat()
+    repo.upsert_daily_memory(
+        scope_type="private_user",
+        user_id=9400,
+        memory_date=today,
+        summary_text="Nvidia CUDA driver notes and GPU earnings context",
+        tokens_estimate=8,
+    )
+
+    decision = AIRouter(topic_agent_memory_repository=repo).decide(
+        prompt="Nvidia CUDA update?",
+        chat_id=9400,
+        user_id=9400,
+    )
+
+    assert "Nvidia CUDA driver notes" in decision.context.recall_memory_text
+
+
+def test_recall_filtering_keeps_topic_scope_isolation(tmp_path) -> None:
+    repo = _mk_repo(tmp_path)
+    repo.upsert_config(scope_type="topic", chat_id=-9500, topic_id=1, ai_enabled=True)
+    repo.upsert_config(scope_type="topic", chat_id=-9500, topic_id=2, ai_enabled=True)
+    repo.append_message(scope_type="topic", chat_id=-9500, topic_id=1, message_text="Nvidia scope-one context")
+    repo.append_message(scope_type="topic", chat_id=-9500, topic_id=2, message_text="Nvidia scope-two context")
+
+    router = AIRouter(topic_agent_memory_repository=repo)
+    topic_one = router.decide(prompt="@bot Nvidia", chat_id=-9500, topic_id=1, user_id=1, bot_username="bot")
+    topic_two = router.decide(prompt="@bot Nvidia", chat_id=-9500, topic_id=2, user_id=1, bot_username="bot")
+
+    assert "scope-one" in topic_one.context.recall_memory_text
+    assert "scope-two" not in topic_one.context.recall_memory_text
+    assert "scope-two" in topic_two.context.recall_memory_text
+    assert "scope-one" not in topic_two.context.recall_memory_text

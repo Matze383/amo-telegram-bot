@@ -106,6 +106,8 @@ class AIRouter:
     _RECALL_MAX_RECORDS = 20
     _RECALL_MAX_CHARS = 1200
     _RECALL_TIMEOUT_MS = 150
+    _RECALL_PROMPT_MIN_TOKEN_CHARS = 3
+    _RECENT_CONTEXT_MAX_BOT_MESSAGES = 2
     _PROFILE_MAX_USERS = 5
     _PROFILE_MAX_BULLETS_PER_USER = 5
     _PROFILE_MAX_CHARS = 1200
@@ -149,6 +151,28 @@ class AIRouter:
     _BASE64_SECRET_RE = re.compile(r"\b(?:[A-Za-z0-9+/]{40,}={0,2}|[A-Za-z0-9_-]{40,})\b")
     _EMAIL_RE = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
     _PHONE_RE = re.compile(r"(?<!\w)(?:\+?\d[\d\s().-]{8,}\d)(?!\w)")
+    _RECALL_TOKEN_STOPWORDS = {
+        "amo",
+        "amobot",
+        "bot",
+        "der",
+        "die",
+        "das",
+        "den",
+        "dem",
+        "und",
+        "oder",
+        "ist",
+        "mit",
+        "was",
+        "wie",
+        "why",
+        "the",
+        "and",
+        "for",
+        "you",
+        "are",
+    }
 
     def __init__(
         self,
@@ -245,6 +269,7 @@ class AIRouter:
         )
         recall_text, recall_error, recall_meta = self._read_active_recall_text(
             scope=scope,
+            prompt=safe_prompt,
             daily_memory_text=daily_memory_text,
             long_memory_text=long_memory_text,
             recent_messages_text=recent_messages_text,
@@ -524,6 +549,7 @@ class AIRouter:
         self,
         *,
         scope: dict[str, int | str | None] | None,
+        prompt: str = "",
         daily_memory_text: str,
         long_memory_text: str,
         recent_messages_text: str,
@@ -568,7 +594,14 @@ class AIRouter:
 
         try:
             started = datetime.now(UTC)
+            prompt_tokens = self._lexical_recall_tokens(prompt)
+            if not prompt_tokens:
+                meta["reason"] = "empty_prompt_tokens"
+                return "", "", meta
+
             compact_lines: list[str] = []
+            sanitized_seen = 0
+            filtered_for_overlap = 0
             for line in raw_lines:
                 if (datetime.now(UTC) - started).total_seconds() * 1000 > self._RECALL_TIMEOUT_MS:
                     meta["timeout_hit"] = True
@@ -576,13 +609,17 @@ class AIRouter:
                 sanitized = self._sanitize_recent_message(line)
                 if not sanitized:
                     continue
+                sanitized_seen += 1
+                if not (self._lexical_recall_tokens(sanitized) & prompt_tokens):
+                    filtered_for_overlap += 1
+                    continue
                 compact_lines.append(sanitized)
                 if len(compact_lines) >= self._RECALL_MAX_RECORDS:
                     meta["truncated_records"] = len(raw_lines) > len(compact_lines)
                     break
 
             if not compact_lines:
-                meta["reason"] = "empty_after_sanitize"
+                meta["reason"] = "low_prompt_overlap" if sanitized_seen and filtered_for_overlap else "empty_after_sanitize"
                 return "", "", meta
 
             compact = "\n".join(compact_lines)
@@ -603,6 +640,38 @@ class AIRouter:
             meta["reason"] = "exception"
             meta["error_class"] = exc.__class__.__name__
             return "", "", meta
+
+    @classmethod
+    def _lexical_recall_tokens(cls, value: str) -> set[str]:
+        return {
+            token.casefold()
+            for token in re.findall(r"[A-Za-z0-9ÄÖÜäöüß_+-]+", value or "")
+            if len(token) >= cls._RECALL_PROMPT_MIN_TOKEN_CHARS
+            and token.casefold() not in cls._RECALL_TOKEN_STOPWORDS
+        }
+
+    @classmethod
+    def _is_recent_row_bot_authored(cls, row: object) -> bool:
+        source = str(getattr(row, "source", "") or "").strip().casefold()
+        return bool(getattr(row, "telegram_author_is_bot", False)) or source == "bot"
+
+    @classmethod
+    def _prioritize_recent_rows(cls, *, rows: list[object], limit: int) -> list[object]:
+        safe_limit = max(0, min(limit, cls._RECENT_WINDOW_MAX_MESSAGES))
+        if safe_limit == 0:
+            return []
+
+        human_rows = [row for row in rows if not cls._is_recent_row_bot_authored(row)]
+        bot_rows = [row for row in rows if cls._is_recent_row_bot_authored(row)]
+        bot_budget = min(cls._RECENT_CONTEXT_MAX_BOT_MESSAGES, max(0, safe_limit - len(human_rows)))
+        selected_ids = {id(row) for row in human_rows[-safe_limit:]}
+        selected: list[object] = [row for row in rows if id(row) in selected_ids]
+
+        if bot_budget:
+            selected.extend(bot_rows[-bot_budget:])
+            selected.sort(key=lambda row: getattr(row, "id", 0) or 0)
+
+        return selected[-safe_limit:]
 
 
     def _read_user_profile_context_text(
@@ -725,13 +794,14 @@ class AIRouter:
                 chat_id=chat_id,
                 topic_id=topic_id,
                 user_id=user_id,
-                limit=safe_limit,
+                limit=self._RECENT_WINDOW_MAX_MESSAGES,
                 max_age_seconds=self._RECENT_WINDOW_MAX_AGE_SECONDS,
             )
             if not rows:
                 return "", ""
 
-            parts = [self._sanitize_recent_message(row.message_text) for row in rows]
+            selected_rows = self._prioritize_recent_rows(rows=rows, limit=safe_limit)
+            parts = [self._sanitize_recent_message(row.message_text) for row in selected_rows]
             joined = "\n".join(part for part in parts if part)
             if not joined:
                 return "", ""
