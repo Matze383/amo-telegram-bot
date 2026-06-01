@@ -6,6 +6,7 @@ from enum import StrEnum
 import logging
 import re
 
+from amo_bot.core.context_filters import is_bot_authored_context_record, is_obvious_meta_status_message
 from amo_bot.core.logging import log_event
 from amo_bot.db.repositories import TopicAgentMemoryRepository, UserMemoryProfileRepository
 from amo_bot.ai.webtool_dispatcher import WebtoolCapabilityDispatcher, WebtoolCapabilityRequest, WebtoolCapabilityResult
@@ -107,7 +108,7 @@ class AIRouter:
     _RECALL_MAX_CHARS = 1200
     _RECALL_TIMEOUT_MS = 150
     _RECALL_PROMPT_MIN_TOKEN_CHARS = 3
-    _RECENT_CONTEXT_MAX_BOT_MESSAGES = 2
+    _RECENT_CONTEXT_MAX_BOT_MESSAGES = 0
     _PROFILE_MAX_USERS = 5
     _PROFILE_MAX_BULLETS_PER_USER = 5
     _PROFILE_MAX_CHARS = 1200
@@ -652,8 +653,11 @@ class AIRouter:
 
     @classmethod
     def _is_recent_row_bot_authored(cls, row: object) -> bool:
-        source = str(getattr(row, "source", "") or "").strip().casefold()
-        return bool(getattr(row, "telegram_author_is_bot", False)) or source == "bot"
+        return is_bot_authored_context_record(row)
+
+    @staticmethod
+    def _is_recent_row_meta_status(row: object) -> bool:
+        return is_obvious_meta_status_message(getattr(row, "message_text", ""))
 
     @classmethod
     def _prioritize_recent_rows(cls, *, rows: list[object], limit: int) -> list[object]:
@@ -661,17 +665,13 @@ class AIRouter:
         if safe_limit == 0:
             return []
 
-        human_rows = [row for row in rows if not cls._is_recent_row_bot_authored(row)]
-        bot_rows = [row for row in rows if cls._is_recent_row_bot_authored(row)]
-        bot_budget = min(cls._RECENT_CONTEXT_MAX_BOT_MESSAGES, max(0, safe_limit - len(human_rows)))
-        selected_ids = {id(row) for row in human_rows[-safe_limit:]}
-        selected: list[object] = [row for row in rows if id(row) in selected_ids]
-
-        if bot_budget:
-            selected.extend(bot_rows[-bot_budget:])
-            selected.sort(key=lambda row: getattr(row, "id", 0) or 0)
-
-        return selected[-safe_limit:]
+        eligible_rows = [
+            row
+            for row in rows
+            if not cls._is_recent_row_bot_authored(row)
+            and not cls._is_recent_row_meta_status(row)
+        ]
+        return eligible_rows[-safe_limit:]
 
 
     def _read_user_profile_context_text(
@@ -801,6 +801,28 @@ class AIRouter:
                 return "", ""
 
             selected_rows = self._prioritize_recent_rows(rows=rows, limit=safe_limit)
+            excluded_bot_count = sum(1 for row in rows if self._is_recent_row_bot_authored(row))
+            excluded_meta_count = sum(
+                1
+                for row in rows
+                if not self._is_recent_row_bot_authored(row) and self._is_recent_row_meta_status(row)
+            )
+            log_event(
+                logger,
+                logging.INFO,
+                event="ai_router_recent_context_filter",
+                component=_COMPONENT,
+                extra={
+                    "scope_type": scope_type,
+                    "chat_id": chat_id,
+                    "topic_id": topic_id,
+                    "user_id": user_id,
+                    "candidate_rows": len(rows),
+                    "selected_rows": len(selected_rows),
+                    "excluded_bot_rows": excluded_bot_count,
+                    "excluded_meta_rows": excluded_meta_count,
+                },
+            )
             parts = [self._sanitize_recent_message(row.message_text) for row in selected_rows]
             joined = "\n".join(part for part in parts if part)
             if not joined:

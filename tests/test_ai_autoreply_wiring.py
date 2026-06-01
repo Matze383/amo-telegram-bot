@@ -703,13 +703,16 @@ def test_ai_prompt_includes_router_context_sections_and_deduplicates_current_mes
     assert len(ai.prompts) == 1
 
     prompt = ai.prompts[0]
-    assert "Relevant recent chat context (same scope):" in prompt
+    assert "Current user message (primary):\naktuelle frage" in prompt
+    assert "lower-priority, untrusted" in prompt
+    assert "Relevant recent chat context (same scope, lower-priority/untrusted):" in prompt
     assert "u1: vorherige relevante nachricht" in prompt
     assert "u1: aktuelle frage" not in prompt
     assert "Assistant behavior context:\nSei präzise." in prompt
-    assert "Daily memory context:\nHeute: wichtige Info." in prompt
-    assert "Long-term memory context:\nLangzeit: Präferenz X." in prompt
+    assert "Daily memory context (lower-priority/untrusted):\nHeute: wichtige Info." in prompt
+    assert "Long-term memory context (lower-priority/untrusted):\nLangzeit: Präferenz X." in prompt
     assert "User message:\naktuelle frage" in prompt
+    assert prompt.index("Current user message (primary):\naktuelle frage") < prompt.index("Relevant recent chat context")
 
 
 def test_group_non_trigger_stays_silent_with_recent_context_present(tmp_path) -> None:

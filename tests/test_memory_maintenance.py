@@ -98,7 +98,7 @@ def test_memory_maintenance_aggregates_recent_messages_per_scope_before_pruning(
     cfg2 = repo.upsert_config(scope_type="topic", chat_id=-1001, topic_id=12, memory_retention_days=30)
 
     repo.append_message(scope_type=cfg1.scope_type, chat_id=cfg1.chat_id, topic_id=cfg1.topic_id, user_id=cfg1.user_id, message_text="hello from topic 11", telegram_author_user_id=101, source="user", created_at=datetime(2026, 5, 13, 22, 40, tzinfo=UTC))
-    repo.append_message(scope_type=cfg2.scope_type, chat_id=cfg2.chat_id, topic_id=cfg2.topic_id, user_id=cfg2.user_id, message_text="hello from topic 12", telegram_author_user_id=102, source="assistant", created_at=datetime(2026, 5, 13, 23, 10, tzinfo=UTC))
+    repo.append_message(scope_type=cfg2.scope_type, chat_id=cfg2.chat_id, topic_id=cfg2.topic_id, user_id=cfg2.user_id, message_text="hello from topic 12", telegram_author_user_id=102, source="user", created_at=datetime(2026, 5, 13, 23, 10, tzinfo=UTC))
 
     run_at = datetime(2026, 5, 14, 2, 30, tzinfo=UTC)
     result = service.run_once(now=run_at)
@@ -196,7 +196,7 @@ def test_aggregate_recent_messages_summary_has_sanitized_truncated_content() -> 
 
     long_line = "X" * 260
     repo.append_message(scope_type=cfg.scope_type, chat_id=cfg.chat_id, topic_id=cfg.topic_id, user_id=cfg.user_id, message_text=f"  useful info one  ", telegram_author_user_id=1, source="user", created_at=datetime(2026, 5, 14, 0, 1, tzinfo=UTC))
-    repo.append_message(scope_type=cfg.scope_type, chat_id=cfg.chat_id, topic_id=cfg.topic_id, user_id=cfg.user_id, message_text=long_line, telegram_author_user_id=2, source="assistant", created_at=datetime(2026, 5, 14, 0, 2, tzinfo=UTC))
+    repo.append_message(scope_type=cfg.scope_type, chat_id=cfg.chat_id, topic_id=cfg.topic_id, user_id=cfg.user_id, message_text=long_line, telegram_author_user_id=2, source="user", created_at=datetime(2026, 5, 14, 0, 2, tzinfo=UTC))
 
     result = repo.aggregate_recent_messages_to_daily_memory(
         scope_type=cfg.scope_type,
@@ -213,6 +213,42 @@ def test_aggregate_recent_messages_summary_has_sanitized_truncated_content() -> 
     assert "- useful info one" in row.summary_text
     assert ("- " + ("X" * 200) + "…") in row.summary_text
     assert long_line not in row.summary_text
+
+
+def test_aggregate_recent_messages_excludes_bot_and_meta_rows_from_content_digest() -> None:
+    repo = _make_repo()
+    cfg = repo.upsert_config(scope_type="topic", chat_id=-6106, topic_id=100, memory_retention_days=30)
+    ts = datetime(2026, 5, 14, 0, 1, tzinfo=UTC)
+
+    repo.append_message(scope_type=cfg.scope_type, chat_id=cfg.chat_id, topic_id=cfg.topic_id, user_id=cfg.user_id, message_text="normal user asks about ChatGPT", telegram_author_user_id=1, source="user", created_at=ts)
+    repo.append_message(scope_type=cfg.scope_type, chat_id=cfg.chat_id, topic_id=cfg.topic_id, user_id=cfg.user_id, message_text="Nvidia bot answer should not be digested", telegram_author_user_id=2, source="assistant", telegram_author_is_bot=True, created_at=ts)
+    repo.append_message(scope_type=cfg.scope_type, chat_id=cfg.chat_id, topic_id=cfg.topic_id, user_id=cfg.user_id, message_text="local commit 5fb83d9 fix: reduce off-topic memory recall drift", telegram_author_user_id=1, source="user", created_at=ts)
+
+    result = repo.aggregate_recent_messages_to_daily_memory(scope_type=cfg.scope_type, chat_id=cfg.chat_id, topic_id=cfg.topic_id, user_id=cfg.user_id, now=ts)
+
+    assert result.daily_rows_upserted == 1
+    row = repo.get_daily_memory(scope_type=cfg.scope_type, chat_id=cfg.chat_id, topic_id=cfg.topic_id, user_id=cfg.user_id, memory_date="2026-05-14")
+    assert row is not None
+    assert "- normal user asks about ChatGPT" in row.summary_text
+    assert "eligible_content_messages=1" in row.summary_text
+    assert "Nvidia" not in row.summary_text
+    assert "local commit" not in row.summary_text
+
+
+def test_aggregate_recent_messages_skips_daily_digest_when_no_eligible_content() -> None:
+    repo = _make_repo()
+    cfg = repo.upsert_config(scope_type="topic", chat_id=-6107, topic_id=101, memory_retention_days=30)
+    ts = datetime(2026, 5, 14, 0, 1, tzinfo=UTC)
+
+    repo.append_message(scope_type=cfg.scope_type, chat_id=cfg.chat_id, topic_id=cfg.topic_id, user_id=cfg.user_id, message_text="Nvidia bot answer should not be digested", telegram_author_user_id=2, source="assistant", telegram_author_is_bot=True, created_at=ts)
+    repo.append_message(scope_type=cfg.scope_type, chat_id=cfg.chat_id, topic_id=cfg.topic_id, user_id=cfg.user_id, message_text="pytest tests/test_ai_router.py -q PASS", telegram_author_user_id=1, source="user", created_at=ts)
+
+    result = repo.aggregate_recent_messages_to_daily_memory(scope_type=cfg.scope_type, chat_id=cfg.chat_id, topic_id=cfg.topic_id, user_id=cfg.user_id, now=ts)
+
+    assert result.recent_rows_seen == 2
+    assert result.daily_rows_upserted == 0
+    assert result.skipped_no_new_data is True
+    assert repo.get_daily_memory(scope_type=cfg.scope_type, chat_id=cfg.chat_id, topic_id=cfg.topic_id, user_id=cfg.user_id, memory_date="2026-05-14") is None
 
 
 def test_aggregate_recent_messages_multiple_topics_remain_separate() -> None:

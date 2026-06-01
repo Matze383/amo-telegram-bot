@@ -11,6 +11,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from amo_bot.auth.roles import Role
+from amo_bot.core.context_filters import is_bot_authored_context_record, is_obvious_meta_status_message
 from amo_bot.consent import ConsentService
 from amo_bot.db.models import (
     AuditEvent,
@@ -2373,7 +2374,13 @@ class TopicAgentMemoryRepository:
             last_iso = last_ts.isoformat() if last_ts is not None else None
 
             content_lines: list[str] = []
-            for row in day_rows:
+            eligible_content_rows = [
+                row
+                for row in day_rows
+                if not is_bot_authored_context_record(row)
+                and not is_obvious_meta_status_message(row.message_text)
+            ]
+            for row in eligible_content_rows:
                 clean_text = " ".join((row.message_text or "").strip().split())
                 if not clean_text:
                     continue
@@ -2385,7 +2392,7 @@ class TopicAgentMemoryRepository:
                     break
 
             if not content_lines:
-                content_lines.append("- [no text content]")
+                continue
 
             summary_lines = [
                 f"Daily memory summary for {day_key}",
@@ -2396,6 +2403,7 @@ class TopicAgentMemoryRepository:
                 f"- bot_messages={bots_count}",
                 f"- source_user_messages={source_user_count}",
                 f"- source_assistant_messages={source_assistant_count}",
+                f"- eligible_content_messages={len(eligible_content_rows)}",
                 f"- window_start={first_iso}",
                 f"- window_end={last_iso}",
                 f"- rows_missing_created_at={rows_missing_created_at}",
