@@ -899,6 +899,127 @@ class _FailingPersistence(MessagePersistence):
         raise RuntimeError("db down")
 
 
+def test_allowed_bot_peer_non_command_uses_dedicated_persistence_and_sends_no_reply(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'bot_peer_allowed_dedicated_persistence.db'}"
+    init_db(db_url)
+    sent: list[tuple[int, str, int | None]] = []
+    dedicated_calls: list[object] = []
+    generic_calls: list[object] = []
+
+    async def fake_send(chat_id: int, text: str, message_thread_id: int | None = None) -> object:
+        sent.append((chat_id, text, message_thread_id))
+        return {"ok": True}
+
+    class _BotPeerPersistence:
+        async def persist_message(self, message: object) -> None:
+            generic_calls.append(message)
+
+        async def persist_bot_peer_recent_message(self, message: object) -> None:
+            dedicated_calls.append(message)
+
+    dispatcher = Dispatcher(
+        command_registry=create_builtin_registry(),
+        role_resolver=InMemoryRoleResolver(default_role=Role.NORMAL),
+        send_text=fake_send,
+        bot_username="AmoBot",
+        database_url=db_url,
+        message_persistence=_BotPeerPersistence(),  # type: ignore[arg-type]
+    )
+
+    with create_session_factory(db_url)() as session:
+        session.add(
+            BotPeer(
+                telegram_bot_id=7002,
+                username="peer_bot",
+                first_name="PeerBot",
+                status="allowed",
+            )
+        )
+        session.commit()
+
+    allowed_non_command_update = {
+        "update_id": 9101,
+        "message": {
+            "message_id": 22,
+            "from": {"id": 7002, "is_bot": True, "first_name": "PeerBot", "username": "peer_bot"},
+            "chat": {"id": -1101, "type": "supergroup", "title": "Peer Group"},
+            "message_thread_id": 41,
+            "text": "allowed bot context line",
+        },
+    }
+
+    asyncio.run(dispatcher.handle_raw_update(allowed_non_command_update))
+
+    assert sent == []
+    assert generic_calls == []
+    assert len(dedicated_calls) == 1
+    assert getattr(dedicated_calls[0], "message_id") == 22
+
+
+def test_pending_bot_peer_non_command_is_not_persisted_and_sends_no_reply(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'bot_peer_pending_non_command_no_persist.db'}"
+    init_db(db_url)
+    sent: list[tuple[int, str, int | None]] = []
+    dedicated_calls: list[object] = []
+    generic_calls: list[object] = []
+    owner_markup: list[tuple[int, str, dict[str, object]]] = []
+
+    async def fake_send(chat_id: int, text: str, message_thread_id: int | None = None) -> object:
+        sent.append((chat_id, text, message_thread_id))
+        return {"ok": True}
+
+    async def fake_owner_text(chat_id: int, text: str) -> object:
+        raise AssertionError("bot peer notification should use markup")
+
+    async def fake_owner_markup(chat_id: int, text: str, reply_markup: dict[str, object]) -> object:
+        owner_markup.append((chat_id, text, reply_markup))
+        return {"ok": True}
+
+    class _BotPeerPersistence:
+        async def persist_message(self, message: object) -> None:
+            generic_calls.append(message)
+
+        async def persist_bot_peer_recent_message(self, message: object) -> None:
+            dedicated_calls.append(message)
+
+    dispatcher = Dispatcher(
+        command_registry=create_builtin_registry(database_url=db_url),
+        role_resolver=InMemoryRoleResolver(default_role=Role.NORMAL),
+        send_text=fake_send,
+        bot_username="AmoBot",
+        database_url=db_url,
+        message_persistence=_BotPeerPersistence(),  # type: ignore[arg-type]
+        owner_notifier=OwnerNotifier(
+            owner_telegram_user_id=9999,
+            send_private_text=fake_owner_text,
+            send_private_markup=fake_owner_markup,
+        ),
+    )
+
+    pending_non_command_update = {
+        "update_id": 9102,
+        "message": {
+            "message_id": 23,
+            "from": {"id": 7005, "is_bot": True, "first_name": "PeerBot", "username": "peer_bot"},
+            "chat": {"id": -1102, "type": "supergroup", "title": "Peer Group"},
+            "message_thread_id": 42,
+            "text": "pending bot context line",
+        },
+    }
+
+    asyncio.run(dispatcher.handle_raw_update(pending_non_command_update))
+
+    assert sent == []
+    assert generic_calls == []
+    assert dedicated_calls == []
+    assert len(owner_markup) == 1
+    with create_session_factory(db_url)() as session:
+        peer = session.query(BotPeer).filter(BotPeer.telegram_bot_id == 7005).one()
+        assert peer.status == "pending"
+        rows = session.query(TopicRecentMessage).all()
+        assert rows == []
+
+
 def test_group_topic_plain_text_without_trigger_is_never_answered_even_when_persisting(tmp_path) -> None:
     from amo_bot.telegram.chat_topic_persistence import ChatTopicPersistenceService
 

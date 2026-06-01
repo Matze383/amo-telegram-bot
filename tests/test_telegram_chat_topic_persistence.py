@@ -5,6 +5,8 @@ import asyncio
 from sqlalchemy import select
 
 from amo_bot.db.models import User
+from amo_bot.db.repositories import UserRoleRepository
+from amo_bot.telegram.update_parser import TelegramChat as ParsedTelegramChat, TelegramMessage, TelegramUser
 
 from amo_bot.auth.roles import Role
 from amo_bot.db.base import create_session_factory
@@ -118,6 +120,77 @@ def _build_dispatcher(
             bot_username=bot_username,
         ),
     )
+
+
+
+def test_bot_peer_recent_message_persists_topic_scope_without_user_discovery(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'bot_peer_recent_message.db'}"
+    init_db(db_url)
+    bot_id = 7002
+
+    async def _forbidden(*args: object, **kwargs: object) -> object:
+        raise AssertionError("bot peer persistence must not use consent/owner notification sends")
+
+    class _RaisingOwnerNotifier:
+        async def notify_new_user_discovered(self, **kwargs: object) -> None:
+            raise AssertionError("bot peer persistence must not notify user discovery")
+
+        async def notify_consent_prompt_sent(self, **kwargs: object) -> None:
+            raise AssertionError("bot peer persistence must not notify consent prompt")
+
+        async def notify_consent_unreachable(self, **kwargs: object) -> None:
+            raise AssertionError("bot peer persistence must not notify consent unreachable")
+
+        async def notify_consent_group_fallback_sent(self, **kwargs: object) -> None:
+            raise AssertionError("bot peer persistence must not notify group fallback")
+
+    service = ChatTopicPersistenceService(
+        create_session_factory(db_url),
+        send_private_message=_forbidden,
+        owner_notifier=_RaisingOwnerNotifier(),  # type: ignore[arg-type]
+        send_group_markup=_forbidden,
+        send_group_text=_forbidden,
+        bot_username="AmoBot",
+    )
+
+    asyncio.run(
+        service.persist_bot_peer_recent_message(
+            TelegramMessage(
+                message_id=22,
+                from_user=TelegramUser(
+                    id=bot_id,
+                    is_bot=True,
+                    first_name="PeerBot",
+                    username="peer_bot",
+                ),
+                chat=ParsedTelegramChat(
+                    id=-1101,
+                    type="supergroup",
+                    title="Peer Group",
+                    username="peer_group",
+                ),
+                message_thread_id=41,
+                text="allowed bot context line",
+            )
+        )
+    )
+
+    sf = create_session_factory(db_url)
+    with sf() as session:
+        rows = session.scalars(select(TopicRecentMessage)).all()
+        assert len(rows) == 1
+        row = rows[0]
+        assert row.scope_type == "topic"
+        assert row.chat_id == -1101
+        assert row.topic_id == 41
+        assert row.user_id is None
+        assert row.telegram_message_id == 22
+        assert row.message_text == "allowed bot context line"
+        assert row.source == "bot"
+        assert row.telegram_author_is_bot is True
+        assert row.telegram_author_user_id == bot_id
+        assert row.telegram_author_username == "peer_bot"
+        assert UserRoleRepository(session).get_user_by_telegram_id(bot_id) is None
 
 
 def test_message_from_private_chat_persists_chat(tmp_path) -> None:

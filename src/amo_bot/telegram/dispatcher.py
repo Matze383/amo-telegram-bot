@@ -724,8 +724,23 @@ class Dispatcher:
     async def _persist_allowed_bot_peer_message(self, *, message: TelegramMessage, update_id: int) -> None:
         if self.message_persistence is None:
             return
+
+        persist_bot_peer = getattr(self.message_persistence, "persist_bot_peer_recent_message", None)
+        if persist_bot_peer is None:
+            log_event(
+                logger, logging.INFO,
+                event="bot_peer.message.persistence_skipped",
+                component=_COMPONENT,
+                update_id=update_id,
+                chat_id=message.chat.id,
+                message_id=message.message_id,
+                user_id=message.from_user.id,
+                extra={"reason": "metadata_only_persistence"},
+            )
+            return
+
         try:
-            await self.message_persistence.persist_message(message)
+            await persist_bot_peer(message)
         except Exception:
             log_event(
                 logger, logging.WARNING,

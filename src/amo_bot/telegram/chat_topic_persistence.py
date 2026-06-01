@@ -100,6 +100,38 @@ class ChatTopicPersistenceService:
         self._send_group_text = send_group_text
         self._bot_username = bot_username
 
+    async def persist_bot_peer_recent_message(self, message: TelegramMessage) -> None:
+        with self._session_factory() as session:
+            repo = ChatTopicRepository(session)
+            repo.upsert_chat(
+                chat_id=message.chat.id,
+                chat_type=message.chat.type,
+                title=message.chat.title,
+                username=message.chat.username,
+            )
+            if message.message_thread_id is not None:
+                repo.upsert_topic(
+                    chat_id=message.chat.id,
+                    message_thread_id=message.message_thread_id,
+                    telegram_topic_name=message.telegram_topic_name,
+                )
+
+            text = (message.text or "").strip()
+            if text and not text.startswith("/"):
+                self._persist_recent_message(
+                    session=session,
+                    chat_type=message.chat.type,
+                    chat_id=message.chat.id,
+                    message_thread_id=message.message_thread_id,
+                    private_user_id=message.from_user.id,
+                    message_id=message.message_id,
+                    author=message.from_user,
+                    text=text,
+                    source="bot",
+                )
+
+            session.commit()
+
     async def persist_message(self, message: TelegramMessage) -> None:
         with self._session_factory() as session:
             user_repo = UserRoleRepository(session)
