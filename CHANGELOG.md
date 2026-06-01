@@ -9,7 +9,7 @@
 ### 🇩🇪 Deutsch
 
 #### Übersicht
-Verbesserte automatische Web-Recherche für aktuelle Markt-, Kurs- und Preis-Fragen. Die Recherche startet mit SearXNG-Websearch und kann bei Bedarf mit bounded statischer Seitenextraktion und optional einem Browser-Fallback fortgesetzt werden.
+Verbesserte automatische Web-Recherche für aktuelle/zeitnahe Fragen (Markt/Kurs/Preis, News, Releases, Status, Wetter, Verkehr, Ausfälle, Versionen, Updates, etc.). Die Recherche startet mit SearXNG-Websearch und kann bei Bedarf mit bounded statischer Seitenextraktion und optional einem Browser-Fallback fortgesetzt werden.
 
 #### Neu
 - **Search→Scrape Chain:** Automatische Folge von Websuche → statische Extraktion → optionaler Browser-Fallback (max. eine URL).
@@ -18,8 +18,9 @@ Verbesserte automatische Web-Recherche für aktuelle Markt-, Kurs- und Preis-Fra
 - **Keine neuen Commands:** Vollständig automatisch bei entsprechenden Intents (Fragen zu aktuellen Werten).
 
 #### Verhalten
-- Bei Fragen nach aktuellen Kursen/Preisen wird zuerst SearXNG-Websearch verwendet.
-- Bei "freshness + market/rate/price"-Intents folgt ggf. statische Extraktion der Top-URL.
+- Bei Fragen nach aktuellen Werten (Kurse, Preise, News, Status, Wetter, Verkehr, etc.) wird zuerst SearXNG-Websearch verwendet.
+- Bei "freshness + current data"-Intents folgt ggf. statische Extraktion der Top-URL.
+- Zeitlose/allgemeine Bildungsfragen lösen die Kette nicht aus.
 - Falls static extraction leer/unbrauchbar: maximal ein Chromium/Browser-Fallback für eine URL.
 - Kann keine exakten aktuellen Werte bestätigen → Bot antwortet wahrheitsgemäß, dass Websuche erfolgreich war, Extraktion aber keine exakten Werte lieferte.
 
@@ -31,7 +32,7 @@ Verbesserte automatische Web-Recherche für aktuelle Markt-, Kurs- und Preis-Fra
 ### 🇬🇧 English
 
 #### Overview
-Enhanced automatic web research for current market, rate, and price questions. Research starts with SearXNG websearch and can continue with bounded static page extraction and optional browser fallback.
+Enhanced automatic web research for current/freshness-relevant questions (market/rate/price, news, releases, status, weather, traffic, outages, versions, updates, etc.). Research starts with SearXNG websearch and can continue with bounded static page extraction and optional browser fallback.
 
 #### New
 - **Search→Scrape Chain:** Automatic sequence of web search → static extraction → optional browser fallback (max one URL).
@@ -40,8 +41,9 @@ Enhanced automatic web research for current market, rate, and price questions. R
 - **No new commands:** Fully automatic for relevant intents (current value questions).
 
 #### Behavior
-- For current rate/price questions, SearXNG websearch is used first.
-- For "freshness + market/rate/price" intents, static extraction of top URL may follow.
+- For current value questions (rates, prices, news, status, weather, traffic, etc.), SearXNG websearch is used first.
+- For "freshness + current data" intents, static extraction of top URL may follow.
+- Timeless/general educational questions do not trigger the chain.
 - If static extraction is empty/unusable: max one Chromium/browser fallback for one URL.
 - If exact current values cannot be confirmed → bot truthfully states web search succeeded but extraction did not provide exact values.
 

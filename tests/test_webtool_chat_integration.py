@@ -140,7 +140,7 @@ def test_provider_success_returns_sanitized_compact_output(monkeypatch):
     assert sent[0] == "Websearch: foo bar"
 
 
-def test_auto_research_injects_strict_context_and_calls_dispatcher_once(monkeypatch):
+def test_auto_research_injects_strict_context_without_chain_for_weak_current_intent(monkeypatch):
     monkeypatch.setattr("amo_bot.telegram.dispatcher.AIRouter.decide", lambda self, **kwargs: _allowing_router_decision())
     result = SimpleNamespace(allowed=True, decision="allow", reason="search_completed", text="fresh facts", sources=("https://a", "https://b"), hosts=("a", "b"), error=None)
     d, sent = _mk_dispatcher(result)
@@ -153,7 +153,7 @@ def test_auto_research_injects_strict_context_and_calls_dispatcher_once(monkeypa
     d.ai_service.ask = _ask
     asyncio.run(
         d._maybe_handle_ai_autoreply(
-            message=_mk_message("@amo_bot Wie ist der aktuelle wetter stand heute?", reply_to_is_bot=False, reply_to_user_is_bot=False, reply_to_username=""),
+            message=_mk_message("@amo_bot Python decorators 2020", reply_to_is_bot=False, reply_to_user_is_bot=False, reply_to_username=""),
             role=Role.ADMIN,
             bot_username="amo_bot",
             from_parsed_update=True,
@@ -253,10 +253,19 @@ def test_auto_research_current_rate_query_chains_static_scrape_into_prompt(monke
     assert "EUR USD current exchange rate" in calls[0]
 
 
-def test_auto_research_non_current_ordinary_query_does_not_chain(monkeypatch):
+def test_auto_research_current_non_market_query_chains_static_scrape_into_prompt(monkeypatch):
     monkeypatch.setattr("amo_bot.telegram.dispatcher.AIRouter.decide", lambda self, **kwargs: _allowing_router_decision())
-    result = SimpleNamespace(allowed=True, decision="allow", reason="search_completed", text="fresh facts", sources=("https://a.example",), hosts=("a.example",), error=None)
-    d, _sent = _mk_sequence_dispatcher([result])
+    search = SimpleNamespace(allowed=True, decision="allow", reason="search_completed", text="Python latest news", sources=("https://python.example/news",), hosts=("python.example",), error=None)
+    scrape = SimpleNamespace(
+        allowed=True,
+        decision="allow",
+        reason="scrape_completed",
+        text="Python release page contains current news and version update details for today.",
+        sources=("https://python.example/news",),
+        hosts=("python.example",),
+        error=None,
+    )
+    d, _sent = _mk_sequence_dispatcher([search, scrape])
     calls = []
 
     async def _ask(prompt: str) -> str:
@@ -272,7 +281,31 @@ def test_auto_research_non_current_ordinary_query_does_not_chain(monkeypatch):
             from_parsed_update=True,
         )
     )
-    assert [c.capability for c in d.webtool_dispatcher.calls] == ["websearch"]
+    assert [c.capability for c in d.webtool_dispatcher.calls] == ["websearch", "webscraping"]
+    assert "AUTO-RESEARCH (LIVE WEB + PAGE EXTRACTION)" in calls[0]
+    assert "Python release page contains current news" in calls[0]
+
+
+def test_auto_research_timeless_ordinary_query_does_not_chain(monkeypatch):
+    monkeypatch.setattr("amo_bot.telegram.dispatcher.AIRouter.decide", lambda self, **kwargs: _allowing_router_decision())
+    result = SimpleNamespace(allowed=True, decision="allow", reason="search_completed", text="fresh facts", sources=("https://a.example",), hosts=("a.example",), error=None)
+    d, _sent = _mk_sequence_dispatcher([result])
+    calls = []
+
+    async def _ask(prompt: str) -> str:
+        calls.append(prompt)
+        return "normal ai"
+
+    d.ai_service.ask = _ask
+    asyncio.run(
+        d._maybe_handle_ai_autoreply(
+            message=_mk_message("@amo_bot erkläre mir Python decorators", reply_to_is_bot=False, reply_to_user_is_bot=False, reply_to_username=""),
+            role=Role.ADMIN,
+            bot_username="amo_bot",
+            from_parsed_update=True,
+        )
+    )
+    assert [c.capability for c in d.webtool_dispatcher.calls] == []
     assert "PAGE EXTRACTION" not in calls[0]
 
 
@@ -361,9 +394,12 @@ def test_auto_research_chain_caps_urls_browser_and_text(monkeypatch):
     assert calls[0].count("X") < 1700
 
 
-def test_should_chain_auto_research_requires_freshness_and_market_terms():
+def test_should_chain_auto_research_requires_websearch_and_current_intent():
     assert should_chain_auto_research("current USD EUR rate now", capability="websearch")
-    assert not should_chain_auto_research("heute neues zu Python", capability="websearch")
+    assert should_chain_auto_research("heute neues zu Python", capability="websearch")
+    assert should_chain_auto_research("aktueller Stand OpenAI Release?", capability="websearch")
+    assert should_chain_auto_research("current status of OpenAI release", capability="websearch")
+    assert not should_chain_auto_research("erkläre mir Python decorators", capability="websearch")
     assert not should_chain_auto_research("current USD EUR rate now", capability="browser")
 
 

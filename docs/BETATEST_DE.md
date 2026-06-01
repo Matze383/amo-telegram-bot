@@ -1061,7 +1061,7 @@ Der Bot unterstützt das Senden von Bildern über Telegram mit Policy/Role/Topic
 
 ### Auto Web Research (Search→Scrape Chain)
 
-Verbesserte automatische Web-Recherche für aktuelle Markt-/Kurs-/Preis-Fragen. Startet mit konfiguriertem SearXNG-Websearch. Bei Fragen zu aktuellen Werten kann optional die Top-URL per statischer Seitenextraktion angefragt werden; falls diese leer/unbrauchbar ist, erfolgt maximal ein Chromium/Browser-Fallback für eine URL. Keine neuen User/Admin-Commands, keine neue Config erforderlich. Verhalten ist bounded/transparent. Bei nicht bestätigbaren Werten antwortet der Bot wahrheitsgemäß, dass die Websuche erfolgreich war, die Extraktion aber keine exakten aktuellen Werte bestätigen konnte.
+Verbesserte automatische Web-Recherche für aktuelle/zeitnahe Fragen (Markt/Kurs/Preis, News, Releases, Status, Wetter, Verkehr, Ausfälle, Versionen, Updates, etc.). Startet mit konfiguriertem SearXNG-Websearch. Bei Fragen zu aktuellen Werten kann optional die Top-URL per statischer Seitenextraktion angefragt werden; falls diese leer/unbrauchbar ist, erfolgt maximal ein Chromium/Browser-Fallback für eine URL. Keine neuen User/Admin-Commands, keine neue Config erforderlich. Verhalten ist bounded/transparent. Zeitlose/allgemeine Bildungsfragen lösen sie nicht aus. Bei nicht bestätigbaren Werten antwortet der Bot wahrheitsgemäß, dass die Websuche erfolgreich war, die Extraktion aber keine exakten aktuellen Werte bestätigen konnte.
 
 ### Webtool-Quotas (Issue #48)
 

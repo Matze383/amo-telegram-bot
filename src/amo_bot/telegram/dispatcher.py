@@ -72,21 +72,59 @@ _AUTO_RESEARCH_CHAIN_FINAL_CAP = 1600
 _AUTO_RESEARCH_CHAIN_MIN_EXTRACT_CHARS = 40
 
 _AUTO_RESEARCH_CHAIN_FRESHNESS_RE = re.compile(
-    r"\b(?:current|aktuell(?:e[nrms]?)?|jetzt|heute|live|realtime|real-time|right\s+now)\b",
+    r"\b(?:"
+    r"current|aktuell(?:e[nrms]?)?|jetzt|heute|live|realtime|real-time|right\s+now|"
+    r"derzeit|stand|status|neueste(?:n)?|latest|news|nachrichten|release|version|"
+    r"update|verf(?:ü|ue)gbar(?:keit)?|availability|weather|wetter|traffic|verkehr|"
+    r"outage|st(?:ö|oe)rung|kurs|preis|price|rate|market|markt|exchange|fx"
+    r")\b",
     re.IGNORECASE,
 )
-_AUTO_RESEARCH_CHAIN_MARKET_RE = re.compile(
-    r"\b(?:kurs|preis|price|rate|exchange|fx|eur|euro|usd|dollar|stock|aktie|crypto|btc|bitcoin|eth|ethereum)\b",
+_AUTO_RESEARCH_CHAIN_STRONG_FRESHNESS_RE = re.compile(
+    r"\b(?:"
+    r"jetzt|heute|live|realtime|real-time|right\s+now|derzeit|neueste(?:n)?|latest|"
+    r"news|nachrichten|release|version|update|verf(?:ü|ue)gbar(?:keit)?|availability|"
+    r"weather|wetter|traffic|verkehr|outage|st(?:ö|oe)rung|kurs|preis|price|rate|market|markt"
+    r")\b",
+    re.IGNORECASE,
+)
+_AUTO_RESEARCH_CHAIN_EXPLICIT_CURRENT_PHRASE_RE = re.compile(
+    r"(?:"
+    r"was\s+gibt\s+es\s+(?:heute\s+)?neues\s+zu|"
+    r"aktueller?\s+stand\s+(?:zu|von)?|"
+    r"current\s+status\s+(?:of|for)|"
+    r"latest\s+\S+|"
+    r"neueste(?:n)?\s+\S+"
+    r")",
+    re.IGNORECASE,
+)
+_AUTO_RESEARCH_CHAIN_TIMELESS_EDU_RE = re.compile(
+    r"\b(?:erkl(?:ä|ae)re|explain|what\s+is|was\s+ist|how\s+does|wie\s+funktioniert|tutorial|grundlagen|basics)\b",
     re.IGNORECASE,
 )
 
 
 def should_chain_auto_research(text: str, *, capability: str, reason: str | None = None) -> bool:
-    """Return True for bounded follow-up extraction on fresh market/rate/price websearches."""
+    """Return True for bounded follow-up extraction on current-data websearches.
+
+    The chain is still limited to websearch-triggered auto research, but it is no
+    longer market-only: explicit freshness/currentness intents may follow search
+    with bounded static extraction and at most one browser fallback.
+    """
     if capability != "websearch":
         return False
     raw = text or ""
-    return bool(_AUTO_RESEARCH_CHAIN_FRESHNESS_RE.search(raw) and _AUTO_RESEARCH_CHAIN_MARKET_RE.search(raw))
+    if not raw.strip():
+        return False
+    if _AUTO_RESEARCH_CHAIN_EXPLICIT_CURRENT_PHRASE_RE.search(raw):
+        return True
+    has_freshness = bool(_AUTO_RESEARCH_CHAIN_FRESHNESS_RE.search(raw))
+    if not has_freshness:
+        return False
+    has_strong_freshness = bool(_AUTO_RESEARCH_CHAIN_STRONG_FRESHNESS_RE.search(raw))
+    if _AUTO_RESEARCH_CHAIN_TIMELESS_EDU_RE.search(raw) and not has_strong_freshness:
+        return False
+    return True
 
 
 def _host_from_url(url: str) -> str:
