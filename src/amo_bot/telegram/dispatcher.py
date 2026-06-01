@@ -54,6 +54,29 @@ AI_AUTOREPLY_ERROR_FALLBACK_TEXT = {
     "en": "I couldn't generate an AI reply right now. Please try again in a moment.",
 }
 
+_AUTO_RESEARCH_NO_RESULT_TEXT = {
+    "quota_exceeded": "the attempt was limited by quota/policy",
+    "provider_timeout": "the provider timed out",
+    "provider_error": "the provider returned an error",
+    "provider_unavailable": "the provider was unavailable",
+    "search_provider_not_configured": "the provider was unavailable",
+    "empty_result": "the search returned no usable hits",
+}
+
+
+def _format_auto_research_no_result_note(*, capability: str, reason: str | None) -> str:
+    normalized_reason = (reason or "").strip() or "no_usable_result"
+    reason_text = _AUTO_RESEARCH_NO_RESULT_TEXT.get(normalized_reason, "the attempt returned no usable live result")
+    return (
+        "AUTO-RESEARCH STATUS — WEB ATTEMPTED, NO USABLE RESULT:\n"
+        f"A live {capability} attempt was made in this turn, but {reason_text}. "
+        f"Reason code: {normalized_reason}.\n"
+        "Be transparent and precise: say the web search was attempted but this specific attempt produced no usable result, timed out, was limited, or the provider was unavailable. "
+        "Do NOT say or imply that the bot has no web tools, no live data capability, or cannot search the web in general. "
+        "If useful in German, say: 'Die Websuche wurde versucht, lieferte aber diesmal keine verwertbaren Treffer/keine Bestätigung.'\n"
+        "Strict anti-hallucination: do NOT invent current facts, dates, prices, levels, or news without reliable live confirmation from this turn."
+    )
+
 SendTextFn = Callable[[int, str, int | None], Awaitable[object]]
 SendMarkupFn = Callable[[int, str, dict[str, Any], int | None], Awaitable[object]]
 SendPrivateMarkupFn = Callable[[int, str, dict[str, Any]], Awaitable[object]]
@@ -1358,10 +1381,7 @@ class Dispatcher:
                         f"Source hosts: {hosts}"
                     )
                 else:
-                    auto_note = (
-                        "AUTO-RESEARCH STATUS: no usable live result in this turn (e.g., limit/provider/timeout/empty). "
-                        "Be transparent that you have no reliable live confirmation right now and do NOT invent current facts, dates, or prices."
-                    )
+                    auto_note = _format_auto_research_no_result_note(capability=decision_auto.capability, reason=tool_result.reason)
 
         if auto_note:
             llm_prompt = f"{auto_note}\n\n{llm_prompt}"

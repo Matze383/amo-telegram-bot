@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 from amo_bot.ai.router import AIRouterDecision, AIRouterReasonCode
 from amo_bot.auth.roles import Role
-from amo_bot.telegram.dispatcher import Dispatcher
+from amo_bot.telegram.dispatcher import Dispatcher, _format_auto_research_no_result_note
 from amo_bot.telegram.update_parser import TelegramChat, TelegramMessage, TelegramUser
 
 
@@ -163,7 +163,24 @@ def test_auto_research_empty_result_injects_no_live_warning(monkeypatch):
         )
     )
     assert sent[0] == "normal ai"
-    assert calls and "AUTO-RESEARCH STATUS: no usable live result" in calls[0]
+    assert calls and "AUTO-RESEARCH STATUS — WEB ATTEMPTED, NO USABLE RESULT" in calls[0]
+    assert "A live websearch attempt was made in this turn" in calls[0]
+    assert "the provider was unavailable" in calls[0]
+    assert "Do NOT say or imply that the bot has no web tools" in calls[0]
+    assert "Die Websuche wurde versucht" in calls[0]
+    assert "do NOT invent current facts" in calls[0]
+
+
+def test_auto_research_no_result_note_is_reason_specific_and_forbids_no_tool_claims():
+    empty_note = _format_auto_research_no_result_note(capability="websearch", reason="empty_result")
+    timeout_note = _format_auto_research_no_result_note(capability="websearch", reason="provider_timeout")
+
+    assert "websearch attempt was made" in empty_note
+    assert "returned no usable hits" in empty_note
+    assert "provider timed out" in timeout_note
+    assert "Do NOT say or imply that the bot has no web tools" in empty_note
+    assert "no live data capability" in empty_note
+    assert "do NOT invent current facts" in empty_note
 
 
 def test_normal_autoreply_without_trigger_not_quota_limited(monkeypatch):
