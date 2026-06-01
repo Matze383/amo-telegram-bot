@@ -47,7 +47,15 @@ class _SequenceWebtoolDispatcher:
         return SimpleNamespace(allowed=False, decision="deny", reason="empty_result", text="", sources=(), hosts=(), error=None)
 
 
-def _mk_message(text: str, *, reply_to_is_bot: bool = True, reply_to_user_is_bot: bool = True, reply_to_username: str = "amo_bot") -> TelegramMessage:
+def _mk_message(
+    text: str,
+    *,
+    reply_to_is_bot: bool = True,
+    reply_to_user_is_bot: bool = True,
+    reply_to_username: str = "amo_bot",
+    reply_to_message_text: str = "",
+    reply_to_message_id: int | None = None,
+) -> TelegramMessage:
     return TelegramMessage(
         message_id=1,
         chat=TelegramChat(id=-100, type="supergroup", title="g", username=None),
@@ -56,8 +64,8 @@ def _mk_message(text: str, *, reply_to_is_bot: bool = True, reply_to_user_is_bot
         attachments=(),
         message_thread_id=7,
         reply_to_message=None,
-        reply_to_message_id=None,
-        reply_to_message_text="",
+        reply_to_message_id=reply_to_message_id,
+        reply_to_message_text=reply_to_message_text,
         reply_to_user_id=None,
         reply_to_username=reply_to_username,
         reply_to_is_bot=reply_to_is_bot,
@@ -359,6 +367,103 @@ def test_auto_research_followup_extraction_failure_is_truthful(monkeypatch):
     assert "WEB SEARCH SUCCEEDED, FOLLOW-UP EXTRACTION UNCONFIRMED" in calls[0]
     assert "follow-up page extraction produced no usable confirmation" in calls[0]
     assert "Do NOT say or imply that the bot has no web tools" in calls[0]
+
+
+def test_user_feedback_followup_reply_triggers_search_and_extraction_without_freshness_terms(monkeypatch):
+    monkeypatch.setattr("amo_bot.telegram.dispatcher.AIRouter.decide", lambda self, **kwargs: _allowing_router_decision())
+    search = SimpleNamespace(
+        allowed=True,
+        decision="allow",
+        reason="search_completed",
+        text="More source candidates for the previous topic",
+        sources=("https://source.example/one",),
+        hosts=("source.example",),
+        error=None,
+    )
+    scrape = SimpleNamespace(
+        allowed=True,
+        decision="allow",
+        reason="scrape_completed",
+        text="Additional source page has enough details to compare against the thin prior answer.",
+        sources=("https://source.example/one",),
+        hosts=("source.example",),
+        error=None,
+    )
+    d, _sent = _mk_sequence_dispatcher([search, scrape])
+    calls = []
+
+    async def _ask(prompt: str) -> str:
+        calls.append(prompt)
+        return "normal ai"
+
+    d.ai_service.ask = _ask
+    asyncio.run(
+        d._maybe_handle_ai_autoreply(
+            message=_mk_message(
+                "such weiter / öffne andere Quellen",
+                reply_to_message_id=41,
+                reply_to_message_text="Bot answer: Ich konnte nur eine dünne Quelle zum Thema Solarförderung finden.",
+            ),
+            role=Role.ADMIN,
+            bot_username="amo_bot",
+            from_parsed_update=True,
+        )
+    )
+    assert [c.capability for c in d.webtool_dispatcher.calls] == ["websearch", "webscraping"]
+    assert "Bot answer" in d.webtool_dispatcher.calls[0].query
+    assert "such weiter" in d.webtool_dispatcher.calls[0].query
+    assert "FOLLOW-UP AUTO-RESEARCH (LIVE WEB + PAGE EXTRACTION)" in calls[0]
+    assert "user feedback requested more/different sources" in calls[0]
+
+
+def test_random_reply_feedback_does_not_trigger_followup_search(monkeypatch):
+    monkeypatch.setattr("amo_bot.telegram.dispatcher.AIRouter.decide", lambda self, **kwargs: _allowing_router_decision())
+    result = SimpleNamespace(allowed=True, decision="allow", reason="search_completed", text="unused", sources=("https://a.example",), hosts=("a.example",), error=None)
+    d, _sent = _mk_dispatcher(result)
+    calls = []
+
+    async def _ask(prompt: str) -> str:
+        calls.append(prompt)
+        return "normal ai"
+
+    d.ai_service.ask = _ask
+    asyncio.run(
+        d._maybe_handle_ai_autoreply(
+            message=_mk_message("okay danke", reply_to_message_id=42, reply_to_message_text="Bot answer with prior context"),
+            role=Role.ADMIN,
+            bot_username="amo_bot",
+            from_parsed_update=True,
+        )
+    )
+    assert d.webtool_dispatcher.calls == []
+    assert calls and "FOLLOW-UP AUTO-RESEARCH" not in calls[0]
+
+
+def test_user_feedback_followup_extraction_failure_prompt_is_truthful(monkeypatch):
+    monkeypatch.setattr("amo_bot.telegram.dispatcher.AIRouter.decide", lambda self, **kwargs: _allowing_router_decision())
+    search = SimpleNamespace(allowed=True, decision="allow", reason="search_completed", text="More candidates", sources=("https://source.example/one",), hosts=("source.example",), error=None)
+    failed_scrape = SimpleNamespace(allowed=False, decision="deny", reason="http_error_403", text="", sources=(), hosts=(), error="HTTP error")
+    failed_browser = SimpleNamespace(allowed=False, decision="provider_unavailable", reason="browser_provider_not_configured", text="", sources=(), hosts=(), error="No browser")
+    d, _sent = _mk_sequence_dispatcher([search, failed_scrape, failed_browser])
+    calls = []
+
+    async def _ask(prompt: str) -> str:
+        calls.append(prompt)
+        return "normal ai"
+
+    d.ai_service.ask = _ask
+    asyncio.run(
+        d._maybe_handle_ai_autoreply(
+            message=_mk_message("das reicht nicht, prüfe andere Quellen", reply_to_message_id=43, reply_to_message_text="Bot answer: Keine sichere Bestätigung gefunden."),
+            role=Role.ADMIN,
+            bot_username="amo_bot",
+            from_parsed_update=True,
+        )
+    )
+    assert [c.capability for c in d.webtool_dispatcher.calls] == ["websearch", "webscraping", "browser"]
+    assert "FOLLOW-UP AUTO-RESEARCH STATUS" in calls[0]
+    assert "WEB SEARCH SUCCEEDED, FOLLOW-UP EXTRACTION UNCONFIRMED" in calls[0]
+    assert "still could not confirm" in calls[0]
 
 
 def test_auto_research_chain_caps_urls_browser_and_text(monkeypatch):

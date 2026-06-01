@@ -1063,6 +1063,8 @@ The bot supports sending images via Telegram with policy/role/topic gates.
 
 Enhanced automatic web research for current/freshness-relevant questions (market/rate/price, news, releases, status, weather, traffic, outages, versions, updates, etc.). Starts with configured SearXNG websearch. For freshness-critical intents only, it can follow up with bounded static page extraction from top URLs and Chromium/browser fallback for max one URL if static extraction is empty/unusable. No new user/admin commands, no new config required. Behavior is bounded/transparent. Timeless/general educational questions do not trigger it. If extraction cannot confirm exact current values, the bot states web search succeeded but follow-up extraction did not confirm the exact value.
 
+**Feedback-driven follow-up search:** User feedback can trigger another bounded research round when the prior answer is perceived as insufficient (e.g., "search more", "other sources", "open/check the sources", "that's not enough", "more sources", "such weiter", "andere Quellen"). The follow-up remains bounded (SearXNG first, static extraction capped, max one browser fallback) and transparent: if still unconfirmed, the bot says so. Context from the previous bot answer/reply may be used for the follow-up search query; raw query/context is not logged but is sent to the configured websearch provider.
+
 ### Webtool Quotas (Issue #48)
 
 Role-based usage quotas for webtools (websearch, webscraping). **Note:** These quotas apply only to webtools, not to normal AI responses via `/ask`.

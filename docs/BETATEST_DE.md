@@ -1063,6 +1063,8 @@ Der Bot unterstützt das Senden von Bildern über Telegram mit Policy/Role/Topic
 
 Verbesserte automatische Web-Recherche für aktuelle/zeitnahe Fragen (Markt/Kurs/Preis, News, Releases, Status, Wetter, Verkehr, Ausfälle, Versionen, Updates, etc.). Startet mit konfiguriertem SearXNG-Websearch. Bei Fragen zu aktuellen Werten kann optional die Top-URL per statischer Seitenextraktion angefragt werden; falls diese leer/unbrauchbar ist, erfolgt maximal ein Chromium/Browser-Fallback für eine URL. Keine neuen User/Admin-Commands, keine neue Config erforderlich. Verhalten ist bounded/transparent. Zeitlose/allgemeine Bildungsfragen lösen sie nicht aus. Bei nicht bestätigbaren Werten antwortet der Bot wahrheitsgemäß, dass die Websuche erfolgreich war, die Extraktion aber keine exakten aktuellen Werte bestätigen konnte.
 
+**Feedback-gesteuerte Follow-up-Recherche:** Nutzer-Feedback kann eine weitere begrenzte Recherche-Runde auslösen, wenn die vorherige Antwort als unzureichend empfunden wird (z.B. "such weiter", "andere Quellen", "öffne/prüfe die Quellen", "das reicht nicht", "search more", "more sources"). Die Follow-up-Recherche bleibt begrenzt (SearXNG zuerst, statische Extraktion gecappt, maximal ein Browser-Fallback) und transparent: Falls weiterhin keine Bestätigung möglich ist, teilt der Bot dies mit. Für die Follow-up-Suche kann Kontext aus der vorherigen Bot-Antwort/Reply verwendet werden; die Rohanfrage wird nicht geloggt, aber an den konfigurierten Websearch-Provider übermittelt.
+
 ### Webtool-Quotas (Issue #48)
 
 Rollenbasierte Nutzungsquotas für Webtools (Websearch, Webscraping). **Hinweis:** Diese Quotas gelten nur für Webtools, nicht für normale AI-Antworten via `/ask`.

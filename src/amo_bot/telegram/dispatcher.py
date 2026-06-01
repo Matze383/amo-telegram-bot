@@ -38,10 +38,13 @@ from amo_bot.telegram.owner_notify import OwnerNotifier
 from amo_bot.telegram.update_parser import TelegramMessage, parse_update
 from amo_bot.telegram.webtool_auto_research import decide_auto_research
 from amo_bot.telegram.webtool_chat_integration import (
+    WebtoolChatTrigger,
+    build_web_research_followup_query,
     build_webtool_request,
     format_webtool_fail_text,
     format_webtool_quota_text,
     format_webtool_success_text,
+    is_web_research_followup_feedback,
     parse_webtool_chat_trigger,
 )
 
@@ -109,10 +112,14 @@ def should_chain_auto_research(text: str, *, capability: str, reason: str | None
 
     The chain is still limited to websearch-triggered auto research, but it is no
     longer market-only: explicit freshness/currentness intents may follow search
-    with bounded static extraction and at most one browser fallback.
+    with bounded static extraction and at most one browser fallback. Explicit
+    user-feedback follow-ups may also chain once so the bot can check
+    more/different sources after a thin prior answer.
     """
     if capability != "websearch":
         return False
+    if reason == "user_feedback_followup":
+        return True
     raw = text or ""
     if not raw.strip():
         return False
@@ -160,7 +167,7 @@ def _compact_chain_text(text: str, *, cap: int = _AUTO_RESEARCH_CHAIN_PER_PAGE_T
 
 
 def _format_auto_research_chained_success_note(
-    *, capability: str, search_text: str, search_hosts: tuple[str, ...], extracts: tuple[tuple[str, str, str], ...]
+    *, capability: str, search_text: str, search_hosts: tuple[str, ...], extracts: tuple[tuple[str, str, str], ...], followup: bool = False
 ) -> str:
     compact_search = " ".join(search_text.split())[:700]
     host_text = ", ".join(search_hosts[:5])
@@ -172,9 +179,14 @@ def _format_auto_research_chained_success_note(
     evidence = "\n".join(evidence_lines)
     if len(evidence) > _AUTO_RESEARCH_CHAIN_FINAL_CAP:
         evidence = evidence[:_AUTO_RESEARCH_CHAIN_FINAL_CAP].rstrip() + " …"
+    heading = "FOLLOW-UP AUTO-RESEARCH (LIVE WEB + PAGE EXTRACTION)" if followup else "AUTO-RESEARCH (LIVE WEB + PAGE EXTRACTION)"
+    context_line = (
+        "This is a bounded follow-up because user feedback requested more/different sources after a prior web/AI answer. "
+        if followup else ""
+    )
     return (
-        "AUTO-RESEARCH (LIVE WEB + PAGE EXTRACTION) — STRICT INSTRUCTION:\n"
-        f"A live {capability}/web tool result and bounded follow-up page extraction are available in this turn. Treat this fresh web context as primary evidence for current facts.\n"
+        f"{heading} — STRICT INSTRUCTION:\n"
+        f"{context_line}A live {capability}/web tool result and bounded follow-up page extraction are available in this turn. Treat this fresh web context as primary evidence for current facts.\n"
         "Do NOT claim or imply that the bot has no web tools, no live data capability, or cannot search the web.\n"
         "Use the supplied search summary and extracted page evidence; mention source hosts when relevant. Do NOT override it with stale memory/priors.\n"
         "Strict anti-hallucination: do NOT invent exact prices, rates, dates, levels, or news not supported by the supplied evidence. If exact values are absent, say the live evidence does not confirm the exact value.\n"
@@ -185,13 +197,18 @@ def _format_auto_research_chained_success_note(
     )
 
 
-def _format_auto_research_chain_no_confirmation_note(*, capability: str, search_text: str, search_hosts: tuple[str, ...]) -> str:
+def _format_auto_research_chain_no_confirmation_note(*, capability: str, search_text: str, search_hosts: tuple[str, ...], followup: bool = False) -> str:
     compact_search = " ".join(search_text.split())[:700]
     host_text = ", ".join(search_hosts[:5])
+    heading = "FOLLOW-UP AUTO-RESEARCH STATUS" if followup else "AUTO-RESEARCH STATUS"
+    context_line = (
+        "This was a bounded follow-up because user feedback requested more/different sources after a prior web/AI answer. "
+        if followup else ""
+    )
     return (
-        "AUTO-RESEARCH STATUS — WEB SEARCH SUCCEEDED, FOLLOW-UP EXTRACTION UNCONFIRMED:\n"
-        f"A live {capability} succeeded in this turn, but bounded follow-up page extraction produced no usable confirmation.\n"
-        "Be transparent: use the search summary only as limited live context, and say that follow-up page extraction did not confirm a concrete current value if asked for one.\n"
+        f"{heading} — WEB SEARCH SUCCEEDED, FOLLOW-UP EXTRACTION UNCONFIRMED:\n"
+        f"{context_line}A live {capability} succeeded in this turn, but bounded follow-up page extraction produced no usable confirmation.\n"
+        "Be transparent: use the search summary only as limited live context, and if evidence remains insufficient, say clearly that the follow-up search/extraction still could not confirm the requested information.\n"
         "Do NOT say or imply that the bot has no web tools, no live data capability, or cannot search the web.\n"
         "Strict anti-hallucination: do NOT invent exact prices, rates, dates, levels, or news without reliable live confirmation from this turn.\n"
         f"Operation: {capability}\n"
@@ -1431,6 +1448,12 @@ class Dispatcher:
 
         message_locale = self._locale_for_message(message)
 
+        followup_context_text = ""
+        if reply_context_block:
+            followup_context_text = (getattr(self._resolve_reply_context(message=message), "message_text", "") or "").strip()
+        elif recent_messages_text:
+            followup_context_text = recent_messages_text
+
         trigger = parse_webtool_chat_trigger(normalized_text)
         if trigger is not None and self.webtool_dispatcher is not None:
             req = build_webtool_request(
@@ -1485,13 +1508,32 @@ class Dispatcher:
         auto_note = ""
         if trigger is None and self.webtool_dispatcher is not None:
             decision_auto = decide_auto_research(normalized_text)
+            is_followup_research = False
+            if (
+                not decision_auto.enabled
+                and is_triggered_path
+                and is_web_research_followup_feedback(normalized_text)
+            ):
+                followup_query = build_web_research_followup_query(
+                    feedback_text=normalized_text,
+                    context_text=followup_context_text,
+                )
+                if followup_query:
+                    decision_auto = type("_AutoFollowup", (), {
+                        "enabled": True,
+                        "capability": "websearch",
+                        "reason": "user_feedback_followup",
+                        "query": followup_query,
+                        "url": "",
+                    })()
+                    is_followup_research = True
             if decision_auto.enabled:
                 req = build_webtool_request(
-                    trigger=type("_T", (), {
-                        "capability": decision_auto.capability,
-                        "query": decision_auto.query,
-                        "url": decision_auto.url,
-                    })(),
+                    trigger=WebtoolChatTrigger(
+                        capability=decision_auto.capability,
+                        query=decision_auto.query,
+                        url=decision_auto.url,
+                    ),
                     user_id=message.from_user.id,
                     role=role,
                     chat_id=message.chat.id,
@@ -1509,7 +1551,7 @@ class Dispatcher:
                     message_thread_id=message.message_thread_id,
                     user_id=message.from_user.id,
                     extra={
-                        "mode": "auto",
+                        "mode": "followup" if is_followup_research else "auto",
                         "operation": decision_auto.capability,
                         "decision": decision_auto.reason,
                         "status": "allow" if tool_result.allowed else "deny",
@@ -1573,7 +1615,7 @@ class Dispatcher:
                             message_thread_id=message.message_thread_id,
                             user_id=message.from_user.id,
                             extra={
-                                "mode": "auto_chain",
+                                "mode": "followup_chain" if is_followup_research else "auto_chain",
                                 "status": "success" if chain_extracts else "no_usable_extraction",
                                 "url_count": len(chain_urls),
                                 "extract_count": len(chain_extracts),
@@ -1589,12 +1631,14 @@ class Dispatcher:
                             search_text=tool_result.text,
                             search_hosts=tuple(tool_result.hosts or ()),
                             extracts=tuple(chain_extracts),
+                            followup=is_followup_research,
                         )
                     elif chain_urls:
                         auto_note = _format_auto_research_chain_no_confirmation_note(
                             capability=decision_auto.capability,
                             search_text=tool_result.text,
                             search_hosts=tuple(tool_result.hosts or ()),
+                            followup=is_followup_research,
                         )
                     else:
                         auto_note = _format_auto_research_success_note(

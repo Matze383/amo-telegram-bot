@@ -2,6 +2,36 @@
 
 ---
 
+## [Unreleased] – Auto Web Research Feedback Follow-up (v3)
+
+**Datum / Date:** 2026-06-01
+
+### 🇩🇪 Deutsch
+
+#### Übersicht
+Feedback-gesteuerte Follow-up-Recherche für den Auto Web Research Flow. Nutzer können eine weitere begrenzte Recherche-Runde auslösen, wenn die Antwort als unzureichend empfunden wird.
+
+#### Neu
+- **Feedback-Trigger:** Phrasen wie "such weiter", "andere Quellen", "öffne/prüfe die Quellen", "das reicht nicht", "search more", "more sources" lösen eine Follow-up-Recherche aus.
+- **Bounded Follow-up:** SearXNG zuerst, statische Extraktion gecappt, maximal ein Browser-Fallback.
+- **Transparentes Scheitern:** Falls weiterhin keine Bestätigung möglich ist, teilt der Bot dies mit.
+- **Kontextnutzung:** Für die Follow-up-Suche kann Kontext aus der vorherigen Bot-Antwort/Reply verwendet werden.
+- **Privacy:** Die Rohanfrage wird nicht geloggt, aber an den konfigurierten Websearch-Provider übermittelt.
+
+### 🇬🇧 English
+
+#### Overview
+Feedback-driven follow-up research for the Auto Web Research flow. Users can trigger another bounded research round when the answer is perceived as insufficient.
+
+#### New
+- **Feedback triggers:** Phrases like "search more", "other sources", "open/check the sources", "that's not enough", "more sources" trigger a follow-up search.
+- **Bounded follow-up:** SearXNG first, static extraction capped, max one browser fallback.
+- **Transparent failure:** If still unconfirmed, the bot states so.
+- **Context usage:** Context from the previous bot answer/reply may be used for the follow-up search query.
+- **Privacy:** Raw query/context is not logged but is sent to the configured websearch provider.
+
+---
+
 ## [Unreleased] – Auto Web Research (Search→Scrape Chain v1)
 
 **Datum / Date:** 2026-06-01
