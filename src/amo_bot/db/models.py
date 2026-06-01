@@ -271,6 +271,24 @@ class TopicAgentConfig(Base):
     )
 
 
+class PromptContextDoc(Base):
+    __tablename__ = "prompt_context_docs"
+    __table_args__ = (
+        UniqueConstraint("kind", "scope_type", "scope_key", name="uq_prompt_context_docs_kind_scope"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    scope_type: Mapped[str] = mapped_column(String(16), nullable=False)
+    scope_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    chat_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    topic_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    content: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="1")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+
 class TopicDailyMemory(Base):
     __tablename__ = "topic_daily_memories"
 

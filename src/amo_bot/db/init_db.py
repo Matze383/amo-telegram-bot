@@ -43,6 +43,21 @@ def init_db(database_url: str) -> None:
                 CONSTRAINT uq_topic_agent_configs_scope UNIQUE (scope_type, chat_id, topic_id, user_id)
             )
         """,
+        "prompt_context_docs": """
+            CREATE TABLE prompt_context_docs (
+                id INTEGER NOT NULL PRIMARY KEY,
+                kind VARCHAR(16) NOT NULL,
+                scope_type VARCHAR(16) NOT NULL,
+                scope_key VARCHAR(128) NOT NULL,
+                chat_id BIGINT,
+                topic_id BIGINT,
+                content TEXT NOT NULL DEFAULT '',
+                enabled BOOLEAN NOT NULL DEFAULT 1,
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                CONSTRAINT uq_prompt_context_docs_kind_scope UNIQUE (kind, scope_type, scope_key)
+            )
+        """,
         "topic_daily_memories": """
             CREATE TABLE topic_daily_memories (
                 id INTEGER NOT NULL PRIMARY KEY,

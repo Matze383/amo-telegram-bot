@@ -8,7 +8,7 @@ import re
 
 from amo_bot.core.context_filters import is_bot_authored_context_record, is_obvious_meta_status_message
 from amo_bot.core.logging import log_event
-from amo_bot.db.repositories import TopicAgentMemoryRepository, UserMemoryProfileRepository
+from amo_bot.db.repositories import PromptContextDocRepository, TopicAgentMemoryRepository, UserMemoryProfileRepository
 from amo_bot.ai.webtool_dispatcher import WebtoolCapabilityDispatcher, WebtoolCapabilityRequest, WebtoolCapabilityResult
 
 logger = logging.getLogger(__name__)
@@ -85,6 +85,7 @@ class AIRouterContextV1:
     recent_messages_text: str = ""
     recall_memory_text: str = ""
     user_profile_context_text: str = ""
+    prompt_context_docs_text: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -112,6 +113,9 @@ class AIRouter:
     _PROFILE_MAX_USERS = 5
     _PROFILE_MAX_BULLETS_PER_USER = 5
     _PROFILE_MAX_CHARS = 1200
+    _PROMPT_DOC_KIND_ORDER = ("AGENT", "SOUL", "PLUGINS", "AUFGABE")
+    _PROMPT_DOC_MAX_CHARS = 2000
+    _PROMPT_DOC_TOTAL_MAX_CHARS = 6000
     _SUSPICIOUS_SOUL_MARKERS = (
         "system prompt",
         "system message",
@@ -180,9 +184,11 @@ class AIRouter:
         *,
         topic_agent_memory_repository: TopicAgentMemoryRepository | None = None,
         user_memory_profile_repository: UserMemoryProfileRepository | None = None,
+        prompt_context_doc_repository: PromptContextDocRepository | None = None,
     ) -> None:
         self._topic_agent_memory_repository = topic_agent_memory_repository
         self._user_memory_profile_repository = user_memory_profile_repository
+        self._prompt_context_doc_repository = prompt_context_doc_repository
 
     def decide(
         self,
@@ -206,6 +212,7 @@ class AIRouter:
         recent_messages_text = ""
         recall_memory_text = ""
         user_profile_context_text = ""
+        prompt_context_docs_text = ""
         base_context = self._build_context(
             scope=scope,
             user_id=user_id,
@@ -220,6 +227,7 @@ class AIRouter:
             recent_messages_text=recent_messages_text,
             recall_memory_text=recall_memory_text,
             user_profile_context_text=user_profile_context_text,
+            prompt_context_docs_text=prompt_context_docs_text,
         )
 
         repo = self._topic_agent_memory_repository
@@ -228,6 +236,11 @@ class AIRouter:
 
         if scope is None:
             return AIRouterDecision(context=base_context)
+
+        prompt_context_docs_text, prompt_docs_error = self._read_prompt_context_docs_text(
+            chat_id=scope["chat_id"] if isinstance(scope["chat_id"], int) else None,
+            topic_id=scope["topic_id"] if isinstance(scope["topic_id"], int) else None,
+        )
 
         config = repo.get_config(
             scope_type=scope["scope_type"],
@@ -275,7 +288,7 @@ class AIRouter:
             long_memory_text=long_memory_text,
             recent_messages_text=recent_messages_text,
         )
-        context_error = ",".join(part for part in (daily_error, long_error, recent_error, profile_error, recall_error) if part)
+        context_error = ",".join(part for part in (daily_error, long_error, recent_error, profile_error, recall_error, prompt_docs_error) if part)
         if recall_meta:
             self._audit_recall(scope=scope, meta=recall_meta)
 
@@ -299,6 +312,7 @@ class AIRouter:
                     recent_messages_text=recent_messages_text,
                     recall_memory_text=recall_text,
                     user_profile_context_text=user_profile_context_text,
+                    prompt_context_docs_text=prompt_context_docs_text,
                     context_error=context_error,
                 ),
             )
@@ -323,6 +337,7 @@ class AIRouter:
                     recent_messages_text=recent_messages_text,
                     recall_memory_text=recall_text,
                     user_profile_context_text=user_profile_context_text,
+                    prompt_context_docs_text=prompt_context_docs_text,
                     context_error=context_error,
                 ),
             )
@@ -350,6 +365,7 @@ class AIRouter:
                 recent_messages_text=recent_messages_text,
                 recall_memory_text=recall_text,
                 user_profile_context_text=user_profile_context_text,
+                prompt_context_docs_text=prompt_context_docs_text,
                 context_error=context_error,
             ),
         )
@@ -370,6 +386,7 @@ class AIRouter:
         recent_messages_text: str,
         recall_memory_text: str,
         user_profile_context_text: str,
+        prompt_context_docs_text: str,
         context_error: str = "",
     ) -> AIRouterContextV1:
         if scope is None:
@@ -387,6 +404,7 @@ class AIRouter:
                 recent_messages_text=recent_messages_text,
                 recall_memory_text=recall_memory_text,
                 user_profile_context_text=user_profile_context_text,
+                prompt_context_docs_text=prompt_context_docs_text,
             )
 
         return AIRouterContextV1(
@@ -407,7 +425,51 @@ class AIRouter:
             recent_messages_text=recent_messages_text,
             recall_memory_text=recall_memory_text,
             user_profile_context_text=user_profile_context_text,
+            prompt_context_docs_text=prompt_context_docs_text,
         )
+
+    def _read_prompt_context_docs_text(self, *, chat_id: int | None, topic_id: int | None) -> tuple[str, str]:
+        repo = self._prompt_context_doc_repository
+        if repo is None:
+            return "", ""
+
+        try:
+            docs = repo.resolve_docs(chat_id=chat_id, topic_id=topic_id)
+        except Exception:
+            return "", "prompt_context_docs_error"
+
+        parts: list[str] = []
+        total = 0
+        truncated_any = False
+        for doc in docs:
+            kind = str(doc.kind).upper()
+            if kind not in self._PROMPT_DOC_KIND_ORDER:
+                continue
+            content = re.sub(r"\s+", " ", (doc.content or "")).strip()
+            if not content:
+                continue
+            truncated_doc = False
+            if len(content) > self._PROMPT_DOC_MAX_CHARS:
+                content = content[: self._PROMPT_DOC_MAX_CHARS].rstrip()
+                truncated_doc = True
+                truncated_any = True
+            header = f"[{kind} steering/context; scope={doc.scope_type}; chars={len(content)}; truncated={str(truncated_doc).lower()}]"
+            block = f"{header}\n{content}"
+            remaining = self._PROMPT_DOC_TOTAL_MAX_CHARS - total
+            if remaining <= 0:
+                truncated_any = True
+                break
+            if len(block) > remaining:
+                block = block[:remaining].rstrip()
+                truncated_any = True
+            if block:
+                parts.append(block)
+                total += len(block)
+
+        if not parts:
+            return "", ""
+        suffix = "\n[prompt_context_docs truncated by total char budget]" if truncated_any else ""
+        return "\n\n".join(parts) + suffix, ""
 
     @staticmethod
     def _resolve_scope(

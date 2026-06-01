@@ -26,6 +26,7 @@ from amo_bot.db.models import (
     PluginPolicyAllowedTopic,
     PluginPolicyOverride,
     PrivateChatPolicy,
+    PromptContextDoc,
     TelegramChat,
     TelegramTopic,
     TopicAgentConfig,
@@ -1763,6 +1764,17 @@ class TopicAgentConfigRecord:
 
 
 @dataclass(slots=True)
+class PromptContextDocRecord:
+    kind: str
+    scope_type: str
+    scope_key: str
+    chat_id: int | None
+    topic_id: int | None
+    content: str
+    enabled: bool
+
+
+@dataclass(slots=True)
 class TopicDailyMemoryRecord:
     id: int
     scope_type: str
@@ -2093,6 +2105,109 @@ class UserMemoryProfileRepository:
         # Filter to users with non-empty profiles and respect limit_users
         result = [by_user[uid] for uid in all_valid_users if uid in by_user and by_user[uid].profile][:safe_limit]
         return result
+
+
+class PromptContextDocRepository:
+    """DB-backed editable steering/context docs for prompt assembly.
+
+    These records are explicit operator-authored context documents, not memory.
+    They are resolved deterministically by kind with topic docs overriding global docs.
+    """
+
+    ALLOWED_KINDS = ("AGENT", "SOUL", "PLUGINS", "AUFGABE")
+    ALLOWED_SCOPE_TYPES = {"global", "topic"}
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def upsert_doc(
+        self,
+        *,
+        kind: str,
+        scope_type: str,
+        content: str,
+        chat_id: int | None = None,
+        topic_id: int | None = None,
+        enabled: bool = True,
+    ) -> PromptContextDocRecord:
+        normalized_kind = self._normalize_kind(kind)
+        normalized_scope_type = self._normalize_scope_type(scope_type)
+        scope_key = self._scope_key(scope_type=normalized_scope_type, chat_id=chat_id, topic_id=topic_id)
+
+        row = self._session.scalar(
+            select(PromptContextDoc).where(
+                PromptContextDoc.kind == normalized_kind,
+                PromptContextDoc.scope_type == normalized_scope_type,
+                PromptContextDoc.scope_key == scope_key,
+            )
+        )
+        if row is None:
+            row = PromptContextDoc(
+                kind=normalized_kind,
+                scope_type=normalized_scope_type,
+                scope_key=scope_key,
+                chat_id=chat_id if normalized_scope_type == "topic" else None,
+                topic_id=topic_id if normalized_scope_type == "topic" else None,
+            )
+            self._session.add(row)
+
+        row.content = content or ""
+        row.enabled = bool(enabled)
+        row.chat_id = chat_id if normalized_scope_type == "topic" else None
+        row.topic_id = topic_id if normalized_scope_type == "topic" else None
+        self._session.commit()
+        self._session.refresh(row)
+        return self._to_record(row)
+
+    def resolve_docs(self, *, chat_id: int | None = None, topic_id: int | None = None) -> list[PromptContextDocRecord]:
+        rows = self._session.scalars(select(PromptContextDoc).where(PromptContextDoc.enabled.is_(True))).all()
+        by_scope_kind = {(row.scope_type, row.scope_key, row.kind): row for row in rows}
+        topic_key = None
+        if chat_id is not None and topic_id is not None:
+            topic_key = self._scope_key(scope_type="topic", chat_id=chat_id, topic_id=topic_id)
+
+        resolved: list[PromptContextDocRecord] = []
+        for kind in self.ALLOWED_KINDS:
+            row = by_scope_kind.get(("topic", topic_key, kind)) if topic_key is not None else None
+            if row is None:
+                row = by_scope_kind.get(("global", "global", kind))
+            if row is not None and (row.content or "").strip():
+                resolved.append(self._to_record(row))
+        return resolved
+
+    @classmethod
+    def _normalize_kind(cls, kind: str) -> str:
+        normalized = (kind or "").strip().upper()
+        if normalized not in cls.ALLOWED_KINDS:
+            raise ValueError("invalid prompt context doc kind")
+        return normalized
+
+    @classmethod
+    def _normalize_scope_type(cls, scope_type: str) -> str:
+        normalized = (scope_type or "").strip().lower()
+        if normalized not in cls.ALLOWED_SCOPE_TYPES:
+            raise ValueError("invalid prompt context doc scope_type")
+        return normalized
+
+    @staticmethod
+    def _scope_key(*, scope_type: str, chat_id: int | None, topic_id: int | None) -> str:
+        if scope_type == "global":
+            return "global"
+        if chat_id is None or topic_id is None:
+            raise ValueError("topic prompt context docs require chat_id and topic_id")
+        return f"telegram:{chat_id}:{topic_id}"
+
+    @staticmethod
+    def _to_record(row: PromptContextDoc) -> PromptContextDocRecord:
+        return PromptContextDocRecord(
+            kind=row.kind,
+            scope_type=row.scope_type,
+            scope_key=row.scope_key,
+            chat_id=row.chat_id,
+            topic_id=row.topic_id,
+            content=row.content,
+            enabled=bool(row.enabled),
+        )
 
 
 class TopicAgentMemoryRepository:

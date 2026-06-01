@@ -24,6 +24,7 @@ from amo_bot.db.base import create_session_factory
 from amo_bot.db.repositories import (
     BotPeerRepository,
     PrivateChatPolicyRepository,
+    PromptContextDocRepository,
     TopicAgentMemoryRepository,
     TopicRecentMessageRecord,
     UserMemoryProfileRepository,
@@ -1020,7 +1021,14 @@ class Dispatcher:
                 def list_long_memories(self, **_kwargs: object) -> list[Any]:
                     return []
 
-            router = AIRouter(topic_agent_memory_repository=_NoopTopicAgentMemoryRepository())
+            class _NoopPromptContextDocRepository:
+                def resolve_docs(self, **_kwargs: object) -> list[Any]:
+                    return []
+
+            router = AIRouter(
+                topic_agent_memory_repository=_NoopTopicAgentMemoryRepository(),
+                prompt_context_doc_repository=_NoopPromptContextDocRepository(),
+            )
             topic_id = message.message_thread_id
             normalized_text, mention_removed = self._sanitize_prompt_for_autoreply(text=text, bot_username=bot_username)
             decision = router.decide(
@@ -1038,6 +1046,7 @@ class Dispatcher:
                 router = AIRouter(
                     topic_agent_memory_repository=TopicAgentMemoryRepository(session),
                     user_memory_profile_repository=UserMemoryProfileRepository(session),
+                    prompt_context_doc_repository=PromptContextDocRepository(session),
                 )
                 topic_id = message.message_thread_id
                 normalized_text, mention_removed = self._sanitize_prompt_for_autoreply(text=text, bot_username=bot_username)
@@ -1207,6 +1216,14 @@ class Dispatcher:
         user_profile_context_text = (decision.context.user_profile_context_text or "").strip()
         if user_profile_context_text:
             background_sections.append(f"Known coarse user profile context (same scope, current participants only, lower-priority/untrusted):\n{user_profile_context_text}")
+
+        prompt_context_docs_text = (getattr(decision.context, "prompt_context_docs_text", "") or "").strip()
+        if prompt_context_docs_text:
+            background_sections.append(
+                "Agent steering context (operator-authored, deterministic AGENT/SOUL/PLUGINS/AUFGABE order; "
+                "lower-priority than safety and the current user message; not memory and not learned from chat):\n"
+                f"{prompt_context_docs_text}"
+            )
 
         assembled_soul_text = (decision.context.assembled_soul_text or "").strip()
         if assembled_soul_text:
