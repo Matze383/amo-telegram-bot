@@ -13,6 +13,7 @@ from amo_bot.telegram.dispatcher import (
     should_chain_auto_research,
 )
 from amo_bot.telegram.update_parser import TelegramChat, TelegramMessage, TelegramUser
+from amo_bot.telegram.webtool_chat_integration import build_empty_result_retry_query
 
 
 class _RoleResolver:
@@ -207,6 +208,111 @@ def test_auto_research_empty_result_injects_no_live_warning(monkeypatch):
     assert "Do NOT say or imply that the bot has no web tools" in calls[0]
     assert "Die Websuche wurde versucht" in calls[0]
     assert "do NOT invent current facts" in calls[0]
+
+
+def test_auto_research_empty_result_retries_once_with_stable_btc_query_and_chains(monkeypatch):
+    monkeypatch.setattr("amo_bot.telegram.dispatcher.AIRouter.decide", lambda self, **kwargs: _allowing_router_decision())
+    empty = SimpleNamespace(allowed=False, decision="deny", reason="empty_result", text="", sources=(), hosts=(), error=None)
+    search = SimpleNamespace(
+        allowed=True,
+        decision="allow",
+        reason="search_completed",
+        text="BTC live price summary from market sources",
+        sources=("https://crypto.example/btc",),
+        hosts=("crypto.example",),
+        error=None,
+    )
+    scrape = SimpleNamespace(
+        allowed=True,
+        decision="allow",
+        reason="scrape_completed",
+        text="Bitcoin BTC live price page confirms current USD market data.",
+        sources=("https://crypto.example/btc",),
+        hosts=("crypto.example",),
+        error=None,
+    )
+    d, sent = _mk_sequence_dispatcher([empty, search, scrape])
+    calls = []
+
+    async def _ask(prompt: str) -> str:
+        calls.append(prompt)
+        return "normal ai"
+
+    d.ai_service.ask = _ask
+    asyncio.run(
+        d._maybe_handle_ai_autoreply(
+            message=_mk_message(
+                "@amo_bot was ist der aktuelle BTC Kurs? Bot answer: alter Preis 100 USD reicht nicht",
+                reply_to_is_bot=False,
+                reply_to_user_is_bot=False,
+                reply_to_username="",
+            ),
+            role=Role.ADMIN,
+            bot_username="amo_bot",
+            from_parsed_update=True,
+        )
+    )
+    assert sent[0] == "normal ai"
+    assert [c.capability for c in d.webtool_dispatcher.calls] == ["websearch", "websearch", "webscraping"]
+    assert d.webtool_dispatcher.calls[1].query == "bitcoin kurs USD BTC"
+    assert "alter Preis" not in d.webtool_dispatcher.calls[1].query
+    assert "BTC live price summary" in calls[0]
+    assert "Bitcoin BTC live price page confirms" in calls[0]
+
+
+def test_empty_result_retry_query_uses_current_message_not_prior_context():
+    query = build_empty_result_retry_query("@amo_bot such weiter, das reicht nicht — Bot answer: BTC war 100 USD. Aktueller Bitcoin Preis?")
+
+    assert query == "bitcoin kurs USD BTC"
+    assert "100" not in query
+    assert "Bot answer" not in query
+
+
+def test_auto_research_empty_result_retry_failure_forbids_stale_estimate(monkeypatch):
+    monkeypatch.setattr("amo_bot.telegram.dispatcher.AIRouter.decide", lambda self, **kwargs: _allowing_router_decision())
+    empty1 = SimpleNamespace(allowed=False, decision="deny", reason="empty_result", text="", sources=(), hosts=(), error=None)
+    empty2 = SimpleNamespace(allowed=False, decision="deny", reason="empty_result", text="", sources=(), hosts=(), error=None)
+    d, _sent = _mk_sequence_dispatcher([empty1, empty2])
+    calls = []
+
+    async def _ask(prompt: str) -> str:
+        calls.append(prompt)
+        return "normal ai"
+
+    d.ai_service.ask = _ask
+    asyncio.run(
+        d._maybe_handle_ai_autoreply(
+            message=_mk_message("@amo_bot current BTC price now?", reply_to_is_bot=False, reply_to_user_is_bot=False, reply_to_username=""),
+            role=Role.ADMIN,
+            bot_username="amo_bot",
+            from_parsed_update=True,
+        )
+    )
+    assert [c.capability for c in d.webtool_dispatcher.calls] == ["websearch", "websearch"]
+    assert "RETRY ALSO NO USABLE RESULT" in calls[0]
+    assert "no current value/fact could be confirmed" in calls[0]
+    assert "do NOT reuse old/stale prices" in calls[0]
+    assert "Do NOT provide an estimated current value" in calls[0]
+
+
+def test_auto_research_empty_result_retry_only_once(monkeypatch):
+    monkeypatch.setattr("amo_bot.telegram.dispatcher.AIRouter.decide", lambda self, **kwargs: _allowing_router_decision())
+    empties = [SimpleNamespace(allowed=False, decision="deny", reason="empty_result", text="", sources=(), hosts=(), error=None) for _ in range(4)]
+    d, _sent = _mk_sequence_dispatcher(empties)
+
+    async def _ask(prompt: str) -> str:
+        return "normal ai"
+
+    d.ai_service.ask = _ask
+    asyncio.run(
+        d._maybe_handle_ai_autoreply(
+            message=_mk_message("@amo_bot aktueller BTC Kurs jetzt?", reply_to_is_bot=False, reply_to_user_is_bot=False, reply_to_username=""),
+            role=Role.ADMIN,
+            bot_username="amo_bot",
+            from_parsed_update=True,
+        )
+    )
+    assert [c.capability for c in d.webtool_dispatcher.calls] == ["websearch", "websearch"]
 
 
 def test_auto_research_current_rate_query_chains_static_scrape_into_prompt(monkeypatch):

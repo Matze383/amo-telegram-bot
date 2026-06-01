@@ -15,6 +15,7 @@ class WebtoolChatTrigger:
 
 
 _FOLLOWUP_QUERY_MAX_CHARS = 220
+_EMPTY_RESULT_RETRY_QUERY_MAX_CHARS = 150
 
 _WEBSEARCH_PREFIX_RE = re.compile(r"^\s*websearch\s*:\s*(.+)$", re.IGNORECASE | re.DOTALL)
 _WEBSCRAPE_PREFIX_RE = re.compile(r"^\s*webscrape\s*:\s*(.+)$", re.IGNORECASE | re.DOTALL)
@@ -31,6 +32,25 @@ _WEB_RESEARCH_FOLLOWUP_RE = re.compile(
     r")",
     re.IGNORECASE,
 )
+_BOT_MENTION_RE = re.compile(r"@\w{3,32}\b")
+_MARKDOWN_PUNCT_RE = re.compile(r"[`*_~>#\[\](){}]")
+_FOLLOWUP_FILLER_RE = re.compile(
+    r"\b(?:"
+    r"such\s+(?:bitte\s+)?weiter|weiter\s+suchen|noch(?:mal|mals?)\s+suchen|mehr\s+suchen|"
+    r"andere\s+quellen|das\s+reicht\s+nicht|zu\s+wenig|nicht\s+gefunden|keine\s+aktuellen\s+daten|"
+    r"try\s+again|search\s+more|more\s+sources|not\s+enough|couldn['’]?t\s+find|could\s+not\s+find"
+    r")\b",
+    re.IGNORECASE,
+)
+_OLD_ANSWER_MARKER_RE = re.compile(
+    r"\b(?:bot\s+answer|assistant\s+answer|previous\s+answer|prior\s+answer|alte\s+antwort|vorherige\s+antwort|antwort)\s*:",
+    re.IGNORECASE,
+)
+_BTC_RE = re.compile(r"\b(?:btc|bitcoin)\b", re.IGNORECASE)
+_PRICE_INTENT_RE = re.compile(
+    r"\b(?:price|preis|kurs|rate|current|aktuell(?:e[nrms]?)?|jetzt|heute|live|usd|dollar)\b",
+    re.IGNORECASE,
+)
 
 
 def _compact_followup_query(value: str, *, max_len: int = _FOLLOWUP_QUERY_MAX_CHARS) -> str:
@@ -38,6 +58,35 @@ def _compact_followup_query(value: str, *, max_len: int = _FOLLOWUP_QUERY_MAX_CH
     if len(compact) > max_len:
         compact = compact[:max_len].rstrip() + " …"
     return compact
+
+
+def build_empty_result_retry_query(text: str, *, max_len: int = _EMPTY_RESULT_RETRY_QUERY_MAX_CHARS) -> str:
+    """Build one safer retry query from the current user message only.
+
+    This intentionally avoids prior bot-answer/reply context so an empty first
+    auto-search cannot be retried with stale, over-specific context. Callers must
+    not log the returned raw query.
+    """
+    raw = (text or "").strip()
+    if not raw:
+        return ""
+    if _BTC_RE.search(raw) and _PRICE_INTENT_RE.search(raw):
+        if re.search(r"\b(?:kurs|preis|aktuell(?:e[nrms]?)?|heute|jetzt)\b", raw, re.IGNORECASE):
+            return "bitcoin kurs USD BTC"
+        return "bitcoin price USD BTC"
+
+    cleaned = _BOT_MENTION_RE.sub(" ", raw)
+    cleaned = _OLD_ANSWER_MARKER_RE.sub(" ", cleaned)
+    cleaned = _MARKDOWN_PUNCT_RE.sub(" ", cleaned)
+    cleaned = _FOLLOWUP_FILLER_RE.sub(" ", cleaned)
+    cleaned = re.sub(r"https?://\S+", " ", cleaned)
+    cleaned = re.sub(r"\bwebsearch\s*:\s*", " ", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" -–—:;,.!?\t\n\r")
+    if not cleaned:
+        return ""
+    if len(cleaned) > max_len:
+        cleaned = cleaned[:max_len].rstrip(" -–—:;,.!")
+    return cleaned
 
 
 def is_web_research_followup_feedback(text: str) -> bool:

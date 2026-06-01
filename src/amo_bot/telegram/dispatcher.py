@@ -39,6 +39,7 @@ from amo_bot.telegram.update_parser import TelegramMessage, parse_update
 from amo_bot.telegram.webtool_auto_research import decide_auto_research
 from amo_bot.telegram.webtool_chat_integration import (
     WebtoolChatTrigger,
+    build_empty_result_retry_query,
     build_web_research_followup_query,
     build_webtool_request,
     format_webtool_fail_text,
@@ -245,6 +246,20 @@ def _format_auto_research_no_result_note(*, capability: str, reason: str | None)
         "Do NOT say or imply that the bot has no web tools, no live data capability, or cannot search the web in general. "
         "If useful in German, say: 'Die Websuche wurde versucht, lieferte aber diesmal keine verwertbaren Treffer/keine Bestätigung.'\n"
         "Strict anti-hallucination: do NOT invent current facts, dates, prices, levels, or news without reliable live confirmation from this turn."
+    )
+
+
+def _format_auto_research_retry_no_result_note(*, capability: str, reason: str | None) -> str:
+    normalized_reason = (reason or "").strip() or "no_usable_result"
+    reason_text = _AUTO_RESEARCH_NO_RESULT_TEXT.get(normalized_reason, "the retry returned no usable live result")
+    return (
+        "AUTO-RESEARCH STATUS — WEB ATTEMPTED, RETRY ALSO NO USABLE RESULT:\n"
+        f"A live {capability} attempt was made in this turn, then exactly one simplified retry from the current user message was also attempted, but {reason_text}. "
+        f"Final reason code: {normalized_reason}.\n"
+        "Be transparent and precise: say live websearch was attempted but did not return usable results after retry, so no current value/fact could be confirmed from live sources in this turn. "
+        "Do NOT say or imply that the bot has no web tools, no live data capability, or cannot search the web in general. "
+        "If useful in German, say: 'Die Live-Websuche wurde versucht, lieferte aber auch nach einem vereinfachten Retry keine verwertbaren Treffer; ein aktueller Wert konnte nicht bestätigt werden.'\n"
+        "Strict anti-hallucination: do NOT reuse old/stale prices, rates, dates, levels, news, or prior-answer context as an estimate. Do NOT provide an estimated current value when live confirmation is unavailable."
     )
 
 SendTextFn = Callable[[int, str, int | None], Awaitable[object]]
@@ -1562,6 +1577,53 @@ class Dispatcher:
                         "scope": decision.context.scope_type,
                     },
                 )
+                retry_attempted = False
+                if (
+                    decision_auto.capability == "websearch"
+                    and not (tool_result.allowed and (tool_result.text or "").strip())
+                    and (tool_result.reason or "") == "empty_result"
+                ):
+                    retry_query = build_empty_result_retry_query(normalized_text)
+                    if retry_query and retry_query != (decision_auto.query or "").strip():
+                        retry_attempted = True
+                        retry_req = build_webtool_request(
+                            trigger=WebtoolChatTrigger(
+                                capability="websearch",
+                                query=retry_query,
+                                url="",
+                            ),
+                            user_id=message.from_user.id,
+                            role=role,
+                            chat_id=message.chat.id,
+                            topic_id=message.message_thread_id,
+                            locale=message_locale,
+                        )
+                        retry_result = self.webtool_dispatcher.execute(retry_req)
+                        log_event(
+                            logger,
+                            logging.INFO,
+                            event="ai.webtool.auto_research_retry",
+                            component=_COMPONENT,
+                            chat_id=message.chat.id,
+                            message_id=message.message_id,
+                            message_thread_id=message.message_thread_id,
+                            user_id=message.from_user.id,
+                            extra={
+                                "mode": "followup" if is_followup_research else "auto",
+                                "operation": "websearch",
+                                "decision": decision_auto.reason,
+                                "status": "allow" if retry_result.allowed else "deny",
+                                "reason": retry_result.reason,
+                                "retry_attempted": True,
+                                "retry_reason": "empty_result",
+                                "query_length": len(retry_query),
+                                "error_class": type(retry_result.error).__name__ if retry_result.error else None,
+                                "source_count": len(retry_result.sources),
+                                "host_count": len(retry_result.hosts),
+                                "scope": decision.context.scope_type,
+                            },
+                        )
+                        tool_result = retry_result
                 if tool_result.allowed and (tool_result.text or "").strip():
                     chain_extracts: list[tuple[str, str, str]] = []
                     chain_urls = ()
@@ -1647,7 +1709,10 @@ class Dispatcher:
                             hosts=tuple(tool_result.hosts or ()),
                         )
                 else:
-                    auto_note = _format_auto_research_no_result_note(capability=decision_auto.capability, reason=tool_result.reason)
+                    if retry_attempted:
+                        auto_note = _format_auto_research_retry_no_result_note(capability=decision_auto.capability, reason=tool_result.reason)
+                    else:
+                        auto_note = _format_auto_research_no_result_note(capability=decision_auto.capability, reason=tool_result.reason)
 
         if auto_note:
             llm_prompt = f"{auto_note}\n\n{llm_prompt}"
