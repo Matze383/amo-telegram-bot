@@ -1098,6 +1098,57 @@ Role-based usage quotas for webtools (websearch, webscraping). **Note:** These q
 
 ---
 
+### Admin: Prompt Context Docs (`/ctxdoc_*` Commands)
+
+Admin-only Telegram commands for managing DB-backed prompt context docs. These docs control bot behavior for AI responses and are **not** part of the memory system (no Memory.md learning curve).
+
+**Available Kinds:** `AGENT`, `SOUL`, `PLUGINS`, `AUFGABE`
+
+**Scopes:** `global` (applies everywhere) or `topic` (current Telegram topic only)
+
+#### Commands
+
+**`/ctxdoc_set <kind> <global|topic> <text...>`**
+- Creates or overwrites a context doc for the specified kind/scope combination
+- **Long text:** Reply to a message whose text/caption is used as content
+- Example: `/ctxdoc_set SOUL global You are a helpful assistant`
+
+**`/ctxdoc_get <kind> <global|topic>`**
+- Shows the current context doc for kind/scope
+- Example: `/ctxdoc_get SOUL global`
+
+**`/ctxdoc_del <kind> <global|topic>`**
+- Deletes the context doc for kind/scope
+- Example: `/ctxdoc_del PLUGINS topic`
+
+**`/ctxdoc_list [scope] [kind]`**
+- Lists all set context docs
+- Optionally filterable by scope (`global`/`topic`) and/or kind
+- Examples:
+  - `/ctxdoc_list` — all docs
+  - `/ctxdoc_list global` — global scope only
+  - `/ctxdoc_list topic AGENT` — AGENT docs in current topic
+
+**Important:**
+- Owner/Admin only (no WebUI/API editor in current release)
+- Docs are included as system context for AI requests
+- No automatic migration to Memory.md — docs are separate config layer
+
+**Limitation:** WebUI/API editor for context docs is not yet included in this release — management is via Telegram commands only.
+
+**Checklist:**
+- [ ] `/ctxdoc_set` saves doc correctly (with direct text)
+- [ ] `/ctxdoc_set` with reply uses reply text/caption
+- [ ] `/ctxdoc_get` shows set content
+- [ ] `/ctxdoc_del` removes doc correctly
+- [ ] `/ctxdoc_list` shows all docs without filter
+- [ ] `/ctxdoc_list global` filters correctly
+- [ ] `/ctxdoc_list topic AGENT` filters correctly
+- [ ] Only owner/admin can execute commands
+- [ ] Normal/VIP users are denied
+
+---
+
 ### Future Features (Not Yet Implemented)
 
 The following features are planned for future releases and are **not available** in the current beta:

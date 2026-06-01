@@ -463,6 +463,7 @@ class Dispatcher:
             command_name=command.name,
             argument=command.argument,
             message_thread_id=message.message_thread_id,
+            reply_to_message_text=message.reply_to_message_text,
             locale=resolve_locale(
                 explicit_arg=command.argument if command.name.casefold() in {"start", "help", "consent", "accept", "decline", "ask", "webui", "test", "ping", "role", "setrole"} else None,
                 telegram_language_code=getattr(message.from_user, "language_code", None),

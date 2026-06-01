@@ -18,6 +18,7 @@ from amo_bot.consent import CONSENT_ACCEPTED, CONSENT_DECLINED, CONSENT_PENDING,
 from amo_bot.consent.prompt_service import ConsentPromptService
 from amo_bot.db.repositories import (
     ChatScopedRoleRepository,
+    PromptContextDocRepository,
     TopicAgentMemoryRepository,
     UserMemoryProfileRepository,
     UserRoleRepository,
@@ -36,6 +37,7 @@ class CommandContext:
     argument: str | None
     message_thread_id: int | None = None
     locale: Locale = "de"
+    reply_to_message_text: str = ""
 
     @property
     def chat_type(self) -> str:
@@ -58,6 +60,8 @@ class Command:
 logger = logging.getLogger(__name__)
 
 AI_SESSION_IDLE_TIMEOUT = timedelta(hours=8)
+PROMPT_CONTEXT_DOC_MAX_CHARS = 6000
+TELEGRAM_SAFE_MESSAGE_CHARS = 3900
 
 
 def _ai_scope_from_ctx(ctx: CommandContext) -> tuple[str, int | None, int | None, int | None]:
@@ -421,6 +425,170 @@ def create_builtin_registry(
                 limit_label = str(q.daily_limit) if q.daily_limit else "-"
                 lines.append(f"  {q.role.value}: mode={q.mode} limit={limit_label}")
             return "\n".join(lines)
+
+    def _ctxdoc_parse_kind_scope(ctx: CommandContext, *, require_text: bool = False) -> tuple[str, str, str | None] | str:
+        parts = (ctx.argument or "").split(maxsplit=2)
+        minimum = 3 if require_text else 2
+        if len(parts) < minimum:
+            cmd = ctx.command_name
+            usage = f"usage: /{cmd} <kind> <scope>" + (" <text...>" if require_text else "")
+            return usage
+        kind, scope = parts[0].upper(), parts[1].casefold()
+        if kind not in PromptContextDocRepository.ALLOWED_KINDS:
+            return "invalid kind. allowed: AGENT, SOUL, PLUGINS, AUFGABE"
+        if scope not in PromptContextDocRepository.ALLOWED_SCOPE_TYPES:
+            return "invalid scope. allowed: global, topic"
+        text = parts[2] if len(parts) >= 3 else None
+        return kind, scope, text
+
+    def _ctxdoc_scope_args(ctx: CommandContext, scope: str) -> tuple[int | None, int | None] | str:
+        if scope == "global":
+            return None, None
+        if ctx.chat_type == "private" or ctx.message_thread_id is None:
+            return "topic scope requires running the command inside a Telegram topic"
+        return ctx.chat_id, ctx.message_thread_id
+
+    def _ctxdoc_audit(
+        session: object,
+        *,
+        ctx: CommandContext,
+        action: str,
+        kind: str | None,
+        scope: str | None,
+        content_length: int | None = None,
+        success: bool,
+        reason: str | None = None,
+    ) -> None:
+        # Metadata only: never include prompt context content.
+        session.add(  # type: ignore[attr-defined]
+            AuditEvent(
+                actor_telegram_user_id=ctx.user_id,
+                event_type=f"prompt_context_doc_{action}",
+                payload_json=json.dumps(
+                    {
+                        "kind": kind,
+                        "scope_type": scope,
+                        "chat_id": ctx.chat_id,
+                        "topic_id": ctx.message_thread_id,
+                        "content_length": content_length,
+                        "success": success,
+                        "reason": reason,
+                    },
+                    separators=(",", ":"),
+                ),
+            )
+        )
+
+    async def ctxdoc_set_handler(ctx: CommandContext) -> str:
+        if session_factory is None:
+            return "database not configured"
+        parsed = _ctxdoc_parse_kind_scope(ctx, require_text=False)
+        if isinstance(parsed, str):
+            return parsed
+        kind, scope, tail_text = parsed
+        scoped = _ctxdoc_scope_args(ctx, scope)
+        if isinstance(scoped, str):
+            return scoped
+        chat_id, topic_id = scoped
+        content = (ctx.reply_to_message_text or "").strip() if ctx.reply_to_message_text.strip() else (tail_text or "").strip()
+        if not content:
+            return "usage: /ctxdoc_set <kind> <scope> <text...> (or reply to a text/caption message)"
+        if len(content) > PROMPT_CONTEXT_DOC_MAX_CHARS:
+            with session_factory() as session:
+                _ctxdoc_audit(session, ctx=ctx, action="set", kind=kind, scope=scope, content_length=len(content), success=False, reason="content_too_long")
+                session.commit()
+            return f"content too long: {len(content)} chars (max {PROMPT_CONTEXT_DOC_MAX_CHARS})"
+        with session_factory() as session:
+            repo = PromptContextDocRepository(session)
+            repo.upsert_doc(kind=kind, scope_type=scope, chat_id=chat_id, topic_id=topic_id, content=content, enabled=True)
+            _ctxdoc_audit(session, ctx=ctx, action="set", kind=kind, scope=scope, content_length=len(content), success=True)
+            session.commit()
+        logger.info("prompt_context_doc action=set kind=%s scope=%s actor=%s chat_id=%s topic_id=%s content_length=%s success=true", kind, scope, ctx.user_id, ctx.chat_id, ctx.message_thread_id, len(content))
+        return f"ctxdoc saved: {kind} {scope} ({len(content)} chars)"
+
+    async def ctxdoc_get_handler(ctx: CommandContext) -> str:
+        if session_factory is None:
+            return "database not configured"
+        parsed = _ctxdoc_parse_kind_scope(ctx)
+        if isinstance(parsed, str):
+            return parsed
+        kind, scope, _ = parsed
+        scoped = _ctxdoc_scope_args(ctx, scope)
+        if isinstance(scoped, str):
+            return scoped
+        chat_id, topic_id = scoped
+        with session_factory() as session:
+            row = PromptContextDocRepository(session).get_doc(kind=kind, scope_type=scope, chat_id=chat_id, topic_id=topic_id)
+            _ctxdoc_audit(session, ctx=ctx, action="get", kind=kind, scope=scope, content_length=len(row.content) if row else 0, success=row is not None)
+            session.commit()
+        if row is None:
+            return f"ctxdoc not found: {kind} {scope}"
+        status = "enabled" if row.enabled else "disabled"
+        header = f"{kind} {scope} ({status}, {len(row.content)} chars):\n"
+        available = TELEGRAM_SAFE_MESSAGE_CHARS - len(header)
+        if len(row.content) > available:
+            return header + row.content[:available] + f"\n… truncated for Telegram; stored length {len(row.content)} chars"
+        return header + row.content
+
+    async def ctxdoc_del_handler(ctx: CommandContext) -> str:
+        if session_factory is None:
+            return "database not configured"
+        parsed = _ctxdoc_parse_kind_scope(ctx)
+        if isinstance(parsed, str):
+            return parsed
+        kind, scope, _ = parsed
+        scoped = _ctxdoc_scope_args(ctx, scope)
+        if isinstance(scoped, str):
+            return scoped
+        chat_id, topic_id = scoped
+        with session_factory() as session:
+            deleted = PromptContextDocRepository(session).delete_doc(kind=kind, scope_type=scope, chat_id=chat_id, topic_id=topic_id)
+            _ctxdoc_audit(session, ctx=ctx, action="del", kind=kind, scope=scope, content_length=0, success=deleted)
+            session.commit()
+        logger.info("prompt_context_doc action=del kind=%s scope=%s actor=%s chat_id=%s topic_id=%s success=%s", kind, scope, ctx.user_id, ctx.chat_id, ctx.message_thread_id, deleted)
+        return f"ctxdoc deleted: {kind} {scope}" if deleted else f"ctxdoc not found: {kind} {scope}"
+
+    async def ctxdoc_list_handler(ctx: CommandContext) -> str:
+        if session_factory is None:
+            return "database not configured"
+        parts = (ctx.argument or "").split()
+        scope = parts[0].casefold() if len(parts) >= 1 else None
+        kind = parts[1].upper() if len(parts) >= 2 else None
+        if scope is not None and scope not in PromptContextDocRepository.ALLOWED_SCOPE_TYPES:
+            # Also allow /ctxdoc_list AGENT shorthand.
+            if scope.upper() in PromptContextDocRepository.ALLOWED_KINDS and kind is None:
+                kind = scope.upper()
+                scope = None
+            else:
+                return "invalid scope. allowed: global, topic"
+        if kind is not None and kind not in PromptContextDocRepository.ALLOWED_KINDS:
+            return "invalid kind. allowed: AGENT, SOUL, PLUGINS, AUFGABE"
+        chat_id: int | None = None
+        topic_id: int | None = None
+        if scope == "topic":
+            scoped = _ctxdoc_scope_args(ctx, scope)
+            if isinstance(scoped, str):
+                return scoped
+            chat_id, topic_id = scoped
+        with session_factory() as session:
+            repo = PromptContextDocRepository(session)
+            if scope is None:
+                rows = repo.list_docs(scope_type="global", kind=kind)
+                if ctx.chat_type != "private" and ctx.message_thread_id is not None:
+                    rows.extend(repo.list_docs(scope_type="topic", kind=kind, chat_id=ctx.chat_id, topic_id=ctx.message_thread_id))
+            else:
+                rows = repo.list_docs(scope_type=scope, kind=kind, chat_id=chat_id, topic_id=topic_id)
+            _ctxdoc_audit(session, ctx=ctx, action="list", kind=kind, scope=scope, content_length=None, success=True)
+            session.commit()
+        if not rows:
+            return "no ctxdocs found"
+        lines = ["ctxdocs:"]
+        for row in rows:
+            status = "enabled" if row.enabled else "disabled"
+            scope_label = row.scope_type if row.scope_type == "global" else f"topic:{row.chat_id}:{row.topic_id}"
+            updated = row.updated_at.isoformat() if row.updated_at is not None else "-"
+            lines.append(f"- {row.kind} {scope_label} {status} chars={len(row.content)} updated_at={updated}")
+        return "\n".join(lines)
 
     async def setrole_handler(ctx: CommandContext) -> str:
         if ctx.role not in {Role.OWNER, Role.ADMIN}:
@@ -873,6 +1041,10 @@ def create_builtin_registry(
     registry.register(Command(name="memory_profile", description="Show your coarse memory profile", description_de="Eigenes grobes Memory-Profil anzeigen", description_en="Show your coarse memory profile", allowed_roles=normal_plus, handler=memory_profile_handler))
     registry.register(Command(name="memory_profile_set", description="Update profile: /memory_profile_set key=value[, key=value]", description_de="Profil aktualisieren: /memory_profile_set key=value[, key=value]", description_en="Update profile: /memory_profile_set key=value[, key=value]", allowed_roles=normal_plus, handler=memory_profile_set_handler))
     registry.register(Command(name="memory_profile_delete", description="Delete your memory profile", description_de="Eigenes Memory-Profil löschen", description_en="Delete your memory profile", allowed_roles=normal_plus, handler=memory_profile_delete_handler))
+    registry.register(Command(name="ctxdoc_set", description="Set prompt context doc: /ctxdoc_set <kind> <global|topic> <text>", description_de="Prompt-Kontextdoc setzen: /ctxdoc_set <kind> <global|topic> <text>", description_en="Set prompt context doc: /ctxdoc_set <kind> <global|topic> <text>", allowed_roles=admin_plus, handler=ctxdoc_set_handler))
+    registry.register(Command(name="ctxdoc_get", description="Read prompt context doc: /ctxdoc_get <kind> <global|topic>", description_de="Prompt-Kontextdoc lesen: /ctxdoc_get <kind> <global|topic>", description_en="Read prompt context doc: /ctxdoc_get <kind> <global|topic>", allowed_roles=admin_plus, handler=ctxdoc_get_handler))
+    registry.register(Command(name="ctxdoc_del", description="Delete prompt context doc: /ctxdoc_del <kind> <global|topic>", description_de="Prompt-Kontextdoc löschen: /ctxdoc_del <kind> <global|topic>", description_en="Delete prompt context doc: /ctxdoc_del <kind> <global|topic>", allowed_roles=admin_plus, handler=ctxdoc_del_handler))
+    registry.register(Command(name="ctxdoc_list", description="List prompt context docs: /ctxdoc_list [scope] [kind]", description_de="Prompt-Kontextdocs listen: /ctxdoc_list [scope] [kind]", description_en="List prompt context docs: /ctxdoc_list [scope] [kind]", allowed_roles=admin_plus, handler=ctxdoc_list_handler))
     async def new_handler(ctx: CommandContext) -> str:
         if session_factory is None:
             return _lang(ctx, "Session-Speicher ist nicht konfiguriert.", "Session storage is not configured.")

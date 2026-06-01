@@ -1098,6 +1098,57 @@ Rollenbasierte Nutzungsquotas für Webtools (Websearch, Webscraping). **Hinweis:
 
 ---
 
+### Admin: Prompt Context Docs (`/ctxdoc_*` Commands)
+
+Admin-only Telegram-Commands zur Verwaltung von DB-gestützten Prompt Context Docs. Diese Docs steuern das Bot-Verhalten für KI-Antworten und sind **nicht** Teil des Memory-Systems (keine Memory.md-Lernkurve).
+
+**Verfügbare Kinds:** `AGENT`, `SOUL`, `PLUGINS`, `AUFGABE`
+
+**Scopes:** `global` (gilt überall) oder `topic` (nur aktuelles Telegram-Topic)
+
+#### Commands
+
+**`/ctxdoc_set <kind> <global|topic> <text...>`**
+- Legt einen Context Doc für die angegebene Kind/Scope-Kombination an oder überschreibt ihn
+- **Langer Text:** Antworte auf eine Nachricht, deren Text/Caption als Inhalt verwendet wird
+- Beispiel: `/ctxdoc_set SOUL global Du bist ein hilfreicher Assistent`
+
+**`/ctxdoc_get <kind> <global|topic>`**
+- Zeigt den aktuellen Context Doc für Kind/Scope an
+- Beispiel: `/ctxdoc_get SOUL global`
+
+**`/ctxdoc_del <kind> <global|topic>`**
+- Löscht den Context Doc für Kind/Scope
+- Beispiel: `/ctxdoc_del PLUGINS topic`
+
+**`/ctxdoc_list [scope] [kind]`**
+- Listet alle gesetzten Context Docs auf
+- Optional filterbar nach Scope (`global`/`topic`) und/oder Kind
+- Beispiele:
+  - `/ctxdoc_list` — alle Docs
+  - `/ctxdoc_list global` — nur global Scope
+  - `/ctxdoc_list topic AGENT` — AGENT-Docs im aktuellen Topic
+
+**Wichtig:**
+- Nur Owner/Admin (keine WebUI/API-Editor im aktuellen Release)
+- Docs werden bei KI-Anfragen als System-Kontext eingebunden
+- Keine automatische Migration zu Memory.md — Docs sind separate Config-Ebene
+
+**Limitation:** WebUI/API-Editor für Context Docs ist in diesem Release noch nicht enthalten — Verwaltung erfolgt ausschließlich über Telegram-Commands.
+
+**Checkliste:**
+- [ ] `/ctxdoc_set` speichert Doc korrekt (mit direktem Text)
+- [ ] `/ctxdoc_set` mit Reply verwendet Reply-Text/Caption
+- [ ] `/ctxdoc_get` zeigt gesetzten Inhalt an
+- [ ] `/ctxdoc_del` entfernt Doc korrekt
+- [ ] `/ctxdoc_list` zeigt alle Docs ohne Filter
+- [ ] `/ctxdoc_list global` filtert korrekt
+- [ ] `/ctxdoc_list topic AGENT` filtert korrekt
+- [ ] Nur Owner/Admin können Commands ausführen
+- [ ] Normale/VIP-User werden abgelehnt
+
+---
+
 ### Zukünftige Features (Noch nicht implementiert)
 
 Folgende Features sind für zukünftige Releases geplant und im aktuellen Beta **nicht verfügbar**:

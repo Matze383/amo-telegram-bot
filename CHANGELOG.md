@@ -2,6 +2,54 @@
 
 ---
 
+## [Unreleased] – Admin Prompt Context Docs Commands
+
+**Datum / Date:** 2026-06-01
+
+### 🇩🇪 Deutsch
+
+#### Übersicht
+Neue admin-only Telegram-Commands zur Verwaltung von DB-gestützten Prompt Context Docs. Diese Docs steuern das Bot-Verhalten für KI-Antworten und sind von Memory.md getrennt (keine Lernkurve).
+
+#### Neu
+- **`/ctxdoc_set <kind> <global|topic> <text...>`:** Erstellt/überschreibt Context Doc für Kind/Scope
+- **`/ctxdoc_get <kind> <global|topic>`:** Zeigt aktuellen Context Doc an
+- **`/ctxdoc_del <kind> <global|topic>`:** Löscht Context Doc
+- **`/ctxdoc_list [scope] [kind]`:** Listet alle Context Docs auf (optional filterbar)
+
+#### Details
+- **Kinds:** `AGENT`, `SOUL`, `PLUGINS`, `AUFGABE`
+- **Scopes:** `global` (gilt überall) oder `topic` (nur aktuelles Telegram-Topic)
+- **Langer Text:** Reply-to Text/Caption kann für lange Inhalte verwendet werden
+- **Berechtigung:** Nur Owner/Admin
+
+#### Limitation
+- Kein WebUI/API-Editor in diesem Release — Verwaltung ausschließlich über Telegram-Commands
+- Docs sind separate Config-Ebene (nicht Memory.md)
+
+### 🇬🇧 English
+
+#### Overview
+New admin-only Telegram commands for managing DB-backed prompt context docs. These docs control bot behavior for AI responses and are separate from Memory.md (no learning curve).
+
+#### New
+- **`/ctxdoc_set <kind> <global|topic> <text...>`:** Creates/overwrites context doc for kind/scope
+- **`/ctxdoc_get <kind> <global|topic>`:** Shows current context doc
+- **`/ctxdoc_del <kind> <global|topic>`:** Deletes context doc
+- **`/ctxdoc_list [scope] [kind]`:** Lists all context docs (optionally filterable)
+
+#### Details
+- **Kinds:** `AGENT`, `SOUL`, `PLUGINS`, `AUFGABE`
+- **Scopes:** `global` (applies everywhere) or `topic` (current Telegram topic only)
+- **Long text:** Reply-to text/caption can be used for long content
+- **Permission:** Owner/Admin only
+
+#### Limitation
+- No WebUI/API editor in this release — management via Telegram commands only
+- Docs are separate config layer (not Memory.md)
+
+---
+
 ## [Unreleased] – Daily Memory Runtime (OpenClaw-like Light Memory)
 
 **Datum / Date:** 2026-05-31

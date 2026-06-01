@@ -1772,6 +1772,7 @@ class PromptContextDocRecord:
     topic_id: int | None
     content: str
     enabled: bool
+    updated_at: datetime | None = None
 
 
 @dataclass(slots=True)
@@ -2159,6 +2160,72 @@ class PromptContextDocRepository:
         self._session.refresh(row)
         return self._to_record(row)
 
+    def get_doc(
+        self,
+        *,
+        kind: str,
+        scope_type: str,
+        chat_id: int | None = None,
+        topic_id: int | None = None,
+    ) -> PromptContextDocRecord | None:
+        normalized_kind = self._normalize_kind(kind)
+        normalized_scope_type = self._normalize_scope_type(scope_type)
+        scope_key = self._scope_key(scope_type=normalized_scope_type, chat_id=chat_id, topic_id=topic_id)
+        row = self._session.scalar(
+            select(PromptContextDoc).where(
+                PromptContextDoc.kind == normalized_kind,
+                PromptContextDoc.scope_type == normalized_scope_type,
+                PromptContextDoc.scope_key == scope_key,
+            )
+        )
+        return self._to_record(row) if row is not None else None
+
+    def delete_doc(
+        self,
+        *,
+        kind: str,
+        scope_type: str,
+        chat_id: int | None = None,
+        topic_id: int | None = None,
+    ) -> bool:
+        normalized_kind = self._normalize_kind(kind)
+        normalized_scope_type = self._normalize_scope_type(scope_type)
+        scope_key = self._scope_key(scope_type=normalized_scope_type, chat_id=chat_id, topic_id=topic_id)
+        row = self._session.scalar(
+            select(PromptContextDoc).where(
+                PromptContextDoc.kind == normalized_kind,
+                PromptContextDoc.scope_type == normalized_scope_type,
+                PromptContextDoc.scope_key == scope_key,
+            )
+        )
+        if row is None:
+            return False
+        self._session.delete(row)
+        self._session.commit()
+        return True
+
+    def list_docs(
+        self,
+        *,
+        scope_type: str | None = None,
+        kind: str | None = None,
+        chat_id: int | None = None,
+        topic_id: int | None = None,
+    ) -> list[PromptContextDocRecord]:
+        stmt = select(PromptContextDoc)
+        if kind:
+            stmt = stmt.where(PromptContextDoc.kind == self._normalize_kind(kind))
+        if scope_type:
+            normalized_scope_type = self._normalize_scope_type(scope_type)
+            stmt = stmt.where(PromptContextDoc.scope_type == normalized_scope_type)
+            if normalized_scope_type == "topic":
+                scope_key = self._scope_key(scope_type="topic", chat_id=chat_id, topic_id=topic_id)
+                stmt = stmt.where(PromptContextDoc.scope_key == scope_key)
+            else:
+                stmt = stmt.where(PromptContextDoc.scope_key == "global")
+        rows = self._session.scalars(stmt.order_by(PromptContextDoc.scope_type, PromptContextDoc.scope_key, PromptContextDoc.kind)).all()
+        return [self._to_record(row) for row in rows]
+
     def resolve_docs(self, *, chat_id: int | None = None, topic_id: int | None = None) -> list[PromptContextDocRecord]:
         rows = self._session.scalars(select(PromptContextDoc).where(PromptContextDoc.enabled.is_(True))).all()
         by_scope_kind = {(row.scope_type, row.scope_key, row.kind): row for row in rows}
@@ -2207,6 +2274,7 @@ class PromptContextDocRepository:
             topic_id=row.topic_id,
             content=row.content,
             enabled=bool(row.enabled),
+            updated_at=row.updated_at,
         )
 
 
