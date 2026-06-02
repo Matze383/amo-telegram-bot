@@ -112,6 +112,7 @@ def _allowing_router_decision() -> AIRouterDecision:
             assembled_soul_text="",
             daily_memory_text="",
             long_memory_text="",
+            recall_memory_text="",
         ),
     )
 
@@ -208,6 +209,32 @@ def test_auto_research_empty_result_injects_no_live_warning(monkeypatch):
     assert "Do NOT say or imply that the bot has no web tools" in calls[0]
     assert "Die Websuche wurde versucht" in calls[0]
     assert "do NOT invent current facts" in calls[0]
+
+
+def test_auto_research_sports_tournament_empty_result_fails_closed(monkeypatch):
+    monkeypatch.setattr("amo_bot.telegram.dispatcher.AIRouter.decide", lambda self, **kwargs: _allowing_router_decision())
+    result = SimpleNamespace(allowed=False, decision="deny", reason="empty_result", text="", sources=(), hosts=(), error=None)
+    d, sent = _mk_dispatcher(result)
+    calls = []
+
+    async def _ask(prompt: str) -> str:
+        calls.append(prompt)
+        return "normal ai"
+
+    d.ai_service.ask = _ask
+    asyncio.run(
+        d._maybe_handle_ai_autoreply(
+            message=_mk_message("@amo_bot Wie läuft die WM-Vorrunde?", reply_to_is_bot=False, reply_to_user_is_bot=False, reply_to_username=""),
+            role=Role.ADMIN,
+            bot_username="amo_bot",
+            from_parsed_update=True,
+        )
+    )
+    assert sent[0] == "normal ai"
+    assert [c.capability for c in d.webtool_dispatcher.calls][0] == "websearch"
+    assert "AUTO-RESEARCH STATUS — WEB ATTEMPTED" in calls[0]
+    assert "Strict anti-hallucination" in calls[0]
+    assert "Do NOT provide an estimated current value" in calls[0]
 
 
 def test_auto_research_empty_result_retries_once_with_stable_btc_query_and_chains(monkeypatch):

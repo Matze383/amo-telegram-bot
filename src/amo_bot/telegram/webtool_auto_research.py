@@ -24,6 +24,33 @@ _CURRENT_KEYWORDS = (
     "changelog", "lage", "status", "live", "current", "right now",
 )
 
+_SPORTS_TOURNAMENT_RE = re.compile(
+    r"\b(?:"
+    r"wm|weltmeisterschaft|world\s+cup|em|europameisterschaft|euro|"
+    r"champions\s+league|europa\s+league|bundesliga|dfb\s*pokal|"
+    r"uefa|fifa|nba|nfl|nhl|mlb|formel\s*1|f1|"
+    r"deutschland|germany"
+    r")\b",
+    re.IGNORECASE,
+)
+_SPORTS_CURRENT_DETAIL_RE = re.compile(
+    r"\b(?:"
+    r"vorrunde|gruppenphase|gruppe|spielplan|tabelle|ergebnis(?:se)?|"
+    r"result(?:s)?|fixture(?:s)?|standing(?:s)?|table|aufstellung(?:en)?|"
+    r"qualifikation|qualifying|qualifier|kader|gruppe(?:n)?spiel(?:e)?|"
+    r"spieltag|runde|halbfinale|finale"
+    r")\b",
+    re.IGNORECASE,
+)
+_SPORTS_CURRENT_INTENT_RE = re.compile(
+    r"\b(?:"
+    r"l(?:ä|ae)uft|stehen|steht|stand|spiel(?:t|en)?|wann|wer|gegen\s+wen|"
+    r"next|upcoming|schedule|score|scored|plays?|fixtures?|standings?|"
+    r"result(?:s)?|table|line\s*up|lineup"
+    r")\b",
+    re.IGNORECASE,
+)
+
 _SMALLTALK_PATTERNS = (
     r"\bhallo\b", r"\bhi\b", r"\bhey\b", r"\bdanke\b", r"\bwie geht'?s\b",
     r"\bwas machst du\b", r"\bgute[nr]? morgen\b", r"\bgute[nr]? abend\b",
@@ -62,8 +89,14 @@ def decide_auto_research(text: str, *, now: datetime | None = None) -> AutoResea
     has_year = bool(_YEAR_RE.search(raw))
     has_date = bool(_DATE_RE.search(raw))
     has_current_year = str(current_year) in raw
+    has_sports_current_signal = bool(
+        _SPORTS_TOURNAMENT_RE.search(raw)
+        and _SPORTS_CURRENT_DETAIL_RE.search(raw)
+        and (_SPORTS_CURRENT_INTENT_RE.search(raw) or re.search(r"\b(?:wie|was|wann|wer|wo)\b", lowered))
+    )
 
-    if has_temporal or has_year or has_date or has_current_year:
-        return AutoResearchDecision(True, "websearch", "current_info_signal", _sanitize_text(raw, max_len=220), "")
+    if has_temporal or has_year or has_date or has_current_year or has_sports_current_signal:
+        reason = "sports_current_info_signal" if has_sports_current_signal and not (has_temporal or has_year or has_date or has_current_year) else "current_info_signal"
+        return AutoResearchDecision(True, "websearch", reason, _sanitize_text(raw, max_len=220), "")
 
     return AutoResearchDecision(False, "", "timeless_or_unclear", "", "")

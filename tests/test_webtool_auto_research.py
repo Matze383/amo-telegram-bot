@@ -36,6 +36,24 @@ def test_auto_research_triggers_on_year_date_reference():
     assert d.capability == "websearch"
 
 
+def test_auto_research_triggers_on_german_sports_tournament_current_prompts():
+    prompts = [
+        "Wie läuft die WM-Vorrunde?",
+        "Was ist der aktuelle Spielplan der WM Vorrunde?",
+        "Wie steht Deutschland in der Gruppenphase?",
+        "Bundesliga Tabelle aktuell",
+    ]
+    for prompt in prompts:
+        d = decide_auto_research(prompt)
+        assert d.enabled is True, prompt
+        assert d.capability == "websearch"
+
+
+def test_auto_research_does_not_trigger_for_general_sports_chat_without_current_detail():
+    timeless = decide_auto_research("Ich mag Fußball und alte WM Geschichten")
+    assert timeless.enabled is False
+
+
 def test_auto_research_empty_disabled():
     d = decide_auto_research("   ", now=datetime(2026, 1, 1, tzinfo=UTC))
     assert d.enabled is False

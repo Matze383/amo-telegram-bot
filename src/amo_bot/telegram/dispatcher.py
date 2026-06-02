@@ -81,7 +81,10 @@ _AUTO_RESEARCH_CHAIN_FRESHNESS_RE = re.compile(
     r"current|aktuell(?:e[nrms]?)?|jetzt|heute|live|realtime|real-time|right\s+now|"
     r"derzeit|stand|status|neueste(?:n)?|latest|news|nachrichten|release|version|"
     r"update|verf(?:ü|ue)gbar(?:keit)?|availability|weather|wetter|traffic|verkehr|"
-    r"outage|st(?:ö|oe)rung|kurs|preis|price|rate|market|markt|exchange|fx"
+    r"outage|st(?:ö|oe)rung|kurs|preis|price|rate|market|markt|exchange|fx|"
+    r"wm|weltmeisterschaft|world\s+cup|em|europameisterschaft|champions\s+league|"
+    r"bundesliga|vorrunde|gruppenphase|spielplan|tabelle|ergebnis(?:se)?|"
+    r"aufstellung(?:en)?|qualifikation"
     r")\b",
     re.IGNORECASE,
 )
@@ -89,7 +92,8 @@ _AUTO_RESEARCH_CHAIN_STRONG_FRESHNESS_RE = re.compile(
     r"\b(?:"
     r"jetzt|heute|live|realtime|real-time|right\s+now|derzeit|neueste(?:n)?|latest|"
     r"news|nachrichten|release|version|update|verf(?:ü|ue)gbar(?:keit)?|availability|"
-    r"weather|wetter|traffic|verkehr|outage|st(?:ö|oe)rung|kurs|preis|price|rate|market|markt"
+    r"weather|wetter|traffic|verkehr|outage|st(?:ö|oe)rung|kurs|preis|price|rate|market|markt|"
+    r"vorrunde|gruppenphase|spielplan|tabelle|ergebnis(?:se)?|aufstellung(?:en)?|qualifikation"
     r")\b",
     re.IGNORECASE,
 )
