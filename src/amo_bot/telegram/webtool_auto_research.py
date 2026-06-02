@@ -4,6 +4,8 @@ import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
+from amo_bot.ai.current_data_classifier import classify_current_data
+
 
 @dataclass(frozen=True, slots=True)
 class AutoResearchDecision:
@@ -98,5 +100,22 @@ def decide_auto_research(text: str, *, now: datetime | None = None) -> AutoResea
     if has_temporal or has_year or has_date or has_current_year or has_sports_current_signal:
         reason = "sports_current_info_signal" if has_sports_current_signal and not (has_temporal or has_year or has_date or has_current_year) else "current_info_signal"
         return AutoResearchDecision(True, "websearch", reason, _sanitize_text(raw, max_len=220), "")
+
+    classifier_decision = classify_current_data(
+        raw,
+        metadata={
+            "has_year": has_year,
+            "has_date": has_date,
+            "has_current_year": has_current_year,
+        },
+    )
+    if classifier_decision.should_research:
+        return AutoResearchDecision(
+            True,
+            "websearch",
+            classifier_decision.reason,
+            _sanitize_text(raw, max_len=220),
+            "",
+        )
 
     return AutoResearchDecision(False, "", "timeless_or_unclear", "", "")

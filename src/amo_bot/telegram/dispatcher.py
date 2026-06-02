@@ -250,7 +250,8 @@ def _format_auto_research_no_result_note(*, capability: str, reason: str | None)
         "Be transparent and precise: say the web search was attempted but this specific attempt produced no usable result, timed out, was limited, or the provider was unavailable. "
         "Do NOT say or imply that the bot has no web tools, no live data capability, or cannot search the web in general. "
         "If useful in German, say: 'Die Websuche wurde versucht, lieferte aber diesmal keine verwertbaren Treffer/keine Bestätigung.'\n"
-        "Strict anti-hallucination: do NOT invent current facts, dates, prices, levels, or news without reliable live confirmation from this turn."
+        "Strict anti-hallucination: do NOT invent current facts, dates, prices, levels, or news without reliable live confirmation from this turn. "
+        "Memory and model priors are not acceptable substitutes for live evidence when current external data was required."
     )
 
 
@@ -264,7 +265,8 @@ def _format_auto_research_retry_no_result_note(*, capability: str, reason: str |
         "Be transparent and precise: say live websearch was attempted but did not return usable results after retry, so no current value/fact could be confirmed from live sources in this turn. "
         "Do NOT say or imply that the bot has no web tools, no live data capability, or cannot search the web in general. "
         "If useful in German, say: 'Die Live-Websuche wurde versucht, lieferte aber auch nach einem vereinfachten Retry keine verwertbaren Treffer; ein aktueller Wert konnte nicht bestätigt werden.'\n"
-        "Strict anti-hallucination: do NOT reuse old/stale prices, rates, dates, levels, news, or prior-answer context as an estimate. Do NOT provide an estimated current value when live confirmation is unavailable."
+        "Strict anti-hallucination: do NOT reuse old/stale prices, rates, dates, levels, news, or prior-answer context as an estimate. Do NOT provide an estimated current value when live confirmation is unavailable. "
+        "Memory and model priors are not acceptable substitutes for live evidence when current external data was required."
     )
 
 SendTextFn = Callable[[int, str, int | None], Awaitable[object]]

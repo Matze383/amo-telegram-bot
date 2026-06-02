@@ -54,6 +54,42 @@ def test_auto_research_does_not_trigger_for_general_sports_chat_without_current_
     assert timeless.enabled is False
 
 
+def test_auto_research_uses_generic_current_data_classifier_for_category_prompts():
+    prompts = [
+        "Wer ist gerade Tabellenführer?",
+        "Was kostet das iPhone 16 aktuell?",
+        "Ist die neue Version von Python schon draußen?",
+        "Wann spielt Deutschland das nächste Mal?",
+        "Wie ist das Wetter morgen in Berlin?",
+        "Gibt es heute Störungen bei Vodafone?",
+        "Was sagen die neuesten Umfragen?",
+        "Ist der Dienst gerade down?",
+        "Welche Filme laufen heute im Kino?",
+    ]
+    for prompt in prompts:
+        d = decide_auto_research(prompt)
+        assert d.enabled is True, prompt
+        assert d.capability == "websearch"
+        assert d.reason in {
+            "current_info_signal",
+            "semantic_current_data_required",
+            "semantic_uncertain_external_lookup",
+        }
+
+
+def test_auto_research_classifier_does_not_trigger_timeless_prompts():
+    prompts = [
+        "Erklär mir was eine Vorrunde ist",
+        "Warum mögen Menschen Fußball?",
+        "Schreib mir eine Geschichte über eine WM",
+        "Was ist eine Programmiersprache?",
+        "Wie kann ich besser schlafen?",
+    ]
+    for prompt in prompts:
+        d = decide_auto_research(prompt)
+        assert d.enabled is False, prompt
+
+
 def test_auto_research_empty_disabled():
     d = decide_auto_research("   ", now=datetime(2026, 1, 1, tzinfo=UTC))
     assert d.enabled is False
