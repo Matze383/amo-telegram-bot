@@ -259,6 +259,26 @@ def init_db(database_url: str) -> None:
                 created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
         """,
+        "retrievable_memories": """
+            CREATE TABLE retrievable_memories (
+                id INTEGER NOT NULL PRIMARY KEY,
+                chat_id BIGINT,
+                message_thread_id INTEGER,
+                user_id BIGINT,
+                visibility VARCHAR(16) NOT NULL,
+                memory_type VARCHAR(32) NOT NULL,
+                content TEXT,
+                summary TEXT,
+                confidence FLOAT NOT NULL DEFAULT 1,
+                source VARCHAR(32) NOT NULL DEFAULT 'manual',
+                active BOOLEAN NOT NULL DEFAULT 1,
+                expires_at DATETIME,
+                last_used_at DATETIME,
+                use_count INTEGER NOT NULL DEFAULT 0,
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+        """,
     }
 
     table_column_migrations: dict[str, dict[str, str]] = {
@@ -270,6 +290,16 @@ def init_db(database_url: str) -> None:
         "topic_long_memories": {
             "promotion_status": "ALTER TABLE topic_long_memories ADD COLUMN promotion_status VARCHAR(16) NOT NULL DEFAULT 'none'",
             "answer_status": "ALTER TABLE topic_long_memories ADD COLUMN answer_status VARCHAR(16) NOT NULL DEFAULT 'legacy'",
+        },
+        "retrievable_memories": {
+            "message_thread_id": "ALTER TABLE retrievable_memories ADD COLUMN message_thread_id INTEGER",
+            "summary": "ALTER TABLE retrievable_memories ADD COLUMN summary TEXT",
+            "confidence": "ALTER TABLE retrievable_memories ADD COLUMN confidence FLOAT NOT NULL DEFAULT 1",
+            "source": "ALTER TABLE retrievable_memories ADD COLUMN source VARCHAR(32) NOT NULL DEFAULT 'manual'",
+            "active": "ALTER TABLE retrievable_memories ADD COLUMN active BOOLEAN NOT NULL DEFAULT 1",
+            "expires_at": "ALTER TABLE retrievable_memories ADD COLUMN expires_at DATETIME",
+            "last_used_at": "ALTER TABLE retrievable_memories ADD COLUMN last_used_at DATETIME",
+            "use_count": "ALTER TABLE retrievable_memories ADD COLUMN use_count INTEGER NOT NULL DEFAULT 0",
         },
         "topic_recent_messages": {
             "telegram_message_id": "ALTER TABLE topic_recent_messages ADD COLUMN telegram_message_id BIGINT",
@@ -308,6 +338,7 @@ def init_db(database_url: str) -> None:
         for table_name, create_sql in table_creation_migrations.items():
             if table_name not in existing_tables:
                 connection.execute(text(create_sql))
+                existing_tables.add(table_name)
 
         if "chat_user_roles" not in existing_tables:
             connection.execute(
@@ -532,6 +563,20 @@ def init_db(database_url: str) -> None:
             for column_name, ddl in migrations.items():
                 if column_name not in existing_columns:
                     connection.execute(text(ddl))
+
+        if "retrievable_memories" in existing_tables:
+            existing_indexes = {index["name"] for index in inspector.get_indexes("retrievable_memories")}
+            if "ix_retrievable_memories_scope_active" not in existing_indexes:
+                connection.execute(
+                    text(
+                        "CREATE INDEX ix_retrievable_memories_scope_active "
+                        "ON retrievable_memories (visibility, chat_id, message_thread_id, user_id, active)"
+                    )
+                )
+            if "ix_retrievable_memories_type_active" not in existing_indexes:
+                connection.execute(text("CREATE INDEX ix_retrievable_memories_type_active ON retrievable_memories (memory_type, active)"))
+            if "ix_retrievable_memories_expires_at" not in existing_indexes:
+                connection.execute(text("CREATE INDEX ix_retrievable_memories_expires_at ON retrievable_memories (expires_at)"))
 
         if "users" in existing_tables:
             existing_columns = {column["name"] for column in inspector.get_columns("users")}

@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta, timezone
 from typing import TYPE_CHECKING
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select, text
 from sqlalchemy.orm import Session
 
 from amo_bot.auth.roles import Role
@@ -27,6 +27,7 @@ from amo_bot.db.models import (
     PluginPolicyOverride,
     PrivateChatPolicy,
     PromptContextDoc,
+    RetrievableMemory,
     TelegramChat,
     TelegramTopic,
     TopicAgentConfig,
@@ -1802,6 +1803,31 @@ class TopicLongMemoryRecord:
 
 
 @dataclass(slots=True)
+class RetrievableMemoryRecord:
+    id: int
+    chat_id: int | None
+    message_thread_id: int | None
+    user_id: int | None
+    visibility: str
+    memory_type: str
+    content: str | None
+    summary: str | None
+    confidence: float
+    source: str
+    active: bool
+    expires_at: datetime | None
+    last_used_at: datetime | None
+    use_count: int
+    created_at: datetime | None
+    updated_at: datetime | None
+    score: float = 0.0
+
+    @property
+    def searchable_text(self) -> str:
+        return " ".join(part.strip() for part in (self.summary, self.content) if part and part.strip()).strip()
+
+
+@dataclass(slots=True)
 class TopicAiSessionRecord:
     scope_type: str
     chat_id: int | None
@@ -2275,6 +2301,290 @@ class PromptContextDocRepository:
             content=row.content,
             enabled=bool(row.enabled),
             updated_at=row.updated_at,
+        )
+
+
+class RetrievableMemoryRepository:
+    ALLOWED_VISIBILITIES = {"topic", "chat", "user", "global"}
+    ALLOWED_MEMORY_TYPES = {"preference", "fact", "summary", "relationship", "warning"}
+    ALLOWED_SOURCES = {"daily_memory", "manual", "auto", "plugin"}
+    DEFAULT_LIMIT = 5
+    MAX_LIMIT = 20
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def create_memory(
+        self,
+        *,
+        visibility: str,
+        memory_type: str,
+        content: str | None = None,
+        summary: str | None = None,
+        chat_id: int | None = None,
+        message_thread_id: int | None = None,
+        user_id: int | None = None,
+        confidence: float = 1.0,
+        source: str = "manual",
+        active: bool = True,
+        expires_at: datetime | None = None,
+    ) -> RetrievableMemoryRecord:
+        normalized_visibility = self._normalize_visibility(visibility)
+        normalized_type = self._normalize_memory_type(memory_type)
+        normalized_source = self._normalize_source(source)
+        safe_content = (content or "").strip() or None
+        safe_summary = (summary or "").strip() or None
+        if not (safe_content or safe_summary):
+            raise ValueError("content or summary required")
+        self._validate_scope(
+            visibility=normalized_visibility,
+            chat_id=chat_id,
+            message_thread_id=message_thread_id,
+            user_id=user_id,
+        )
+
+        row = RetrievableMemory(
+            chat_id=chat_id,
+            message_thread_id=message_thread_id,
+            user_id=user_id,
+            visibility=normalized_visibility,
+            memory_type=normalized_type,
+            content=safe_content,
+            summary=safe_summary,
+            confidence=max(0.0, min(float(confidence), 1.0)),
+            source=normalized_source,
+            active=bool(active),
+            expires_at=expires_at,
+        )
+        self._session.add(row)
+        self._session.commit()
+        self._session.refresh(row)
+        return self._to_retrievable_record(row)
+
+    def update_memory(
+        self,
+        memory_id: int,
+        *,
+        content: str | None = None,
+        summary: str | None = None,
+        confidence: float | None = None,
+        active: bool | None = None,
+        expires_at: datetime | None = None,
+        memory_type: str | None = None,
+    ) -> RetrievableMemoryRecord | None:
+        row = self._session.scalar(select(RetrievableMemory).where(RetrievableMemory.id == memory_id))
+        if row is None:
+            return None
+        if content is not None:
+            row.content = content.strip() or None
+        if summary is not None:
+            row.summary = summary.strip() or None
+        if not ((row.content or "").strip() or (row.summary or "").strip()):
+            raise ValueError("content or summary required")
+        if confidence is not None:
+            row.confidence = max(0.0, min(float(confidence), 1.0))
+        if active is not None:
+            row.active = bool(active)
+        if expires_at is not None:
+            row.expires_at = expires_at
+        if memory_type is not None:
+            row.memory_type = self._normalize_memory_type(memory_type)
+        self._session.commit()
+        self._session.refresh(row)
+        return self._to_retrievable_record(row)
+
+    def recall_memories(
+        self,
+        *,
+        query_text: str,
+        chat_id: int | None = None,
+        message_thread_id: int | None = None,
+        user_id: int | None = None,
+        limit: int = DEFAULT_LIMIT,
+        memory_types: Iterable[str] | None = None,
+        now: datetime | None = None,
+        mark_used: bool = False,
+    ) -> list[RetrievableMemoryRecord]:
+        safe_limit = max(1, min(int(limit or self.DEFAULT_LIMIT), self.MAX_LIMIT))
+        current = now or datetime.now(timezone.utc)
+        query = select(RetrievableMemory).where(
+            RetrievableMemory.active.is_(True),
+            or_(RetrievableMemory.expires_at.is_(None), RetrievableMemory.expires_at > current),
+            self._scope_filter(chat_id=chat_id, message_thread_id=message_thread_id, user_id=user_id),
+        )
+        if memory_types is not None:
+            normalized_types = [self._normalize_memory_type(value) for value in memory_types]
+            if normalized_types:
+                query = query.where(RetrievableMemory.memory_type.in_(normalized_types))
+
+        tokens = self._tokens(query_text)
+        rows: list[RetrievableMemory]
+        if tokens and self._is_mysql_backend():
+            try:
+                raw_terms = " ".join(sorted(tokens))
+                ids = [
+                    int(row_id)
+                    for row_id in self._session.execute(
+                        text(
+                            "SELECT id FROM retrievable_memories "
+                            "WHERE MATCH(summary, content) AGAINST (:terms IN NATURAL LANGUAGE MODE) "
+                            "ORDER BY MATCH(summary, content) AGAINST (:terms IN NATURAL LANGUAGE MODE) DESC "
+                            "LIMIT :limit"
+                        ),
+                        {"terms": raw_terms, "limit": safe_limit * 5},
+                    ).scalars()
+                ]
+                if ids:
+                    query = query.where(RetrievableMemory.id.in_(ids))
+                else:
+                    query = query.where(RetrievableMemory.id.in_([]))
+            except Exception:
+                # Fallback below keeps SQLite/tests and non-FULLTEXT MariaDB schemas usable.
+                pass
+
+        rows = list(self._session.scalars(query.limit(200)).all())
+        scored = [self._score_record(self._to_retrievable_record(row), tokens=tokens, now=current) for row in rows]
+        if tokens:
+            scored = [record for record in scored if record.score > 0]
+        scored.sort(key=lambda record: (record.score, record.confidence, record.id), reverse=True)
+        selected = scored[:safe_limit]
+
+        if mark_used and selected:
+            used_at = current
+            selected_ids = {record.id for record in selected}
+            for row in rows:
+                if row.id in selected_ids:
+                    row.last_used_at = used_at
+                    row.use_count = int(row.use_count or 0) + 1
+            self._session.commit()
+        return selected
+
+    @classmethod
+    def _scope_filter(cls, *, chat_id: int | None, message_thread_id: int | None, user_id: int | None):  # noqa: ANN206
+        conditions = [RetrievableMemory.visibility == "global"]
+        if chat_id is not None:
+            conditions.append(and_(RetrievableMemory.visibility == "chat", RetrievableMemory.chat_id == chat_id))
+            if message_thread_id is not None:
+                conditions.append(
+                    and_(
+                        RetrievableMemory.visibility == "topic",
+                        RetrievableMemory.chat_id == chat_id,
+                        RetrievableMemory.message_thread_id == message_thread_id,
+                    )
+                )
+        if user_id is not None:
+            if chat_id is None:
+                conditions.append(
+                    and_(
+                        RetrievableMemory.visibility == "user",
+                        RetrievableMemory.user_id == user_id,
+                        RetrievableMemory.chat_id.is_(None),
+                    )
+                )
+            else:
+                conditions.append(
+                    and_(
+                        RetrievableMemory.visibility == "user",
+                        RetrievableMemory.user_id == user_id,
+                        RetrievableMemory.chat_id == chat_id,
+                    )
+                )
+        return or_(*conditions)
+
+    @classmethod
+    def _score_record(cls, record: RetrievableMemoryRecord, *, tokens: set[str], now: datetime) -> RetrievableMemoryRecord:
+        text_tokens = cls._tokens(record.searchable_text)
+        if tokens:
+            overlap = len(tokens & text_tokens)
+            textual = overlap / max(len(tokens), 1)
+            if overlap == 0:
+                textual = 0.0
+        else:
+            textual = 0.2
+        age_days = 0.0
+        if record.updated_at is not None:
+            age_delta = now - cls._as_aware_utc(record.updated_at)
+            age_days = max(0.0, age_delta.total_seconds() / 86400)
+        recency = 1.0 / (1.0 + min(age_days, 365.0) / 30.0)
+        record.score = round((textual * 0.70) + (record.confidence * 0.20) + (recency * 0.10), 6)
+        return record
+
+    @staticmethod
+    def _as_aware_utc(value: datetime) -> datetime:
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
+
+    @staticmethod
+    def _tokens(value: str | None) -> set[str]:
+        import re
+
+        return {token.casefold() for token in re.findall(r"[A-Za-z0-9ÄÖÜäöüß_+-]+", value or "") if len(token) >= 3}
+
+    def _is_mysql_backend(self) -> bool:
+        bind = self._session.get_bind()
+        return bind.dialect.name in {"mysql", "mariadb"}
+
+    @classmethod
+    def _normalize_visibility(cls, value: str) -> str:
+        normalized = (value or "").strip().lower()
+        if normalized not in cls.ALLOWED_VISIBILITIES:
+            raise ValueError("invalid visibility")
+        return normalized
+
+    @classmethod
+    def _normalize_memory_type(cls, value: str) -> str:
+        normalized = (value or "").strip().lower()
+        if normalized not in cls.ALLOWED_MEMORY_TYPES:
+            raise ValueError("invalid memory_type")
+        return normalized
+
+    @classmethod
+    def _normalize_source(cls, value: str) -> str:
+        normalized = (value or "").strip().lower()
+        if not normalized:
+            return "manual"
+        if normalized not in cls.ALLOWED_SOURCES:
+            return "plugin"
+        return normalized
+
+    @staticmethod
+    def _validate_scope(
+        *,
+        visibility: str,
+        chat_id: int | None,
+        message_thread_id: int | None,
+        user_id: int | None,
+    ) -> None:
+        if visibility == "topic" and (chat_id is None or message_thread_id is None):
+            raise ValueError("topic memory requires chat_id and message_thread_id")
+        if visibility == "chat" and chat_id is None:
+            raise ValueError("chat memory requires chat_id")
+        if visibility == "user" and user_id is None:
+            raise ValueError("user memory requires user_id")
+        if visibility == "global" and any(value is not None for value in (chat_id, message_thread_id, user_id)):
+            raise ValueError("global memory must not set chat_id, message_thread_id, or user_id")
+
+    @staticmethod
+    def _to_retrievable_record(row: RetrievableMemory, *, score: float = 0.0) -> RetrievableMemoryRecord:
+        return RetrievableMemoryRecord(
+            id=row.id,
+            chat_id=row.chat_id,
+            message_thread_id=row.message_thread_id,
+            user_id=row.user_id,
+            visibility=row.visibility,
+            memory_type=row.memory_type,
+            content=row.content,
+            summary=row.summary,
+            confidence=float(row.confidence or 0.0),
+            source=row.source,
+            active=bool(row.active),
+            expires_at=row.expires_at,
+            last_used_at=row.last_used_at,
+            use_count=int(row.use_count or 0),
+            created_at=row.created_at,
+            updated_at=row.updated_at,
+            score=score,
         )
 
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import BigInteger, Boolean, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from amo_bot.auth.roles import Role
@@ -321,6 +321,33 @@ class TopicLongMemory(Base):
     source_daily_memory_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     promotion_status: Mapped[str] = mapped_column(String(16), nullable=False, default="none", server_default="none")
     answer_status: Mapped[str] = mapped_column(String(16), nullable=False, default="legacy", server_default="legacy")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+
+class RetrievableMemory(Base):
+    __tablename__ = "retrievable_memories"
+    __table_args__ = (
+        Index("ix_retrievable_memories_scope_active", "visibility", "chat_id", "message_thread_id", "user_id", "active"),
+        Index("ix_retrievable_memories_type_active", "memory_type", "active"),
+        Index("ix_retrievable_memories_expires_at", "expires_at"),
+        Index("ix_retrievable_memories_search_text", "summary", "content", mysql_prefix="FULLTEXT"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    chat_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    message_thread_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    user_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    visibility: Mapped[str] = mapped_column(String(16), nullable=False)
+    memory_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    content: Mapped[str | None] = mapped_column(Text, nullable=True)
+    summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    confidence: Mapped[float] = mapped_column(Float, nullable=False, default=1.0, server_default="1")
+    source: Mapped[str] = mapped_column(String(32), nullable=False, default="manual", server_default="manual")
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="1")
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    use_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
 
