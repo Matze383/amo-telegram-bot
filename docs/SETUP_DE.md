@@ -266,6 +266,9 @@ OLLAMA_MAX_RESPONSE_CHARS=1500
 # Optional: Datenbank (Standard: SQLite)
 DATABASE_URL=sqlite:///./data/amo_bot.db
 
+# Optional: MariaDB/MySQL (statt SQLite)
+# DATABASE_URL=mysql+pymysql://amo_bot:<password>@<mariadb-host>:3306/amo_bot?charset=utf8mb4
+
 # Optional: Plugin-Verzeichnis
 AMO_PLUGIN_DIR=./plugins
 
@@ -754,6 +757,41 @@ chmod 755 data
 - Existiert das Verzeichnis `data\`?
 - Ordnerberechtigungen prüfen (Rechtsklick → Eigenschaften → Sicherheit)
 - Nur für Tests: `del data\amo_bot.db` und Neustart
+
+---
+
+## Datenbank: MariaDB-Unterstützung (optional)
+
+Neben SQLite unterstützt AMO auch MariaDB/MySQL über SQLAlchemy.
+
+### Konfiguration
+
+```ini
+DATABASE_URL=mysql+pymysql://amo_bot:<password>@<mariadb-host>:3306/amo_bot?charset=utf8mb4
+```
+
+### Voraussetzungen vor Cutover
+
+1. **Abhängigkeiten installieren** (im venv):
+   ```bash
+   pip install pymysql
+   ```
+
+2. **Datenbank und User anlegen** (empfohlene Rechte: nur database-scoped, nicht global):
+   ```sql
+   CREATE DATABASE amo_bot CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+   CREATE USER 'amo_bot'@'%' IDENTIFIED BY '<strong-password>';
+   GRANT ALL PRIVILEGES ON amo_bot.* TO 'amo_bot'@'%';
+   FLUSH PRIVILEGES;
+   ```
+
+3. **Daten migrieren/verifizieren** vor dem Cutover (SQLite-DB nicht löschen außer zu Testzwecken).
+
+### Hinweise
+
+- SQLite bleibt der Standard und wird empfohlen für lokale Instanzen.
+- MariaDB ist für zukünftige Production-Deployments vorbereitet.
+- Die SQLite-Datei (`data/amo_bot.db`) nicht löschen vor erfolgreicher Migration.
 
 ### Ollama nicht erreichbar
 - Läuft Ollama? `curl http://127.0.0.1:11434/api/tags`

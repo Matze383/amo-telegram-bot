@@ -114,7 +114,7 @@ OLLAMA_MAX_PROMPT_CHARS=4000
 OLLAMA_MAX_PREDICT_TOKENS=512
 OLLAMA_MAX_RESPONSE_CHARS=1500
 
-# Datenbank
+# Datenbank (Standard: SQLite; optional MariaDB/MySQL via mysql+pymysql://...)
 DATABASE_URL=sqlite:///./data/amo_bot.db
 
 # Plugins
@@ -1212,6 +1212,11 @@ Folgende Features sind **nicht** im MVP enthalten:
 - Existiert der `data/`-Ordner?
 - Schreibrechte vorhanden?
 - Löschen der DB-Datei (nur im Test!): `rm data/amo_bot.db`
+
+**MariaDB (optional):**
+- PyMySQL installiert? `pip install pymysql`
+- Datenbank und User angelegt mit database-scoped Rechten?
+- Migration vor Cutover durchgeführt?
 
 **Ollama nicht erreichbar:**
 - Läuft Ollama? `curl http://127.0.0.1:11434/api/tags`

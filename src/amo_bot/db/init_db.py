@@ -21,6 +21,9 @@ def init_db(database_url: str) -> None:
     inspector = inspect(engine)
 
 
+    # Legacy bootstrap/migration DDL from the SQLite era. A fresh MariaDB database
+    # is created via Base.metadata.create_all above; live SQLite-to-MariaDB data
+    # migration should use a separate dialect-aware migration/export step.
     table_creation_migrations: dict[str, str] = {
         "topic_agent_configs": """
             CREATE TABLE topic_agent_configs (
