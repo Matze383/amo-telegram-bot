@@ -1828,6 +1828,40 @@ class RetrievableMemoryRecord:
 
 
 @dataclass(slots=True)
+class RetrievableMemoryBackfillStats:
+    source: str
+    source_rows: int = 0
+    created: int = 0
+    updated: int = 0
+    unchanged: int = 0
+    skipped: int = 0
+    by_visibility: dict[str, int] | None = None
+
+
+@dataclass(slots=True)
+class RetrievableMemoryBackfillResult:
+    dry_run: bool
+    daily_memory: RetrievableMemoryBackfillStats
+    long_memory: RetrievableMemoryBackfillStats
+
+    @property
+    def total_source_rows(self) -> int:
+        return self.daily_memory.source_rows + self.long_memory.source_rows
+
+    @property
+    def total_created(self) -> int:
+        return self.daily_memory.created + self.long_memory.created
+
+    @property
+    def total_updated(self) -> int:
+        return self.daily_memory.updated + self.long_memory.updated
+
+    @property
+    def total_skipped(self) -> int:
+        return self.daily_memory.skipped + self.long_memory.skipped
+
+
+@dataclass(slots=True)
 class TopicAiSessionRecord:
     scope_type: str
     chat_id: int | None
@@ -2307,7 +2341,7 @@ class PromptContextDocRepository:
 class RetrievableMemoryRepository:
     ALLOWED_VISIBILITIES = {"topic", "chat", "user", "global"}
     ALLOWED_MEMORY_TYPES = {"preference", "fact", "summary", "relationship", "warning"}
-    ALLOWED_SOURCES = {"daily_memory", "manual", "auto", "plugin"}
+    ALLOWED_SOURCES = {"daily_memory", "long_memory", "manual", "auto", "plugin"}
     DEFAULT_LIMIT = 5
     MAX_LIMIT = 20
 
@@ -2360,6 +2394,86 @@ class RetrievableMemoryRepository:
         self._session.commit()
         self._session.refresh(row)
         return self._to_retrievable_record(row)
+
+    def backfill_from_summarized_memories(
+        self,
+        *,
+        dry_run: bool = True,
+        include_daily: bool = True,
+        include_long: bool = True,
+        memory_type: str = "summary",
+        confidence: float = 0.7,
+    ) -> RetrievableMemoryBackfillResult:
+        normalized_type = self._normalize_memory_type(memory_type)
+        safe_confidence = max(0.0, min(float(confidence), 1.0))
+        daily_stats = RetrievableMemoryBackfillStats(source="daily_memory", by_visibility={})
+        long_stats = RetrievableMemoryBackfillStats(source="long_memory", by_visibility={})
+
+        if include_daily:
+            daily_by_scope: dict[tuple[str, int | None, int | None, int | None], list[str]] = defaultdict(list)
+            for row in self._session.scalars(select(TopicDailyMemory).order_by(TopicDailyMemory.id.asc())).all():
+                daily_stats.source_rows += 1
+                scope = self._visibility_from_summary_scope(
+                    scope_type=row.scope_type,
+                    chat_id=row.chat_id,
+                    topic_id=row.topic_id,
+                    user_id=row.user_id,
+                )
+                safe_summary = (row.summary_text or "").strip()
+                if scope is None or not safe_summary:
+                    daily_stats.skipped += 1
+                    continue
+                daily_by_scope[scope].append(safe_summary)
+            for scope, summaries in daily_by_scope.items():
+                self._upsert_backfill_row(
+                    stats=daily_stats,
+                    source="daily_memory",
+                    scope=scope,
+                    summary="\n\n".join(summaries),
+                    memory_type=normalized_type,
+                    confidence=safe_confidence,
+                    dry_run=dry_run,
+                    active=True,
+                )
+
+        if include_long:
+            long_by_scope: dict[tuple[str, int | None, int | None, int | None], list[str]] = defaultdict(list)
+            for row in self._session.scalars(select(TopicLongMemory).order_by(TopicLongMemory.id.asc())).all():
+                long_stats.source_rows += 1
+                if not row.is_active:
+                    long_stats.skipped += 1
+                    continue
+                scope = self._visibility_from_summary_scope(
+                    scope_type=row.scope_type,
+                    chat_id=row.chat_id,
+                    topic_id=row.topic_id,
+                    user_id=row.user_id,
+                )
+                safe_summary = (row.fact_text or "").strip()
+                if scope is None or not safe_summary:
+                    long_stats.skipped += 1
+                    continue
+                long_by_scope[scope].append(safe_summary)
+            for scope, summaries in long_by_scope.items():
+                self._upsert_backfill_row(
+                    stats=long_stats,
+                    source="long_memory",
+                    scope=scope,
+                    summary="\n\n".join(summaries),
+                    memory_type=normalized_type,
+                    confidence=safe_confidence,
+                    dry_run=dry_run,
+                    active=True,
+                )
+
+        if not dry_run:
+            self._session.commit()
+
+        return RetrievableMemoryBackfillResult(
+            dry_run=dry_run,
+            daily_memory=daily_stats,
+            long_memory=long_stats,
+        )
 
     def update_memory(
         self,
@@ -2490,6 +2604,118 @@ class RetrievableMemoryRepository:
                     )
                 )
         return or_(*conditions)
+
+    def _upsert_backfill_row(
+        self,
+        *,
+        stats: RetrievableMemoryBackfillStats,
+        source: str,
+        scope: tuple[str, int | None, int | None, int | None],
+        summary: str | None,
+        memory_type: str,
+        confidence: float,
+        dry_run: bool,
+        active: bool,
+    ) -> None:
+        safe_summary = (summary or "").strip()
+        if not safe_summary:
+            stats.skipped += 1
+            return
+
+        visibility, target_chat_id, message_thread_id, target_user_id = scope
+        if stats.by_visibility is not None:
+            stats.by_visibility[visibility] = stats.by_visibility.get(visibility, 0) + 1
+        existing = self._find_backfilled_memory(
+            source=source,
+            memory_type=memory_type,
+            visibility=visibility,
+            chat_id=target_chat_id,
+            message_thread_id=message_thread_id,
+            user_id=target_user_id,
+        )
+        if existing is None:
+            stats.created += 1
+            if not dry_run:
+                self._session.add(
+                    RetrievableMemory(
+                        chat_id=target_chat_id,
+                        message_thread_id=message_thread_id,
+                        user_id=target_user_id,
+                        visibility=visibility,
+                        memory_type=memory_type,
+                        content=None,
+                        summary=safe_summary,
+                        confidence=confidence,
+                        source=source,
+                        active=active,
+                    )
+                )
+            return
+
+        needs_update = (
+            existing.summary != safe_summary
+            or existing.content is not None
+            or float(existing.confidence or 0.0) != confidence
+            or bool(existing.active) != active
+        )
+        if not needs_update:
+            stats.unchanged += 1
+            return
+        stats.updated += 1
+        if not dry_run:
+            existing.summary = safe_summary
+            existing.content = None
+            existing.confidence = confidence
+            existing.active = active
+
+    def _find_backfilled_memory(
+        self,
+        *,
+        source: str,
+        memory_type: str,
+        visibility: str,
+        chat_id: int | None,
+        message_thread_id: int | None,
+        user_id: int | None,
+    ) -> RetrievableMemory | None:
+        return self._session.scalar(
+            select(RetrievableMemory).where(
+                RetrievableMemory.source == source,
+                RetrievableMemory.memory_type == memory_type,
+                RetrievableMemory.visibility == visibility,
+                RetrievableMemory.chat_id == chat_id,
+                RetrievableMemory.message_thread_id == message_thread_id,
+                RetrievableMemory.user_id == user_id,
+            )
+        )
+
+    @classmethod
+    def _visibility_from_summary_scope(
+        cls,
+        *,
+        scope_type: str,
+        chat_id: int | None,
+        topic_id: int | None,
+        user_id: int | None,
+    ) -> tuple[str, int | None, int | None, int | None] | None:
+        normalized_scope = (scope_type or "").strip().lower()
+        if normalized_scope == "topic":
+            if chat_id is None or topic_id is None:
+                return None
+            return ("topic", chat_id, topic_id, None)
+        if normalized_scope in {"group_chat", "chat"}:
+            if chat_id is None:
+                return None
+            return ("chat", chat_id, None, None)
+        if normalized_scope in {"private_user", "user"}:
+            if user_id is None:
+                return None
+            return ("user", chat_id, None, user_id)
+        if normalized_scope == "global":
+            if any(value is not None for value in (chat_id, topic_id, user_id)):
+                return None
+            return ("global", None, None, None)
+        return None
 
     @classmethod
     def _score_record(cls, record: RetrievableMemoryRecord, *, tokens: set[str], now: datetime) -> RetrievableMemoryRecord:
