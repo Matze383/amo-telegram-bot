@@ -785,7 +785,14 @@ DATABASE_URL=mysql+pymysql://amo_bot:<password>@<mariadb-host>:3306/amo_bot?char
    FLUSH PRIVILEGES;
    ```
 
-3. **Daten migrieren/verifizieren** vor dem Cutover (SQLite-DB nicht löschen außer zu Testzwecken).
+3. **Daten migrieren/verifizieren** vor dem Cutover (SQLite-DB nicht löschen außer zu Testzwecken):
+   ```bash
+   python -m amo_bot.db.migrate \
+     --source-url sqlite:///./data/amo_bot.db \
+     --target-url 'mysql+pymysql://amo_bot:<password>@<mariadb-host>:3306/amo_bot?charset=utf8mb4' \
+     --dry-run
+   ```
+   Das Migrationstool gibt nur Tabellennamen, Zeilenzahlen und Status aus. Nach geprüftem Backup und Dry-Run `--dry-run` entfernen, um in eine leere Target-DB zu kopieren. Standardmäßig verweigert es gleiche Source/Target-URLs und nicht-leere Targets, außer `--allow-nonempty-target` wird explizit gesetzt.
 
 ### Hinweise
 
