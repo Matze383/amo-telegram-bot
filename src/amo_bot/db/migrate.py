@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TextIO
@@ -122,6 +123,39 @@ def _format_status_line(status: TableMigrationStatus) -> str:
     )
 
 
+def _insert_mapping_for_target(row: Mapping[str, object], target_table) -> dict[str, object]:  # noqa: ANN001
+    """Return a target insert mapping without forcing legacy NULLs over server defaults.
+
+    Some old SQLite tables were created by additive migrations that allowed NULL
+    values in columns that the current model declares NOT NULL with a server
+    default. Passing those source NULLs explicitly into a fresh target bypasses
+    the target default and fails integrity checks. Omitting only those defaulted
+    target columns lets the fresh schema supply its default while preserving all
+    non-NULL values and primary keys.
+    """
+
+    insert_row: dict[str, object] = {}
+    for column in target_table.columns:
+        if column.name not in row:
+            continue
+        value = row[column.name]
+        if value is None and not column.nullable and column.server_default is not None:
+            continue
+        insert_row[column.name] = value
+    return insert_row
+
+
+def _insert_batch(target_connection, target_table, rows: list[Mapping[str, object]]) -> int:  # noqa: ANN001
+    grouped_rows: dict[tuple[str, ...], list[dict[str, object]]] = {}
+    for row in rows:
+        insert_row = _insert_mapping_for_target(row, target_table)
+        grouped_rows.setdefault(tuple(insert_row.keys()), []).append(insert_row)
+
+    for grouped in grouped_rows.values():
+        target_connection.execute(target_table.insert(), grouped)
+    return len(rows)
+
+
 def migrate_database(
     *,
     source_url: str,
@@ -214,8 +248,7 @@ def migrate_database(
                     batch = [dict(row) for row in mappings.fetchmany(500)]
                     if not batch:
                         break
-                    target_connection.execute(target_table.insert(), batch)
-                    copied_count += len(batch)
+                    copied_count += _insert_batch(target_connection, target_table, batch)
                 copied_status = TableMigrationStatus(
                     table_name=status.table_name,
                     source_count=status.source_count,

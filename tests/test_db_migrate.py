@@ -3,7 +3,7 @@ from __future__ import annotations
 from io import StringIO
 
 import pytest
-from sqlalchemy import create_engine, func, select
+from sqlalchemy import create_engine, func, select, text
 
 from amo_bot.db.base import Base
 from amo_bot.db.init_db import init_db
@@ -111,6 +111,58 @@ def test_actual_copy_preserves_counts_primary_keys_and_metadata_only_output(tmp_
         assert target.scalar(select(TopicRecentMessage.id).where(TopicRecentMessage.id == 77)) == 77
         assert target.scalar(select(AuditEvent.id).where(AuditEvent.id == 88)) == 88
     source_engine.dispose()
+    target_engine.dispose()
+
+
+def test_copy_uses_target_server_default_for_legacy_null_in_not_null_column(tmp_path) -> None:
+    source_url = _sqlite_url(tmp_path / "source.db")
+    target_url = _sqlite_url(tmp_path / "target.db")
+    _seed_source(source_url)
+
+    source_engine = create_engine(source_url, future=True)
+    with source_engine.begin() as connection:
+        connection.execute(text("PRAGMA legacy_alter_table=ON"))
+        connection.execute(text("ALTER TABLE users RENAME TO users_current"))
+        connection.execute(
+            text(
+                """
+                CREATE TABLE users (
+                    id INTEGER NOT NULL PRIMARY KEY,
+                    telegram_user_id BIGINT NOT NULL UNIQUE,
+                    username VARCHAR(255),
+                    first_name VARCHAR(255),
+                    last_name VARCHAR(255),
+                    display_name VARCHAR(255),
+                    first_seen_at DATETIME,
+                    last_seen_at DATETIME,
+                    role_id INTEGER NOT NULL,
+                    created_at DATETIME,
+                    updated_at DATETIME,
+                    consent_status VARCHAR(32) NOT NULL DEFAULT 'accepted',
+                    consent_updated_at DATETIME,
+                    consent_prompted_at DATETIME,
+                    consent_prompt_count INTEGER NOT NULL DEFAULT 0
+                )
+                """
+            )
+        )
+        connection.execute(text("INSERT INTO users SELECT * FROM users_current"))
+        connection.execute(text("UPDATE users SET first_seen_at = NULL WHERE id = 42"))
+        connection.execute(text("DROP TABLE users_current"))
+    source_engine.dispose()
+
+    out = StringIO()
+    migrate_database(source_url=source_url, target_url=target_url, out=out)
+
+    output = out.getvalue()
+    assert "table=users" in output
+    assert SECRET_TEXT not in output
+    assert SECRET_USERNAME not in output
+
+    target_engine = create_engine(target_url, future=True)
+    with target_engine.connect() as connection:
+        assert connection.scalar(select(User.id).where(User.id == 42)) == 42
+        assert connection.scalar(select(User.first_seen_at).where(User.id == 42)) is not None
     target_engine.dispose()
 
 
