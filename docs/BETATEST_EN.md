@@ -601,6 +601,13 @@ When `WEBUI_PUBLIC_MODE=true`, the HTTP Request Gate blocks access to protected 
 - `/memory_profile_set key=value[, key=value]` updates allowed coarse fields (e.g. `language=en,verbosity=high`). Disallowed fields are ignored/rejected.
 - `/memory_profile_delete` deletes only your own private profile.
 
+### Explicit Recall Memory Command
+
+- `/remember <topic|chat|user> <preference|fact|summary|relationship|warning> <text>` saves a retrievable social/conversation memory only when explicitly requested.
+- `topic` is available only inside forum topics; `chat` stores for the current group; `user` stores only for the requesting user in the current chat/private context.
+- Global manual memories are disabled for v1. Sensitive-looking tokens/secrets/system-prompt content and texts over 1000 characters are rejected.
+- Normal messages such as `remember: ...` are not harvested automatically in v1.
+
 ### Consent Commands (Block 1)
 
 The bot now includes user consent management via Telegram commands.

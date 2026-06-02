@@ -601,6 +601,13 @@ Wenn `WEBUI_PUBLIC_MODE=true`, blockiert das HTTP-Request-Gate den Zugriff auf g
 - `/memory_profile_set key=value[, key=value]` aktualisiert erlaubte grobe Felder (z. B. `language=de,verbosity=high`). Nicht erlaubte Felder werden ignoriert/abgelehnt.
 - `/memory_profile_delete` löscht nur dein eigenes privates Profil.
 
+### Explizites Recall-Memory-Command
+
+- `/remember <topic|chat|user> <preference|fact|summary|relationship|warning> <text>` speichert ein abrufbares soziales/Conversation-Memory nur nach explizitem Wunsch.
+- `topic` ist nur in Forum-Topics verfügbar; `chat` speichert für die aktuelle Gruppe; `user` speichert nur für den anfragenden User im aktuellen Chat-/Privat-Kontext.
+- Globale manuelle Memories sind in v1 deaktiviert. Sensibel wirkende Tokens/Secrets/System-Prompt-Inhalte und Texte über 1000 Zeichen werden abgelehnt.
+- Normale Nachrichten wie `remember: ...` werden in v1 nicht automatisch übernommen.
+
 ### Consent Commands (Block 1)
 
 Der Bot enthält nun ein Consent-Management über Telegram-Commands.

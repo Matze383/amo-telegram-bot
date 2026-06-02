@@ -2395,6 +2395,68 @@ class RetrievableMemoryRepository:
         self._session.refresh(row)
         return self._to_retrievable_record(row)
 
+    def upsert_manual_memory(
+        self,
+        *,
+        visibility: str,
+        memory_type: str,
+        content: str,
+        chat_id: int | None = None,
+        message_thread_id: int | None = None,
+        user_id: int | None = None,
+        confidence: float = 0.9,
+        active: bool = True,
+        expires_at: datetime | None = None,
+    ) -> tuple[RetrievableMemoryRecord, bool]:
+        normalized_visibility = self._normalize_visibility(visibility)
+        normalized_type = self._normalize_memory_type(memory_type)
+        safe_content = (content or "").strip()
+        if not safe_content:
+            raise ValueError("content required")
+        self._validate_scope(
+            visibility=normalized_visibility,
+            chat_id=chat_id,
+            message_thread_id=message_thread_id,
+            user_id=user_id,
+        )
+
+        row = self._session.scalar(
+            select(RetrievableMemory).where(
+                RetrievableMemory.source == "manual",
+                RetrievableMemory.memory_type == normalized_type,
+                RetrievableMemory.visibility == normalized_visibility,
+                RetrievableMemory.chat_id == chat_id,
+                RetrievableMemory.message_thread_id == message_thread_id,
+                RetrievableMemory.user_id == user_id,
+                RetrievableMemory.content == safe_content,
+            )
+        )
+        created = row is None
+        if row is None:
+            row = RetrievableMemory(
+                chat_id=chat_id,
+                message_thread_id=message_thread_id,
+                user_id=user_id,
+                visibility=normalized_visibility,
+                memory_type=normalized_type,
+                content=safe_content,
+                summary=None,
+                confidence=max(0.0, min(float(confidence), 1.0)),
+                source="manual",
+                active=bool(active),
+                expires_at=expires_at,
+            )
+            self._session.add(row)
+        else:
+            row.confidence = max(float(row.confidence or 0.0), max(0.0, min(float(confidence), 1.0)))
+            row.active = bool(active)
+            if expires_at is not None:
+                row.expires_at = expires_at
+
+        self._session.commit()
+        self._session.refresh(row)
+        return self._to_retrievable_record(row), created
+
     def backfill_from_summarized_memories(
         self,
         *,

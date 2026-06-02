@@ -8,6 +8,7 @@ from typing import Awaitable, Callable, Literal
 
 
 from amo_bot.ai.memory_c2_service import MemoryC2Service, MemoryScope
+from amo_bot.ai.remember_service import ManualMemoryError, ManualMemoryService
 from amo_bot.ai.service import AIService, OllamaError
 from amo_bot.auth.permissions import ADMIN_ASSIGNABLE_ROLES, can_assign_role, can_use_bot
 from amo_bot.auth.roles import ROLE_PRIORITY, Role
@@ -21,6 +22,7 @@ from amo_bot.db.repositories import (
     PromptContextDocRepository,
     TopicAgentMemoryRepository,
     UserMemoryProfileRepository,
+    RetrievableMemoryRepository,
     UserRoleRepository,
     WebToolRoleQuotaRepository,
 )
@@ -224,6 +226,21 @@ TELEGRAM_TEXTS: dict[str, dict[Locale, str]] = {
     "memory_profile.set.rejected": {"de": "Keine erlaubten Felder. Erlaubt: {allowed}", "en": "No allowed fields. Allowed: {allowed}"},
     "memory_profile.set.partial": {"de": "Profil teilweise aktualisiert. Gespeichert: {accepted}; ignoriert: {rejected}", "en": "Profile partially updated. Stored: {accepted}; ignored: {rejected}"},
     "memory_profile.delete.done": {"de": "Dein Memory-Profil wurde gelöscht.", "en": "Your memory profile was deleted."},
+    "remember.usage": {
+        "de": "Nutzung: /remember <topic|chat|user> <preference|fact|summary|relationship|warning> <text>",
+        "en": "usage: /remember <topic|chat|user> <preference|fact|summary|relationship|warning> <text>",
+    },
+    "remember.saved": {"de": "Gespeichert ({visibility}/{memory_type}).", "en": "Saved ({visibility}/{memory_type})."},
+    "remember.unchanged": {"de": "War schon gespeichert ({visibility}/{memory_type}).", "en": "Already saved ({visibility}/{memory_type})."},
+    "remember.unavailable": {"de": "Memory-Speicher ist nicht konfiguriert.", "en": "Memory storage is not configured."},
+    "remember.invalid_type": {
+        "de": "Ungültiger Memory-Typ. Erlaubt: preference, fact, summary, relationship, warning.",
+        "en": "Invalid memory type. Allowed: preference, fact, summary, relationship, warning.",
+    },
+    "remember.global_disallowed": {"de": "Globales Speichern ist in v1 deaktiviert.", "en": "Global saves are disabled in v1."},
+    "remember.sensitive": {"de": "Nicht gespeichert: Der Text wirkt sensibel.", "en": "Not saved: the text looks sensitive."},
+    "remember.too_long": {"de": "Nicht gespeichert: Text ist zu lang (max. 1000 Zeichen).", "en": "Not saved: text is too long (max 1000 chars)."},
+    "remember.scope_unavailable": {"de": "Dieser Scope ist hier nicht verfügbar.", "en": "That scope is not available here."},
 }
 
 
@@ -1014,6 +1031,48 @@ def create_builtin_registry(
             session.commit()
         return t_text("memory_profile.delete.done", ctx.locale)
 
+    async def remember_handler(ctx: CommandContext) -> str:
+        if session_factory is None:
+            return t_text("remember.unavailable", ctx.locale)
+        try:
+            request = ManualMemoryService.parse_command_argument(
+                ctx.argument,
+                chat_id=ctx.chat_id,
+                message_thread_id=ctx.message_thread_id,
+                role=ctx.role,
+            )
+            with session_factory() as session:
+                result = ManualMemoryService(RetrievableMemoryRepository(session)).save_manual_memory(
+                    request,
+                    chat_id=ctx.chat_id,
+                    message_thread_id=ctx.message_thread_id,
+                    user_id=ctx.user_id,
+                )
+        except ManualMemoryError as exc:
+            key = str(exc) or "usage"
+            if key in {"usage", "empty"}:
+                return t_text("remember.usage", ctx.locale)
+            if key == "invalid_type":
+                return t_text("remember.invalid_type", ctx.locale)
+            if key == "global_disallowed":
+                return t_text("remember.global_disallowed", ctx.locale)
+            if key == "sensitive":
+                return t_text("remember.sensitive", ctx.locale)
+            if key == "too_long":
+                return t_text("remember.too_long", ctx.locale)
+            return t_text("remember.scope_unavailable", ctx.locale)
+        except ValueError:
+            return t_text("remember.usage", ctx.locale)
+
+        logger.info(
+            "manual_memory_save visibility=%s memory_type=%s source=manual created=%s",
+            result.record.visibility,
+            result.record.memory_type,
+            result.created,
+        )
+        key = "remember.saved" if result.created else "remember.unchanged"
+        return t_text(key, ctx.locale, visibility=result.record.visibility, memory_type=result.record.memory_type)
+
     async def help_handler(ctx: CommandContext) -> str:
         allowed = registry.list_allowed(ctx.role)
         if not allowed:
@@ -1041,6 +1100,7 @@ def create_builtin_registry(
     registry.register(Command(name="memory_profile", description="Show your coarse memory profile", description_de="Eigenes grobes Memory-Profil anzeigen", description_en="Show your coarse memory profile", allowed_roles=normal_plus, handler=memory_profile_handler))
     registry.register(Command(name="memory_profile_set", description="Update profile: /memory_profile_set key=value[, key=value]", description_de="Profil aktualisieren: /memory_profile_set key=value[, key=value]", description_en="Update profile: /memory_profile_set key=value[, key=value]", allowed_roles=normal_plus, handler=memory_profile_set_handler))
     registry.register(Command(name="memory_profile_delete", description="Delete your memory profile", description_de="Eigenes Memory-Profil löschen", description_en="Delete your memory profile", allowed_roles=normal_plus, handler=memory_profile_delete_handler))
+    registry.register(Command(name="remember", description="Save memory: /remember <scope> <type> <text>", description_de="Memory speichern: /remember <scope> <typ> <text>", description_en="Save memory: /remember <scope> <type> <text>", allowed_roles=normal_plus, handler=remember_handler))
     registry.register(Command(name="ctxdoc_set", description="Set prompt context doc: /ctxdoc_set <kind> <global|topic> <text>", description_de="Prompt-Kontextdoc setzen: /ctxdoc_set <kind> <global|topic> <text>", description_en="Set prompt context doc: /ctxdoc_set <kind> <global|topic> <text>", allowed_roles=admin_plus, handler=ctxdoc_set_handler))
     registry.register(Command(name="ctxdoc_get", description="Read prompt context doc: /ctxdoc_get <kind> <global|topic>", description_de="Prompt-Kontextdoc lesen: /ctxdoc_get <kind> <global|topic>", description_en="Read prompt context doc: /ctxdoc_get <kind> <global|topic>", allowed_roles=admin_plus, handler=ctxdoc_get_handler))
     registry.register(Command(name="ctxdoc_del", description="Delete prompt context doc: /ctxdoc_del <kind> <global|topic>", description_de="Prompt-Kontextdoc löschen: /ctxdoc_del <kind> <global|topic>", description_en="Delete prompt context doc: /ctxdoc_del <kind> <global|topic>", allowed_roles=admin_plus, handler=ctxdoc_del_handler))
