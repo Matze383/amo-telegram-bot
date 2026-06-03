@@ -5,6 +5,7 @@ from amo_bot.ai.webtool_provider_adapter import (
     _normalize_ddg_locale,
     _normalize_market_price_query,
     _resolve_searxng_config,
+    _SearxngConfig,
     _search_searxng_json,
     _validate_search_endpoint_base_url,
 )
@@ -40,7 +41,7 @@ class _DummyClient:
         return False
 
     def get(self, url: str, params: dict[str, str], headers: dict[str, str] | None = None):
-        assert url.startswith("https://")
+        assert url.startswith(("http://", "https://"))
         assert "q" in params
         if self._on_get is not None:
             self._on_get(url, params, headers or {})
@@ -279,11 +280,7 @@ def test_search_searxng_json_parses_results(monkeypatch):
         ),
     )
 
-    cfg = _resolve_searxng_config(locale="en", max_results=5)
-    if cfg is None:
-        from amo_bot.ai.webtool_provider_adapter import _SearxngConfig
-
-        cfg = _SearxngConfig(base_url="https://searx.example.org", timeout_seconds=2.0, max_results=5, language="en-us")
+    cfg = _SearxngConfig(base_url="https://searx.example.org", timeout_seconds=2.0, max_results=5, language="en-us")
 
     results = _search_searxng_json(query="bitcoin", config=cfg)
     assert len(results) == 2

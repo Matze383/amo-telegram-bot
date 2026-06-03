@@ -388,6 +388,13 @@ def test_main_wires_scheduled_plugin_executor_timeout(monkeypatch) -> None:
         dreaming_jitter_seconds = 120
         dreaming_min_daily_memories = 1
         dreaming_lookback_days = 7
+        memory_daily_enabled = False
+        memory_daily_interval_seconds = 21600
+        memory_daily_max_input_messages = 200
+        memory_daily_max_chars_per_message = 500
+        memory_daily_max_summary_chars = 6000
+        memory_daily_min_messages = 1
+        memory_daily_max_scopes_per_run = 10
 
     class _DummyContext:
         def __enter__(self):
