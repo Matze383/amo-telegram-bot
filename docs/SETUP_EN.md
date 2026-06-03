@@ -800,6 +800,20 @@ DATABASE_URL=mysql+pymysql://amo_bot:<password>@<mariadb-host>:3306/amo_bot?char
 - MariaDB is prepared for future production deployments.
 - Do not delete the SQLite file (`data/amo_bot.db`) before successful migration.
 
+### Retrievable Memory Backfill
+
+After migration, existing Daily Memories can be moved into retrievable memory:
+
+```bash
+# Preview (metadata-only: table names, counts, scopes)
+python -m amo_bot.db.retrievable_memory_backfill --dry-run
+
+# After review: perform the transfer
+python -m amo_bot.db.retrievable_memory_backfill --apply
+```
+
+**Note:** The backfill does not read `topic_recent_messages`. Output contains metadata only (counts, scopes, types) — never memory text.
+
 ### Ollama not reachable
 - Is Ollama running? `curl http://127.0.0.1:11434/api/tags`
 - Is the URL in `.env` correct?
@@ -886,7 +900,7 @@ The WebUI Dashboard includes a **KI Memory** section for inspecting and managing
 ## Next Steps
 
 - See [BETATEST_EN.md](BETATEST_EN.md) for detailed testing instructions
-- See [RELEASE_NOTES_2026.05.09-Beta_EN.md](RELEASE_NOTES_2026.05.09-Beta_EN.md) for changelog
+- See [RELEASE_NOTES_2026.06.03-Beta_EN.md](RELEASE_NOTES_2026.06.03-Beta_EN.md) for the current changelog
 
 ## WebUI Security — Access Window (Block 3)
 
