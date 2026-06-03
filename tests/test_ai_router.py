@@ -41,13 +41,12 @@ def test_default_decision_is_passthrough_noop() -> None:
             message_text="hello",
             route_reason=AIRouterReasonCode.DEFAULT_NOOP,
             current_time_context_text=(
-                "Current time context (system-provided, higher priority than memory/recent chat):\n"
+                "Context:\n"
                 "Current date: 2026-01-02\n"
                 "Timezone: Europe/Berlin\n"
                 "Local timestamp: 2026-01-02T04:04:05+01:00\n"
                 "UTC timestamp: 2026-01-02T03:04:05Z\n"
-                "Use this as the current date/time. For live/current external facts, use web research when available; "
-                "do not infer from model training date."
+                "When answering about current events or live facts, prefer available web research over prior knowledge."
             ),
         ),
     )
@@ -280,13 +279,12 @@ def test_context_dto_v1_defaults_without_repo() -> None:
         daily_memory_text="",
         long_memory_text="",
         current_time_context_text=(
-            "Current time context (system-provided, higher priority than memory/recent chat):\n"
+            "Context:\n"
             "Current date: 2026-01-02\n"
             "Timezone: Europe/Berlin\n"
             "Local timestamp: 2026-01-02T04:04:05+01:00\n"
             "UTC timestamp: 2026-01-02T03:04:05Z\n"
-            "Use this as the current date/time. For live/current external facts, use web research when available; "
-            "do not infer from model training date."
+            "When answering about current events or live facts, prefer available web research over prior knowledge."
         ),
     )
 

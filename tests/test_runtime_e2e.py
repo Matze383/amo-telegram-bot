@@ -126,7 +126,11 @@ def test_dispatcher_e2e_ping_role_help_setrole_and_ask_ignore_is_silent(tmp_path
     prompts = ai.prompts[:]
     assert len(prompts) == 3
     for prompt in prompts:
-        assert "Current time context (system-provided" in prompt
+        assert "Context:" in prompt
+        assert "system-provided" not in prompt
+        assert "higher priority" not in prompt
+        assert "memory/recent chat" not in prompt
+        assert "model training date" not in prompt
         assert "Current date:" in prompt
         assert "Timezone: Europe/Berlin" in prompt
         assert prompt.endswith("User message:\nhi ai")

@@ -34,11 +34,11 @@ def build_current_time_context(
 
     return "\n".join(
         (
-            "Current time context (system-provided, higher priority than memory/recent chat):",
+            "Context:",
             f"Current date: {local_now.date().isoformat()}",
             f"Timezone: {tz_name}",
             f"Local timestamp: {local_now.isoformat(timespec='seconds')}",
             f"UTC timestamp: {utc_iso}",
-            "Use this as the current date/time. For live/current external facts, use web research when available; do not infer from model training date.",
+            "When answering about current events or live facts, prefer available web research over prior knowledge.",
         )
     )

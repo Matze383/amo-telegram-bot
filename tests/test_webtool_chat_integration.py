@@ -110,7 +110,7 @@ def _allowing_router_decision() -> AIRouterDecision:
             flag_bot_mention=True,
             flag_reply_to_bot=True,
             recent_messages_text="",
-            current_time_context_text="Current time context (system-provided, higher priority than memory/recent chat):\nCurrent date: 2026-06-03\nTimezone: Europe/Berlin\nUse this as the current date/time. For live/current external facts, use web research when available; do not infer from model training date.",
+            current_time_context_text="Context:\nCurrent date: 2026-06-03\nTimezone: Europe/Berlin\nWhen answering about current events or live facts, prefer available web research over prior knowledge.",
             user_profile_context_text="",
             assembled_soul_text="",
             daily_memory_text="",

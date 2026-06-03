@@ -85,7 +85,11 @@ def test_ask_prompt_includes_current_time_context_without_logging_user_text() ->
     )
 
     assert out == "ok"
-    assert "Current time context (system-provided, higher priority than memory/recent chat):" in ai.prompt
+    assert "Context:" in ai.prompt
+    assert "system-provided" not in ai.prompt
+    assert "higher priority" not in ai.prompt
+    assert "memory/recent chat" not in ai.prompt
+    assert "model training date" not in ai.prompt
     assert "Current date:" in ai.prompt
     assert "Timezone: Europe/Berlin" in ai.prompt
     assert "User message:\nHi?" in ai.prompt

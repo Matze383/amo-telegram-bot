@@ -175,8 +175,8 @@ def test_dispatcher_prompt_keeps_current_user_message_primary_with_docs(tmp_path
     assert sent == [(-1001, "ok", 11)]
     assert len(prompts) == 1
     prompt = prompts[0]
-    assert prompt.index("Current user message (primary):") < prompt.index("Agent steering context")
-    assert "not memory and not learned from chat" in prompt
+    assert prompt.index("Current message:") < prompt.index("Assistant context notes")
+    assert "do not quote or describe these notes" in prompt
     assert prompt.rstrip().endswith("User message:\nplease answer this current request")
 
 

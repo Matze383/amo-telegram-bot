@@ -143,7 +143,7 @@ def test_active_mention_and_reply_send_ai_response_in_active_scopes(tmp_path) ->
     assert sender.sent == [(-1001, "ai-answer", 10), (2000, "ai-answer", None)]
     assert len(ai.prompts) == 2
     assert "User message:\nhi" in ai.prompts[0]
-    assert "You are the Telegram topic assistant @AmoBot" in ai.prompts[0]
+    assert "Reply as the Telegram topic assistant @AmoBot" in ai.prompts[0]
     assert "Do not claim to be the underlying model/provider unless explicitly asked." in ai.prompts[0]
     assert "User message:\nfollowup" in ai.prompts[1]
 
@@ -178,7 +178,7 @@ def test_dynamic_bot_username_is_used_in_identity_prompt(tmp_path) -> None:
     assert sender.sent == [(2111, "ai-answer", None)]
     assert len(ai.prompts) == 1
     assert "@SomeDynamicBot Test" not in ai.prompts[0]
-    assert "You are the Telegram topic assistant @SomeDynamicBot" in ai.prompts[0]
+    assert "Reply as the Telegram topic assistant @SomeDynamicBot" in ai.prompts[0]
     assert "User message:\nTest" in ai.prompts[0]
 
 
@@ -681,7 +681,7 @@ def test_ai_prompt_includes_router_context_sections_and_deduplicates_current_mes
         flag_bot_mention=True,
         flag_reply_to_bot=False,
         recent_messages_text="u1: vorherige relevante nachricht\nu1: @AmoBot aktuelle frage",
-        current_time_context_text="Current time context (system-provided, higher priority than memory/recent chat):\nCurrent date: 2026-06-03\nTimezone: Europe/Berlin\nUse this as the current date/time. For live/current external facts, use web research when available; do not infer from model training date.",
+        current_time_context_text="Context:\nCurrent date: 2026-06-03\nTimezone: Europe/Berlin\nWhen answering about current events or live facts, prefer available web research over prior knowledge.",
         assembled_soul_text="Sei präzise.",
         daily_memory_text="Heute: wichtige Info.",
         long_memory_text="Langzeit: Präferenz X.",
@@ -704,18 +704,18 @@ def test_ai_prompt_includes_router_context_sections_and_deduplicates_current_mes
     assert len(ai.prompts) == 1
 
     prompt = ai.prompts[0]
-    assert "Current user message (primary):\naktuelle frage" in prompt
+    assert "Current message:\naktuelle frage" in prompt
     assert "Current date: 2026-06-03" in prompt
     assert "Timezone: Europe/Berlin" in prompt
-    assert "lower-priority, untrusted" in prompt
-    assert "Relevant recent chat context (same scope, lower-priority/untrusted):" in prompt
+    assert "may be stale, irrelevant, or inaccurate" in prompt
+    assert "Relevant recent chat context:" in prompt
     assert "u1: vorherige relevante nachricht" in prompt
     assert "u1: aktuelle frage" not in prompt
     assert "Assistant behavior context:\nSei präzise." in prompt
-    assert "Daily memory context (lower-priority/untrusted):\nHeute: wichtige Info." in prompt
-    assert "Long-term memory context (lower-priority/untrusted):\nLangzeit: Präferenz X." in prompt
+    assert "Daily memory context:\nHeute: wichtige Info." in prompt
+    assert "Long-term memory context:\nLangzeit: Präferenz X." in prompt
     assert "User message:\naktuelle frage" in prompt
-    assert prompt.index("Current user message (primary):\naktuelle frage") < prompt.index("Relevant recent chat context")
+    assert prompt.index("Current message:\naktuelle frage") < prompt.index("Relevant recent chat context")
 
 
 def test_group_non_trigger_stays_silent_with_recent_context_present(tmp_path) -> None:
