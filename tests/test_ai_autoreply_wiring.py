@@ -39,7 +39,7 @@ class Sender:
         return {"ok": True}
 
 
-def _mk_update(*, uid: int, chat_id: int, chat_type: str, text: str, update_id: int, message_thread_id: int | None = None, reply_to_is_bot: bool = False, reply_to_message_id: int | None = None, reply_to_bot_username: str = "AmoBot") -> dict[str, object]:
+def _mk_update(*, uid: int, chat_id: int, chat_type: str, text: str, update_id: int, message_thread_id: int | None = None, reply_to_is_bot: bool = False, reply_to_message_id: int | None = None, reply_to_bot_username: str = "AmoBot", reply_to_text: str = "") -> dict[str, object]:
     m: dict[str, object] = {
         "message_id": update_id + 100,
         "is_topic_message": message_thread_id is not None,
@@ -67,6 +67,8 @@ def _mk_update(*, uid: int, chat_id: int, chat_type: str, text: str, update_id: 
                 "username": reply_to_bot_username,
             },
         }
+        if reply_to_text:
+            m["reply_to_message"]["text"] = reply_to_text
     return {"update_id": update_id, "message": m}
 
 
@@ -143,12 +145,13 @@ def test_active_mention_and_reply_send_ai_response_in_active_scopes(tmp_path) ->
     assert sender.sent == [(-1001, "ai-answer", 10), (2000, "ai-answer", None)]
     assert len(ai.prompts) == 2
     assert "User message:\nhi" in ai.prompts[0]
-    assert "Reply as the Telegram topic assistant @AmoBot" in ai.prompts[0]
+    assert "Reply as the Telegram topic assistant" not in ai.prompts[0]
+    assert "@AmoBot" not in ai.prompts[0]
     assert "Do not claim to be the underlying model/provider unless explicitly asked." in ai.prompts[0]
     assert "User message:\nfollowup" in ai.prompts[1]
 
 
-def test_dynamic_bot_username_is_used_in_identity_prompt(tmp_path) -> None:
+def test_dynamic_bot_username_is_removed_from_visible_prompt(tmp_path) -> None:
     db_url = f"sqlite:///{tmp_path / 'ai_autoreply_dynamic_botname.db'}"
     init_db(db_url)
     _seed_user(db_url, user_id=2111, role="vip", consent="accepted")
@@ -178,9 +181,61 @@ def test_dynamic_bot_username_is_used_in_identity_prompt(tmp_path) -> None:
     assert sender.sent == [(2111, "ai-answer", None)]
     assert len(ai.prompts) == 1
     assert "@SomeDynamicBot Test" not in ai.prompts[0]
-    assert "Reply as the Telegram topic assistant @SomeDynamicBot" in ai.prompts[0]
+    assert "Reply as the Telegram topic assistant" not in ai.prompts[0]
+    assert "@SomeDynamicBot" not in ai.prompts[0]
     assert "User message:\nTest" in ai.prompts[0]
 
+
+
+def test_reply_context_bot_username_is_not_action_target_in_ai_prompt(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'ai_autoreply_reply_context_bot_identity.db'}"
+    init_db(db_url)
+    _seed_user(db_url, user_id=2113, role="vip", consent="accepted")
+
+    sf = create_session_factory(db_url)
+    with sf() as session:
+        repo = TopicAgentMemoryRepository(session)
+        repo.upsert_config(scope_type="private_user", user_id=2113, ai_enabled=True)
+
+    ai = FakeAIService(answer="chart-analysis")
+    sender = Sender()
+    dispatcher = _mk_dispatcher(db_url, ai, sender)
+
+    asyncio.run(
+        dispatcher.handle_raw_update(
+            _mk_update(
+                uid=2113,
+                chat_id=2113,
+                chat_type="private",
+                text="Analysiere bitte das Chart",
+                update_id=12,
+                reply_to_is_bot=True,
+                reply_to_bot_username="TsubasaOzora_bot",
+                reply_to_text="@TsubasaOzora_bot was zeigt dieses Chart?",
+            )
+        )
+    )
+
+    assert sender.sent == [(2113, "chart-analysis", None)]
+    assert len(ai.prompts) == 1
+    prompt = ai.prompts[0]
+    assert "User message:\nAnalysiere bitte das Chart" in prompt
+    assert "Reply as the Telegram topic assistant" not in prompt
+    assert "@AmoBot" not in prompt
+    assert "@TsubasaOzora_bot" not in prompt
+    assert "contact" not in prompt.casefold()
+    assert "tag" not in prompt.casefold()
+    assert "external platform" not in prompt.casefold()
+
+
+def test_bot_like_handles_are_removed_from_current_autoreply_prompt() -> None:
+    sanitized, changed = Dispatcher._sanitize_prompt_for_autoreply(
+        text="@TsubasaOzora_bot analysiere das Bild",
+        bot_username="AmoBot",
+    )
+
+    assert changed is True
+    assert sanitized == "analysiere das Bild"
 
 def test_private_scope_enabled_plain_text_triggers_ai_autoreply(tmp_path) -> None:
     db_url = f"sqlite:///{tmp_path / 'ai_autoreply_private_scope_enabled.db'}"
@@ -841,7 +896,8 @@ def test_reply_to_persisted_bot_message_includes_reply_context(tmp_path) -> None
     assert len(ai.prompts) == 1
     prompt = ai.prompts[0]
     assert "Telegram reply context:" in prompt
-    assert "Replied-to author/source: bot @AmoBot" in prompt
+    assert "Replied-to source type: bot" in prompt
+    assert "@AmoBot" not in prompt
     assert "Bot sample answer for reply context" in prompt
     assert "User message:\nWas meinst du damit?" in prompt
 
@@ -887,7 +943,8 @@ def test_reply_to_user_message_uses_safe_inline_quote_context(tmp_path) -> None:
     assert len(ai.prompts) == 1
     prompt = ai.prompts[0]
     assert "Telegram reply context:" in prompt
-    assert "Replied-to author/source: user @other" in prompt
+    assert "Replied-to source type: user" in prompt
+    assert "@other" not in prompt
     assert "User sample statement for reply context" in prompt
 
 

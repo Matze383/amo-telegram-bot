@@ -237,7 +237,7 @@ def test_dispatcher_passes_image_attachments_to_plugin_invocation() -> None:
 
 class _AutoImageRecorder:
     def __init__(self) -> None:
-        self.auto_calls: list[tuple[str, int, str, int, int, int | None, int]] = []
+        self.auto_calls: list[tuple[str, int, str, int, int, int | None, int, str | None]] = []
         self.execute_calls: list[object] = []
 
     async def analyze_image_automatically(self, *, actor, invocation) -> bool:
@@ -250,6 +250,7 @@ class _AutoImageRecorder:
                 invocation.message_id,
                 invocation.message_thread_id,
                 len(invocation.attachments),
+                invocation.argument,
             )
         )
         return True
@@ -335,7 +336,7 @@ def test_dispatcher_topic_photo_with_bot_mention_routes_to_auto_image_analysis()
 
     assert sent == []
     assert recorder.execute_calls == []
-    assert recorder.auto_calls == [("admin", 55, "auto_image", -1002003580909, 941, 6845, 1)]
+    assert recorder.auto_calls == [("admin", 55, "auto_image", -1002003580909, 941, 6845, 1, "was ist auf dem bild?")]
 
 
 def test_dispatcher_does_not_route_ignore_role_plain_photo_to_auto_image_analysis() -> None:

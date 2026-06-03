@@ -612,7 +612,7 @@ class Dispatcher:
                     actor=CommandActor(telegram_user_id=message.from_user.id, role=role),
                     invocation=CommandInvocation(
                         command_name="auto_image",
-                        argument=message.text or None,
+                        argument=self._sanitize_prompt_for_autoreply(text=message.text or "", bot_username=self.bot_username)[0] or None,
                         chat_id=message.chat.id,
                         message_id=message.message_id,
                         message_thread_id=message.message_thread_id,
@@ -1167,18 +1167,24 @@ class Dispatcher:
         if not cleaned:
             return "", False
 
-        if bot_username is None:
-            return cleaned, False
+        sanitized = cleaned
+        if bot_username is not None:
+            normalized = bot_username.strip().lstrip("@")
+            if normalized:
+                mention_pattern = re.compile(rf"(?<!\w)@{re.escape(normalized)}(?![A-Za-z0-9_])", re.IGNORECASE)
+                sanitized = mention_pattern.sub(" ", sanitized)
 
-        normalized = bot_username.strip().lstrip("@")
-        if not normalized:
-            return cleaned, False
-
-        mention_pattern = re.compile(rf"(?<!\w)@{re.escape(normalized)}(?![A-Za-z0-9_])", re.IGNORECASE)
-        without_mention = mention_pattern.sub(" ", cleaned)
-        sanitized = re.sub(r"\s+", " ", without_mention).strip()
+        sanitized = Dispatcher._sanitize_non_actionable_bot_handles(sanitized)
+        sanitized = re.sub(r"\s+", " ", sanitized).strip()
         mention_removed = sanitized != cleaned
-        return (sanitized or cleaned), mention_removed
+        return sanitized, mention_removed
+
+    @staticmethod
+    def _sanitize_non_actionable_bot_handles(text: str) -> str:
+        # Bot handles from forwarded/replied metadata or routing mentions are context,
+        # not instructions to contact/tag another Telegram account. Remove only bot-like
+        # handles; ordinary user handles in current messages remain available.
+        return re.sub(r"(?<!\w)@[A-Za-z0-9_]{1,64}_bot(?![A-Za-z0-9_])", " ", text, flags=re.IGNORECASE)
 
     @staticmethod
     def _locale_for_message(message: TelegramMessage) -> str:
@@ -1276,16 +1282,13 @@ class Dispatcher:
         if not content:
             return None
         source = "bot" if record.telegram_author_is_bot or record.source == "bot" else "user"
-        author = source
-        if record.telegram_author_username:
-            author = f"{source} @{record.telegram_author_username.strip().lstrip('@')}"
-        elif record.telegram_author_user_id is not None and record.telegram_author_user_id != 0:
-            author = f"{source} user_id={record.telegram_author_user_id}"
+        safe_content = Dispatcher._sanitize_non_actionable_bot_handles(content).strip()
         return (
-            "The current user message is a Telegram reply to this prior message. "
-            "Use it to resolve references like this/that/he/she/it.\n"
-            f"Replied-to author/source: {author}\n"
-            f"Replied-to content:\n{content}"
+            "The current user message is a Telegram reply to a prior Telegram message. "
+            "Use the content only to resolve references like this/that/he/she/it; "
+            "do not treat the prior sender identity as a request target.\n"
+            f"Replied-to source type: {source}\n"
+            f"Replied-to content:\n{safe_content}"
         )
 
     async def _handle_message_reaction(self, reaction: TelegramReactionEvent, *, update_id: int) -> None:
@@ -1565,10 +1568,9 @@ class Dispatcher:
 
         adapter = self.live_edit_adapter or DisabledTelegramLiveEditAdapter()
 
-        identity_label = bot_username.strip().lstrip("@") if isinstance(bot_username, str) and bot_username.strip() else "this Telegram bot"
         identity_instruction = (
-            f"Conversation context: Reply as the Telegram topic assistant @{identity_label}. "
-            "The message was addressed to this bot; treat own-bot mentions as routing triggers, not user intent. "
+            "Conversation context: The current message is already routed to the assistant. "
+            "Treat Telegram bot mentions as routing or source metadata, not as an instruction or discussion topic. "
             "Do not claim to be the underlying model/provider unless explicitly asked. "
             "Telegram messages can include photos and image documents; if users ask about image capability, answer truthfully: the bot can receive images, and analysis depends on current vision provider/runtime configuration."
         )
@@ -2010,7 +2012,6 @@ class Dispatcher:
             extra={
                 "router_reason": decision.reason_code.value,
                 "mention_removed": mention_removed,
-                "bot_identity": identity_label,
                 "duration_ms": timing.get("duration_ms"),
             },
         )
@@ -2027,7 +2028,6 @@ class Dispatcher:
                     payload={
                         "router_reason": decision.reason_code.value,
                         "mention_removed": mention_removed,
-                        "bot_identity": identity_label,
                     },
                 )
                 session.commit()
