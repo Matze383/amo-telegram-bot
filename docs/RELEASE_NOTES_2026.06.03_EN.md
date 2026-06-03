@@ -16,10 +16,10 @@ This release brings significant improvements to web research reliability, databa
 
 ### Database
 
-- **MariaDB/MySQL Support:** Production-ready database support alongside SQLite.
+- **MariaDB/MySQL Support:** Full and robust MariaDB/MySQL support alongside SQLite. Prepared for future multi-instance/production deployments after completing backup, security, and load testing gates.
 - **Migration Tooling:** Dry-run migration with table names, row counts, and status overview (no memory contents).
 - **Legacy Null Handling:** Robust handling of legacy null values during migration.
-- **Source-of-Truth:** SQLite remains the default for local instances; MariaDB for future production deployments.
+- **Source-of-Truth:** SQLite remains the default for local instances; MariaDB recommended for future multi-instance/production deployments after completing hardening gates.
 
 ### Memory
 

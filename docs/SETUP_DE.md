@@ -797,7 +797,7 @@ DATABASE_URL=mysql+pymysql://amo_bot:<password>@<mariadb-host>:3306/amo_bot?char
 ### Hinweise
 
 - SQLite bleibt der Standard und wird empfohlen für lokale Instanzen.
-- MariaDB ist für zukünftige Production-Deployments vorbereitet.
+- MariaDB ist für zukünftige Produktions-Deployments vorbereitet.
 - Die SQLite-Datei (`data/amo_bot.db`) nicht löschen vor erfolgreicher Migration.
 
 ### Retrievable Memory Backfill

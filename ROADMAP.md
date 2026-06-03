@@ -24,8 +24,12 @@ Aktueller Fokus: Stabilität und Fundament.
 | **Core Bot** | ✅ Stabil | Rollenbasiertes Berechtigungssystem, Consent-Management, grundlegende Befehle |
 | **WebUI** | ✅ Stabil | Lokale Flask-Oberfläche für Verwaltung und Konfiguration |
 | **KI-Integration** | ✅ Stabil | `/ask`-Befehl, Auto-Antworten, Memory-System (Daily + Long Memory) |
-| **Plugin-System** | ✅ Stabil | Discovery, Manifest-Validierung, Registry, Aktivierung |
+| **Plugin-System** | ✅ Stabil | Discovery, Manifest-Validierung, Registry, Aktivierung, Sandbox-Runtime |
 | **Bilinguale Oberfläche** | ✅ Stabil | Deutsche und englische Unterstützung für Bot und WebUI |
+| **Image Analysis** | ✅ Stabil | Bildanalyse-Schnittstelle mit Rollen-Quotas und Follow-up |
+| **Webtools** | ✅ Stabil | Websuche, Webscraping mit Quotas und Auto Web Research |
+| **Memory-Systeme** | ✅ Stabil | Daily Memory Runtime + Dreaming (Long Memory) |
+| **Context Docs** | ✅ Stabil | Admin-Prompt-Context über DB-gestützte Commands |
 
 ---
 
@@ -35,11 +39,12 @@ Kurzfristige Ziele (1–3 Monate):
 
 | Feature | Status | Beschreibung |
 |---------|--------|--------------|
-| **Core Plugins (KI-Fähigkeiten)** | ✅ Abgeschlossen (CP-Z1) | RSS-Feeds, Websuche, Webscraping als policy-gesteuerte KI-Fähigkeiten |
-| **Image Analysis Coreplugin** | ✅ Abgeschlossen (IMG-B7) | Sichere Bildanalyse-Schnittstelle (default-off, Stub-Implementierung) |
-| **API-Integration** | 🔄 In Planung | Konfigurierbare API-Aufrufe für erlaubte Endpoints |
-| **Speicher-Verwaltung** | 📋 Geplant | Erweiterte Memory-Operationen mit Scope-Isolation |
+| **Core Plugins (KI-Fähigkeiten)** | ✅ Stabil (CP-Z1) | RSS-Feeds, Websuche, Webscraping als policy-gesteuerte KI-Fähigkeiten |
+| **Image Analysis Coreplugin** | ✅ Stabil (IMG-B7) | Sichere Bildanalyse-Schnittstelle (default-off, Stub-Implementierung) |
+| **Multi-Provider AI** | ✅ Stabil | 15+ AI Provider (Ollama, OpenAI, Anthropic, Google, Groq, Mistral, xAI, DeepSeek, Bedrock, Together, Fireworks, LiteLLM, LM Studio, vLLM, SGLang, OpenRouter) |
+| **Cross-Platform Smoke Tests** | 🔄 In Planung | Automatisierte Validierung für macOS/Windows (RR-13) |
 | **WebUI-Verbesserungen** | 📋 Geplant | Bessere Übersicht, Filter, Export-Optionen |
+| **Sandbox-Erweiterungen** | 📋 Geplant | Weitere Capability-Gates für Plugins |
 
 ---
 
@@ -96,8 +101,12 @@ Current focus: Stability and foundation.
 | **Core Bot** | ✅ Stable | Role-based permission system, consent management, basic commands |
 | **WebUI** | ✅ Stable | Local Flask interface for management and configuration |
 | **AI Integration** | ✅ Stable | `/ask` command, auto-replies, memory system (Daily + Long Memory) |
-| **Plugin System** | ✅ Stable | Discovery, manifest validation, registry, activation |
+| **Plugin System** | ✅ Stable | Discovery, manifest validation, registry, activation, sandbox runtime |
 | **Bilingual Interface** | ✅ Stable | German and English support for bot and WebUI |
+| **Image Analysis** | ✅ Stable | Image analysis interface with role quotas and follow-up |
+| **Webtools** | ✅ Stable | Web search, web scraping with quotas and auto web research |
+| **Memory Systems** | ✅ Stable | Daily Memory Runtime + Dreaming (Long Memory) |
+| **Context Docs** | ✅ Stable | Admin prompt context via DB-backed commands |
 
 ---
 
@@ -107,11 +116,12 @@ Short-term goals (1–3 months):
 
 | Feature | Status | Description |
 |---------|--------|-------------|
-| **Core Plugins (AI Capabilities)** | ✅ Complete (CP-Z1) | RSS feeds, web search, web scraping as policy-controlled AI capabilities |
-| **Image Analysis Coreplugin** | ✅ Complete (IMG-B7) | Secure image analysis interface (default-off, stub implementation) |
-| **API Integration** | 🔄 In Planning | Configurable API calls for allowed endpoints |
-| **Memory Management** | 📋 Planned | Advanced memory operations with scope isolation |
+| **Core Plugins (AI Capabilities)** | ✅ Stable (CP-Z1) | RSS feeds, web search, web scraping as policy-controlled AI capabilities |
+| **Image Analysis Coreplugin** | ✅ Stable (IMG-B7) | Secure image analysis interface (default-off, stub implementation) |
+| **Multi-Provider AI** | ✅ Stable | 15+ AI providers (Ollama, OpenAI, Anthropic, Google, Groq, Mistral, xAI, DeepSeek, Bedrock, Together, Fireworks, LiteLLM, LM Studio, vLLM, SGLang, OpenRouter) |
+| **Cross-Platform Smoke Tests** | 🔄 In Planning | Automated validation for macOS/Windows (RR-13) |
 | **WebUI Improvements** | 📋 Planned | Better overview, filters, export options |
+| **Sandbox Extensions** | 📋 Planned | Additional capability gates for plugins |
 
 ---
 
@@ -163,7 +173,7 @@ Medium- to long-term goals (3–6+ months):
 
 ## 📅 Letzte Aktualisierung / Last Updated
 
-2026-05-17
+2026-06-03
 
 ---
 

@@ -16,10 +16,10 @@ Dieses Release bringt erhebliche Verbesserungen bei der Web-Recherche-Zuverläss
 
 ### Datenbank
 
-- **MariaDB/MySQL-Support:** Produktionsreife Datenbank-Unterstützung neben SQLite.
+- **MariaDB/MySQL-Support:** Vollständige und robuste MariaDB/MySQL-Unterstützung neben SQLite. Für zukünftige Multi-Instance-/Produktions-Deployments nach Abschluss von Backup-, Security- und Load-Testing-Gates vorbereitet/empfohlen.
 - **Migrations-Tooling:** Dry-Run-Migration mit Tabellennamen, Zeilenzahlen und Status-Übersicht (keine Memory-Inhalte).
 - **Legacy Null-Handling:** Robuste Behandlung von Legacy-Null-Werten während der Migration.
-- **Source-of-Truth:** SQLite bleibt Standard für lokale Instanzen; MariaDB für zukünftige Production-Deployments.
+- **Source-of-Truth:** SQLite bleibt Standard für lokale Instanzen; MariaDB für zukünftige Multi-Instance-/Produktions-Deployments nach Abschluss der Härtungs-Gates empfohlen.
 
 ### Memory
 
@@ -80,7 +80,7 @@ Dieses Release bringt erhebliche Verbesserungen bei der Web-Recherche-Zuverläss
 ### Betriebsnotizen
 
 - SQLite bleibt empfohlener Standard für lokale Instanzen.
-- MariaDB ist für zukünftige Production-Deployments vorbereitet.
+- MariaDB ist für zukünftige Multi-Instance-/Produktions-Deployments nach Backup-, Security- und Load-Gates vorbereitet.
 - Keine Breaking Changes für Endnutzer erwartet.
 
 ---

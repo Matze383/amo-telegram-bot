@@ -13,7 +13,7 @@ Bevor du nach Unterstützung fragst, prüfe bitte:
 
 1. **Dokumentation lesen**
    - [Setup-Anleitung (DE)](docs/SETUP_DE.md)
-   - [Beta-Test Anleitung](docs/BETATEST_DE.md)
+   - [Testanleitung](docs/BETATEST_DE.md)
    - [Release Notes](docs/)
 
 2. **README prüfen**
@@ -51,10 +51,10 @@ Bevor du nach Unterstützung fragst, prüfe bitte:
 
 ### Erwartungshaltung
 
-**Beta-Status:**
-- AMO befindet sich in der Beta-Phase
-- API und Features können sich ändern
-- Produktiveinsatz ohne Backup nicht empfohlen
+**MVP-Status:**
+- AMO hat den MVP erreicht und ist funktional stabil
+- API und Features sind weitgehend stabilisiert
+- Produktiveinsatz ohne Backup und Security-Audit nicht empfohlen
 
 **Antwortzeiten:**
 - Issues: 7 Tage (länger bei komplexen Problemen)
@@ -113,7 +113,7 @@ Before asking for help, please check:
 
 1. **Read the documentation**
    - [Setup Guide (EN)](docs/SETUP_EN.md)
-   - [Beta Test Guide](docs/BETATEST_EN.md)
+   - [Test Guide](docs/BETATEST_EN.md)
    - [Release Notes](docs/)
 
 2. **Check the README**
@@ -151,10 +151,10 @@ Before asking for help, please check:
 
 ### Expectations
 
-**Beta Status:**
-- AMO is in beta
-- API and features may change
-- Production use without backup not recommended
+**MVP Status:**
+- AMO has reached MVP and is functionally stable
+- API and features are largely stabilized
+- Production use without backup and security audit not recommended
 
 **Response Times:**
 - Issues: 7 days (longer for complex problems)

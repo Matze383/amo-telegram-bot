@@ -9,8 +9,8 @@
 
 | Sprache | Verfügbare Dokumente |
 |---------|---------------------|
-| 🇩🇪 Deutsch | Diese Seite, [Setup-Anleitung](docs/SETUP_DE.md), [Betatest-Anleitung](docs/BETATEST_DE.md) |
-| 🇬🇧 English | This page, [Setup Guide](docs/SETUP_EN.md), [Beta Test Guide](docs/BETATEST_EN.md) |
+| 🇩🇪 Deutsch | Diese Seite, [Setup-Anleitung](docs/SETUP_DE.md), [Testanleitung](docs/BETATEST_DE.md) |
+| 🇬🇧 English | This page, [Setup Guide](docs/SETUP_EN.md), [Test Guide](docs/BETATEST_EN.md) |
 
 ---
 
@@ -20,7 +20,7 @@
 
 AMO ist ein erweiterbarer Telegram-Bot für Gruppen und private Chats. Er bietet ein rollenbasiertes Berechtigungssystem, eine lokale WebUI zur Verwaltung und optionale KI-Funktionen über Ollama oder OpenAI.
 
-**Status:** Beta / MVP — Nicht für den Produktivbetrieb geeignet.
+**Status:** MVP Complete / Stable — Funktionsumfang ist stabil; Produktions-Härtung (Load, Security-Audit) nicht abgeschlossen.
 
 ### Unterstützte Plattformen
 
@@ -101,8 +101,8 @@ python main.py
 |----------|--------|
 | [📗 Setup-Anleitung (DE)](docs/SETUP_DE.md) | Vollständige Installation und Konfiguration |
 | [📘 Setup Guide (EN)](docs/SETUP_EN.md) | English setup guide |
-| [🧪 Beta-Test (DE)](docs/BETATEST_DE.md) | Schritt-für-Schritt Testanleitung |
-| [🧪 Beta Test (EN)](docs/BETATEST_EN.md) | Step-by-step testing guide |
+| [🧪 Testanleitung (DE)](docs/BETATEST_DE.md) | Schritt-für-Schritt Testanleitung |
+| [🧪 Test Guide (EN)](docs/BETATEST_EN.md) | Step-by-step testing guide |
 | [🔌 Userplugin Guide](docs/USERPLUGINS.md) | Plugin-Entwicklung mit Do/Don't-Regeln (bilingual) |
 | [📺 YT-RSS Plugin (DE/EN)](docs/YT-RSS.md) | YouTube-Kanal-RSS-Abos / YouTube channel RSS subscriptions (topic-scoped) |
 | [📝 Changelog (DE/EN)](CHANGELOG.md) | Änderungsprotokoll / Changelog (bilingual) |
@@ -119,7 +119,7 @@ python main.py
 
 AMO is an extensible Telegram bot for groups and private chats. It provides a role-based permission system, a local WebUI for management, and optional AI features via Ollama or OpenAI.
 
-**Status:** Beta / MVP — Not production-ready.
+**Status:** MVP Complete / Stable — Feature set is stable; production hardening (load, security audit) not complete.
 
 ### Supported Platforms
 
@@ -200,8 +200,8 @@ python main.py
 |----------|---------|
 | [📘 Setup Guide (EN)](docs/SETUP_EN.md) | Complete installation and configuration |
 | [📗 Setup-Anleitung (DE)](docs/SETUP_DE.md) | German setup guide |
-| [🧪 Beta Test (EN)](docs/BETATEST_EN.md) | Step-by-step testing guide |
-| [🧪 Beta-Test (DE)](docs/BETATEST_DE.md) | German testing guide |
+| [🧪 Test Guide (EN)](docs/BETATEST_EN.md) | Step-by-step testing guide |
+| [🧪 Testanleitung (DE)](docs/BETATEST_DE.md) | German testing guide |
 | [🔌 Userplugin Guide](docs/USERPLUGINS.md) | Plugin development with Do/Don't rules (bilingual) |
 | [📺 YT-RSS Plugin (DE/EN)](docs/YT-RSS.md) | YouTube-Kanal-RSS-Abos / YouTube channel RSS subscriptions (topic-scoped) |
 | [📝 Changelog (DE/EN)](CHANGELOG.md) | Changelog and version history (bilingual) |
@@ -280,7 +280,7 @@ MIT License — siehe [LICENSE](LICENSE) für Details.
 ---
 
 <p align="center">
-  <sub>AMO Telegram Bot — Beta / MVP</sub>
+  <sub>AMO Telegram Bot — MVP Complete / Stable</sub>
 </p>
 
 LiteLLM provider (GH39): AI_PROVIDER=litellm with LITELLM_API_KEY, LITELLM_MODEL, LITELLM_BASE_URL, LITELLM_TIMEOUT_SECONDS.

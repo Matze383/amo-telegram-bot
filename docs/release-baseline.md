@@ -11,11 +11,11 @@ This document defines the first public release readiness baseline for the AMO Te
 
 ### Target Release
 
-**Version:** `2026.05.16`
+**Version:** `2026.06.03`
 
 - Date-based versioning (YYYY.MM.DD)
-- Public release candidate
-- Stable release after quality gates pass
+- MVP Complete release
+- Stable release with known limitations
 
 ### Supported Python / Runtime Matrix
 
@@ -37,10 +37,14 @@ This document defines the first public release readiness baseline for the AMO Te
 ### Included Components
 
 - **Telegram Bot Core:** Long polling, role-based permissions, consent management
-- **Plugin System:** Manifest-based plugin loader (I1-I6 complete)
+- **Plugin System:** Manifest-based plugin loader (I1-I6 complete), Sandbox Runtime
 - **WebUI:** Flask-based management interface
-- **KI/AI Integration:** Ollama-based AI responses, topic memory system
+- **KI/AI Integration:** Multi-provider AI (15+ providers), topic memory system
 - **Topic Agent System:** Configurable per-topic AI behavior, memory curation (KI-A to KI-F4 complete)
+- **Image Analysis:** Secure image analysis interface with role quotas
+- **Webtools:** Web search, web scraping, auto web research with feedback follow-up
+- **Memory Systems:** Daily Memory Runtime + Dreaming (Long Memory)
+- **Context Docs:** DB-backed prompt context management
 
 ### Quality Gates
 
@@ -61,9 +65,8 @@ Before any release:
 | **Experimental** | Not guaranteed, subject to change, use with caution |
 
 Current beta areas:
-- Plugin system (beta)
-- Topic memory curation (beta)
-- WebUI memory controls (beta)
+- Sandbox Runtime (Beta – stabilized but production hardening pending)
+- Cross-platform support macOS/Windows (Beta – Linux only validated)
 
 ### Known Limitations
 
@@ -81,11 +84,11 @@ Dieses Dokument definiert die Release-Baseline für die erste öffentliche Versi
 
 ### Ziel-Release
 
-**Version:** `2026.05.16`
+**Version:** `2026.06.03`
 
 - Datumsbasiertes Versionsschema (JJJJ.MM.TT)
-- Öffentlicher Release-Kandidat
-- Stabiles Release nach Bestehen der Quality Gates
+- MVP Complete Release
+- Stabiles Release mit bekannten Einschränkungen
 
 ### Unterstützte Python / Runtime-Matrix
 
@@ -107,10 +110,14 @@ Dieses Dokument definiert die Release-Baseline für die erste öffentliche Versi
 ### Enthaltene Komponenten
 
 - **Telegram Bot Core:** Long Polling, rollenbasierte Berechtigungen, Consent-Management
-- **Plugin-System:** Manifest-basierter Plugin-Loader (I1-I6 komplett)
+- **Plugin-System:** Manifest-basierter Plugin-Loader (I1-I6 komplett), Sandbox-Runtime
 - **WebUI:** Flask-basierte Verwaltungsoberfläche
-- **KI/AI-Integration:** Ollama-basierte KI-Antworten, Topic-Memory-System
+- **KI/AI-Integration:** Multi-Provider KI (15+ Provider), Topic-Memory-System
 - **Topic-Agent-System:** Konfigurierbares KI-Verhalten pro Topic, Memory-Kuratierung (KI-A bis KI-F4 komplett)
+- **Bildanalyse:** Sichere Bildanalyse-Schnittstelle mit Rollen-Quotas
+- **Webtools:** Websuche, Webscraping, Auto Web Research mit Feedback Follow-up
+- **Memory-Systeme:** Daily Memory Runtime + Dreaming (Long Memory)
+- **Context Docs:** DB-gestütztes Prompt-Context-Management
 
 ### Quality Gates
 
@@ -131,9 +138,8 @@ Vor jedem Release:
 | **Experimentell** | Nicht garantiert, änderungsanfällig, mit Vorsicht nutzen |
 
 Aktuelle Beta-Bereiche:
-- Plugin-System (Beta)
-- Topic-Memory-Kuratierung (Beta)
-- WebUI Memory-Controls (Beta)
+- Sandbox Runtime (Beta – stabilisiert, aber Production-Härtung ausstehend)
+- Cross-Platform Support macOS/Windows (Beta – nur Linux validiert)
 
 ### Bekannte Einschränkungen
 
@@ -224,5 +230,5 @@ Aktuelle Beta-Bereiche:
 
 ---
 
-*Last updated: 2026-05-16*
+*Last updated: 2026-06-03*
 *RR-13 Block – Cross-Platform Smoke Validation Evidence*
