@@ -8,6 +8,7 @@ from amo_bot.ai.router import AIRouterDecision, AIRouterReasonCode
 from amo_bot.auth.roles import Role
 from amo_bot.telegram.dispatcher import (
     Dispatcher,
+    _chain_diagnostic_snapshot,
     _format_auto_research_no_result_note,
     _format_auto_research_success_note,
     should_chain_auto_research,
@@ -322,6 +323,44 @@ def test_empty_result_retry_query_uses_current_message_not_prior_context():
     assert "100" not in query
     assert "Bot answer" not in query
 
+
+
+
+def test_empty_result_retry_query_simplifies_generic_current_question():
+    query = build_empty_result_retry_query(
+        "@amo_bot such bitte weiter, das reicht nicht — Bot answer: Alter Stand war falsch. "
+        "Was gibt es heute Neues zum Python 3.14 Release Candidate?"
+    )
+
+    assert query == "Alter falsch Neues Python 3.14 Release Candidate"
+    assert len(query) < 90
+    assert "@amo_bot" not in query
+    assert "such" not in query.lower()
+
+
+def test_chain_diagnostic_snapshot_is_metadata_only_and_splits_host_counts():
+    diagnostics = _chain_diagnostic_snapshot(
+        search_hosts=("search-one.example", "search-two.example", "search-three.example"),
+        chain_urls=("https://search-one.example/a", "https://search-two.example/b", "https://search-three.example/c"),
+        static_attempts=3,
+        browser_attempts=1,
+        chain_extracts=[],
+        reason_buckets={"empty_text": 2, "provider_unavailable": 1, "timeout": 1},
+        content_length_buckets={"zero": 3, "short": 1},
+        timeout_count=1,
+        error_class_buckets={"RuntimeError": 1},
+    )
+
+    assert diagnostics["status"] if "status" in diagnostics else True
+    assert diagnostics["search_host_count"] == 3
+    assert diagnostics["selected_url_host_count"] == 3
+    assert diagnostics["extraction_host_count"] == 0
+    assert diagnostics["host_count"] == 0
+    assert diagnostics["failed_attempt_count"] == 4
+    assert diagnostics["reason_buckets"] == {"empty_text": 2, "provider_unavailable": 1, "timeout": 1}
+    serialized = str(diagnostics)
+    assert "https://" not in serialized
+    assert "/a" not in serialized
 
 def test_auto_research_empty_result_retry_failure_forbids_stale_estimate(monkeypatch):
     monkeypatch.setattr("amo_bot.telegram.dispatcher.AIRouter.decide", lambda self, **kwargs: _allowing_router_decision())

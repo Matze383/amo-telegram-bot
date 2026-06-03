@@ -51,6 +51,15 @@ _PRICE_INTENT_RE = re.compile(
     r"\b(?:price|preis|kurs|rate|current|aktuell(?:e[nrms]?)?|jetzt|heute|live|usd|dollar)\b",
     re.IGNORECASE,
 )
+_RETRY_KEEP_WORD_RE = re.compile(r"[0-9A-Za-zÄÖÜäöüß][0-9A-Za-zÄÖÜäöüß.+#-]{1,}")
+_RETRY_STOPWORDS = {
+    "amo", "bot", "bitte", "such", "suche", "weiter", "reicht", "nicht", "wenig",
+    "aktuell", "aktuelle", "aktueller", "aktuellen", "heute", "jetzt", "live", "current",
+    "right", "now", "please", "search", "more", "again", "sources", "quellen", "answer",
+    "antwort", "vorherige", "alte", "was", "ist", "sind", "der", "die", "das", "den",
+    "dem", "ein", "eine", "einer", "einen", "und", "oder", "for", "the", "what", "with",
+    "stand", "war", "gibt", "zum", "es",
+}
 
 
 def _compact_followup_query(value: str, *, max_len: int = _FOLLOWUP_QUERY_MAX_CHARS) -> str:
@@ -60,8 +69,47 @@ def _compact_followup_query(value: str, *, max_len: int = _FOLLOWUP_QUERY_MAX_CH
     return compact
 
 
+def _clean_empty_result_retry_text(text: str) -> str:
+    cleaned = _BOT_MENTION_RE.sub(" ", text or "")
+    cleaned = _OLD_ANSWER_MARKER_RE.sub(" ", cleaned)
+    cleaned = _MARKDOWN_PUNCT_RE.sub(" ", cleaned)
+    cleaned = _FOLLOWUP_FILLER_RE.sub(" ", cleaned)
+    cleaned = re.sub(r"https?://\S+", " ", cleaned)
+    cleaned = re.sub(r"\bwebsearch\s*:\s*", " ", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" -–—:;,.!?\t\n\r")
+    return cleaned
+
+
+def _simplify_empty_result_retry_query(text: str, *, max_len: int) -> str:
+    """Return a shorter keyword query for empty-result retries.
+
+    Metadata-only logging rules mean the caller may log only lengths/classes, not
+    this returned value. Keep high-signal tokens, drop request/follow-up filler,
+    and preserve order without inventing context.
+    """
+    tokens: list[str] = []
+    seen: set[str] = set()
+    for match in _RETRY_KEEP_WORD_RE.finditer(text or ""):
+        token = match.group(0).strip("-_.")
+        key = token.casefold()
+        if not token or key in _RETRY_STOPWORDS or key in seen:
+            continue
+        # Drop plain old-answer numerals such as stale prices; keep year-like or
+        # version-like tokens only when they are attached to letters/dots.
+        if token.isdigit() and len(token) < 4:
+            continue
+        tokens.append(token)
+        seen.add(key)
+        if len(tokens) >= 8:
+            break
+    simplified = " ".join(tokens).strip()
+    if len(simplified) > max_len:
+        simplified = simplified[:max_len].rstrip(" -–—:;,.!")
+    return simplified
+
+
 def build_empty_result_retry_query(text: str, *, max_len: int = _EMPTY_RESULT_RETRY_QUERY_MAX_CHARS) -> str:
-    """Build one safer retry query from the current user message only.
+    """Build one safer, simplified retry query from the current user message.
 
     This intentionally avoids prior bot-answer/reply context so an empty first
     auto-search cannot be retried with stale, over-specific context. Callers must
@@ -75,15 +123,12 @@ def build_empty_result_retry_query(text: str, *, max_len: int = _EMPTY_RESULT_RE
             return "bitcoin kurs USD BTC"
         return "bitcoin price USD BTC"
 
-    cleaned = _BOT_MENTION_RE.sub(" ", raw)
-    cleaned = _OLD_ANSWER_MARKER_RE.sub(" ", cleaned)
-    cleaned = _MARKDOWN_PUNCT_RE.sub(" ", cleaned)
-    cleaned = _FOLLOWUP_FILLER_RE.sub(" ", cleaned)
-    cleaned = re.sub(r"https?://\S+", " ", cleaned)
-    cleaned = re.sub(r"\bwebsearch\s*:\s*", " ", cleaned, flags=re.IGNORECASE)
-    cleaned = re.sub(r"\s+", " ", cleaned).strip(" -–—:;,.!?\t\n\r")
+    cleaned = _clean_empty_result_retry_text(raw)
     if not cleaned:
         return ""
+    simplified = _simplify_empty_result_retry_query(cleaned, max_len=max_len)
+    if simplified:
+        return simplified
     if len(cleaned) > max_len:
         cleaned = cleaned[:max_len].rstrip(" -–—:;,.!")
     return cleaned

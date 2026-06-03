@@ -173,6 +173,79 @@ def _compact_chain_text(text: str, *, cap: int = _AUTO_RESEARCH_CHAIN_PER_PAGE_T
     return compact
 
 
+
+
+def _content_length_bucket(length: int) -> str:
+    if length <= 0:
+        return "zero"
+    if length < _AUTO_RESEARCH_CHAIN_MIN_EXTRACT_CHARS:
+        return "short"
+    if length < 500:
+        return "usable_small"
+    if length < 1500:
+        return "usable_medium"
+    return "usable_large"
+
+
+def _chain_failure_reason(result: Any, text_len: int) -> str:
+    if result is None:
+        return "missing_result"
+    if not getattr(result, "allowed", False):
+        reason = (getattr(result, "reason", "") or "denied").strip()
+        if "timeout" in reason:
+            return "timeout"
+        if reason.startswith("http_error"):
+            return "http_error"
+        if "provider" in reason and "unavailable" in reason:
+            return "provider_unavailable"
+        if reason == "empty_result":
+            return "empty_result"
+        return reason[:64] or "denied"
+    if text_len <= 0:
+        return "empty_text"
+    if text_len < _AUTO_RESEARCH_CHAIN_MIN_EXTRACT_CHARS:
+        return "too_short"
+    return "usable"
+
+
+def _chain_diagnostic_snapshot(
+    *,
+    search_hosts: tuple[str, ...],
+    chain_urls: tuple[str, ...],
+    static_attempts: int,
+    browser_attempts: int,
+    chain_extracts: list[tuple[str, str, str]],
+    reason_buckets: dict[str, int],
+    content_length_buckets: dict[str, int],
+    timeout_count: int,
+    error_class_buckets: dict[str, int],
+) -> dict[str, Any]:
+    """Build metadata-only diagnostics for auto-research extraction chains.
+
+    Do not include URLs, queries, extracted contents, prompts, or private context.
+    """
+    selected_hosts = {_host_from_url(url) for url in chain_urls}
+    selected_hosts.discard("")
+    extraction_hosts = {host for _, host, _ in chain_extracts if host}
+    return {
+        "url_count": len(chain_urls),
+        "attempted_url_count": len(chain_urls),
+        "search_host_count": len(tuple(search_hosts or ())),
+        "selected_url_host_count": len(selected_hosts),
+        "extraction_host_count": len(extraction_hosts),
+        "host_count": len(extraction_hosts),  # Backward-compatible alias; prefer extraction_host_count.
+        "static_attempt_count": static_attempts,
+        "browser_attempt_count": browser_attempts,
+        "browser_fallback_count": browser_attempts,
+        "extract_count": len(chain_extracts),
+        "skipped_url_count": max(0, len(chain_urls) - static_attempts),
+        "failed_attempt_count": max(0, static_attempts + browser_attempts - len(chain_extracts)),
+        "timeout_count": timeout_count,
+        "reason_buckets": dict(sorted(reason_buckets.items())),
+        "content_length_buckets": dict(sorted(content_length_buckets.items())),
+        "error_class_buckets": dict(sorted(error_class_buckets.items())),
+    }
+
 def _format_auto_research_chained_success_note(
     *, capability: str, search_text: str, search_hosts: tuple[str, ...], extracts: tuple[tuple[str, str, str], ...], followup: bool = False
 ) -> str:
@@ -1735,6 +1808,25 @@ class Dispatcher:
                         chain_urls = _select_chain_urls(tuple(tool_result.sources or ()))
                         static_successes = 0
                         browser_fallbacks_used = 0
+                        static_attempts = 0
+                        reason_buckets: dict[str, int] = {}
+                        content_length_buckets: dict[str, int] = {}
+                        error_class_buckets: dict[str, int] = {}
+                        timeout_count = 0
+
+                        def _record_chain_attempt(result: Any, text_len: int) -> None:
+                            nonlocal timeout_count
+                            reason_bucket = _chain_failure_reason(result, text_len)
+                            reason_buckets[reason_bucket] = reason_buckets.get(reason_bucket, 0) + 1
+                            length_bucket = _content_length_bucket(text_len)
+                            content_length_buckets[length_bucket] = content_length_buckets.get(length_bucket, 0) + 1
+                            if "timeout" in reason_bucket:
+                                timeout_count += 1
+                            error_value = getattr(result, "error", None) if result is not None else None
+                            if error_value is not None:
+                                error_class = type(error_value).__name__
+                                error_class_buckets[error_class] = error_class_buckets.get(error_class, 0) + 1
+
                         for url in chain_urls:
                             if static_successes >= _AUTO_RESEARCH_CHAIN_MAX_STATIC_SUCCESSES:
                                 break
@@ -1748,7 +1840,9 @@ class Dispatcher:
                                 locale=message_locale,
                             )
                             chain_result = self.webtool_dispatcher.execute(chain_req)
+                            static_attempts += 1
                             chain_text = _compact_chain_text(chain_result.text or "")
+                            _record_chain_attempt(chain_result, len(chain_text))
                             if chain_result.allowed and len(chain_text) >= _AUTO_RESEARCH_CHAIN_MIN_EXTRACT_CHARS:
                                 chain_extracts.append(("webscraping", (tuple(chain_result.hosts or ()) or (_host_from_url(url),))[0], chain_text))
                                 static_successes += 1
@@ -1766,6 +1860,7 @@ class Dispatcher:
                                 browser_result = self.webtool_dispatcher.execute(browser_req)
                                 browser_fallbacks_used += 1
                                 browser_text = _compact_chain_text(browser_result.text or "")
+                                _record_chain_attempt(browser_result, len(browser_text))
                                 if browser_result.allowed and len(browser_text) >= _AUTO_RESEARCH_CHAIN_MIN_EXTRACT_CHARS:
                                     chain_extracts.append(("browser", (tuple(browser_result.hosts or ()) or (_host_from_url(url),))[0], browser_text))
                                     break
@@ -1782,10 +1877,17 @@ class Dispatcher:
                             extra={
                                 "mode": "followup_chain" if is_followup_research else "auto_chain",
                                 "status": "success" if chain_extracts else "no_usable_extraction",
-                                "url_count": len(chain_urls),
-                                "extract_count": len(chain_extracts),
-                                "browser_fallback_count": browser_fallbacks_used,
-                                "host_count": len({host for _, host, _ in chain_extracts if host}),
+                                **_chain_diagnostic_snapshot(
+                                    search_hosts=tuple(tool_result.hosts or ()),
+                                    chain_urls=chain_urls,
+                                    static_attempts=static_attempts,
+                                    browser_attempts=browser_fallbacks_used,
+                                    chain_extracts=chain_extracts,
+                                    reason_buckets=reason_buckets,
+                                    content_length_buckets=content_length_buckets,
+                                    timeout_count=timeout_count,
+                                    error_class_buckets=error_class_buckets,
+                                ),
                                 "scope": decision.context.scope_type,
                             },
                         )
