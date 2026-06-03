@@ -1162,6 +1162,27 @@ Admin-only Telegram-Commands zur Verwaltung von DB-gestützten Prompt Context Do
 
 ---
 
+### Learning Feedback Memory v1
+
+Der Bot kann aus explizitem Feedback über Quellen, Ansätze oder Ergebnisse lernen (z. B. „gute Quelle", „schlechte Quelle", Feedback zu Chart-Analysen, wie ein Nutzer eine Aufgabe angegangen haben möchte).
+
+**Telegram-Reaktionen als schwache Signale:**
+- Emoji-Reaktionen/Smileys auf Bot-Nachrichten werden als schwache Engagement-/Feedback-Signale verstanden
+- **Niedrige Konfidenz:** Reaktionen haben begrenzte Aussagekraft und gelten nur im aktuellen Scope
+- Smileys/Lachen bedeuten Ton/Engagement, **nicht** faktische Korrektheit
+
+**Scope & Privatsphäre:**
+- Lernen ist auf Topic/Chat/User begrenzt — kein globales Lernen in v1
+- Keine Roh-Chat-Speicherung; es werden nur zusammengefasste Lernsignale gespeichert
+
+**Starke Erinnerungen:**
+- `/remember <topic|chat|user> <preference|fact|summary|relationship|warning> <text>` bleibt der explizite Weg, wichtige Präferenzen dauerhaft zu speichern
+
+**Opt-out:**
+- Wer keine Reaktions-Feedback-Lernung wünscht, sollte Bot-Nachrichten nicht mit Emoji reagieren oder explizit korrigierenden Text senden
+
+---
+
 ### Zukünftige Features (Noch nicht implementiert)
 
 Folgende Features sind für zukünftige Releases geplant und im aktuellen Beta **nicht verfügbar**:

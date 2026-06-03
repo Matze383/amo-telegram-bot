@@ -1162,6 +1162,27 @@ Admin-only Telegram commands for managing DB-backed prompt context docs. These d
 
 ---
 
+### Learning Feedback Memory v1
+
+The bot can learn from explicit feedback about sources, approaches, or results (e.g., "good source", "bad source", chart analysis feedback, how a user wants a task approached).
+
+**Telegram Reactions as Weak Signals:**
+- Emoji reactions/smileys on bot messages are interpreted as weak engagement/feedback signals
+- **Low confidence:** Reactions have limited meaning and are scoped to the current context only
+- Smileys/laughter indicate tone/engagement, **not** factual correctness
+
+**Scope & Privacy:**
+- Learning is scoped by topic/chat/user — no global learning in v1
+- No raw chat storage; only summarized learning signals are stored
+
+**Strong Memories:**
+- `/remember <topic|chat|user> <preference|fact|summary|relationship|warning> <text>` remains the explicit way to save important preferences permanently
+
+**Opt-out:**
+- If you do not want reaction-based learning, avoid reacting to bot messages with emoji or provide explicit corrective text
+
+---
+
 ### Future Features (Not Yet Implemented)
 
 The following features are planned for future releases and are **not available** in the current beta:

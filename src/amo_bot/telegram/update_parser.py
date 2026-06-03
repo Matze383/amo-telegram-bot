@@ -105,11 +105,22 @@ class TelegramCallbackQuery:
 
 
 @dataclass(slots=True)
+class TelegramReactionEvent:
+    chat: TelegramChat
+    message_id: int
+    from_user: TelegramUser | None = None
+    user_id: int | None = None
+    message_thread_id: int | None = None
+    emojis: tuple[str, ...] = ()
+
+
+@dataclass(slots=True)
 class TelegramUpdate:
     update_id: int
     message: TelegramMessage | None
     callback_query: TelegramCallbackQuery | None
     top_level_kind: str | None = None
+    message_reaction: TelegramReactionEvent | None = None
 
 
 def _parse_user(raw: Any) -> TelegramUser | None:
@@ -349,6 +360,43 @@ def _parse_callback_query(raw: Any) -> TelegramCallbackQuery | None:
     )
 
 
+def _parse_reaction_type(raw: Any) -> str | None:
+    if not isinstance(raw, dict):
+        return None
+    if raw.get("type") != "emoji":
+        return None
+    emoji = raw.get("emoji")
+    return emoji if isinstance(emoji, str) and emoji else None
+
+
+def _parse_message_reaction(raw: Any) -> TelegramReactionEvent | None:
+    if not isinstance(raw, dict):
+        return None
+    chat = _parse_chat(raw.get("chat"))
+    if chat is None:
+        return None
+    message_id = _safe_int(raw.get("message_id"))
+    if message_id is None:
+        return None
+    from_user = _parse_user(raw.get("user"))
+    actor_chat = _parse_chat(raw.get("actor_chat"))
+    user_id = from_user.id if from_user is not None else actor_chat.id if actor_chat is not None else None
+    emojis = tuple(
+        emoji
+        for item in raw.get("new_reaction", [])
+        for emoji in (_parse_reaction_type(item),)
+        if emoji is not None
+    )
+    return TelegramReactionEvent(
+        chat=chat,
+        message_id=message_id,
+        from_user=from_user,
+        user_id=user_id,
+        message_thread_id=_safe_int(raw.get("message_thread_id")),
+        emojis=emojis,
+    )
+
+
 def parse_update(raw: Any) -> TelegramUpdate | None:
     if not isinstance(raw, dict):
         return None
@@ -360,6 +408,7 @@ def parse_update(raw: Any) -> TelegramUpdate | None:
 
     message = _parse_message(raw.get("message"))
     callback_query = _parse_callback_query(raw.get("callback_query"))
+    message_reaction = _parse_message_reaction(raw.get("message_reaction"))
 
     top_level_kind: str | None = None
     for key in raw.keys():
@@ -373,4 +422,5 @@ def parse_update(raw: Any) -> TelegramUpdate | None:
         message=message,
         callback_query=callback_query,
         top_level_kind=top_level_kind,
+        message_reaction=message_reaction,
     )

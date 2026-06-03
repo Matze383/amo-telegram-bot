@@ -9,6 +9,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any, Awaitable, Callable, Protocol
 from urllib.parse import urlparse
 
+from amo_bot.ai.learning_feedback import LearningFeedbackScope, LearningFeedbackService
 from amo_bot.ai.router import AIRouter, AIRouterReasonCode
 from amo_bot.auth.permissions import can_use_bot
 from amo_bot.auth.roles import Role, role_meets_minimum
@@ -36,7 +37,7 @@ from amo_bot.plugins.command_runtime import CommandActor, CommandInvocation, Plu
 from amo_bot.telegram.commands import CommandContext, CommandRegistry, RoleResolver, resolve_locale, t_text
 from amo_bot.telegram.live_edit_adapter import DisabledTelegramLiveEditAdapter, TelegramLiveEditAdapter
 from amo_bot.telegram.owner_notify import OwnerNotifier
-from amo_bot.telegram.update_parser import TelegramMessage, parse_update
+from amo_bot.telegram.update_parser import TelegramMessage, TelegramReactionEvent, parse_update
 from amo_bot.telegram.webtool_auto_research import decide_auto_research
 from amo_bot.telegram.webtool_chat_integration import (
     WebtoolChatTrigger,
@@ -332,6 +333,10 @@ class Dispatcher:
             )
             return
 
+        if update.message_reaction is not None:
+            await self._handle_message_reaction(update.message_reaction, update_id=update.update_id)
+            return
+
         callback_query = update.callback_query
         if callback_query is not None:
             log_event(
@@ -429,6 +434,7 @@ class Dispatcher:
         )
 
         if command is None:
+            self._maybe_store_learning_text_feedback(message=message)
             is_addressed_for_auto_image = self._is_addressed_for_auto_image(message=message, bot_username=self.bot_username)
             followup_candidate = self._resolve_auto_image_followup_candidate(message=message)
             reply_to_attachment_source = self._resolve_reply_to_auto_image_attachments(message=message)
@@ -1206,6 +1212,91 @@ class Dispatcher:
             f"Replied-to author/source: {author}\n"
             f"Replied-to content:\n{content}"
         )
+
+    async def _handle_message_reaction(self, reaction: TelegramReactionEvent, *, update_id: int) -> None:
+        if self.database_url is None:
+            log_event(
+                logger, logging.INFO,
+                event="learning_feedback.reaction.dispatch",
+                component=_COMPONENT,
+                update_id=update_id,
+                chat_id=reaction.chat.id,
+                message_id=reaction.message_id,
+                user_id=reaction.user_id,
+                extra={"decision": "skip", "reason": "no_database", "emoji_count": len(reaction.emojis)},
+            )
+            return
+        if not reaction.emojis:
+            log_event(
+                logger, logging.INFO,
+                event="learning_feedback.reaction.dispatch",
+                component=_COMPONENT,
+                update_id=update_id,
+                chat_id=reaction.chat.id,
+                message_id=reaction.message_id,
+                user_id=reaction.user_id,
+                extra={"decision": "skip", "reason": "empty_reaction", "emoji_count": 0},
+            )
+            return
+        stored_count = 0
+        with create_session_factory(self.database_url)() as session:
+            service = LearningFeedbackService(RetrievableMemoryRepository(session))
+            scope = LearningFeedbackScope(
+                chat_id=reaction.chat.id,
+                message_thread_id=reaction.message_thread_id,
+                user_id=reaction.user_id,
+            )
+            # Telegram message_reaction updates do not include the reacted message body/author.
+            # Treat the event as a service-level weak signal only; future wiring can add bot-message lookup.
+            for emoji in reaction.emojis[:3]:
+                result = service.process_reaction_feedback(
+                    emoji=emoji,
+                    scope=scope,
+                    reacted_message_id=reaction.message_id,
+                    reacted_message_is_bot=True,
+                    reacted_message_thread_id=reaction.message_thread_id,
+                )
+                if result.stored:
+                    stored_count += 1
+        log_event(
+            logger, logging.INFO,
+            event="learning_feedback.reaction.dispatch",
+            component=_COMPONENT,
+            update_id=update_id,
+            chat_id=reaction.chat.id,
+            message_id=reaction.message_id,
+            message_thread_id=reaction.message_thread_id,
+            user_id=reaction.user_id,
+            extra={"decision": "handled", "emoji_count": len(reaction.emojis), "stored_count": stored_count},
+        )
+
+    def _maybe_store_learning_text_feedback(self, *, message: TelegramMessage) -> None:
+        if self.database_url is None or not (message.text or "").strip():
+            return
+        try:
+            with create_session_factory(self.database_url)() as session:
+                service = LearningFeedbackService(RetrievableMemoryRepository(session))
+                service.process_text_feedback(
+                    text=message.text,
+                    scope=LearningFeedbackScope(
+                        chat_id=message.chat.id,
+                        message_thread_id=message.message_thread_id,
+                        user_id=message.from_user.id,
+                    ),
+                    user_id=message.from_user.id,
+                )
+        except Exception as exc:
+            log_event(
+                logger,
+                logging.INFO,
+                event="learning_feedback.text.dispatch",
+                component=_COMPONENT,
+                chat_id=message.chat.id,
+                message_id=message.message_id,
+                message_thread_id=message.message_thread_id,
+                user_id=message.from_user.id,
+                extra={"decision": "error", "error_class": exc.__class__.__name__},
+            )
 
     async def _maybe_handle_ai_autoreply(
         self,

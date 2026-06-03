@@ -2341,6 +2341,7 @@ class PromptContextDocRepository:
 class RetrievableMemoryRepository:
     ALLOWED_VISIBILITIES = {"topic", "chat", "user", "global"}
     ALLOWED_MEMORY_TYPES = {"preference", "fact", "summary", "relationship", "warning"}
+    ALLOWED_LEARNING_MEMORY_TYPES = {"preference", "warning", "summary"}
     ALLOWED_SOURCES = {"daily_memory", "long_memory", "manual", "auto", "plugin"}
     DEFAULT_LIMIT = 5
     MAX_LIMIT = 20
