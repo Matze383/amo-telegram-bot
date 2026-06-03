@@ -68,7 +68,7 @@ def test_websearch_fake_provider_result_cap_is_bounded() -> None:
         max_results=99,
     )
     assert result.reason_code == "ok"
-    assert len(result.results) <= 5
+    assert len(result.results) == 5
 
 
 def test_websearch_fake_provider_audits_bounded_redacted_metadata() -> None:
@@ -83,7 +83,7 @@ def test_websearch_fake_provider_audits_bounded_redacted_metadata() -> None:
     )
 
     assert result.reason_code == "ok"
-    assert len(result.results) <= 5
+    assert len(result.results) == 5
     assert sink.events
 
     event = sink.events[-1]

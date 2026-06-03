@@ -12,6 +12,7 @@ from amo_bot.telegram.dispatcher import (
     _format_auto_research_no_result_note,
     _format_auto_research_success_note,
     should_chain_auto_research,
+    _select_chain_urls,
 )
 from amo_bot.telegram.update_parser import TelegramChat, TelegramMessage, TelegramUser
 from amo_bot.telegram.webtool_chat_integration import build_empty_result_retry_query
@@ -340,9 +341,15 @@ def test_empty_result_retry_query_simplifies_generic_current_question():
 
 def test_chain_diagnostic_snapshot_is_metadata_only_and_splits_host_counts():
     diagnostics = _chain_diagnostic_snapshot(
-        search_hosts=("search-one.example", "search-two.example", "search-three.example"),
-        chain_urls=("https://search-one.example/a", "https://search-two.example/b", "https://search-three.example/c"),
-        static_attempts=3,
+        search_hosts=("search-one.example", "search-two.example", "search-three.example", "search-four.example", "search-five.example"),
+        chain_urls=(
+            "https://search-one.example/a",
+            "https://search-two.example/b",
+            "https://search-three.example/c",
+            "https://search-four.example/d",
+            "https://search-five.example/e",
+        ),
+        static_attempts=5,
         browser_attempts=1,
         chain_extracts=[],
         reason_buckets={"empty_text": 2, "provider_unavailable": 1, "timeout": 1},
@@ -352,15 +359,36 @@ def test_chain_diagnostic_snapshot_is_metadata_only_and_splits_host_counts():
     )
 
     assert diagnostics["status"] if "status" in diagnostics else True
-    assert diagnostics["search_host_count"] == 3
-    assert diagnostics["selected_url_host_count"] == 3
+    assert diagnostics["search_host_count"] == 5
+    assert diagnostics["selected_url_host_count"] == 5
     assert diagnostics["extraction_host_count"] == 0
     assert diagnostics["host_count"] == 0
-    assert diagnostics["failed_attempt_count"] == 4
+    assert diagnostics["failed_attempt_count"] == 6
     assert diagnostics["reason_buckets"] == {"empty_text": 2, "provider_unavailable": 1, "timeout": 1}
     serialized = str(diagnostics)
     assert "https://" not in serialized
     assert "/a" not in serialized
+    assert "/e" not in serialized
+
+
+def test_select_chain_urls_caps_at_five_and_dedupes_hosts():
+    urls = _select_chain_urls((
+        "https://one.example/a",
+        "https://two.example/b",
+        "https://one.example/duplicate",
+        "https://three.example/c",
+        "https://four.example/d",
+        "https://five.example/e",
+        "https://six.example/f",
+    ))
+
+    assert urls == (
+        "https://one.example/a",
+        "https://two.example/b",
+        "https://three.example/c",
+        "https://four.example/d",
+        "https://five.example/e",
+    )
 
 def test_auto_research_empty_result_retry_failure_forbids_stale_estimate(monkeypatch):
     monkeypatch.setattr("amo_bot.telegram.dispatcher.AIRouter.decide", lambda self, **kwargs: _allowing_router_decision())
@@ -673,13 +701,20 @@ def test_auto_research_chain_caps_urls_browser_and_text(monkeypatch):
         decision="allow",
         reason="search_completed",
         text="stock live price",
-        sources=("https://one.example/a", "https://two.example/b", "https://three.example/c", "https://four.example/d"),
-        hosts=("one.example", "two.example", "three.example", "four.example"),
+        sources=(
+            "https://one.example/a",
+            "https://two.example/b",
+            "https://three.example/c",
+            "https://four.example/d",
+            "https://five.example/e",
+            "https://six.example/f",
+        ),
+        hosts=("one.example", "two.example", "three.example", "four.example", "five.example", "six.example"),
         error=None,
     )
     fail = SimpleNamespace(allowed=False, decision="deny", reason="empty_result", text="", sources=(), hosts=(), error=None)
     long_browser = SimpleNamespace(allowed=True, decision="allow", reason="browser_completed", text="X" * 3000, sources=("https://one.example/a",), hosts=("one.example",), error=None)
-    d, _sent = _mk_sequence_dispatcher([search, fail, long_browser, fail, fail, fail])
+    d, _sent = _mk_sequence_dispatcher([search, fail, long_browser, fail, fail, fail, fail, fail])
     calls = []
 
     async def _ask(prompt: str) -> str:
@@ -696,6 +731,7 @@ def test_auto_research_chain_caps_urls_browser_and_text(monkeypatch):
         )
     )
     assert [c.capability for c in d.webtool_dispatcher.calls] == ["websearch", "webscraping", "browser"]
+    assert len([c for c in d.webtool_dispatcher.calls if c.capability == "browser"]) == 1
     assert calls[0].count("X") < 1700
 
 

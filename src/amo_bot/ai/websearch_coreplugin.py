@@ -16,7 +16,7 @@ _MAX_TITLE_LENGTH = 200
 _MAX_SNIPPET_LENGTH = 400
 _MAX_URL_LENGTH = 2048
 _ALLOWED_SAFESEARCH = {"off", "moderate", "strict"}
-_DEFAULT_PROVIDER_RESULT_CAP = 3
+_DEFAULT_PROVIDER_RESULT_CAP = 5
 _MAX_PROVIDER_RESULT_CAP = 5
 _DEFAULT_PROVIDER_ALLOWLIST = frozenset({"fake"})
 _DEFAULT_TIMEOUT_SECONDS = 1.0
@@ -114,6 +114,16 @@ class FakeWebsearchProvider:
                 f"{query} – references",
                 f"https://example.test/ref/{_slug(query)}",
                 "Deterministic fake references for offline validation.",
+            ),
+            (
+                f"{query} – latest",
+                f"https://example.test/latest/{_slug(query)}",
+                "Deterministic fake latest-source item for offline validation.",
+            ),
+            (
+                f"{query} – background",
+                f"https://example.test/background/{_slug(query)}",
+                "Deterministic fake background-source item for offline validation.",
             ),
         )
         bounded = seeds[: min(max_results, _MAX_PROVIDER_RESULT_CAP)]

@@ -102,7 +102,7 @@ def test_cp_c2_result_normalization_caps_fields_and_count() -> None:
         max_results=99,
     )
 
-    assert len(result.results) <= 5
+    assert len(result.results) == 5
     for item in result.results:
         assert len(item.title) <= 200
         assert len(item.url) <= 2048

@@ -52,7 +52,7 @@ class WebtoolCapabilityRequest:
         query: For websearch: the search query string.
         url: For webscraping: the target URL.
         locale: Optional locale for websearch (default "en").
-        max_results: Optional max results for websearch (default 3).
+        max_results: Optional max results for websearch (default 5).
     """
     capability: str
     user_id: int
@@ -62,7 +62,7 @@ class WebtoolCapabilityRequest:
     query: str = ""
     url: str = ""
     locale: str = "en"
-    max_results: int = 3
+    max_results: int = 5
 
 
 @dataclass(frozen=True, slots=True)

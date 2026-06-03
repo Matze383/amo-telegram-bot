@@ -208,7 +208,7 @@ def build_webtool_request(
         query=trigger.query,
         url=trigger.url,
         locale=locale,
-        max_results=3,
+        max_results=5,
     )
 
 

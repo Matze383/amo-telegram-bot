@@ -84,7 +84,7 @@ class WebtoolSubagentRequest:
         query: For websearch: the search query string.
         url: For webscraping: the target URL.
         locale: Optional locale for websearch (default "en").
-        max_results: Optional max results for websearch (default 3).
+        max_results: Optional max results for websearch (default 5).
     """
     operation_type: str
     user_id: int
@@ -95,7 +95,7 @@ class WebtoolSubagentRequest:
     query: str = ""
     url: str = ""
     locale: str = "en"
-    max_results: int = 3
+    max_results: int = 5
 
 
 @dataclass(frozen=True, slots=True)
