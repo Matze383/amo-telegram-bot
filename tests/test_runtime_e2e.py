@@ -143,3 +143,46 @@ def test_dispatcher_e2e_ping_role_help_setrole_and_ask_ignore_is_silent(tmp_path
     asyncio.run(dispatcher.handle_raw_update(_mk_update(uid=5000, chat_id=50, text="/ask blocked", update_id=7)))
     assert len(sender.sent) == before + 1  # ignore stays silent for blocked commands
     assert len(ai.prompts) == ai_calls_before_ignore  # ignore must not trigger AI requests
+
+
+def test_image_analysis_prompt_gets_default_german_language_rule() -> None:
+    from amo_bot.ai.image_analyze_orchestrator import (
+        ImageAnalyzeOrchestrator,
+        ImageAnalyzeOrchestratorRequest,
+        ImageAnalyzeProviderRequest,
+        ImageAnalyzeProviderResult,
+    )
+    from amo_bot.auth.roles import Role
+
+    class RecordingProvider:
+        name = "vision"
+
+        def __init__(self) -> None:
+            self.requests: list[ImageAnalyzeProviderRequest] = []
+
+        def analyze(self, request: ImageAnalyzeProviderRequest) -> ImageAnalyzeProviderResult:
+            self.requests.append(request)
+            return ImageAnalyzeProviderResult(provider=self.name, summary="ok")
+
+    provider = RecordingProvider()
+    orchestrator = ImageAnalyzeOrchestrator(provider=provider)
+    result = orchestrator.evaluate_and_maybe_invoke_provider(
+        request=ImageAnalyzeOrchestratorRequest(
+            user_id=1,
+            role=Role.ADMIN,
+            chat_id=2,
+            message_thread_id=None,
+            command="auto_image",
+            reply_to_image={"ok": True, "type_hint": "image", "file_unique_id": "img1"},
+            prompt="Was ist auf dem Bild?",
+        )
+    )
+
+    assert result.allowed is True
+    assert len(provider.requests) == 1
+    prompt = provider.requests[0].prompt
+    assert "Antworte standardmäßig auf Deutsch" in prompt
+    assert "Wenn der Nutzer klar eine andere Sprache nutzt" in prompt
+    assert "Nutzeranfrage:\nWas ist auf dem Bild?" in prompt
+    assert "system-provided" not in prompt
+    assert "higher priority" not in prompt

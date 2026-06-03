@@ -13,6 +13,7 @@ from sqlalchemy.orm import sessionmaker
 from amo_bot.auth.roles import Role
 from amo_bot.db.models import ImageAnalyzeAuditEvent, ImageAnalyzeQuotaCounter
 from amo_bot.db.repositories import TopicAgentMemoryRepository
+from amo_bot.ai.prompt_language import build_language_steered_prompt
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,7 +80,7 @@ class FakeImageAnalyzeRuntimeProvider:
     name = "fake"
 
     def analyze(self, request: ImageAnalyzeProviderRequest) -> ImageAnalyzeProviderResult:
-        prompt = request.prompt.strip() or "describe image"
+        prompt = _display_prompt_text(request.prompt) or "describe image"
         return ImageAnalyzeProviderResult(provider=self.name, summary=f"fake image analysis for {request.image_ref}: {prompt}")
 
     async def analyze_async(self, request: ImageAnalyzeProviderRequest) -> ImageAnalyzeProviderResult:
@@ -144,7 +145,7 @@ class ImageAnalyzeOrchestrator:
             provider_result = provider.analyze(
                 ImageAnalyzeProviderRequest(
                     image_ref=_image_ref(image),
-                    prompt=request.prompt,
+                    prompt=build_language_steered_prompt(request.prompt or "describe image"),
                     user_id=request.user_id,
                     chat_id=request.chat_id,
                     message_thread_id=request.message_thread_id,
@@ -215,7 +216,7 @@ class ImageAnalyzeOrchestrator:
         provider = provider_call or self._provider
         provider_request = ImageAnalyzeProviderRequest(
             image_ref=_image_ref(image),
-            prompt=request.prompt,
+            prompt=build_language_steered_prompt(request.prompt or "describe image"),
             user_id=request.user_id,
             chat_id=request.chat_id,
             message_thread_id=request.message_thread_id,
@@ -345,6 +346,14 @@ class ImageAnalyzeOrchestrator:
             if image_size is not None and image_size > self._max_image_bytes:
                 return "oversize"
         return None
+
+
+def _display_prompt_text(prompt: str) -> str:
+    marker = "\n\nUser message:\n"
+    text = prompt.strip()
+    if marker in text:
+        return text.rsplit(marker, 1)[1].strip()
+    return text
 
 
 def _image_ref(image: dict[str, Any]) -> str:

@@ -11,6 +11,7 @@ from urllib.parse import urlparse
 
 from amo_bot.ai.current_time_context import DEFAULT_AI_PROMPT_TIMEZONE
 from amo_bot.ai.learning_feedback import LearningFeedbackScope, LearningFeedbackService
+from amo_bot.ai.prompt_language import DEFAULT_RESPONSE_LANGUAGE_RULE
 from amo_bot.ai.router import AIRouter, AIRouterReasonCode
 from amo_bot.auth.permissions import can_use_bot
 from amo_bot.auth.roles import Role, role_meets_minimum
@@ -1580,7 +1581,7 @@ class Dispatcher:
             filtered = [line for line in lines if line.strip() and line.strip() != drop_exact_line]
             return "\n".join(filtered).strip()
 
-        prompt_sections: list[str] = [identity_instruction]
+        prompt_sections: list[str] = [identity_instruction, DEFAULT_RESPONSE_LANGUAGE_RULE]
         current_time_context_text = (getattr(decision.context, "current_time_context_text", "") or "").strip()
         if current_time_context_text:
             prompt_sections.append(current_time_context_text)

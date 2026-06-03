@@ -148,6 +148,10 @@ def test_active_mention_and_reply_send_ai_response_in_active_scopes(tmp_path) ->
     assert "Reply as the Telegram topic assistant" not in ai.prompts[0]
     assert "@AmoBot" not in ai.prompts[0]
     assert "Do not claim to be the underlying model/provider unless explicitly asked." in ai.prompts[0]
+    assert "Antworte standardmäßig auf Deutsch" in ai.prompts[0]
+    assert "Wenn der Nutzer klar eine andere Sprache nutzt" in ai.prompts[0]
+    assert "system-provided" not in ai.prompts[0]
+    assert "higher priority" not in ai.prompts[0]
     assert "User message:\nfollowup" in ai.prompts[1]
 
 
@@ -763,6 +767,7 @@ def test_ai_prompt_includes_router_context_sections_and_deduplicates_current_mes
     assert "Current date: 2026-06-03" in prompt
     assert "Timezone: Europe/Berlin" in prompt
     assert "may be stale, irrelevant, or inaccurate" in prompt
+    assert "Antworte standardmäßig auf Deutsch" in prompt
     assert "Relevant recent chat context:" in prompt
     assert "u1: vorherige relevante nachricht" in prompt
     assert "u1: aktuelle frage" not in prompt

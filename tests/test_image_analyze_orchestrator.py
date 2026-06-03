@@ -88,7 +88,10 @@ def test_successful_runtime_seam_invokes_provider_once() -> None:
     assert result.day == "2026-05-21"
     assert len(provider.calls) == 1
     assert provider.calls[0].image_ref == "telegram-file:uniq-1"
-    assert provider.calls[0].prompt == "what is visible?"
+    assert "Antworte standardmäßig auf Deutsch" in provider.calls[0].prompt
+    assert "Nutzeranfrage:\nwhat is visible?" in provider.calls[0].prompt
+    assert "system-provided" not in provider.calls[0].prompt
+    assert "higher priority" not in provider.calls[0].prompt
 
 
 def test_fake_provider_is_deterministic() -> None:
