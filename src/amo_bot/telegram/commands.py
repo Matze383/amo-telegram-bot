@@ -7,6 +7,7 @@ import logging
 from typing import Awaitable, Callable, Literal
 
 
+from amo_bot.ai.current_time_context import DEFAULT_AI_PROMPT_TIMEZONE, build_current_time_context
 from amo_bot.ai.memory_c2_service import MemoryC2Service, MemoryScope
 from amo_bot.ai.remember_service import ManualMemoryError, ManualMemoryService
 from amo_bot.ai.service import AIService, OllamaError
@@ -307,6 +308,7 @@ def create_builtin_registry(
     database_url: str | None = None,
     ai_service: AIService | None = None,
     owner_notifier: OwnerNotifier | None = None,
+    prompt_timezone: str = DEFAULT_AI_PROMPT_TIMEZONE,
 ) -> CommandRegistry:
     registry = CommandRegistry()
     if database_url:
@@ -742,7 +744,8 @@ def create_builtin_registry(
 
         now = datetime.now(timezone.utc)
         scope_type, scope_chat_id, scope_topic_id, scope_user_id = _ai_scope_from_ctx(ctx)
-        ai_prompt = ctx.argument
+        current_time_context = build_current_time_context(now=now, timezone_name=prompt_timezone)
+        ai_prompt = f"{current_time_context}\n\nUser message:\n{ctx.argument}"
         if session_factory is not None:
             with session_factory() as session:
                 repo = TopicAgentMemoryRepository(session)
@@ -763,6 +766,7 @@ def create_builtin_registry(
                 ).profile
                 if profile:
                     ai_prompt = (
+                        f"{current_time_context}\n\n"
                         "Known coarse user profile context for the current user in this scope:\n"
                         f"{_profile_to_text(profile)}\n\n"
                         f"User message:\n{ctx.argument}"

@@ -124,7 +124,12 @@ def test_dispatcher_e2e_ping_role_help_setrole_and_ask_ignore_is_silent(tmp_path
         assert sender.sent[-1] == (chat_id, "answer-from-fake-ai", None)
 
     prompts = ai.prompts[:]
-    assert prompts == ["hi ai", "hi ai", "hi ai"]
+    assert len(prompts) == 3
+    for prompt in prompts:
+        assert "Current time context (system-provided" in prompt
+        assert "Current date:" in prompt
+        assert "Timezone: Europe/Berlin" in prompt
+        assert prompt.endswith("User message:\nhi ai")
 
     before = len(sender.sent)
     asyncio.run(dispatcher.handle_raw_update(_mk_update(uid=4000, chat_id=40, text="/ask blocked", update_id=6)))

@@ -165,6 +165,7 @@ def run(argv: list[str] | None = None) -> None:
         database_url=settings.database_url,
         ai_service=ai_service,
         owner_notifier=owner_notifier,
+        prompt_timezone=settings.dreaming_timezone,
     )
 
     async def answer_callback(callback_query_id: str, text: str | None = None) -> object:
@@ -290,6 +291,7 @@ def run(argv: list[str] | None = None) -> None:
         ai_service=ai_service,
         owner_notifier=owner_notifier,
         webtool_dispatcher=webtool_dispatcher,
+        prompt_timezone=settings.dreaming_timezone,
     )
 
     # Dreaming / Memory-Curation Runtime — disabled by default.

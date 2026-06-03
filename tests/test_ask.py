@@ -74,6 +74,23 @@ def test_ask_returns_answer_from_service() -> None:
     assert out == "hello from ollama"
 
 
+def test_ask_prompt_includes_current_time_context_without_logging_user_text() -> None:
+    ai = CapturingAIService()
+    reg = create_builtin_registry(ai_service=ai, prompt_timezone="Europe/Berlin")
+    ask_cmd = reg.get("ask")
+    assert ask_cmd is not None
+
+    out = asyncio.run(
+        ask_cmd.handler(CommandContext(chat_id=1, user_id=1, role=Role.ADMIN, command_name="ask", argument="Hi?"))
+    )
+
+    assert out == "ok"
+    assert "Current time context (system-provided, higher priority than memory/recent chat):" in ai.prompt
+    assert "Current date:" in ai.prompt
+    assert "Timezone: Europe/Berlin" in ai.prompt
+    assert "User message:\nHi?" in ai.prompt
+
+
 def test_ask_includes_only_current_scoped_user_profile(tmp_path) -> None:
     db_url = f"sqlite:///{tmp_path / 'ask_profile_scope.db'}"
     init_db(db_url)

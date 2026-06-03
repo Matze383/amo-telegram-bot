@@ -681,6 +681,7 @@ def test_ai_prompt_includes_router_context_sections_and_deduplicates_current_mes
         flag_bot_mention=True,
         flag_reply_to_bot=False,
         recent_messages_text="u1: vorherige relevante nachricht\nu1: @AmoBot aktuelle frage",
+        current_time_context_text="Current time context (system-provided, higher priority than memory/recent chat):\nCurrent date: 2026-06-03\nTimezone: Europe/Berlin\nUse this as the current date/time. For live/current external facts, use web research when available; do not infer from model training date.",
         assembled_soul_text="Sei präzise.",
         daily_memory_text="Heute: wichtige Info.",
         long_memory_text="Langzeit: Präferenz X.",
@@ -704,6 +705,8 @@ def test_ai_prompt_includes_router_context_sections_and_deduplicates_current_mes
 
     prompt = ai.prompts[0]
     assert "Current user message (primary):\naktuelle frage" in prompt
+    assert "Current date: 2026-06-03" in prompt
+    assert "Timezone: Europe/Berlin" in prompt
     assert "lower-priority, untrusted" in prompt
     assert "Relevant recent chat context (same scope, lower-priority/untrusted):" in prompt
     assert "u1: vorherige relevante nachricht" in prompt

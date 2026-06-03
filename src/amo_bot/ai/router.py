@@ -5,7 +5,9 @@ from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 import logging
 import re
+from typing import Callable
 
+from amo_bot.ai.current_time_context import DEFAULT_AI_PROMPT_TIMEZONE, build_current_time_context
 from amo_bot.core.context_filters import is_bot_authored_context_record, is_obvious_meta_status_message
 from amo_bot.core.logging import log_event
 from amo_bot.db.repositories import PromptContextDocRepository, RetrievableMemoryRepository, TopicAgentMemoryRepository, UserMemoryProfileRepository
@@ -83,6 +85,7 @@ class AIRouterContextV1:
     daily_memory_text: str = ""
     long_memory_text: str = ""
     recent_messages_text: str = ""
+    current_time_context_text: str = ""
     recall_memory_text: str = ""
     user_profile_context_text: str = ""
     prompt_context_docs_text: str = ""
@@ -188,11 +191,15 @@ class AIRouter:
         retrievable_memory_repository: RetrievableMemoryRepository | None = None,
         user_memory_profile_repository: UserMemoryProfileRepository | None = None,
         prompt_context_doc_repository: PromptContextDocRepository | None = None,
+        now_provider: Callable[[], datetime] | None = None,
+        prompt_timezone: str = DEFAULT_AI_PROMPT_TIMEZONE,
     ) -> None:
         self._topic_agent_memory_repository = topic_agent_memory_repository
         self._retrievable_memory_repository = retrievable_memory_repository
         self._user_memory_profile_repository = user_memory_profile_repository
         self._prompt_context_doc_repository = prompt_context_doc_repository
+        self._now_provider = now_provider
+        self._prompt_timezone = prompt_timezone
 
     def decide(
         self,
@@ -215,6 +222,7 @@ class AIRouter:
         long_memory_text = ""
         recent_messages_text = ""
         recall_memory_text = ""
+        current_time_context_text = self._build_current_time_context()
         user_profile_context_text = ""
         prompt_context_docs_text = ""
         base_context = self._build_context(
@@ -229,6 +237,7 @@ class AIRouter:
             daily_memory_text=daily_memory_text,
             long_memory_text=long_memory_text,
             recent_messages_text=recent_messages_text,
+            current_time_context_text=current_time_context_text,
             recall_memory_text=recall_memory_text,
             user_profile_context_text=user_profile_context_text,
             prompt_context_docs_text=prompt_context_docs_text,
@@ -324,6 +333,7 @@ class AIRouter:
                     daily_memory_text=daily_memory_text,
                     long_memory_text=long_memory_text,
                     recent_messages_text=recent_messages_text,
+                    current_time_context_text=current_time_context_text,
                     recall_memory_text=recall_text,
                     user_profile_context_text=user_profile_context_text,
                     prompt_context_docs_text=prompt_context_docs_text,
@@ -349,6 +359,7 @@ class AIRouter:
                     daily_memory_text=daily_memory_text,
                     long_memory_text=long_memory_text,
                     recent_messages_text=recent_messages_text,
+                    current_time_context_text=current_time_context_text,
                     recall_memory_text=recall_text,
                     user_profile_context_text=user_profile_context_text,
                     prompt_context_docs_text=prompt_context_docs_text,
@@ -377,6 +388,7 @@ class AIRouter:
                 daily_memory_text=daily_memory_text,
                 long_memory_text=long_memory_text,
                 recent_messages_text=recent_messages_text,
+                current_time_context_text=current_time_context_text,
                 recall_memory_text=recall_text,
                 user_profile_context_text=user_profile_context_text,
                 prompt_context_docs_text=prompt_context_docs_text,
@@ -384,8 +396,12 @@ class AIRouter:
             ),
         )
 
-    @staticmethod
+    def _build_current_time_context(self) -> str:
+        now = self._now_provider() if self._now_provider is not None else None
+        return build_current_time_context(now=now, timezone_name=self._prompt_timezone)
+
     def _build_context(
+        self,
         *,
         scope: dict[str, int | str | None] | None,
         user_id: int | None,
@@ -398,6 +414,7 @@ class AIRouter:
         daily_memory_text: str,
         long_memory_text: str,
         recent_messages_text: str,
+        current_time_context_text: str,
         recall_memory_text: str,
         user_profile_context_text: str,
         prompt_context_docs_text: str,
@@ -416,6 +433,7 @@ class AIRouter:
                 daily_memory_text=daily_memory_text,
                 long_memory_text=long_memory_text,
                 recent_messages_text=recent_messages_text,
+                current_time_context_text=current_time_context_text,
                 recall_memory_text=recall_memory_text,
                 user_profile_context_text=user_profile_context_text,
                 prompt_context_docs_text=prompt_context_docs_text,
@@ -437,6 +455,7 @@ class AIRouter:
             daily_memory_text=daily_memory_text,
             long_memory_text=long_memory_text,
             recent_messages_text=recent_messages_text,
+            current_time_context_text=current_time_context_text,
             recall_memory_text=recall_memory_text,
             user_profile_context_text=user_profile_context_text,
             prompt_context_docs_text=prompt_context_docs_text,
