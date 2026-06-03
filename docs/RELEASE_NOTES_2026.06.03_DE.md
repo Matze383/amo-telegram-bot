@@ -1,4 +1,4 @@
-# Versionshinweise 2026.06.03-Beta
+# Versionshinweise 2026.06.03
 
 ---
 

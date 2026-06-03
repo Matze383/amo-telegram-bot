@@ -900,7 +900,7 @@ Das WebUI-Dashboard enthält einen **KI Memory**-Bereich zum Einsehen und Verwal
 ## Nächste Schritte
 
 - Siehe [BETATEST_DE.md](BETATEST_DE.md) für detaillierte Testanleitungen
-- Siehe [RELEASE_NOTES_2026.06.03-Beta_DE.md](RELEASE_NOTES_2026.06.03-Beta_DE.md) für das aktuelle Changelog
+- Siehe [RELEASE_NOTES_2026.06.03_DE.md](RELEASE_NOTES_2026.06.03_DE.md) für das aktuelle Changelog
 
 ## WebUI Security — Access Window (Block 3)
 

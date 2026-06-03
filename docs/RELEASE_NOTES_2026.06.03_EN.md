@@ -1,4 +1,4 @@
-# Release Notes 2026.06.03-Beta
+# Release Notes 2026.06.03
 
 ---
 

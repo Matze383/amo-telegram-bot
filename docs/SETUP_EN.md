@@ -900,7 +900,7 @@ The WebUI Dashboard includes a **KI Memory** section for inspecting and managing
 ## Next Steps
 
 - See [BETATEST_EN.md](BETATEST_EN.md) for detailed testing instructions
-- See [RELEASE_NOTES_2026.06.03-Beta_EN.md](RELEASE_NOTES_2026.06.03-Beta_EN.md) for the current changelog
+- See [RELEASE_NOTES_2026.06.03_EN.md](RELEASE_NOTES_2026.06.03_EN.md) for the current changelog
 
 ## WebUI Security — Access Window (Block 3)
 
