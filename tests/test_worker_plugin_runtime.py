@@ -214,7 +214,7 @@ async def handle_worker(context, host_api):
 
     calls = 0
 
-    def _fake_run(self, request: SandboxRequest) -> SandboxResponse:
+    def _fake_run(self, request: SandboxRequest, stream_event_handler=None) -> SandboxResponse:
         nonlocal calls
         calls += 1
         if calls == 1:
