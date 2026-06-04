@@ -95,10 +95,19 @@ class _RuntimeContext:
 
 
 class _RecordingHostAPI:
-    def __init__(self, *, permissions: set[str], max_ops: int = 16, max_text_len: int = 4000) -> None:
+    def __init__(
+        self,
+        *,
+        permissions: set[str],
+        max_ops: int = 16,
+        max_text_len: int = 4000,
+        stream_ops: bool = False,
+    ) -> None:
         self._permissions = permissions
         self._max_ops = max_ops
         self._max_text_len = max_text_len
+        self._stream_ops = stream_ops
+        self._op_count = 0
         self._ops: list[dict[str, object]] = []
 
     def _require_permission(self, permission: str, operation: str) -> None:
@@ -189,8 +198,13 @@ class _RecordingHostAPI:
         return {"entries": entries, "audit": result.audit, "entry_count": len(entries)}
 
     def _append(self, op: dict[str, object]) -> None:
-        if len(self._ops) >= self._max_ops:
+        if self._op_count >= self._max_ops:
             raise _PluginRuntimeError("maximum operation count exceeded")
+        self._op_count += 1
+        if self._stream_ops:
+            sys.stdout.write(json.dumps({"type": "op", "op": op}, ensure_ascii=False) + "\n")
+            sys.stdout.flush()
+            return
         self._ops.append(op)
 
     @property
@@ -260,7 +274,7 @@ async def _execute_plugin(request: SandboxRequest) -> SandboxResponse:
         started_at=payload.get("started_at") if isinstance(payload.get("started_at"), str) else None,
         scheduled_at=payload.get("scheduled_at") if isinstance(payload.get("scheduled_at"), str) else None,
     )
-    host_api = _RecordingHostAPI(permissions=permissions)
+    host_api = _RecordingHostAPI(permissions=permissions, stream_ops=trigger == "worker")
     handler = _load_handler(module_path, str(trigger))
     handler_result = await handler(context, host_api)
     response_result: dict[str, object] = {

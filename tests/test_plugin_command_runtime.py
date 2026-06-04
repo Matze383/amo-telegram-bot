@@ -6,6 +6,7 @@ import json
 from sqlalchemy import select
 
 from amo_bot.auth.roles import Role
+from amo_bot.ai.prompt_language import build_language_steered_prompt
 from amo_bot.db.base import create_session_factory
 from amo_bot.db.init_db import init_db
 from amo_bot.db.models import AuditEvent, ImageAnalyzeAuditEvent, PluginPolicyAllowedGroup, PluginPolicyAllowedTopic, PluginPolicyOverride
@@ -971,7 +972,15 @@ async def handle_command(context, host_api):
 
     assert handled is True
     assert sent == []
-    assert replied == [(-1002003580909, 94, "fake image analysis for telegram-file:u1: describe image", 6845)]
+    expected_prompt = build_language_steered_prompt("describe image")
+    assert replied == [
+        (
+            -1002003580909,
+            94,
+            f"fake image analysis for telegram-file:u1: {expected_prompt}",
+            6845,
+        )
+    ]
 
     with sf() as session:
         from amo_bot.db.models import ImageAnalyzeAuditEvent
@@ -1050,7 +1059,15 @@ async def handle_command(context, host_api):
     assert media_store.seen and media_store.seen[0].source_kind == "photo"
     assert media_store.seen[0].type_hint == "image"
     assert sent == []
-    assert replied == [(-1002003580909, 94, "fake image analysis for telegram-file:photo-unique-id: describe image", 6845)]
+    expected_prompt = build_language_steered_prompt("describe image")
+    assert replied == [
+        (
+            -1002003580909,
+            94,
+            f"fake image analysis for telegram-file:photo-unique-id: {expected_prompt}",
+            6845,
+        )
+    ]
 
     with sf() as session:
         audits = session.scalars(select(ImageAnalyzeAuditEvent).order_by(ImageAnalyzeAuditEvent.id)).all()

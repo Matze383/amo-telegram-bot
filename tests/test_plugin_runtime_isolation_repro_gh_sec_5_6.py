@@ -142,7 +142,7 @@ async def handle_worker(context, host_api):
 
     calls: list[str] = []
 
-    def _fake_run(self, request: SandboxRequest):
+    def _fake_run(self, request: SandboxRequest, stream_event_handler=None):
         calls.append(request.action)
         return {"ok": True, "result": {"ops": []}}
 

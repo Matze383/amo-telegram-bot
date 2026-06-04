@@ -22,7 +22,12 @@ class _SingleRestartUpdateTelegramClient:
 
 
 class _RestartingDispatcher:
+    def __init__(self, offset_store: OffsetStore) -> None:
+        self.offset_store = offset_store
+
     async def handle_raw_update(self, update: object) -> None:
+        if self.offset_store.load() != 0:
+            raise SystemExit(2)
         raise SystemExit(0)
 
 
@@ -88,7 +93,7 @@ def test_run_polling_swallows_scheduled_tick_errors() -> None:
     assert tick_calls >= 1
 
 
-def test_run_polling_saves_offset_before_restart_exit(tmp_path) -> None:
+def test_run_polling_saves_offset_after_restart_dispatch_exit(tmp_path) -> None:
     offset_store = OffsetStore(str(tmp_path / "offset.json"))
 
     async def _run() -> None:
@@ -98,12 +103,13 @@ def test_run_polling_saves_offset_before_restart_exit(tmp_path) -> None:
             timeout_seconds=1,
             limit=1,
             retry_max_seconds=1,
-            dispatcher=_RestartingDispatcher(),  # type: ignore[arg-type]
+            dispatcher=_RestartingDispatcher(offset_store),  # type: ignore[arg-type]
         )
 
     try:
         asyncio.run(_run())
-    except SystemExit:
+    except SystemExit as exc:
+        assert exc.code == 0
         pass
 
     assert offset_store.load() == 268714202

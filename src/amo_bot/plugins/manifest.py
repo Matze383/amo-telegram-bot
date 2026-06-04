@@ -183,7 +183,13 @@ class PluginManifest(BaseModel):
         backoff = value.get("restart_backoff_seconds", 60)
         if not isinstance(backoff, int) or backoff < 1:
             raise ValueError("worker.restart_backoff_seconds must be a positive integer")
-        return {"restart_backoff_seconds": backoff}
+        worker = {"restart_backoff_seconds": backoff}
+        timeout_ms = value.get("timeout_ms")
+        if timeout_ms is not None:
+            if not isinstance(timeout_ms, int) or timeout_ms < 100:
+                raise ValueError("worker.timeout_ms must be an integer >= 100")
+            worker["timeout_ms"] = timeout_ms
+        return worker
 
     @field_validator("required_roles")
     @classmethod
