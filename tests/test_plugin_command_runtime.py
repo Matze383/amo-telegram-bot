@@ -498,6 +498,55 @@ async def handle_command(context, host_api):
     assert "Traceback" not in (rows[-1].payload_json or "")
 
 
+def test_plugin_command_sandbox_error_code_survives_invalid_exception_factory(tmp_path, monkeypatch) -> None:
+    db_url = f"sqlite:///{tmp_path / 'plugin_runtime_sandbox_error_code.db'}"
+    init_db(db_url)
+
+    executor, sent, replied, _, _ = _mk_executor(
+        tmp_path,
+        db_url,
+        "sandbox_error_code_demo",
+        """
+async def handle_command(context, host_api):
+    await host_api.send_message(context.chat_id, "should-not-run")
+""",
+    )
+
+    from amo_bot.plugins import command_runtime
+    from amo_bot.plugins.sandbox import command_worker
+
+    async def _fake_execute_command_request(request, *, plugins_root):
+        return {
+            "ok": False,
+            "error": {
+                "code": "invalid_plugin_entry",
+                "message": "command execution failed",
+            },
+        }
+
+    monkeypatch.setattr(command_worker, "execute_command_request", _fake_execute_command_request)
+    monkeypatch.setattr(command_runtime, "RuntimeError", lambda message: None, raising=False)
+
+    asyncio.run(
+        executor.execute(
+            actor=CommandActor(telegram_user_id=100, role=Role.ADMIN),
+            invocation=CommandInvocation(command_name="plug", argument=None, chat_id=77, message_id=9),
+        )
+    )
+
+    assert sent == []
+    assert replied == []
+
+    sf = create_session_factory(db_url)
+    with sf() as session:
+        rows = session.scalars(select(AuditEvent).where(AuditEvent.event_type == "plugin_command_error")).all()
+    assert rows
+    payload = json.loads(rows[-1].payload_json or "{}")
+    assert payload.get("error") == "command execution failed"
+    assert payload.get("error_code") == "invalid_plugin_entry"
+    assert "__dict__" not in (rows[-1].payload_json or "")
+
+
 def test_plugin_callback_context_builds_runtime_dataclass_and_handles_delyt(tmp_path) -> None:
     db_url = f"sqlite:///{tmp_path / 'plugin_runtime_callback_ctx.db'}"
     init_db(db_url)

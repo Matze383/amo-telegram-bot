@@ -81,6 +81,12 @@ class PluginCapabilityError(RuntimeError):
     pass
 
 
+class PluginSandboxCommandError(RuntimeError):
+    def __init__(self, message: str, error_code: str):
+        super().__init__(message)
+        self.sandbox_error_code = error_code
+
+
 class PluginHostAPI:
     def __init__(
         self,
@@ -814,9 +820,7 @@ class PluginCommandExecutor:
                 )
             else:
                 command_error = CommandError(code="runtime_error", message="command execution failed")
-            sandbox_exc = RuntimeError(command_error.message)
-            sandbox_exc.__dict__["sandbox_error_code"] = command_error.code
-            raise sandbox_exc
+            raise PluginSandboxCommandError(command_error.message, command_error.code)
 
         for op_payload in response.get("ops", []):
             op = CommandOp.from_dict(op_payload, max_text_len=request.limits.max_text_len)
