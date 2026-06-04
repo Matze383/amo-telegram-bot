@@ -16,6 +16,16 @@ class _DummyTelegramClient:
         return []
 
 
+class _SingleRestartUpdateTelegramClient:
+    async def get_updates(self, *, offset: int, timeout: int, limit: int):
+        return [{"update_id": 268714202, "message": {"text": "/restart"}}]
+
+
+class _RestartingDispatcher:
+    async def handle_raw_update(self, update: object) -> None:
+        raise SystemExit(0)
+
+
 def test_run_polling_calls_scheduled_tick() -> None:
     tg = _DummyTelegramClient()
     offset_store = OffsetStore(":memory:")
@@ -76,3 +86,24 @@ def test_run_polling_swallows_scheduled_tick_errors() -> None:
         pass
 
     assert tick_calls >= 1
+
+
+def test_run_polling_saves_offset_before_restart_exit(tmp_path) -> None:
+    offset_store = OffsetStore(str(tmp_path / "offset.json"))
+
+    async def _run() -> None:
+        await run_polling(
+            tg=_SingleRestartUpdateTelegramClient(),
+            offset_store=offset_store,
+            timeout_seconds=1,
+            limit=1,
+            retry_max_seconds=1,
+            dispatcher=_RestartingDispatcher(),  # type: ignore[arg-type]
+        )
+
+    try:
+        asyncio.run(_run())
+    except SystemExit:
+        pass
+
+    assert offset_store.load() == 268714202

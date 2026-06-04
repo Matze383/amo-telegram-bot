@@ -44,6 +44,102 @@ def test_dispatcher_routes_command_and_calls_send() -> None:
     assert sent == [(99, "pong", None)]
 
 
+def test_owner_restart_command_sends_ack_and_terminates() -> None:
+    sent: list[tuple[int, str, int | None]] = []
+    terminated: list[bool] = []
+
+    async def fake_send(chat_id: int, text: str, message_thread_id: int | None = None) -> object:
+        sent.append((chat_id, text, message_thread_id))
+        return {"ok": True}
+
+    dispatcher = Dispatcher(
+        command_registry=create_builtin_registry(),
+        role_resolver=InMemoryRoleResolver({42: Role.OWNER}),
+        send_text=fake_send,
+        bot_username="BotName",
+        restart_terminator=lambda: terminated.append(True),
+    )
+
+    raw_update = {
+        "update_id": 701,
+        "message": {
+            "message_id": 12,
+            "from": {"id": 42, "is_bot": False, "first_name": "Owner", "username": "owner"},
+            "chat": {"id": 99, "type": "private"},
+            "text": "/restart",
+        },
+    }
+
+    asyncio.run(dispatcher.handle_raw_update(raw_update))
+
+    assert sent == [(99, "Restart wird ausgelöst.", None)]
+    assert terminated == [True]
+
+
+def test_admin_restart_command_is_ignored() -> None:
+    sent: list[tuple[int, str, int | None]] = []
+    terminated: list[bool] = []
+
+    async def fake_send(chat_id: int, text: str, message_thread_id: int | None = None) -> object:
+        sent.append((chat_id, text, message_thread_id))
+        return {"ok": True}
+
+    dispatcher = Dispatcher(
+        command_registry=create_builtin_registry(),
+        role_resolver=InMemoryRoleResolver({42: Role.ADMIN}),
+        send_text=fake_send,
+        bot_username="BotName",
+        restart_terminator=lambda: terminated.append(True),
+    )
+
+    raw_update = {
+        "update_id": 702,
+        "message": {
+            "message_id": 12,
+            "from": {"id": 42, "is_bot": False, "first_name": "Admin", "username": "admin"},
+            "chat": {"id": 99, "type": "private"},
+            "text": "/restart",
+        },
+    }
+
+    asyncio.run(dispatcher.handle_raw_update(raw_update))
+
+    assert sent == []
+    assert terminated == []
+
+
+def test_normal_restart_command_is_ignored() -> None:
+    sent: list[tuple[int, str, int | None]] = []
+    terminated: list[bool] = []
+
+    async def fake_send(chat_id: int, text: str, message_thread_id: int | None = None) -> object:
+        sent.append((chat_id, text, message_thread_id))
+        return {"ok": True}
+
+    dispatcher = Dispatcher(
+        command_registry=create_builtin_registry(),
+        role_resolver=InMemoryRoleResolver({42: Role.NORMAL}),
+        send_text=fake_send,
+        bot_username="BotName",
+        restart_terminator=lambda: terminated.append(True),
+    )
+
+    raw_update = {
+        "update_id": 703,
+        "message": {
+            "message_id": 12,
+            "from": {"id": 42, "is_bot": False, "first_name": "User", "username": "user"},
+            "chat": {"id": 99, "type": "private"},
+            "text": "/restart",
+        },
+    }
+
+    asyncio.run(dispatcher.handle_raw_update(raw_update))
+
+    assert sent == []
+    assert terminated == []
+
+
 def test_dispatcher_ignores_non_message_updates() -> None:
     sent: list[tuple[int, str]] = []
 

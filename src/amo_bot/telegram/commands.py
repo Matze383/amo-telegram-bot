@@ -48,7 +48,12 @@ class CommandContext:
         return "private" if self.chat_id > 0 else "group"
 
 
-CommandHandler = Callable[[CommandContext], Awaitable[str | dict[str, object] | None]]
+@dataclass(frozen=True, slots=True)
+class RestartRequest:
+    acknowledgement: str
+
+
+CommandHandler = Callable[[CommandContext], Awaitable[str | dict[str, object] | RestartRequest | None]]
 
 
 @dataclass(slots=True)
@@ -318,6 +323,15 @@ def create_builtin_registry(
 
     async def ping_handler(ctx: CommandContext) -> str:
         return _lang(ctx, "pong", "pong")
+
+    async def restart_handler(ctx: CommandContext) -> RestartRequest:
+        return RestartRequest(
+            acknowledgement=_lang(
+                ctx,
+                "Restart wird ausgelöst.",
+                "Restart requested.",
+            )
+        )
 
     def _lang(ctx: CommandContext, de: str, en: str) -> str:
         return de if ctx.locale == "de" else en
@@ -1094,8 +1108,10 @@ def create_builtin_registry(
     normal_plus = {Role.OWNER, Role.ADMIN, Role.VIP, Role.NORMAL}
     ask_roles = {Role.OWNER, Role.ADMIN, Role.VIP}
     admin_plus = {Role.OWNER, Role.ADMIN}
+    owner_only = {Role.OWNER}
 
     registry.register(Command(name="ping", description="Health check", description_de="Bot-Erreichbarkeit prüfen", description_en="Check bot health", allowed_roles=normal_plus, handler=ping_handler))
+    registry.register(Command(name="restart", description="Restart bot process", description_de="Bot-Prozess neu starten", description_en="Restart bot process", allowed_roles=owner_only, handler=restart_handler))
     registry.register(Command(name="help", description="List available commands", description_de="Verfügbare Befehle anzeigen", description_en="List available commands", allowed_roles=normal_plus, handler=help_handler))
     registry.register(Command(name="role", description="Show your current role", description_de="Deine aktuelle Rolle anzeigen", description_en="Show your current role", allowed_roles=normal_plus, handler=role_handler))
     registry.register(Command(name="webtoolquota", description="View or set webtool rate limits per role", description_de="Webtool Rate-Limits pro Rolle anzeigen oder setzen", description_en="View or set webtool rate limits per role", allowed_roles=admin_plus, handler=webtoolquota_handler))

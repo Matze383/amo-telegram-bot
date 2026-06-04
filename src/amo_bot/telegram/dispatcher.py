@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -36,7 +37,7 @@ from amo_bot.db.repositories import (
 )
 from amo_bot.db.models import AuditEvent, User
 from amo_bot.plugins.command_runtime import CommandActor, CommandInvocation, PluginCommandExecutor
-from amo_bot.telegram.commands import CommandContext, CommandRegistry, RoleResolver, resolve_locale, t_text
+from amo_bot.telegram.commands import CommandContext, CommandRegistry, RestartRequest, RoleResolver, resolve_locale, t_text
 from amo_bot.telegram.live_edit_adapter import DisabledTelegramLiveEditAdapter, TelegramLiveEditAdapter
 from amo_bot.telegram.owner_notify import OwnerNotifier
 from amo_bot.telegram.update_parser import TelegramMessage, TelegramReactionEvent, parse_update
@@ -58,6 +59,13 @@ _COMPONENT = "telegram.dispatcher"
 
 AUTOREPLY_ALLOWED_ROLES: set[Role] = {Role.OWNER, Role.ADMIN, Role.VIP}
 BOT_PEER_V1_ALLOWED_COMMANDS: set[str] = {"help", "ping"}
+RESTART_ACK_TIMEOUT_SECONDS = 3.0
+
+
+def _terminate_current_process() -> None:
+    raise SystemExit(0)
+
+
 AI_AUTOREPLY_ERROR_FALLBACK_TEXT = {
     "de": "Ich konnte gerade keine KI-Antwort erzeugen. Bitte versuch es gleich nochmal.",
     "en": "I couldn't generate an AI reply right now. Please try again in a moment.",
@@ -393,6 +401,7 @@ class Dispatcher:
     ai_service: Any | None = None
     webtool_dispatcher: Any | None = None
     live_edit_adapter: TelegramLiveEditAdapter | None = None
+    restart_terminator: Callable[[], None] = _terminate_current_process
     auto_image_followup_ttl_seconds: int = 180
     prompt_timezone: str = DEFAULT_AI_PROMPT_TIMEZONE
     _recent_auto_image_candidates: list[_RecentAutoImageCandidate] = field(default_factory=list)
@@ -762,11 +771,23 @@ class Dispatcher:
             message_thread_id=message.message_thread_id,
             reply_to_message_text=message.reply_to_message_text,
             locale=resolve_locale(
-                explicit_arg=command.argument if command.name.casefold() in {"start", "help", "consent", "accept", "decline", "ask", "webui", "test", "ping", "role", "setrole", "remember"} else None,
+                explicit_arg=command.argument if command.name.casefold() in {"start", "help", "consent", "accept", "decline", "ask", "webui", "test", "ping", "role", "setrole", "remember", "restart"} else None,
                 telegram_language_code=getattr(message.from_user, "language_code", None),
             ),
         )
         response = await command_def.handler(ctx)
+        if isinstance(response, RestartRequest):
+            if response.acknowledgement:
+                try:
+                    await asyncio.wait_for(
+                        self._send_text(message.chat.id, response.acknowledgement, message.message_thread_id),
+                        timeout=RESTART_ACK_TIMEOUT_SECONDS,
+                    )
+                except Exception:
+                    logger.exception("Restart acknowledgement failed; terminating anyway")
+            self.restart_terminator()
+            return
+
         if isinstance(response, dict):
             text = response.get("text")
             reply_markup = response.get("reply_markup")

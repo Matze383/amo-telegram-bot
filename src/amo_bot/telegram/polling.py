@@ -142,9 +142,8 @@ async def run_polling(
                         set_request_id(None)  # type: ignore[arg-type]
                     except Exception:
                         pass
-
-                offset = update_id + 1
-                offset_store.save(update_id)
+                    offset = update_id + 1
+                    offset_store.save(update_id)
 
         except TelegramRateLimitError as exc:
             log_event(
