@@ -123,7 +123,7 @@ class WorkerPluginManager:
     async def _run_worker(self, *, manifest: PluginManifest, run_id: str, started_at: datetime) -> None:
         plugin_entry = (Path(self._loader.plugins_dir) / manifest.name / "main.py").as_posix()
         worker_timeout_ms = int(manifest.worker.get("timeout_ms", 60_000)) if manifest.worker else 60_000
-        worker_timeout_ms = max(100, min(worker_timeout_ms, 60_000))
+        worker_timeout_ms = max(100, min(worker_timeout_ms, 600_000))
 
         while True:
             request = SandboxRequest.from_dict(
@@ -146,6 +146,7 @@ class WorkerPluginManager:
                 self._run_sandbox_request,
                 request,
                 worker_timeout_ms,
+                asyncio.get_running_loop(),
             )
             if response is None:
                 continue
@@ -155,9 +156,26 @@ class WorkerPluginManager:
             error_code = response.error_code or ""
             raise RuntimeError(response.error_message or error_code or "sandbox_worker_failed")
 
-    def _run_sandbox_request(self, request: SandboxRequest, worker_timeout_ms: int) -> SandboxResponse | None:
+    def _run_sandbox_request(
+        self,
+        request: SandboxRequest,
+        worker_timeout_ms: int,
+        loop: asyncio.AbstractEventLoop,
+    ) -> SandboxResponse | None:
+        def _handle_stream_event(event: dict[str, Any]) -> None:
+            if event.get("type") != "op":
+                return
+            op = event.get("op")
+            if not isinstance(op, dict):
+                return
+            future = asyncio.run_coroutine_threadsafe(self._apply_worker_op(op), loop)
+            future.result(timeout=max(1.0, worker_timeout_ms / 1000))
+
         try:
-            response = PluginSandboxRunner(base_timeout_ms=worker_timeout_ms, plugins_dir=self._loader.plugins_dir).run(request)
+            response = PluginSandboxRunner(base_timeout_ms=worker_timeout_ms, plugins_dir=self._loader.plugins_dir).run(
+                request,
+                stream_event_handler=_handle_stream_event,
+            )
         except SandboxRunnerError as exc:
             if exc.code == SandboxErrorCode.WORKER_TIMEOUT:
                 return None
@@ -166,6 +184,32 @@ class WorkerPluginManager:
         if isinstance(response, dict):
             response = SandboxResponse.from_dict(response)
         return response
+
+    async def _apply_worker_op(self, op: dict[str, Any]) -> None:
+        op_name = op.get("op")
+        chat_id = op.get("chat_id")
+        text = op.get("text")
+        if op_name == "send_message":
+            if not isinstance(chat_id, int) or not isinstance(text, str):
+                raise RuntimeError("invalid worker send_message op")
+            message_thread_id = op.get("message_thread_id")
+            if message_thread_id is not None:
+                if not isinstance(message_thread_id, int) or message_thread_id < 1:
+                    raise RuntimeError("invalid worker send_message op")
+                await self._send_message(chat_id, text, message_thread_id)  # type: ignore[misc]
+            else:
+                await self._send_message(chat_id, text)
+            return
+        if op_name == "reply":
+            message_id = op.get("message_id")
+            if not isinstance(chat_id, int) or not isinstance(message_id, int) or not isinstance(text, str):
+                raise RuntimeError("invalid worker reply op")
+            message_thread_id = op.get("message_thread_id")
+            if message_thread_id is not None and (not isinstance(message_thread_id, int) or message_thread_id < 1):
+                raise RuntimeError("invalid worker reply op")
+            await self._reply(chat_id, message_id, text, message_thread_id)
+            return
+        raise RuntimeError("invalid worker op")
 
     async def _finalize_worker_done(
         self,

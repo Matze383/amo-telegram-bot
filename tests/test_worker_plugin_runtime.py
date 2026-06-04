@@ -250,3 +250,66 @@ async def handle_worker(context, host_api):
     assert manager.state("worker_sync") == "running"
     assert manager.stop_sync("worker_sync", now=datetime(2030, 1, 1, tzinfo=timezone.utc)) is True
     assert manager.state("worker_sync") == "stopped"
+
+
+def test_worker_streaming_send_message_is_applied_before_timeout(tmp_path, monkeypatch) -> None:
+    db_url = f"sqlite:///{tmp_path / 'worker_streaming.db'}"
+    init_db(db_url)
+    loader = _write_worker_plugin(
+        tmp_path,
+        "worker_streaming",
+        """
+async def handle_worker(context, host_api):
+    return None
+""",
+    )
+    sf = create_session_factory(db_url)
+    with sf() as session:
+        repo = PluginRepository(session)
+        repo.sync_discovered(loader.discover().valid)
+        repo.activate("worker_streaming", actor_telegram_user_id=1)
+
+    sent: list[tuple[int, str, int | None]] = []
+
+    async def _send(chat_id: int, text: str, message_thread_id: int | None = None):
+        sent.append((chat_id, text, message_thread_id))
+        return {"ok": True}
+
+    async def _reply(chat_id: int, message_id: int, text: str, message_thread_id: int | None = None):
+        return {"ok": True}
+
+    calls = 0
+
+    def _fake_run(self, request: SandboxRequest, stream_event_handler=None) -> SandboxResponse:
+        nonlocal calls
+        calls += 1
+        if stream_event_handler is not None:
+            stream_event_handler(
+                {
+                    "type": "op",
+                    "op": {
+                        "op": "send_message",
+                        "chat_id": 123,
+                        "text": "streamed",
+                        "message_thread_id": 456,
+                    },
+                }
+            )
+        raise SandboxRunnerError(SandboxErrorCode.WORKER_TIMEOUT, "worker_timeout")
+
+    monkeypatch.setattr("amo_bot.plugins.worker_runtime.PluginSandboxRunner.run", _fake_run)
+
+    manager = WorkerPluginManager(loader=loader, session_factory=sf, send_message=_send, reply=_reply)
+
+    async def _run() -> None:
+        assert await manager.start("worker_streaming", now=datetime(2030, 1, 1, tzinfo=timezone.utc)) is True
+        for _ in range(30):
+            if sent:
+                break
+            await asyncio.sleep(0.1)
+        assert sent[0] == (123, "streamed", 456)
+        assert manager.state("worker_streaming") == "running"
+        assert await manager.stop("worker_streaming", now=datetime(2030, 1, 1, tzinfo=timezone.utc)) is True
+
+    asyncio.run(_run())
+    assert calls >= 1

@@ -1,0 +1,15 @@
+name: popgun
+version: "0.1.0"
+description: Topic-scoped crypto Popgun monitor for AMO Telegram Bot
+commands:
+  - popgun
+  - popgunadd
+worker:
+  restart_backoff_seconds: 60
+  timeout_ms: 360000
+required_roles:
+  - admin
+  - owner
+required_permissions:
+  - send_message
+settings_schema: {}

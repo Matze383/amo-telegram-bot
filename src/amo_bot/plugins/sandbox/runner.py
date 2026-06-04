@@ -326,6 +326,7 @@ class PluginSandboxRunner:
         self,
         proc: subprocess.Popen[str],
         timeout_s: float,
+        stream_event_handler=None,
     ) -> tuple[str, str]:
         assert proc.stdout is not None
         assert proc.stderr is not None
@@ -355,7 +356,7 @@ class PluginSandboxRunner:
 
                 for key, _ in events:
                     stream = key.fileobj
-                    chunk = stream.read(4096)
+                    chunk = stream.readline()
                     if chunk == "":
                         selector.unregister(stream)
                         continue
@@ -369,6 +370,8 @@ class PluginSandboxRunner:
                                 "worker_output_limit_exceeded",
                             )
                         stdout_chunks.append(chunk)
+                        if stream_event_handler is not None:
+                            self._handle_stream_chunk(chunk, stream_event_handler)
                     else:
                         stderr_size += size
                         if stderr_size > self._max_output_bytes:
@@ -382,7 +385,21 @@ class PluginSandboxRunner:
 
         return "".join(stdout_chunks), "".join(stderr_chunks)
 
+    @staticmethod
+    def _handle_stream_chunk(chunk: str, stream_event_handler) -> None:
+        for line in chunk.splitlines():
+            stripped = line.strip()
+            if not stripped:
+                continue
+            try:
+                parsed = json.loads(stripped)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(parsed, dict) and parsed.get("type") == "op":
+                stream_event_handler(parsed)
+
     def _parse_worker_response(self, stdout: str, request: SandboxRequest) -> SandboxResponse:
+        stdout = self._extract_final_response_json(stdout)
         try:
             parsed = json.loads(stdout)
         except json.JSONDecodeError as exc:
@@ -401,7 +418,23 @@ class PluginSandboxRunner:
 
         return response
 
-    def run(self, request: SandboxRequest) -> SandboxResponse:
+    @staticmethod
+    def _extract_final_response_json(stdout: str) -> str:
+        stripped = stdout.strip()
+        if not stripped:
+            return stripped
+        lines = [line.strip() for line in stripped.splitlines() if line.strip()]
+        for line in reversed(lines):
+            try:
+                parsed = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(parsed, dict) and parsed.get("type") == "op":
+                continue
+            return line
+        return stripped
+
+    def run(self, request: SandboxRequest, stream_event_handler=None) -> SandboxResponse:
         self._validate_request(request)
         payload = json.dumps(request.to_dict())
 
@@ -436,7 +469,11 @@ class PluginSandboxRunner:
         )
 
         try:
-            stdout, stderr = self._read_streams_with_limits(proc, timeout_s=effective_timeout_ms / 1000)
+            stdout, stderr = self._read_streams_with_limits(
+                proc,
+                timeout_s=effective_timeout_ms / 1000,
+                stream_event_handler=stream_event_handler,
+            )
         except SandboxRunnerError as exc:
             self._terminate_process_group(proc)
             try:
