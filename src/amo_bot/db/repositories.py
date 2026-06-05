@@ -8,6 +8,7 @@ from datetime import UTC, date, datetime, timedelta, timezone
 from typing import TYPE_CHECKING
 
 from sqlalchemy import and_, func, or_, select, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from amo_bot.auth.roles import Role
@@ -25,6 +26,9 @@ from amo_bot.db.models import (
     PluginPolicyAllowedGroup,
     PluginPolicyAllowedTopic,
     PluginPolicyOverride,
+    PopgunAlertState,
+    PopgunSetting,
+    PopgunTopicSetting,
     PrivateChatPolicy,
     PromptContextDoc,
     RetrievableMemory,
@@ -90,6 +94,16 @@ class PluginPolicyOverrideSnapshot:
     topics_mode: str
     allowed_group_ids: list[int]
     allowed_topics: list[tuple[int, int]]
+
+
+@dataclass(slots=True)
+class PopgunTopicSettingSnapshot:
+    chat_id: int
+    thread_id: int | None
+    enabled: bool
+    symbols: list[str]
+    timeframes: list[str]
+    updated_at: str
 
 
 PRIVATE_CHAT_THRESHOLD_ROLES: tuple[Role, ...] = (Role.OWNER, Role.ADMIN, Role.VIP, Role.NORMAL)
@@ -1274,6 +1288,193 @@ class ChatTopicRepository:
 
         self._session.commit()
         return topic
+
+
+class PopgunRepository:
+    DEFAULTS_KEY = "defaults"
+    LEGACY_IMPORT_KEY = "legacy_state_import"
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    @staticmethod
+    def topic_key(chat_id: int, thread_id: int | None) -> str:
+        return f"{chat_id}:{thread_id if thread_id is not None else 'root'}"
+
+    def ensure_defaults(self, *, symbols: list[str], timeframes: list[str]) -> None:
+        row = self._session.scalar(select(PopgunSetting).where(PopgunSetting.key == self.DEFAULTS_KEY))
+        if row is None:
+            self._session.add(
+                PopgunSetting(
+                    key=self.DEFAULTS_KEY,
+                    value_json=json.dumps(
+                        {"default_symbols": symbols, "default_timeframes": timeframes},
+                        sort_keys=True,
+                    ),
+                )
+            )
+            self._session.commit()
+
+    def set_defaults(self, *, symbols: list[str], timeframes: list[str]) -> None:
+        payload = json.dumps({"default_symbols": symbols, "default_timeframes": timeframes}, sort_keys=True)
+        row = self._session.scalar(select(PopgunSetting).where(PopgunSetting.key == self.DEFAULTS_KEY))
+        if row is None:
+            self._session.add(PopgunSetting(key=self.DEFAULTS_KEY, value_json=payload))
+        else:
+            row.value_json = payload
+            row.updated_at = datetime.now(timezone.utc)
+        self._session.commit()
+
+    def get_defaults(self, *, fallback_symbols: list[str], fallback_timeframes: list[str]) -> tuple[list[str], list[str]]:
+        row = self._session.scalar(select(PopgunSetting).where(PopgunSetting.key == self.DEFAULTS_KEY))
+        if row is None:
+            self.ensure_defaults(symbols=fallback_symbols, timeframes=fallback_timeframes)
+            return list(fallback_symbols), list(fallback_timeframes)
+        try:
+            payload = json.loads(row.value_json)
+        except json.JSONDecodeError:
+            return list(fallback_symbols), list(fallback_timeframes)
+        if not isinstance(payload, dict):
+            return list(fallback_symbols), list(fallback_timeframes)
+        symbols = payload.get("default_symbols")
+        timeframes = payload.get("default_timeframes")
+        return (
+            list(symbols) if isinstance(symbols, list) else list(fallback_symbols),
+            list(timeframes) if isinstance(timeframes, list) else list(fallback_timeframes),
+        )
+
+    def has_topics_or_alerts(self) -> bool:
+        topic_count = self._session.scalar(select(func.count()).select_from(PopgunTopicSetting)) or 0
+        alert_count = self._session.scalar(select(func.count()).select_from(PopgunAlertState)) or 0
+        return bool(topic_count or alert_count)
+
+    def is_legacy_import_completed(self) -> bool:
+        row = self._session.scalar(select(PopgunSetting).where(PopgunSetting.key == self.LEGACY_IMPORT_KEY))
+        return row is not None
+
+    def mark_legacy_import_completed(self, *, state_path: str, topics_count: int, alerts_count: int) -> None:
+        payload = json.dumps(
+            {
+                "state_path": state_path,
+                "topics_count": topics_count,
+                "alerts_count": alerts_count,
+                "imported_at": datetime.now(timezone.utc).isoformat(),
+            },
+            sort_keys=True,
+        )
+        row = self._session.scalar(select(PopgunSetting).where(PopgunSetting.key == self.LEGACY_IMPORT_KEY))
+        if row is None:
+            self._session.add(PopgunSetting(key=self.LEGACY_IMPORT_KEY, value_json=payload))
+        else:
+            row.value_json = payload
+            row.updated_at = datetime.now(timezone.utc)
+        self._session.commit()
+
+    def get_topic(self, *, chat_id: int, thread_id: int | None) -> PopgunTopicSettingSnapshot | None:
+        row = self._session.scalar(
+            select(PopgunTopicSetting).where(PopgunTopicSetting.topic_key == self.topic_key(chat_id, thread_id))
+        )
+        return self._snapshot(row) if row is not None else None
+
+    def upsert_topic(
+        self,
+        *,
+        chat_id: int,
+        thread_id: int | None,
+        enabled: bool,
+        symbols: list[str],
+        timeframes: list[str],
+    ) -> PopgunTopicSettingSnapshot:
+        key = self.topic_key(chat_id, thread_id)
+        row = self._session.scalar(select(PopgunTopicSetting).where(PopgunTopicSetting.topic_key == key))
+        if row is None:
+            row = PopgunTopicSetting(
+                topic_key=key,
+                chat_id=chat_id,
+                message_thread_id=thread_id,
+                enabled=enabled,
+                symbols_json=json.dumps(symbols, sort_keys=True),
+                timeframes_json=json.dumps(timeframes, sort_keys=True),
+            )
+            self._session.add(row)
+        else:
+            row.chat_id = chat_id
+            row.message_thread_id = thread_id
+            row.enabled = enabled
+            row.symbols_json = json.dumps(symbols, sort_keys=True)
+            row.timeframes_json = json.dumps(timeframes, sort_keys=True)
+            row.updated_at = datetime.now(timezone.utc)
+        self._session.commit()
+        self._session.refresh(row)
+        return self._snapshot(row)
+
+    def list_enabled_topics(self) -> list[PopgunTopicSettingSnapshot]:
+        rows = self._session.scalars(
+            select(PopgunTopicSetting)
+            .where(PopgunTopicSetting.enabled.is_(True))
+            .order_by(PopgunTopicSetting.chat_id.asc(), PopgunTopicSetting.message_thread_id.asc())
+        ).all()
+        return [snapshot for row in rows if (snapshot := self._snapshot(row)).symbols]
+
+    def record_alert_if_new(
+        self,
+        *,
+        chat_id: int,
+        thread_id: int | None,
+        symbol: str,
+        timeframe: str,
+        signal_timestamp: int,
+        inside_high: float | None,
+        inside_low: float | None,
+        outside_high: float | None,
+        outside_low: float | None,
+    ) -> bool:
+        key = self.topic_key(chat_id, thread_id)
+        self._session.add(
+            PopgunAlertState(
+                topic_key=key,
+                chat_id=chat_id,
+                message_thread_id=thread_id,
+                symbol=symbol,
+                timeframe=timeframe,
+                signal_timestamp=signal_timestamp,
+                inside_high=inside_high,
+                inside_low=inside_low,
+                outside_high=outside_high,
+                outside_low=outside_low,
+            )
+        )
+        try:
+            self._session.commit()
+        except IntegrityError:
+            self._session.rollback()
+            return False
+        return True
+
+    @staticmethod
+    def _json_list(value: str) -> list[str]:
+        try:
+            raw = json.loads(value)
+        except json.JSONDecodeError:
+            return []
+        if not isinstance(raw, list):
+            return []
+        return [item for item in raw if isinstance(item, str)]
+
+    def _snapshot(self, row: PopgunTopicSetting) -> PopgunTopicSettingSnapshot:
+        updated_at = row.updated_at
+        if updated_at is None:
+            updated_at_text = datetime.now(timezone.utc).isoformat()
+        else:
+            updated_at_text = updated_at.isoformat()
+        return PopgunTopicSettingSnapshot(
+            chat_id=row.chat_id,
+            thread_id=row.message_thread_id,
+            enabled=bool(row.enabled),
+            symbols=self._json_list(row.symbols_json),
+            timeframes=self._json_list(row.timeframes_json),
+            updated_at=updated_at_text,
+        )
 
 
 class PluginRepository:

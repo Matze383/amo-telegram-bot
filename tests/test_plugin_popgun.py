@@ -8,6 +8,10 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
+from amo_bot.db.base import create_session_factory
+from amo_bot.db.init_db import init_db
+from amo_bot.db.repositories import PopgunRepository
+
 
 def _load_popgun_module():
     module_path = Path(__file__).resolve().parents[1] / "plugins" / "popgun" / "main.py"
@@ -31,7 +35,41 @@ class _HostAPI:
         self.sent.append((chat_id, text, message_thread_id))
 
 
-def _context(*, command: str, argument: str, chat_id: int = 100, thread_id: int | None = 5, role: str = "admin"):
+def _db_url(tmp_path: Path, name: str) -> str:
+    db_url = f"sqlite:///{tmp_path / name}"
+    init_db(db_url)
+    return db_url
+
+
+def _seed_topic(
+    db_url: str,
+    *,
+    chat_id: int = 100,
+    thread_id: int | None,
+    enabled: bool,
+    symbols: list[str],
+    timeframes: list[str],
+) -> None:
+    with create_session_factory(db_url)() as session:
+        PopgunRepository(session).ensure_defaults(symbols=[], timeframes=timeframes)
+        PopgunRepository(session).upsert_topic(
+            chat_id=chat_id,
+            thread_id=thread_id,
+            enabled=enabled,
+            symbols=symbols,
+            timeframes=timeframes,
+        )
+
+
+def _context(
+    *,
+    command: str,
+    argument: str,
+    chat_id: int = 100,
+    thread_id: int | None = 5,
+    role: str = "admin",
+    database_url: str | None = None,
+):
     return SimpleNamespace(
         command_name=command,
         argument=argument,
@@ -40,6 +78,7 @@ def _context(*, command: str, argument: str, chat_id: int = 100, thread_id: int 
         message_thread_id=thread_id,
         user_id=123,
         role=role,
+        database_url=database_url,
     )
 
 
@@ -85,13 +124,24 @@ def test_popgun_fixed_timeframes_are_bybit_supported_and_skip_5m() -> None:
 
 def test_popgun_on_off_is_topic_scoped(tmp_path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
+    db_url = _db_url(tmp_path, "popgun_on_off.sqlite")
     popgun = _load_popgun_module()
     host = _HostAPI()
 
-    asyncio.run(popgun.handle_command(_context(command="popgun", argument="on", thread_id=10), host))
-    asyncio.run(popgun.handle_command(_context(command="popgun", argument="off", thread_id=11), host))
+    asyncio.run(
+        popgun.handle_command(
+            _context(command="popgun", argument="on", thread_id=10, database_url=db_url),
+            host,
+        )
+    )
+    asyncio.run(
+        popgun.handle_command(
+            _context(command="popgun", argument="off", thread_id=11, database_url=db_url),
+            host,
+        )
+    )
 
-    repo = popgun.PopgunStateRepository()
+    repo = popgun.PopgunStateRepository(database_url=db_url)
     topic_a = repo.get_topic(chat_id=100, thread_id=10)
     topic_b = repo.get_topic(chat_id=100, thread_id=11)
 
@@ -103,6 +153,7 @@ def test_popgun_on_off_is_topic_scoped(tmp_path, monkeypatch) -> None:
 
 def test_popgunadd_adds_one_symbol_for_current_topic_and_dedupes(tmp_path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
+    db_url = _db_url(tmp_path, "popgun_add.sqlite")
     popgun = _load_popgun_module()
 
     class _FakeClient:
@@ -115,10 +166,20 @@ def test_popgunadd_adds_one_symbol_for_current_topic_and_dedupes(tmp_path, monke
     monkeypatch.setattr(popgun, "CcxtCandleClient", _FakeClient)
     host = _HostAPI()
 
-    asyncio.run(popgun.handle_command(_context(command="popgunadd", argument="adausdt", thread_id=10), host))
-    asyncio.run(popgun.handle_command(_context(command="popgunadd", argument="ADAUSDT", thread_id=10), host))
+    asyncio.run(
+        popgun.handle_command(
+            _context(command="popgunadd", argument="adausdt", thread_id=10, database_url=db_url),
+            host,
+        )
+    )
+    asyncio.run(
+        popgun.handle_command(
+            _context(command="popgunadd", argument="ADAUSDT", thread_id=10, database_url=db_url),
+            host,
+        )
+    )
 
-    repo = popgun.PopgunStateRepository()
+    repo = popgun.PopgunStateRepository(database_url=db_url)
     topic = repo.get_topic(chat_id=100, thread_id=10)
     sibling = repo.get_topic(chat_id=100, thread_id=11)
 
@@ -132,6 +193,7 @@ def test_popgunadd_adds_one_symbol_for_current_topic_and_dedupes(tmp_path, monke
 
 def test_popgun_command_logging_includes_context_and_outcomes(tmp_path, monkeypatch, caplog) -> None:
     monkeypatch.chdir(tmp_path)
+    db_url = _db_url(tmp_path, "popgun_logging.sqlite")
     popgun = _load_popgun_module()
 
     class _FakeClient:
@@ -145,11 +207,36 @@ def test_popgun_command_logging_includes_context_and_outcomes(tmp_path, monkeypa
     caplog.set_level(logging.INFO, logger="amo.plugins.popgun")
     host = _HostAPI()
 
-    asyncio.run(popgun.handle_command(_context(command="popgun", argument="on", thread_id=10), host))
-    asyncio.run(popgun.handle_command(_context(command="popgunadd", argument="ADAUSDT", thread_id=10), host))
-    asyncio.run(popgun.handle_command(_context(command="popgunadd", argument="ADAUSDT", thread_id=10), host))
-    asyncio.run(popgun.handle_command(_context(command="popgunadd", argument="bad", thread_id=10), host))
-    asyncio.run(popgun.handle_command(_context(command="popgun", argument="on", role="normal", thread_id=10), host))
+    asyncio.run(
+        popgun.handle_command(
+            _context(command="popgun", argument="on", thread_id=10, database_url=db_url),
+            host,
+        )
+    )
+    asyncio.run(
+        popgun.handle_command(
+            _context(command="popgunadd", argument="ADAUSDT", thread_id=10, database_url=db_url),
+            host,
+        )
+    )
+    asyncio.run(
+        popgun.handle_command(
+            _context(command="popgunadd", argument="ADAUSDT", thread_id=10, database_url=db_url),
+            host,
+        )
+    )
+    asyncio.run(
+        popgun.handle_command(
+            _context(command="popgunadd", argument="bad", thread_id=10, database_url=db_url),
+            host,
+        )
+    )
+    asyncio.run(
+        popgun.handle_command(
+            _context(command="popgun", argument="on", role="normal", thread_id=10, database_url=db_url),
+            host,
+        )
+    )
 
     received = [record for record in caplog.records if record.msg == "popgun command received"]
     handled = [record for record in caplog.records if record.msg == "popgun command handled"]
@@ -174,16 +261,23 @@ def test_popgun_command_logging_includes_context_and_outcomes(tmp_path, monkeypa
 
 def test_popgun_rejects_non_manager(tmp_path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
+    db_url = _db_url(tmp_path, "popgun_reject.sqlite")
     popgun = _load_popgun_module()
     host = _HostAPI()
 
-    asyncio.run(popgun.handle_command(_context(command="popgun", argument="on", role="normal"), host))
+    asyncio.run(
+        popgun.handle_command(
+            _context(command="popgun", argument="on", role="normal", database_url=db_url),
+            host,
+        )
+    )
 
     assert host.replies == [(100, 99, "Nur Admins/Owner dürfen Popgun verwalten.")]
 
 
 def test_popgun_state_logging_for_unreadable_and_malformed_topics(tmp_path, monkeypatch, caplog) -> None:
     monkeypatch.chdir(tmp_path)
+    db_url = _db_url(tmp_path, "popgun_legacy.sqlite")
     popgun = _load_popgun_module()
     state_dir = tmp_path / "data" / "plugin_state" / "popgun"
     state_dir.mkdir(parents=True)
@@ -191,7 +285,7 @@ def test_popgun_state_logging_for_unreadable_and_malformed_topics(tmp_path, monk
 
     caplog.set_level(logging.DEBUG, logger="amo.plugins.popgun")
     state_path.write_text("{not-json", encoding="utf-8")
-    assert popgun.PopgunStateRepository().list_enabled_topics() == []
+    assert popgun.PopgunStateRepository(database_url=db_url).list_enabled_topics() == []
 
     unreadable = next(record for record in caplog.records if record.msg == "popgun state unreadable; using empty state")
     assert unreadable.error_class == "JSONDecodeError"
@@ -219,13 +313,120 @@ def test_popgun_state_logging_for_unreadable_and_malformed_topics(tmp_path, monk
         encoding="utf-8",
     )
 
-    topics = popgun.PopgunStateRepository().list_enabled_topics()
+    topics = popgun.PopgunStateRepository(database_url=db_url).list_enabled_topics()
 
     assert len(topics) == 1
     assert topics[0].symbols == ["BTCUSDT"]
     assert topics[0].timeframes == popgun.DEFAULT_TIMEFRAMES
-    assert any(record.msg == "popgun topic state dropped" and record.topic_key == "bad" for record in caplog.records)
-    assert any(record.msg == "popgun topic state normalized" and record.topic_key == "100:10" for record in caplog.records)
+    assert any(
+        record.msg == "popgun topic state dropped" and record.topic_key == "bad"
+        for record in caplog.records
+    )
+    assert any(
+        record.msg == "popgun topic state normalized" and record.topic_key == "100:10"
+        for record in caplog.records
+    )
+
+
+def test_popgun_legacy_state_imports_defaults_and_alerts_idempotently(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    db_url = _db_url(tmp_path, "popgun_legacy_import.sqlite")
+    popgun = _load_popgun_module()
+    state_dir = tmp_path / "data" / "plugin_state" / "popgun"
+    state_dir.mkdir(parents=True)
+    (state_dir / "state.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "default_symbols": ["eth/usdt", "bad"],
+                "default_timeframes": ["15m", "1h", "5m"],
+                "topics": {
+                    "100:root": {
+                        "chat_id": 100,
+                        "thread_id": None,
+                        "enabled": True,
+                        "symbols": [],
+                        "timeframes": ["legacy"],
+                        "updated_at": "2030-01-01T00:00:00+00:00",
+                    },
+                },
+                "alerts": {"100:root:ETHUSDT:15m": 123},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    repo = popgun.PopgunStateRepository(database_url=db_url)
+    topic = repo.get_topic(chat_id=100, thread_id=None)
+    assert topic is not None
+    assert topic.symbols == ["ETHUSDT"]
+    assert topic.timeframes == popgun.DEFAULT_TIMEFRAMES
+
+    signal = popgun.PopgunSignal(
+        symbol="ETHUSDT",
+        timeframe="15m",
+        timestamp=123,
+        inside_high=10,
+        inside_low=5,
+        outside_high=11,
+        outside_low=4,
+    )
+    assert repo.is_new_signal(topic=topic, signal=signal) is False
+
+    popgun.PopgunStateRepository(database_url=db_url)
+    with create_session_factory(db_url)() as session:
+        assert PopgunRepository(session).record_alert_if_new(
+            chat_id=100,
+            thread_id=None,
+            symbol="ETHUSDT",
+            timeframe="15m",
+            signal_timestamp=123,
+            inside_high=None,
+            inside_low=None,
+            outside_high=None,
+            outside_low=None,
+        ) is False
+
+
+def test_popgun_legacy_import_does_not_overwrite_existing_sql_topic(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    db_url = _db_url(tmp_path, "popgun_legacy_preserve_sql.sqlite")
+    popgun = _load_popgun_module()
+    _seed_topic(
+        db_url,
+        thread_id=10,
+        enabled=True,
+        symbols=["BTCUSDT"],
+        timeframes=list(popgun.DEFAULT_TIMEFRAMES),
+    )
+    state_dir = tmp_path / "data" / "plugin_state" / "popgun"
+    state_dir.mkdir(parents=True)
+    (state_dir / "state.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "default_symbols": ["ETHUSDT"],
+                "topics": {
+                    "100:10": {
+                        "chat_id": 100,
+                        "thread_id": 10,
+                        "enabled": False,
+                        "symbols": ["ETHUSDT"],
+                        "updated_at": "2030-01-01T00:00:00+00:00",
+                    }
+                },
+                "alerts": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    repo = popgun.PopgunStateRepository(database_url=db_url)
+    topic = repo.get_topic(chat_id=100, thread_id=10)
+
+    assert topic is not None
+    assert topic.enabled is True
+    assert topic.symbols == ["BTCUSDT"]
 
 
 def test_popgun_build_fetch_plan_dedupes_shared_topic_symbols() -> None:
@@ -266,8 +467,9 @@ def test_popgun_build_fetch_plan_dedupes_shared_topic_symbols() -> None:
 
 def test_popgun_signal_dedupe_is_topic_symbol_timeframe_scoped(tmp_path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
+    db_url = _db_url(tmp_path, "popgun_dedupe.sqlite")
     popgun = _load_popgun_module()
-    repo = popgun.PopgunStateRepository()
+    repo = popgun.PopgunStateRepository(database_url=db_url)
     topic = repo.set_enabled(chat_id=100, thread_id=10, enabled=True)
     signal = popgun.PopgunSignal(
         symbol="BTCUSDT",
@@ -287,41 +489,28 @@ def test_popgun_signal_dedupe_is_topic_symbol_timeframe_scoped(tmp_path, monkeyp
 
 def test_popgun_worker_fetches_globally_and_fans_out_to_subscribed_topics(tmp_path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
+    db_url = _db_url(tmp_path, "popgun_worker_fanout.sqlite")
     popgun = _load_popgun_module()
-    repo = popgun.PopgunStateRepository()
-    repo._save(
-        {
-            "version": 1,
-            "default_symbols": [],
-            "default_timeframes": [],
-            "topics": {
-                "100:10": {
-                    "chat_id": 100,
-                    "thread_id": 10,
-                    "enabled": True,
-                    "symbols": ["BTCUSDT", "ETHUSDT"],
-                    "timeframes": ["5m"],
-                    "updated_at": "2030-01-01T00:00:00+00:00",
-                },
-                "100:11": {
-                    "chat_id": 100,
-                    "thread_id": 11,
-                    "enabled": True,
-                    "symbols": ["BTCUSDT"],
-                    "timeframes": ["15m"],
-                    "updated_at": "2030-01-01T00:00:00+00:00",
-                },
-                "100:12": {
-                    "chat_id": 100,
-                    "thread_id": 12,
-                    "enabled": True,
-                    "symbols": ["XRPUSDT"],
-                    "timeframes": ["15m"],
-                    "updated_at": "2030-01-01T00:00:00+00:00",
-                },
-            },
-            "alerts": {},
-        }
+    _seed_topic(
+        db_url,
+        thread_id=10,
+        enabled=True,
+        symbols=["BTCUSDT", "ETHUSDT"],
+        timeframes=list(popgun.DEFAULT_TIMEFRAMES),
+    )
+    _seed_topic(
+        db_url,
+        thread_id=11,
+        enabled=True,
+        symbols=["BTCUSDT"],
+        timeframes=list(popgun.DEFAULT_TIMEFRAMES),
+    )
+    _seed_topic(
+        db_url,
+        thread_id=12,
+        enabled=True,
+        symbols=["XRPUSDT"],
+        timeframes=list(popgun.DEFAULT_TIMEFRAMES),
     )
     calls: list[tuple[str, str]] = []
 
@@ -354,7 +543,7 @@ def test_popgun_worker_fetches_globally_and_fans_out_to_subscribed_topics(tmp_pa
     host = _HostAPI()
 
     try:
-        asyncio.run(popgun.handle_worker(SimpleNamespace(), host))
+        asyncio.run(popgun.handle_worker(SimpleNamespace(database_url=db_url), host))
     except asyncio.CancelledError:
         pass
 
@@ -366,8 +555,9 @@ def test_popgun_worker_fetches_globally_and_fans_out_to_subscribed_topics(tmp_pa
 
 def test_popgun_worker_dedupes_alerts_per_topic_independently(tmp_path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
+    db_url = _db_url(tmp_path, "popgun_worker_dedupe.sqlite")
     popgun = _load_popgun_module()
-    repo = popgun.PopgunStateRepository()
+    repo = popgun.PopgunStateRepository(database_url=db_url)
     topic_with_seen_signal = popgun.TopicConfig(
         chat_id=100,
         thread_id=10,
@@ -386,29 +576,8 @@ def test_popgun_worker_dedupes_alerts_per_topic_independently(tmp_path, monkeypa
         outside_low=6,
     )
     assert repo.is_new_signal(topic=topic_with_seen_signal, signal=seen_signal) is True
-    repo._save(
-        {
-            **repo._load(),
-            "topics": {
-                "100:10": {
-                    "chat_id": 100,
-                    "thread_id": 10,
-                    "enabled": True,
-                    "symbols": ["BTCUSDT"],
-                    "timeframes": ["15m"],
-                    "updated_at": "2030-01-01T00:00:00+00:00",
-                },
-                "100:11": {
-                    "chat_id": 100,
-                    "thread_id": 11,
-                    "enabled": True,
-                    "symbols": ["BTCUSDT"],
-                    "timeframes": ["15m"],
-                    "updated_at": "2030-01-01T00:00:00+00:00",
-                },
-            },
-        }
-    )
+    _seed_topic(db_url, thread_id=10, enabled=True, symbols=["BTCUSDT"], timeframes=list(popgun.DEFAULT_TIMEFRAMES))
+    _seed_topic(db_url, thread_id=11, enabled=True, symbols=["BTCUSDT"], timeframes=list(popgun.DEFAULT_TIMEFRAMES))
 
     class _FakeClient:
         exchange_id = "bybit"
@@ -434,7 +603,7 @@ def test_popgun_worker_dedupes_alerts_per_topic_independently(tmp_path, monkeypa
     host = _HostAPI()
 
     try:
-        asyncio.run(popgun.handle_worker(SimpleNamespace(), host))
+        asyncio.run(popgun.handle_worker(SimpleNamespace(database_url=db_url), host))
     except asyncio.CancelledError:
         pass
 
@@ -443,25 +612,14 @@ def test_popgun_worker_dedupes_alerts_per_topic_independently(tmp_path, monkeypa
 
 def test_popgun_worker_logs_signal_alert_failure_and_summary(tmp_path, monkeypatch, caplog) -> None:
     monkeypatch.chdir(tmp_path)
+    db_url = _db_url(tmp_path, "popgun_worker_logs.sqlite")
     popgun = _load_popgun_module()
-    repo = popgun.PopgunStateRepository()
-    repo._save(
-        {
-            "version": 1,
-            "default_symbols": [],
-            "default_timeframes": [],
-            "topics": {
-                "100:10": {
-                    "chat_id": 100,
-                    "thread_id": 10,
-                    "enabled": True,
-                    "symbols": ["BTCUSDT", "ETHUSDT"],
-                    "timeframes": ["15m"],
-                    "updated_at": "2030-01-01T00:00:00+00:00",
-                },
-            },
-            "alerts": {},
-        }
+    _seed_topic(
+        db_url,
+        thread_id=10,
+        enabled=True,
+        symbols=["BTCUSDT", "ETHUSDT"],
+        timeframes=list(popgun.DEFAULT_TIMEFRAMES),
     )
 
     class _FakeClient:
@@ -491,7 +649,7 @@ def test_popgun_worker_logs_signal_alert_failure_and_summary(tmp_path, monkeypat
     host = _HostAPI()
 
     try:
-        asyncio.run(popgun.handle_worker(SimpleNamespace(), host))
+        asyncio.run(popgun.handle_worker(SimpleNamespace(database_url=db_url), host))
     except asyncio.CancelledError:
         pass
 

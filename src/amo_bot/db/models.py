@@ -237,6 +237,59 @@ class PluginPolicyAllowedTopic(Base):
     message_thread_id: Mapped[int] = mapped_column(Integer, nullable=False)
 
 
+class PopgunSetting(Base):
+    __tablename__ = "popgun_settings"
+    __table_args__ = (UniqueConstraint("key", name="uq_popgun_settings_key"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    key: Mapped[str] = mapped_column(String(64), nullable=False)
+    value_json: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+
+class PopgunTopicSetting(Base):
+    __tablename__ = "popgun_topic_settings"
+    __table_args__ = (UniqueConstraint("topic_key", name="uq_popgun_topic_settings_topic_key"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    topic_key: Mapped[str] = mapped_column(String(96), nullable=False, index=True)
+    chat_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    message_thread_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="0")
+    symbols_json: Mapped[str] = mapped_column(Text, nullable=False)
+    timeframes_json: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+
+class PopgunAlertState(Base):
+    __tablename__ = "popgun_alert_states"
+    __table_args__ = (
+        UniqueConstraint(
+            "topic_key",
+            "symbol",
+            "timeframe",
+            "signal_timestamp",
+            name="uq_popgun_alert_state_signal",
+        ),
+        Index("ix_popgun_alert_states_topic_symbol_tf", "topic_key", "symbol", "timeframe"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    topic_key: Mapped[str] = mapped_column(String(96), nullable=False)
+    chat_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    message_thread_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    symbol: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    timeframe: Mapped[str] = mapped_column(String(16), nullable=False)
+    signal_timestamp: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    inside_high: Mapped[float | None] = mapped_column(Float, nullable=True)
+    inside_low: Mapped[float | None] = mapped_column(Float, nullable=True)
+    outside_high: Mapped[float | None] = mapped_column(Float, nullable=True)
+    outside_low: Mapped[float | None] = mapped_column(Float, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
 DEFAULT_ROLES: list[tuple[Role, int]] = [
     (Role.OWNER, 0),
     (Role.ADMIN, 10),

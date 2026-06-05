@@ -5,11 +5,15 @@ import json
 import logging
 import re
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
+
+from amo_bot.config.settings import get_settings
+from amo_bot.db.base import create_session_factory
+from amo_bot.db.repositories import PopgunRepository
 
 LOGGER = logging.getLogger("amo.plugins.popgun")
 BERLIN_TZ = ZoneInfo("Europe/Berlin")
@@ -153,14 +157,20 @@ class FetchJob:
 
 
 class PopgunStateRepository:
-    def __init__(self, base_dir: str | Path = PLUGIN_STATE_DIR) -> None:
+    def __init__(
+        self,
+        base_dir: str | Path = PLUGIN_STATE_DIR,
+        database_url: str | None = None,
+    ) -> None:
         self._base_dir = Path(base_dir)
-        self._base_dir.mkdir(parents=True, exist_ok=True)
         self._state_path = self._base_dir / "state.json"
+        self._database_url = database_url or get_settings().database_url
+        self._session_factory = create_session_factory(self._database_url)
+        self._ensure_sql_defaults_and_migrate_legacy()
 
     @staticmethod
     def topic_key(chat_id: int, thread_id: int | None) -> str:
-        return f"{chat_id}:{thread_id if thread_id is not None else 'root'}"
+        return PopgunRepository.topic_key(chat_id, thread_id)
 
     def _default_state(self) -> dict[str, Any]:
         return {
@@ -171,9 +181,9 @@ class PopgunStateRepository:
             "alerts": {},
         }
 
-    def _load(self) -> dict[str, Any]:
+    def _load_from_file(self) -> dict[str, Any] | None:
         if not self._state_path.exists():
-            return self._default_state()
+            return None
         try:
             raw = json.loads(self._state_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
@@ -181,13 +191,13 @@ class PopgunStateRepository:
                 "popgun state unreadable; using empty state",
                 extra={"state_path": str(self._state_path), "error_class": type(exc).__name__},
             )
-            return self._default_state()
+            return None
         if not isinstance(raw, dict):
             LOGGER.debug(
                 "popgun state malformed; using empty state",
                 extra={"state_path": str(self._state_path), "value_type": type(raw).__name__},
             )
-            return self._default_state()
+            return None
         raw.setdefault("version", 1)
         raw.setdefault("default_symbols", list(DEFAULT_SYMBOLS))
         raw.setdefault("default_timeframes", list(DEFAULT_TIMEFRAMES))
@@ -195,9 +205,8 @@ class PopgunStateRepository:
         raw.setdefault("alerts", {})
         return raw
 
-    def _save(self, state: dict[str, Any]) -> None:
-        self._base_dir.mkdir(parents=True, exist_ok=True)
-        self._state_path.write_text(json.dumps(state, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+    def _load(self) -> dict[str, Any]:
+        return self._load_from_file() or self._default_state()
 
     def _coerce_topic(self, key: str, value: Any) -> TopicConfig | None:
         if not isinstance(value, dict):
@@ -225,51 +234,169 @@ class PopgunStateRepository:
             updated_at=str(value.get("updated_at") or datetime.now(UTC).isoformat()),
         )
 
-    def get_topic(self, *, chat_id: int, thread_id: int | None, create: bool = False) -> TopicConfig | None:
-        state = self._load()
-        key = self.topic_key(chat_id, thread_id)
-        raw = state["topics"].get(key)
-        topic = self._coerce_topic(key, raw)
-        if topic is not None:
-            normalized = asdict(topic)
-            if raw != normalized:
-                LOGGER.debug("popgun topic state normalized", extra={"topic_key": key})
-                state["topics"][key] = normalized
-                self._save(state)
-            return topic
-        if raw is not None:
-            LOGGER.debug(
-                "popgun topic state malformed",
-                extra={"topic_key": key, "value_type": type(raw).__name__},
+    def _ensure_sql_defaults_and_migrate_legacy(self) -> None:
+        with self._session_factory() as session:
+            repository = PopgunRepository(session)
+            has_sql_state = repository.has_topics_or_alerts()
+            repository.ensure_defaults(symbols=list(DEFAULT_SYMBOLS), timeframes=list(DEFAULT_TIMEFRAMES))
+            if not self._state_path.exists() or repository.is_legacy_import_completed():
+                return
+
+        legacy_state = self._load_from_file()
+        if legacy_state is None:
+            return
+
+        topics = legacy_state.get("topics")
+        alerts = legacy_state.get("alerts")
+        if not isinstance(topics, dict):
+            topics = {}
+        if not isinstance(alerts, dict):
+            alerts = {}
+        default_symbols_raw = legacy_state.get("default_symbols")
+        normalized_defaults = normalize_symbol_list(
+            default_symbols_raw if isinstance(default_symbols_raw, list) else []
+        ) or list(DEFAULT_SYMBOLS)
+        normalized_timeframes = list(DEFAULT_TIMEFRAMES)
+        has_custom_defaults = normalized_defaults != list(DEFAULT_SYMBOLS)
+        if not topics and not alerts and not has_custom_defaults:
+            return
+
+        imported_topics = 0
+        imported_alerts = 0
+        skipped_topics = 0
+        with self._session_factory() as session:
+            repository = PopgunRepository(session)
+            if not has_sql_state:
+                repository.set_defaults(symbols=normalized_defaults, timeframes=normalized_timeframes)
+            for key, value in topics.items():
+                topic = self._coerce_topic(str(key), value)
+                if topic is None:
+                    LOGGER.debug(
+                        "popgun topic state dropped",
+                        extra={"topic_key": str(key), "value_type": type(value).__name__},
+                    )
+                    continue
+                if not topic.symbols:
+                    topic.symbols = list(normalized_defaults)
+                topic.timeframes = list(normalized_timeframes)
+                normalized_topic = {
+                    "chat_id": topic.chat_id,
+                    "thread_id": topic.thread_id,
+                    "enabled": topic.enabled,
+                    "symbols": topic.symbols,
+                    "timeframes": topic.timeframes,
+                    "updated_at": topic.updated_at,
+                }
+                if value != normalized_topic:
+                    LOGGER.debug("popgun topic state normalized", extra={"topic_key": str(key)})
+                if repository.get_topic(chat_id=topic.chat_id, thread_id=topic.thread_id) is not None:
+                    skipped_topics += 1
+                    LOGGER.info(
+                        "popgun legacy topic skipped; sql topic already exists",
+                        extra={"topic_key": str(key)},
+                    )
+                    continue
+                repository.upsert_topic(
+                    chat_id=topic.chat_id,
+                    thread_id=topic.thread_id,
+                    enabled=topic.enabled,
+                    symbols=topic.symbols,
+                    timeframes=topic.timeframes,
+                )
+                imported_topics += 1
+
+            for key, timestamp in alerts.items():
+                imported_alerts += self._import_legacy_alert(repository, str(key), timestamp)
+
+            repository.mark_legacy_import_completed(
+                state_path=str(self._state_path),
+                topics_count=imported_topics,
+                alerts_count=imported_alerts,
             )
-        if not create:
-            return None
-        topic = TopicConfig(
-            chat_id=chat_id,
-            thread_id=thread_id,
-            enabled=False,
-            symbols=normalize_symbol_list(state.get("default_symbols") or DEFAULT_SYMBOLS),
-            timeframes=list(DEFAULT_TIMEFRAMES),
-            updated_at=datetime.now(UTC).isoformat(),
+
+        LOGGER.info(
+            "popgun legacy state imported",
+            extra={
+                "state_path": str(self._state_path),
+                "topics_count": imported_topics,
+                "skipped_topics_count": skipped_topics,
+                "alerts_count": imported_alerts,
+            },
         )
-        state["topics"][key] = asdict(topic)
-        self._save(state)
-        return topic
+
+    def _import_legacy_alert(self, repository: PopgunRepository, key: str, timestamp: Any) -> int:
+        try:
+            topic_key, symbol_raw, timeframe_raw = key.rsplit(":", 2)
+            chat_raw, thread_raw = topic_key.split(":", 1)
+            chat_id = int(chat_raw)
+            thread_id = None if thread_raw == "root" else int(thread_raw)
+            symbol = normalize_symbol(symbol_raw)
+            timeframe = normalize_timeframe(timeframe_raw)
+            signal_timestamp = int(timestamp)
+        except (TypeError, ValueError):
+            LOGGER.debug("popgun legacy alert state dropped", extra={"alert_key": key})
+            return 0
+
+        return int(
+            repository.record_alert_if_new(
+                chat_id=chat_id,
+                thread_id=thread_id,
+                symbol=symbol,
+                timeframe=timeframe,
+                signal_timestamp=signal_timestamp,
+                inside_high=None,
+                inside_low=None,
+                outside_high=None,
+                outside_low=None,
+            )
+        )
+
+    @staticmethod
+    def _from_snapshot(snapshot: Any) -> TopicConfig:
+        return TopicConfig(
+            chat_id=snapshot.chat_id,
+            thread_id=snapshot.thread_id,
+            enabled=snapshot.enabled,
+            symbols=normalize_symbol_list(snapshot.symbols),
+            timeframes=normalize_timeframe_list(snapshot.timeframes),
+            updated_at=snapshot.updated_at,
+        )
+
+    def get_topic(self, *, chat_id: int, thread_id: int | None, create: bool = False) -> TopicConfig | None:
+        with self._session_factory() as session:
+            repository = PopgunRepository(session)
+            snapshot = repository.get_topic(chat_id=chat_id, thread_id=thread_id)
+            if snapshot is not None:
+                return self._from_snapshot(snapshot)
+            if not create:
+                return None
+            default_symbols, default_timeframes = repository.get_defaults(
+                fallback_symbols=list(DEFAULT_SYMBOLS),
+                fallback_timeframes=list(DEFAULT_TIMEFRAMES),
+            )
+            snapshot = repository.upsert_topic(
+                chat_id=chat_id,
+                thread_id=thread_id,
+                enabled=False,
+                symbols=normalize_symbol_list(default_symbols),
+                timeframes=normalize_timeframe_list(default_timeframes),
+            )
+            return self._from_snapshot(snapshot)
 
     def set_enabled(self, *, chat_id: int, thread_id: int | None, enabled: bool) -> TopicConfig:
-        state = self._load()
-        key = self.topic_key(chat_id, thread_id)
         topic = self.get_topic(chat_id=chat_id, thread_id=thread_id, create=True)
         assert topic is not None
-        topic.enabled = enabled
-        topic.updated_at = datetime.now(UTC).isoformat()
-        state["topics"][key] = asdict(topic)
-        self._save(state)
-        return topic
+        with self._session_factory() as session:
+            snapshot = PopgunRepository(session).upsert_topic(
+                chat_id=chat_id,
+                thread_id=thread_id,
+                enabled=enabled,
+                symbols=topic.symbols,
+                timeframes=list(DEFAULT_TIMEFRAMES),
+            )
+            return self._from_snapshot(snapshot)
 
     def add_symbol(self, *, chat_id: int, thread_id: int | None, symbol: str) -> tuple[TopicConfig, bool]:
-        state = self._load()
-        key = self.topic_key(chat_id, thread_id)
         topic = self.get_topic(chat_id=chat_id, thread_id=thread_id, create=True)
         assert topic is not None
         normalized = normalize_symbol(symbol)
@@ -277,46 +404,33 @@ class PopgunStateRepository:
         if created:
             topic.symbols.append(normalized)
             topic.symbols = sorted(topic.symbols)
-            topic.updated_at = datetime.now(UTC).isoformat()
-            state["topics"][key] = asdict(topic)
-            self._save(state)
-        return topic, created
+        with self._session_factory() as session:
+            snapshot = PopgunRepository(session).upsert_topic(
+                chat_id=chat_id,
+                thread_id=thread_id,
+                enabled=topic.enabled,
+                symbols=topic.symbols,
+                timeframes=list(DEFAULT_TIMEFRAMES),
+            )
+            return self._from_snapshot(snapshot), created
 
     def list_enabled_topics(self) -> list[TopicConfig]:
-        state = self._load()
-        topics: list[TopicConfig] = []
-        changed = False
-        for key, value in list(state.get("topics", {}).items()):
-            topic = self._coerce_topic(key, value)
-            if topic is None:
-                LOGGER.debug(
-                    "popgun topic state dropped",
-                    extra={"topic_key": key, "value_type": type(value).__name__},
-                )
-                state["topics"].pop(key, None)
-                changed = True
-                continue
-            if topic.enabled and topic.symbols:
-                topics.append(topic)
-            normalized = asdict(topic)
-            if value != normalized:
-                LOGGER.debug("popgun topic state normalized", extra={"topic_key": key})
-                state["topics"][key] = normalized
-                changed = True
-        if changed:
-            self._save(state)
-        return sorted(topics, key=lambda item: (item.chat_id, item.thread_id or -1))
+        with self._session_factory() as session:
+            return [self._from_snapshot(snapshot) for snapshot in PopgunRepository(session).list_enabled_topics()]
 
     def is_new_signal(self, *, topic: TopicConfig, signal: PopgunSignal) -> bool:
-        state = self._load()
-        topic_key = self.topic_key(topic.chat_id, topic.thread_id)
-        key = f"{topic_key}:{signal.symbol}:{signal.timeframe}"
-        last_timestamp = state.setdefault("alerts", {}).get(key)
-        if last_timestamp == signal.timestamp:
-            return False
-        state["alerts"][key] = signal.timestamp
-        self._save(state)
-        return True
+        with self._session_factory() as session:
+            return PopgunRepository(session).record_alert_if_new(
+                chat_id=topic.chat_id,
+                thread_id=topic.thread_id,
+                symbol=signal.symbol,
+                timeframe=signal.timeframe,
+                signal_timestamp=signal.timestamp,
+                inside_high=signal.inside_high,
+                inside_low=signal.inside_low,
+                outside_high=signal.outside_high,
+                outside_low=signal.outside_low,
+            )
 
 
 def normalize_symbol(raw: str) -> str:
@@ -338,6 +452,27 @@ def normalize_symbol_list(values: list[Any]) -> list[str]:
         if normalized not in out:
             out.append(normalized)
     return sorted(out)
+
+
+def normalize_timeframe(raw: str) -> str:
+    normalized = (raw or "").strip()
+    if normalized not in FIXED_TIMEFRAMES:
+        raise ValueError("invalid_timeframe")
+    return normalized
+
+
+def normalize_timeframe_list(values: list[Any]) -> list[str]:
+    out: list[str] = []
+    for value in values:
+        if not isinstance(value, str):
+            continue
+        try:
+            normalized = normalize_timeframe(value)
+        except ValueError:
+            continue
+        if normalized not in out:
+            out.append(normalized)
+    return out or list(DEFAULT_TIMEFRAMES)
 
 
 def build_fetch_plan(topics: list[TopicConfig]) -> list[FetchJob]:
@@ -376,7 +511,11 @@ def _is_manager(context: Any) -> bool:
 
 
 def _format_signal(signal: PopgunSignal) -> str:
-    readable_time = datetime.fromtimestamp(signal.timestamp / 1000, tz=UTC).astimezone(BERLIN_TZ).strftime("%d.%m.%Y %H:%M")
+    readable_time = (
+        datetime.fromtimestamp(signal.timestamp / 1000, tz=UTC)
+        .astimezone(BERLIN_TZ)
+        .strftime("%d.%m.%Y %H:%M")
+    )
     return (
         f"[POPGUN] {signal.symbol} {signal.timeframe}\n"
         f"{readable_time}\n"
@@ -386,7 +525,7 @@ def _format_signal(signal: PopgunSignal) -> str:
 
 
 async def handle_command(context: Any, host_api: Any) -> None:
-    repo = PopgunStateRepository()
+    repo = PopgunStateRepository(database_url=_get(context, "database_url", None))
     command = str(_get(context, "command_name", "")).strip().lower()
     argument = str(_get(context, "argument", "") or "").strip()
     chat_id = int(_get(context, "chat_id"))
@@ -486,7 +625,7 @@ async def handle_command(context: Any, host_api: Any) -> None:
 
 
 async def handle_worker(context: Any, host_api: Any) -> dict[str, Any]:
-    repo = PopgunStateRepository()
+    repo = PopgunStateRepository(database_url=_get(context, "database_url", None))
     detector = PopgunDetector()
     poll_interval_seconds = 60
     candle_limit = 5
