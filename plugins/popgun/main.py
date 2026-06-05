@@ -18,8 +18,8 @@ from amo_bot.db.repositories import PopgunRepository
 LOGGER = logging.getLogger("amo.plugins.popgun")
 BERLIN_TZ = ZoneInfo("Europe/Berlin")
 PLUGIN_STATE_DIR = Path("data") / "plugin_state" / "popgun"
-POPGUN_EXCHANGE_ID = "binanceusdm"
-POPGUN_EXCHANGE_NAME = "Binance USD-M Futures/Perps"
+POPGUN_EXCHANGE_ID = "bybit"
+POPGUN_EXCHANGE_NAME = "Bybit USDT Futures/Perps"
 DEFAULT_SYMBOLS = [
     "BTCUSDT",
     "ETHUSDT",
@@ -97,7 +97,15 @@ class CcxtCandleClient:
             raise ValueError(f"Unbekannte Exchange: {exchange_id}")
         self._ccxt = ccxt
         self.exchange_id = exchange_id
-        exchange_config: dict[str, object] = {"enableRateLimit": True, "timeout": 1500}
+        exchange_config: dict[str, object] = {
+            "enableRateLimit": True,
+            "timeout": 1500,
+            "options": {
+                "defaultType": "swap",
+                "defaultSubType": "linear",
+                "settle": "USDT",
+            },
+        }
         if rate_limit_ms is not None:
             exchange_config["rateLimit"] = rate_limit_ms
         self.exchange = exchange_class(exchange_config)
@@ -136,14 +144,22 @@ class CcxtCandleClient:
         return symbol
 
     def resolve_symbol(self, symbol: str) -> str:
-        if symbol in self.exchange.markets:
+        if symbol in self.exchange.markets and self._is_supported_usdt_swap(symbol):
             return symbol
 
         normalized = self.normalize_exchange_symbol(symbol)
-        if normalized in self.exchange.markets:
+        if normalized in self.exchange.markets and self._is_supported_usdt_swap(normalized):
             return normalized
 
         raise self._ccxt.BadSymbol(f"Symbol nicht gefunden: {symbol}")
+
+    def _is_supported_usdt_swap(self, symbol: str) -> bool:
+        market = self.exchange.markets.get(symbol, {})
+        if not isinstance(market, dict) or not market:
+            return True
+        quote = str(market.get("quote") or "").upper()
+        settle = str(market.get("settle") or market.get("settleId") or "").upper()
+        return bool(market.get("swap")) and bool(market.get("linear")) and quote == "USDT" and settle == "USDT"
 
 
 @dataclass(slots=True)
