@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import re
+import time
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -24,6 +25,14 @@ DEFAULT_SYMBOLS = [
 ]
 DEFAULT_TIMEFRAMES = ["5m", "15m", "30m", "1h", "2h", "4h", "6h", "12h", "1d", "1w", "1M"]
 SYMBOL_RE = re.compile(r"^[A-Z0-9]{2,20}USDT$")
+
+
+def _topic_log_extra(*, chat_id: int, thread_id: int | None, **values: Any) -> dict[str, Any]:
+    return {
+        "chat_id": chat_id,
+        "thread_id": thread_id,
+        **values,
+    }
 
 
 @dataclass(slots=True)
@@ -160,10 +169,17 @@ class PopgunStateRepository:
             return self._default_state()
         try:
             raw = json.loads(self._state_path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
-            LOGGER.warning("popgun state unreadable; using empty state")
+        except (OSError, json.JSONDecodeError) as exc:
+            LOGGER.warning(
+                "popgun state unreadable; using empty state",
+                extra={"state_path": str(self._state_path), "error_class": type(exc).__name__},
+            )
             return self._default_state()
         if not isinstance(raw, dict):
+            LOGGER.debug(
+                "popgun state malformed; using empty state",
+                extra={"state_path": str(self._state_path), "value_type": type(raw).__name__},
+            )
             return self._default_state()
         raw.setdefault("version", 1)
         raw.setdefault("default_symbols", list(DEFAULT_SYMBOLS))
@@ -215,9 +231,15 @@ class PopgunStateRepository:
         if topic is not None:
             normalized = asdict(topic)
             if raw != normalized:
+                LOGGER.debug("popgun topic state normalized", extra={"topic_key": key})
                 state["topics"][key] = normalized
                 self._save(state)
             return topic
+        if raw is not None:
+            LOGGER.debug(
+                "popgun topic state malformed",
+                extra={"topic_key": key, "value_type": type(raw).__name__},
+            )
         if not create:
             return None
         topic = TopicConfig(
@@ -265,6 +287,10 @@ class PopgunStateRepository:
         for key, value in list(state.get("topics", {}).items()):
             topic = self._coerce_topic(key, value)
             if topic is None:
+                LOGGER.debug(
+                    "popgun topic state dropped",
+                    extra={"topic_key": key, "value_type": type(value).__name__},
+                )
                 state["topics"].pop(key, None)
                 changed = True
                 continue
@@ -272,6 +298,7 @@ class PopgunStateRepository:
                 topics.append(topic)
             normalized = asdict(topic)
             if value != normalized:
+                LOGGER.debug("popgun topic state normalized", extra={"topic_key": key})
                 state["topics"][key] = normalized
                 changed = True
         if changed:
@@ -344,15 +371,24 @@ async def handle_command(context: Any, host_api: Any) -> None:
     message_id = int(_get(context, "message_id"))
     thread_id = _get(context, "message_thread_id", None)
     thread_id = int(thread_id) if thread_id is not None else None
+    role = _role_name(context)
+    base_extra = _topic_log_extra(chat_id=chat_id, thread_id=thread_id, command=command, role=role)
+
+    LOGGER.info("popgun command received", extra=base_extra)
 
     if not _is_manager(context):
         await host_api.reply(chat_id, message_id, "Nur Admins/Owner dürfen Popgun verwalten.")
+        LOGGER.info("popgun command handled", extra={**base_extra, "outcome": "unauthorized"})
         return
 
     if command == "popgun":
         action = argument.lower()
         if action not in {"on", "off"}:
             await host_api.reply(chat_id, message_id, "Verwendung: /popgun on oder /popgun off")
+            LOGGER.info(
+                "popgun command handled",
+                extra={**base_extra, "outcome": "invalid_usage", "action": action},
+            )
             return
         topic = repo.set_enabled(chat_id=chat_id, thread_id=thread_id, enabled=action == "on")
         status = "aktiviert" if topic.enabled else "deaktiviert"
@@ -361,32 +397,70 @@ async def handle_command(context: Any, host_api: Any) -> None:
             message_id,
             f"Popgun ist für dieses Topic {status}. Coins: {', '.join(topic.symbols) if topic.symbols else 'keine'}",
         )
+        LOGGER.info(
+            "popgun command handled",
+            extra={
+                **base_extra,
+                "outcome": "state_changed",
+                "action": action,
+                "enabled": topic.enabled,
+                "symbol_count": len(topic.symbols),
+            },
+        )
         return
 
     if command == "popgunadd":
         parts = argument.split()
         if len(parts) != 1:
             await host_api.reply(chat_id, message_id, "Verwendung: /popgunadd BTCUSDT")
+            LOGGER.info(
+                "popgun command handled",
+                extra={**base_extra, "outcome": "invalid_usage", "action": "add"},
+            )
             return
         try:
             symbol = normalize_symbol(parts[0])
         except ValueError:
             await host_api.reply(chat_id, message_id, "Ungültiges Symbol. Beispiel: /popgunadd BTCUSDT")
+            LOGGER.info(
+                "popgun command handled",
+                extra={**base_extra, "outcome": "invalid_symbol", "action": "add"},
+            )
             return
         try:
             CcxtCandleClient(exchange_id="bybit").resolve_symbol(symbol)
         except Exception as exc:
-            LOGGER.warning("popgun symbol validation failed", extra={"symbol": symbol, "error": type(exc).__name__})
+            LOGGER.warning(
+                "popgun symbol validation failed",
+                extra={**base_extra, "symbol": symbol, "error_class": type(exc).__name__},
+            )
             await host_api.reply(chat_id, message_id, f"Symbol nicht auf Bybit gefunden: {symbol}")
+            LOGGER.info(
+                "popgun command handled",
+                extra={**base_extra, "outcome": "symbol_not_found", "action": "add", "symbol": symbol},
+            )
             return
         topic, created = repo.add_symbol(chat_id=chat_id, thread_id=thread_id, symbol=symbol)
         if created:
             await host_api.reply(chat_id, message_id, f"{symbol} wurde für dieses Topic hinzugefügt.")
+            outcome = "symbol_added"
         else:
             await host_api.reply(chat_id, message_id, f"{symbol} ist in diesem Topic bereits vorhanden.")
+            outcome = "symbol_already_present"
+        LOGGER.info(
+            "popgun command handled",
+            extra={
+                **base_extra,
+                "outcome": outcome,
+                "action": "add",
+                "symbol": symbol,
+                "symbol_count": len(topic.symbols),
+            },
+        )
         return
 
     await host_api.reply(chat_id, message_id, "Unbekannter Popgun-Befehl.")
+    LOGGER.info("popgun command handled", extra={**base_extra, "outcome": "unknown_command"})
 
 
 async def handle_worker(context: Any, host_api: Any) -> dict[str, Any]:
@@ -403,26 +477,75 @@ async def handle_worker(context: Any, host_api: Any) -> dict[str, Any]:
         LOGGER.exception("popgun worker failed to initialize exchange")
         raise RuntimeError(f"exchange_init_failed:{type(exc).__name__}") from exc
 
+    LOGGER.info(
+        "popgun worker initialized",
+        extra={
+            "poll_interval_seconds": poll_interval_seconds,
+            "candle_limit": candle_limit,
+            "request_pause_seconds": request_pause_seconds,
+            "batch_pause_seconds": batch_pause_seconds,
+            "exchange_id": candle_client.exchange_id,
+        },
+    )
+
     while True:
+        loop_started = time.monotonic()
         topics = repo.list_enabled_topics()
+        scans_attempted = 0
+        signals_found = 0
+        alerts_sent = 0
+        errors_count = 0
         for topic in topics:
             for symbol in topic.symbols:
                 for timeframe in topic.timeframes:
+                    scans_attempted += 1
                     try:
                         candles = candle_client.fetch_candles(symbol=symbol, timeframe=timeframe, limit=candle_limit)
                         signal = detector.detect_latest(symbol=symbol, timeframe=timeframe, candles=candles)
                     except Exception as exc:
+                        errors_count += 1
                         LOGGER.warning(
                             "popgun scan failed",
-                            extra={"symbol": symbol, "timeframe": timeframe, "error": type(exc).__name__},
+                            extra={
+                                **_topic_log_extra(chat_id=topic.chat_id, thread_id=topic.thread_id),
+                                "symbol": symbol,
+                                "timeframe": timeframe,
+                                "error_class": type(exc).__name__,
+                            },
                         )
                         continue
-                    if signal is not None and repo.is_new_signal(topic=topic, signal=signal):
+                    if signal is not None:
+                        signals_found += 1
+                        signal_extra = {
+                            **_topic_log_extra(chat_id=topic.chat_id, thread_id=topic.thread_id),
+                            "symbol": signal.symbol,
+                            "timeframe": signal.timeframe,
+                            "signal_timestamp": signal.timestamp,
+                        }
+                        LOGGER.debug("popgun signal detected", extra=signal_extra)
+                        if not repo.is_new_signal(topic=topic, signal=signal):
+                            LOGGER.debug("popgun duplicate signal skipped", extra=signal_extra)
+                            await asyncio.sleep(request_pause_seconds)
+                            continue
                         await host_api.send_message(
                             topic.chat_id,
                             _format_signal(signal),
                             message_thread_id=topic.thread_id,
                         )
+                        alerts_sent += 1
+                        LOGGER.info("popgun alert sent", extra=signal_extra)
                     await asyncio.sleep(request_pause_seconds)
             await asyncio.sleep(batch_pause_seconds)
+        duration_ms = round((time.monotonic() - loop_started) * 1000, 2)
+        LOGGER.info(
+            "popgun worker loop summary",
+            extra={
+                "enabled_topics_count": len(topics),
+                "scans_attempted": scans_attempted,
+                "signals_found": signals_found,
+                "alerts_sent": alerts_sent,
+                "errors_count": errors_count,
+                "duration_ms": duration_ms,
+            },
+        )
         await asyncio.sleep(poll_interval_seconds)
