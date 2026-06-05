@@ -120,6 +120,7 @@ def test_popgun_fixed_timeframes_are_bybit_usdt_futures_supported_and_skip_5m() 
 
     assert popgun.POPGUN_EXCHANGE_ID == "bybit"
     assert popgun.POPGUN_EXCHANGE_NAME == "Bybit USDT Futures/Perps"
+    assert popgun.DEFAULT_SYMBOLS == ["BTCUSDT", "PAXGUSDT"]
     assert popgun.DEFAULT_TIMEFRAMES == ["15m", "30m", "1h", "2h", "4h", "6h", "12h", "1d", "1w", "1M"]
     assert "5m" not in popgun.DEFAULT_TIMEFRAMES
 
@@ -452,7 +453,7 @@ def test_popgun_legacy_state_imports_defaults_and_alerts_idempotently(tmp_path, 
     repo = popgun.PopgunStateRepository(database_url=db_url)
     topic = repo.get_topic(chat_id=100, thread_id=None)
     assert topic is not None
-    assert topic.symbols == ["ETHUSDT"]
+    assert topic.symbols == ["BTCUSDT", "PAXGUSDT"]
     assert topic.timeframes == popgun.DEFAULT_TIMEFRAMES
 
     signal = popgun.PopgunSignal(
@@ -479,6 +480,38 @@ def test_popgun_legacy_state_imports_defaults_and_alerts_idempotently(tmp_path, 
             outside_high=None,
             outside_low=None,
         ) is False
+
+
+def test_popgun_sql_defaults_update_without_overwriting_existing_topic_symbols(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    db_url = _db_url(tmp_path, "popgun_sql_defaults_preserve_topics.sqlite")
+    popgun = _load_popgun_module()
+    old_default_symbols = ["BTCUSDT", "ETHUSDT", "XRPUSDT", "XLMUSDT", "SOLUSDT", "PAXGUSDT", "XAGUSDT"]
+    _seed_topic(
+        db_url,
+        thread_id=10,
+        enabled=True,
+        symbols=["BTCUSDT", "ETHUSDT", "SOLUSDT"],
+        timeframes=list(popgun.DEFAULT_TIMEFRAMES),
+    )
+    with create_session_factory(db_url)() as session:
+        PopgunRepository(session).set_defaults(
+            symbols=old_default_symbols,
+            timeframes=list(popgun.DEFAULT_TIMEFRAMES),
+        )
+
+    repo = popgun.PopgunStateRepository(database_url=db_url)
+    topic = repo.get_topic(chat_id=100, thread_id=10)
+
+    assert topic is not None
+    assert topic.symbols == ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
+    with create_session_factory(db_url)() as session:
+        default_symbols, default_timeframes = PopgunRepository(session).get_defaults(
+            fallback_symbols=[],
+            fallback_timeframes=[],
+        )
+    assert default_symbols == ["BTCUSDT", "PAXGUSDT"]
+    assert default_timeframes == popgun.DEFAULT_TIMEFRAMES
 
 
 def test_popgun_legacy_import_does_not_overwrite_existing_sql_topic(tmp_path, monkeypatch) -> None:

@@ -22,12 +22,7 @@ POPGUN_EXCHANGE_ID = "bybit"
 POPGUN_EXCHANGE_NAME = "Bybit USDT Futures/Perps"
 DEFAULT_SYMBOLS = [
     "BTCUSDT",
-    "ETHUSDT",
-    "XRPUSDT",
-    "XLMUSDT",
-    "SOLUSDT",
     "PAXGUSDT",
-    "XAGUSDT",
 ]
 FIXED_TIMEFRAMES = ["15m", "30m", "1h", "2h", "4h", "6h", "12h", "1d", "1w", "1M"]
 DEFAULT_TIMEFRAMES = FIXED_TIMEFRAMES
@@ -260,7 +255,12 @@ class PopgunStateRepository:
         with self._session_factory() as session:
             repository = PopgunRepository(session)
             has_sql_state = repository.has_topics_or_alerts()
-            repository.ensure_defaults(symbols=list(DEFAULT_SYMBOLS), timeframes=list(DEFAULT_TIMEFRAMES))
+            default_symbols, default_timeframes = repository.get_defaults(
+                fallback_symbols=list(DEFAULT_SYMBOLS),
+                fallback_timeframes=list(DEFAULT_TIMEFRAMES),
+            )
+            if default_symbols != list(DEFAULT_SYMBOLS) or default_timeframes != list(DEFAULT_TIMEFRAMES):
+                repository.set_defaults(symbols=list(DEFAULT_SYMBOLS), timeframes=list(DEFAULT_TIMEFRAMES))
             if not self._state_path.exists() or repository.is_legacy_import_completed():
                 return
 
@@ -274,13 +274,9 @@ class PopgunStateRepository:
             topics = {}
         if not isinstance(alerts, dict):
             alerts = {}
-        default_symbols_raw = legacy_state.get("default_symbols")
-        normalized_defaults = normalize_symbol_list(
-            default_symbols_raw if isinstance(default_symbols_raw, list) else []
-        ) or list(DEFAULT_SYMBOLS)
+        normalized_defaults = list(DEFAULT_SYMBOLS)
         normalized_timeframes = list(DEFAULT_TIMEFRAMES)
-        has_custom_defaults = normalized_defaults != list(DEFAULT_SYMBOLS)
-        if not topics and not alerts and not has_custom_defaults:
+        if not topics and not alerts:
             return
 
         imported_topics = 0
