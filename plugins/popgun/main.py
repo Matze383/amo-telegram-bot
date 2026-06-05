@@ -23,7 +23,8 @@ DEFAULT_SYMBOLS = [
     "PAXGUSDT",
     "XAGUSDT",
 ]
-DEFAULT_TIMEFRAMES = ["5m", "15m", "30m", "1h", "2h", "4h", "6h", "12h", "1d", "1w", "1M"]
+FIXED_TIMEFRAMES = ["15m", "30m", "1h", "2h", "4h", "6h", "12h", "1d", "1w", "1M"]
+DEFAULT_TIMEFRAMES = FIXED_TIMEFRAMES
 SYMBOL_RE = re.compile(r"^[A-Z0-9]{2,20}USDT$")
 
 
@@ -145,6 +146,12 @@ class TopicConfig:
     updated_at: str
 
 
+@dataclass(frozen=True, slots=True)
+class FetchJob:
+    symbol: str
+    timeframe: str
+
+
 class PopgunStateRepository:
     def __init__(self, base_dir: str | Path = PLUGIN_STATE_DIR) -> None:
         self._base_dir = Path(base_dir)
@@ -209,17 +216,12 @@ class PopgunStateRepository:
                 return None
         symbols_raw = value.get("symbols")
         symbols = normalize_symbol_list(symbols_raw if isinstance(symbols_raw, list) else [])
-        timeframes_raw = value.get("timeframes")
-        timeframes = [str(item).strip() for item in timeframes_raw] if isinstance(timeframes_raw, list) else []
-        timeframes = [item for item in timeframes if item]
-        if not timeframes:
-            timeframes = list(DEFAULT_TIMEFRAMES)
         return TopicConfig(
             chat_id=chat_id,
             thread_id=thread_id,
             enabled=bool(value.get("enabled", False)),
             symbols=symbols,
-            timeframes=timeframes,
+            timeframes=list(DEFAULT_TIMEFRAMES),
             updated_at=str(value.get("updated_at") or datetime.now(UTC).isoformat()),
         )
 
@@ -247,7 +249,7 @@ class PopgunStateRepository:
             thread_id=thread_id,
             enabled=False,
             symbols=normalize_symbol_list(state.get("default_symbols") or DEFAULT_SYMBOLS),
-            timeframes=[str(item) for item in (state.get("default_timeframes") or DEFAULT_TIMEFRAMES)],
+            timeframes=list(DEFAULT_TIMEFRAMES),
             updated_at=datetime.now(UTC).isoformat(),
         )
         state["topics"][key] = asdict(topic)
@@ -336,6 +338,26 @@ def normalize_symbol_list(values: list[Any]) -> list[str]:
         if normalized not in out:
             out.append(normalized)
     return sorted(out)
+
+
+def build_fetch_plan(topics: list[TopicConfig]) -> list[FetchJob]:
+    jobs: list[FetchJob] = []
+    seen: set[tuple[str, str]] = set()
+    for topic in topics:
+        if not topic.enabled:
+            continue
+        for symbol in topic.symbols:
+            for timeframe in DEFAULT_TIMEFRAMES:
+                key = (symbol, timeframe)
+                if key in seen:
+                    continue
+                seen.add(key)
+                jobs.append(FetchJob(symbol=symbol, timeframe=timeframe))
+    return jobs
+
+
+def topics_subscribed_to_symbol(topics: list[TopicConfig], symbol: str) -> list[TopicConfig]:
+    return [topic for topic in topics if topic.enabled and symbol in topic.symbols]
 
 
 def _get(context: Any, key: str, default: Any = None) -> Any:
@@ -491,58 +513,71 @@ async def handle_worker(context: Any, host_api: Any) -> dict[str, Any]:
     while True:
         loop_started = time.monotonic()
         topics = repo.list_enabled_topics()
+        fetch_jobs = build_fetch_plan(topics)
         scans_attempted = 0
         signals_found = 0
+        fanout_topics_count = 0
         alerts_sent = 0
         errors_count = 0
-        for topic in topics:
-            for symbol in topic.symbols:
-                for timeframe in topic.timeframes:
-                    scans_attempted += 1
-                    try:
-                        candles = candle_client.fetch_candles(symbol=symbol, timeframe=timeframe, limit=candle_limit)
-                        signal = detector.detect_latest(symbol=symbol, timeframe=timeframe, candles=candles)
-                    except Exception as exc:
-                        errors_count += 1
-                        LOGGER.warning(
-                            "popgun scan failed",
-                            extra={
-                                **_topic_log_extra(chat_id=topic.chat_id, thread_id=topic.thread_id),
-                                "symbol": symbol,
-                                "timeframe": timeframe,
-                                "error_class": type(exc).__name__,
-                            },
-                        )
+        for job in fetch_jobs:
+            scans_attempted += 1
+            try:
+                candles = candle_client.fetch_candles(symbol=job.symbol, timeframe=job.timeframe, limit=candle_limit)
+                signal = detector.detect_latest(symbol=job.symbol, timeframe=job.timeframe, candles=candles)
+            except Exception as exc:
+                errors_count += 1
+                LOGGER.warning(
+                    "popgun scan failed",
+                    extra={
+                        "symbol": job.symbol,
+                        "timeframe": job.timeframe,
+                        "error_class": type(exc).__name__,
+                    },
+                )
+                await asyncio.sleep(request_pause_seconds)
+                continue
+            if signal is not None:
+                signals_found += 1
+                fanout_topics = topics_subscribed_to_symbol(topics, signal.symbol)
+                fanout_topics_count += len(fanout_topics)
+                LOGGER.debug(
+                    "popgun signal detected",
+                    extra={
+                        "symbol": signal.symbol,
+                        "timeframe": signal.timeframe,
+                        "signal_timestamp": signal.timestamp,
+                        "fanout_topics_count": len(fanout_topics),
+                    },
+                )
+                for topic in fanout_topics:
+                    signal_extra = {
+                        **_topic_log_extra(chat_id=topic.chat_id, thread_id=topic.thread_id),
+                        "symbol": signal.symbol,
+                        "timeframe": signal.timeframe,
+                        "signal_timestamp": signal.timestamp,
+                    }
+                    if not repo.is_new_signal(topic=topic, signal=signal):
+                        LOGGER.debug("popgun duplicate signal skipped", extra=signal_extra)
                         continue
-                    if signal is not None:
-                        signals_found += 1
-                        signal_extra = {
-                            **_topic_log_extra(chat_id=topic.chat_id, thread_id=topic.thread_id),
-                            "symbol": signal.symbol,
-                            "timeframe": signal.timeframe,
-                            "signal_timestamp": signal.timestamp,
-                        }
-                        LOGGER.debug("popgun signal detected", extra=signal_extra)
-                        if not repo.is_new_signal(topic=topic, signal=signal):
-                            LOGGER.debug("popgun duplicate signal skipped", extra=signal_extra)
-                            await asyncio.sleep(request_pause_seconds)
-                            continue
-                        await host_api.send_message(
-                            topic.chat_id,
-                            _format_signal(signal),
-                            message_thread_id=topic.thread_id,
-                        )
-                        alerts_sent += 1
-                        LOGGER.info("popgun alert sent", extra=signal_extra)
-                    await asyncio.sleep(request_pause_seconds)
+                    await host_api.send_message(
+                        topic.chat_id,
+                        _format_signal(signal),
+                        message_thread_id=topic.thread_id,
+                    )
+                    alerts_sent += 1
+                    LOGGER.info("popgun alert sent", extra=signal_extra)
+            await asyncio.sleep(request_pause_seconds)
+        if topics:
             await asyncio.sleep(batch_pause_seconds)
         duration_ms = round((time.monotonic() - loop_started) * 1000, 2)
         LOGGER.info(
             "popgun worker loop summary",
             extra={
                 "enabled_topics_count": len(topics),
+                "fetch_jobs_count": len(fetch_jobs),
                 "scans_attempted": scans_attempted,
                 "signals_found": signals_found,
+                "fanout_topics_count": fanout_topics_count,
                 "alerts_sent": alerts_sent,
                 "errors_count": errors_count,
                 "duration_ms": duration_ms,

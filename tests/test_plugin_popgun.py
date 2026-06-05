@@ -76,6 +76,13 @@ def test_popgun_detector_ignores_negative_cases() -> None:
     ) is None
 
 
+def test_popgun_fixed_timeframes_are_bybit_supported_and_skip_5m() -> None:
+    popgun = _load_popgun_module()
+
+    assert popgun.DEFAULT_TIMEFRAMES == ["15m", "30m", "1h", "2h", "4h", "6h", "12h", "1d", "1w", "1M"]
+    assert "5m" not in popgun.DEFAULT_TIMEFRAMES
+
+
 def test_popgun_on_off_is_topic_scoped(tmp_path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
     popgun = _load_popgun_module()
@@ -221,6 +228,42 @@ def test_popgun_state_logging_for_unreadable_and_malformed_topics(tmp_path, monk
     assert any(record.msg == "popgun topic state normalized" and record.topic_key == "100:10" for record in caplog.records)
 
 
+def test_popgun_build_fetch_plan_dedupes_shared_topic_symbols() -> None:
+    popgun = _load_popgun_module()
+    topics = [
+        popgun.TopicConfig(
+            chat_id=100,
+            thread_id=10,
+            enabled=True,
+            symbols=["BTCUSDT", "ETHUSDT"],
+            timeframes=["legacy"],
+            updated_at="2030-01-01T00:00:00+00:00",
+        ),
+        popgun.TopicConfig(
+            chat_id=100,
+            thread_id=11,
+            enabled=True,
+            symbols=["BTCUSDT"],
+            timeframes=["legacy"],
+            updated_at="2030-01-01T00:00:00+00:00",
+        ),
+        popgun.TopicConfig(
+            chat_id=100,
+            thread_id=12,
+            enabled=False,
+            symbols=["XRPUSDT"],
+            timeframes=["legacy"],
+            updated_at="2030-01-01T00:00:00+00:00",
+        ),
+    ]
+
+    jobs = popgun.build_fetch_plan(topics)
+
+    assert len(jobs) == 2 * len(popgun.DEFAULT_TIMEFRAMES)
+    assert jobs.count(popgun.FetchJob(symbol="BTCUSDT", timeframe="15m")) == 1
+    assert popgun.FetchJob(symbol="XRPUSDT", timeframe="15m") not in jobs
+
+
 def test_popgun_signal_dedupe_is_topic_symbol_timeframe_scoped(tmp_path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
     popgun = _load_popgun_module()
@@ -240,6 +283,162 @@ def test_popgun_signal_dedupe_is_topic_symbol_timeframe_scoped(tmp_path, monkeyp
     assert repo.is_new_signal(topic=topic, signal=signal) is False
     other_topic = repo.set_enabled(chat_id=100, thread_id=11, enabled=True)
     assert repo.is_new_signal(topic=other_topic, signal=signal) is True
+
+
+def test_popgun_worker_fetches_globally_and_fans_out_to_subscribed_topics(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    popgun = _load_popgun_module()
+    repo = popgun.PopgunStateRepository()
+    repo._save(
+        {
+            "version": 1,
+            "default_symbols": [],
+            "default_timeframes": [],
+            "topics": {
+                "100:10": {
+                    "chat_id": 100,
+                    "thread_id": 10,
+                    "enabled": True,
+                    "symbols": ["BTCUSDT", "ETHUSDT"],
+                    "timeframes": ["5m"],
+                    "updated_at": "2030-01-01T00:00:00+00:00",
+                },
+                "100:11": {
+                    "chat_id": 100,
+                    "thread_id": 11,
+                    "enabled": True,
+                    "symbols": ["BTCUSDT"],
+                    "timeframes": ["15m"],
+                    "updated_at": "2030-01-01T00:00:00+00:00",
+                },
+                "100:12": {
+                    "chat_id": 100,
+                    "thread_id": 12,
+                    "enabled": True,
+                    "symbols": ["XRPUSDT"],
+                    "timeframes": ["15m"],
+                    "updated_at": "2030-01-01T00:00:00+00:00",
+                },
+            },
+            "alerts": {},
+        }
+    )
+    calls: list[tuple[str, str]] = []
+
+    class _FakeClient:
+        exchange_id = "bybit"
+
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        def fetch_candles(self, *, symbol: str, timeframe: str, limit: int) -> list:
+            calls.append((symbol, timeframe))
+            if symbol == "BTCUSDT" and timeframe == "15m":
+                return [
+                    popgun.Candle(timestamp=1, open=10, high=20, low=5, close=12, volume=1),
+                    popgun.Candle(timestamp=2, open=12, high=18, low=7, close=13, volume=1),
+                    popgun.Candle(timestamp=3, open=13, high=19, low=6, close=14, volume=1),
+                ]
+            return [
+                popgun.Candle(timestamp=1, open=10, high=20, low=5, close=12, volume=1),
+                popgun.Candle(timestamp=2, open=12, high=21, low=7, close=13, volume=1),
+                popgun.Candle(timestamp=3, open=13, high=22, low=6, close=14, volume=1),
+            ]
+
+    async def _fake_sleep(seconds: float) -> None:
+        if seconds == 300:
+            raise asyncio.CancelledError
+
+    monkeypatch.setattr(popgun, "CcxtCandleClient", _FakeClient)
+    monkeypatch.setattr(popgun.asyncio, "sleep", _fake_sleep)
+    host = _HostAPI()
+
+    try:
+        asyncio.run(popgun.handle_worker(SimpleNamespace(), host))
+    except asyncio.CancelledError:
+        pass
+
+    assert calls.count(("BTCUSDT", "15m")) == 1
+    assert len(calls) == 3 * len(popgun.DEFAULT_TIMEFRAMES)
+    assert [message[2] for message in host.sent] == [10, 11]
+    assert all("BTCUSDT 15m" in message[1] for message in host.sent)
+
+
+def test_popgun_worker_dedupes_alerts_per_topic_independently(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    popgun = _load_popgun_module()
+    repo = popgun.PopgunStateRepository()
+    topic_with_seen_signal = popgun.TopicConfig(
+        chat_id=100,
+        thread_id=10,
+        enabled=True,
+        symbols=["BTCUSDT"],
+        timeframes=list(popgun.DEFAULT_TIMEFRAMES),
+        updated_at="2030-01-01T00:00:00+00:00",
+    )
+    seen_signal = popgun.PopgunSignal(
+        symbol="BTCUSDT",
+        timeframe="15m",
+        timestamp=3,
+        inside_high=18,
+        inside_low=7,
+        outside_high=19,
+        outside_low=6,
+    )
+    assert repo.is_new_signal(topic=topic_with_seen_signal, signal=seen_signal) is True
+    repo._save(
+        {
+            **repo._load(),
+            "topics": {
+                "100:10": {
+                    "chat_id": 100,
+                    "thread_id": 10,
+                    "enabled": True,
+                    "symbols": ["BTCUSDT"],
+                    "timeframes": ["15m"],
+                    "updated_at": "2030-01-01T00:00:00+00:00",
+                },
+                "100:11": {
+                    "chat_id": 100,
+                    "thread_id": 11,
+                    "enabled": True,
+                    "symbols": ["BTCUSDT"],
+                    "timeframes": ["15m"],
+                    "updated_at": "2030-01-01T00:00:00+00:00",
+                },
+            },
+        }
+    )
+
+    class _FakeClient:
+        exchange_id = "bybit"
+
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        def fetch_candles(self, *, symbol: str, timeframe: str, limit: int) -> list:
+            if timeframe == "15m":
+                return [
+                    popgun.Candle(timestamp=1, open=10, high=20, low=5, close=12, volume=1),
+                    popgun.Candle(timestamp=2, open=12, high=18, low=7, close=13, volume=1),
+                    popgun.Candle(timestamp=3, open=13, high=19, low=6, close=14, volume=1),
+                ]
+            return []
+
+    async def _fake_sleep(seconds: float) -> None:
+        if seconds == 300:
+            raise asyncio.CancelledError
+
+    monkeypatch.setattr(popgun, "CcxtCandleClient", _FakeClient)
+    monkeypatch.setattr(popgun.asyncio, "sleep", _fake_sleep)
+    host = _HostAPI()
+
+    try:
+        asyncio.run(popgun.handle_worker(SimpleNamespace(), host))
+    except asyncio.CancelledError:
+        pass
+
+    assert [message[2] for message in host.sent] == [11]
 
 
 def test_popgun_worker_logs_signal_alert_failure_and_summary(tmp_path, monkeypatch, caplog) -> None:
@@ -272,8 +471,10 @@ def test_popgun_worker_logs_signal_alert_failure_and_summary(tmp_path, monkeypat
             pass
 
         def fetch_candles(self, *, symbol: str, timeframe: str, limit: int) -> list:
-            if symbol == "ETHUSDT":
+            if symbol == "ETHUSDT" and timeframe == "15m":
                 raise RuntimeError("exchange unavailable")
+            if timeframe != "15m":
+                return []
             return [
                 popgun.Candle(timestamp=1, open=10, high=20, low=5, close=12, volume=1),
                 popgun.Candle(timestamp=2, open=12, high=18, low=7, close=13, volume=1),
@@ -306,11 +507,14 @@ def test_popgun_worker_logs_signal_alert_failure_and_summary(tmp_path, monkeypat
     assert alert.thread_id == 10
     failure = next(record for record in caplog.records if record.msg == "popgun scan failed")
     assert failure.symbol == "ETHUSDT"
+    assert failure.timeframe == "15m"
     assert failure.error_class == "RuntimeError"
     summary = next(record for record in caplog.records if record.msg == "popgun worker loop summary")
     assert summary.enabled_topics_count == 1
-    assert summary.scans_attempted == 2
+    assert summary.fetch_jobs_count == 2 * len(popgun.DEFAULT_TIMEFRAMES)
+    assert summary.scans_attempted == 2 * len(popgun.DEFAULT_TIMEFRAMES)
     assert summary.signals_found == 1
+    assert summary.fanout_topics_count == 1
     assert summary.alerts_sent == 1
     assert summary.errors_count == 1
     assert summary.duration_ms >= 0
