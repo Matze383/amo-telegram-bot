@@ -488,7 +488,7 @@ async def handle_command(context: Any, host_api: Any) -> None:
 async def handle_worker(context: Any, host_api: Any) -> dict[str, Any]:
     repo = PopgunStateRepository()
     detector = PopgunDetector()
-    poll_interval_seconds = 300
+    poll_interval_seconds = 60
     candle_limit = 5
     request_pause_seconds = 0.5
     batch_pause_seconds = 1.5

@@ -346,7 +346,7 @@ def test_popgun_worker_fetches_globally_and_fans_out_to_subscribed_topics(tmp_pa
             ]
 
     async def _fake_sleep(seconds: float) -> None:
-        if seconds == 300:
+        if seconds == 60:
             raise asyncio.CancelledError
 
     monkeypatch.setattr(popgun, "CcxtCandleClient", _FakeClient)
@@ -426,7 +426,7 @@ def test_popgun_worker_dedupes_alerts_per_topic_independently(tmp_path, monkeypa
             return []
 
     async def _fake_sleep(seconds: float) -> None:
-        if seconds == 300:
+        if seconds == 60:
             raise asyncio.CancelledError
 
     monkeypatch.setattr(popgun, "CcxtCandleClient", _FakeClient)
@@ -482,7 +482,7 @@ def test_popgun_worker_logs_signal_alert_failure_and_summary(tmp_path, monkeypat
             ]
 
     async def _fake_sleep(seconds: float) -> None:
-        if seconds == 300:
+        if seconds == 60:
             raise asyncio.CancelledError
 
     monkeypatch.setattr(popgun, "CcxtCandleClient", _FakeClient)
@@ -497,7 +497,7 @@ def test_popgun_worker_logs_signal_alert_failure_and_summary(tmp_path, monkeypat
 
     assert len(host.sent) == 1
     initialized = next(record for record in caplog.records if record.msg == "popgun worker initialized")
-    assert initialized.poll_interval_seconds == 300
+    assert initialized.poll_interval_seconds == 60
     assert initialized.candle_limit == 5
     detected = next(record for record in caplog.records if record.msg == "popgun signal detected")
     assert detected.symbol == "BTCUSDT"
