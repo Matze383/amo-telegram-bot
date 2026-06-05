@@ -18,6 +18,7 @@ from amo_bot.db.repositories import PopgunRepository
 LOGGER = logging.getLogger("amo.plugins.popgun")
 BERLIN_TZ = ZoneInfo("Europe/Berlin")
 PLUGIN_STATE_DIR = Path("data") / "plugin_state" / "popgun"
+POPGUN_EXCHANGE_ID = "binance"
 DEFAULT_SYMBOLS = [
     "BTCUSDT",
     "ETHUSDT",
@@ -87,7 +88,7 @@ class PopgunDetector:
 
 
 class CcxtCandleClient:
-    def __init__(self, *, exchange_id: str = "bybit", rate_limit_ms: int | None = 1500) -> None:
+    def __init__(self, *, exchange_id: str = POPGUN_EXCHANGE_ID, rate_limit_ms: int | None = 1500) -> None:
         import ccxt
 
         exchange_class = getattr(ccxt, exchange_id, None)
@@ -116,6 +117,13 @@ class CcxtCandleClient:
             for row in ohlcv
         ]
 
+    def supports_symbol(self, symbol: str) -> bool:
+        try:
+            self.resolve_symbol(symbol)
+        except Exception:
+            return False
+        return True
+
     @staticmethod
     def normalize_exchange_symbol(symbol: str) -> str:
         if "/" in symbol:
@@ -131,11 +139,6 @@ class CcxtCandleClient:
         normalized = self.normalize_exchange_symbol(symbol)
         if normalized in self.exchange.markets:
             return normalized
-
-        if self.exchange_id == "bybit" and normalized.endswith("/USDT"):
-            perpetual = f"{normalized}:USDT"
-            if perpetual in self.exchange.markets:
-                return perpetual
 
         raise self._ccxt.BadSymbol(f"Symbol nicht gefunden: {symbol}")
 
@@ -589,13 +592,13 @@ async def handle_command(context: Any, host_api: Any) -> None:
             )
             return
         try:
-            CcxtCandleClient(exchange_id="bybit").resolve_symbol(symbol)
+            CcxtCandleClient(exchange_id=POPGUN_EXCHANGE_ID).resolve_symbol(symbol)
         except Exception as exc:
             LOGGER.warning(
                 "popgun symbol validation failed",
                 extra={**base_extra, "symbol": symbol, "error_class": type(exc).__name__},
             )
-            await host_api.reply(chat_id, message_id, f"Symbol nicht auf Bybit gefunden: {symbol}")
+            await host_api.reply(chat_id, message_id, f"Symbol nicht auf Binance gefunden: {symbol}")
             LOGGER.info(
                 "popgun command handled",
                 extra={**base_extra, "outcome": "symbol_not_found", "action": "add", "symbol": symbol},
@@ -633,7 +636,7 @@ async def handle_worker(context: Any, host_api: Any) -> dict[str, Any]:
     batch_pause_seconds = 1.5
 
     try:
-        candle_client = CcxtCandleClient(exchange_id="bybit", rate_limit_ms=1500)
+        candle_client = CcxtCandleClient(exchange_id=POPGUN_EXCHANGE_ID, rate_limit_ms=1500)
     except Exception as exc:
         LOGGER.exception("popgun worker failed to initialize exchange")
         raise RuntimeError(f"exchange_init_failed:{type(exc).__name__}") from exc
@@ -653,12 +656,24 @@ async def handle_worker(context: Any, host_api: Any) -> dict[str, Any]:
         loop_started = time.monotonic()
         topics = repo.list_enabled_topics()
         fetch_jobs = build_fetch_plan(topics)
+        fetch_symbols = sorted({job.symbol for job in fetch_jobs})
+        unsupported_symbols = [symbol for symbol in fetch_symbols if not candle_client.supports_symbol(symbol)]
+        for symbol in unsupported_symbols:
+            LOGGER.warning(
+                "popgun symbol unsupported on exchange",
+                extra={"symbol": symbol, "exchange_id": candle_client.exchange_id},
+            )
+        if unsupported_symbols:
+            unsupported_symbol_set = set(unsupported_symbols)
+            fetch_jobs_to_scan = [job for job in fetch_jobs if job.symbol not in unsupported_symbol_set]
+        else:
+            fetch_jobs_to_scan = fetch_jobs
         scans_attempted = 0
         signals_found = 0
         fanout_topics_count = 0
         alerts_sent = 0
         errors_count = 0
-        for job in fetch_jobs:
+        for job in fetch_jobs_to_scan:
             scans_attempted += 1
             try:
                 candles = candle_client.fetch_candles(symbol=job.symbol, timeframe=job.timeframe, limit=candle_limit)
@@ -719,6 +734,7 @@ async def handle_worker(context: Any, host_api: Any) -> dict[str, Any]:
                 "fanout_topics_count": fanout_topics_count,
                 "alerts_sent": alerts_sent,
                 "errors_count": errors_count,
+                "unsupported_symbols_count": len(unsupported_symbols),
                 "duration_ms": duration_ms,
             },
         )

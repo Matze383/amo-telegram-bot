@@ -115,11 +115,48 @@ def test_popgun_detector_ignores_negative_cases() -> None:
     ) is None
 
 
-def test_popgun_fixed_timeframes_are_bybit_supported_and_skip_5m() -> None:
+def test_popgun_fixed_timeframes_are_binance_supported_and_skip_5m() -> None:
     popgun = _load_popgun_module()
 
+    assert popgun.POPGUN_EXCHANGE_ID == "binance"
     assert popgun.DEFAULT_TIMEFRAMES == ["15m", "30m", "1h", "2h", "4h", "6h", "12h", "1d", "1w", "1M"]
     assert "5m" not in popgun.DEFAULT_TIMEFRAMES
+
+
+def test_ccxt_candle_client_defaults_to_binance_spot_symbol_resolution(monkeypatch) -> None:
+    popgun = _load_popgun_module()
+    created_configs: list[dict[str, object]] = []
+
+    class _BadSymbol(Exception):
+        pass
+
+    class _FakeBinance:
+        def __init__(self, config: dict[str, object]) -> None:
+            created_configs.append(config)
+            self.markets: dict[str, object] = {}
+
+        def load_markets(self) -> None:
+            self.markets = {
+                "BTC/USDT": {},
+                "PAXG/USDT": {},
+            }
+
+    fake_ccxt = SimpleNamespace(binance=_FakeBinance, BadSymbol=_BadSymbol)
+    monkeypatch.setitem(sys.modules, "ccxt", fake_ccxt)
+
+    client = popgun.CcxtCandleClient()
+
+    assert client.exchange_id == "binance"
+    assert created_configs == [{"enableRateLimit": True, "timeout": 1500, "rateLimit": 1500}]
+    assert client.resolve_symbol("BTCUSDT") == "BTC/USDT"
+    assert client.resolve_symbol("PAXGUSDT") == "PAXG/USDT"
+
+    try:
+        client.resolve_symbol("XAGUSDT")
+    except _BadSymbol as exc:
+        assert "XAGUSDT" in str(exc)
+    else:
+        raise AssertionError("XAGUSDT should not resolve when Binance markets do not include it")
 
 
 def test_popgun_on_off_is_topic_scoped(tmp_path, monkeypatch) -> None:
@@ -157,11 +194,13 @@ def test_popgunadd_adds_one_symbol_for_current_topic_and_dedupes(tmp_path, monke
     popgun = _load_popgun_module()
 
     class _FakeClient:
+        calls: list[dict[str, object]] = []
+
         def __init__(self, *args, **kwargs) -> None:
-            pass
+            self.calls.append(kwargs)
 
         def resolve_symbol(self, symbol: str) -> str:
-            return f"{symbol[:-4]}/USDT:USDT"
+            return f"{symbol[:-4]}/USDT"
 
     monkeypatch.setattr(popgun, "CcxtCandleClient", _FakeClient)
     host = _HostAPI()
@@ -189,6 +228,7 @@ def test_popgunadd_adds_one_symbol_for_current_topic_and_dedupes(tmp_path, monke
     assert sibling is None
     assert "hinzugefügt" in host.replies[0][2]
     assert "bereits vorhanden" in host.replies[1][2]
+    assert _FakeClient.calls == [{"exchange_id": "binance"}, {"exchange_id": "binance"}]
 
 
 def test_popgun_command_logging_includes_context_and_outcomes(tmp_path, monkeypatch, caplog) -> None:
@@ -197,11 +237,13 @@ def test_popgun_command_logging_includes_context_and_outcomes(tmp_path, monkeypa
     popgun = _load_popgun_module()
 
     class _FakeClient:
+        calls: list[dict[str, object]] = []
+
         def __init__(self, *args, **kwargs) -> None:
-            pass
+            self.calls.append(kwargs)
 
         def resolve_symbol(self, symbol: str) -> str:
-            return f"{symbol[:-4]}/USDT:USDT"
+            return f"{symbol[:-4]}/USDT"
 
     monkeypatch.setattr(popgun, "CcxtCandleClient", _FakeClient)
     caplog.set_level(logging.INFO, logger="amo.plugins.popgun")
@@ -257,6 +299,7 @@ def test_popgun_command_logging_includes_context_and_outcomes(tmp_path, monkeypa
     assert state_changed.enabled is True
     added = next(record for record in handled if record.outcome == "symbol_added")
     assert added.symbol == "ADAUSDT"
+    assert _FakeClient.calls == [{"exchange_id": "binance"}, {"exchange_id": "binance"}]
 
 
 def test_popgun_rejects_non_manager(tmp_path, monkeypatch) -> None:
@@ -515,10 +558,13 @@ def test_popgun_worker_fetches_globally_and_fans_out_to_subscribed_topics(tmp_pa
     calls: list[tuple[str, str]] = []
 
     class _FakeClient:
-        exchange_id = "bybit"
+        exchange_id = "binance"
 
         def __init__(self, *args, **kwargs) -> None:
             pass
+
+        def supports_symbol(self, symbol: str) -> bool:
+            return True
 
         def fetch_candles(self, *, symbol: str, timeframe: str, limit: int) -> list:
             calls.append((symbol, timeframe))
@@ -553,6 +599,56 @@ def test_popgun_worker_fetches_globally_and_fans_out_to_subscribed_topics(tmp_pa
     assert all("BTCUSDT 15m" in message[1] for message in host.sent)
 
 
+def test_popgun_worker_skips_symbols_unsupported_by_binance(tmp_path, monkeypatch, caplog) -> None:
+    monkeypatch.chdir(tmp_path)
+    db_url = _db_url(tmp_path, "popgun_worker_unsupported.sqlite")
+    popgun = _load_popgun_module()
+    _seed_topic(
+        db_url,
+        thread_id=10,
+        enabled=True,
+        symbols=["BTCUSDT", "XAGUSDT"],
+        timeframes=list(popgun.DEFAULT_TIMEFRAMES),
+    )
+    calls: list[tuple[str, str]] = []
+
+    class _FakeClient:
+        exchange_id = "binance"
+
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        def supports_symbol(self, symbol: str) -> bool:
+            return symbol != "XAGUSDT"
+
+        def fetch_candles(self, *, symbol: str, timeframe: str, limit: int) -> list:
+            calls.append((symbol, timeframe))
+            return []
+
+    async def _fake_sleep(seconds: float) -> None:
+        if seconds == 60:
+            raise asyncio.CancelledError
+
+    monkeypatch.setattr(popgun, "CcxtCandleClient", _FakeClient)
+    monkeypatch.setattr(popgun.asyncio, "sleep", _fake_sleep)
+    caplog.set_level(logging.DEBUG, logger="amo.plugins.popgun")
+    host = _HostAPI()
+
+    try:
+        asyncio.run(popgun.handle_worker(SimpleNamespace(database_url=db_url), host))
+    except asyncio.CancelledError:
+        pass
+
+    assert calls == [("BTCUSDT", timeframe) for timeframe in popgun.DEFAULT_TIMEFRAMES]
+    unsupported = next(record for record in caplog.records if record.msg == "popgun symbol unsupported on exchange")
+    assert unsupported.symbol == "XAGUSDT"
+    assert unsupported.exchange_id == "binance"
+    summary = next(record for record in caplog.records if record.msg == "popgun worker loop summary")
+    assert summary.fetch_jobs_count == 2 * len(popgun.DEFAULT_TIMEFRAMES)
+    assert summary.scans_attempted == len(popgun.DEFAULT_TIMEFRAMES)
+    assert summary.unsupported_symbols_count == 1
+
+
 def test_popgun_worker_dedupes_alerts_per_topic_independently(tmp_path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
     db_url = _db_url(tmp_path, "popgun_worker_dedupe.sqlite")
@@ -580,10 +676,13 @@ def test_popgun_worker_dedupes_alerts_per_topic_independently(tmp_path, monkeypa
     _seed_topic(db_url, thread_id=11, enabled=True, symbols=["BTCUSDT"], timeframes=list(popgun.DEFAULT_TIMEFRAMES))
 
     class _FakeClient:
-        exchange_id = "bybit"
+        exchange_id = "binance"
 
         def __init__(self, *args, **kwargs) -> None:
             pass
+
+        def supports_symbol(self, symbol: str) -> bool:
+            return True
 
         def fetch_candles(self, *, symbol: str, timeframe: str, limit: int) -> list:
             if timeframe == "15m":
@@ -623,10 +722,13 @@ def test_popgun_worker_logs_signal_alert_failure_and_summary(tmp_path, monkeypat
     )
 
     class _FakeClient:
-        exchange_id = "bybit"
+        exchange_id = "binance"
 
         def __init__(self, *args, **kwargs) -> None:
             pass
+
+        def supports_symbol(self, symbol: str) -> bool:
+            return True
 
         def fetch_candles(self, *, symbol: str, timeframe: str, limit: int) -> list:
             if symbol == "ETHUSDT" and timeframe == "15m":
@@ -657,6 +759,7 @@ def test_popgun_worker_logs_signal_alert_failure_and_summary(tmp_path, monkeypat
     initialized = next(record for record in caplog.records if record.msg == "popgun worker initialized")
     assert initialized.poll_interval_seconds == 60
     assert initialized.candle_limit == 5
+    assert initialized.exchange_id == "binance"
     detected = next(record for record in caplog.records if record.msg == "popgun signal detected")
     assert detected.symbol == "BTCUSDT"
     assert detected.timeframe == "15m"
