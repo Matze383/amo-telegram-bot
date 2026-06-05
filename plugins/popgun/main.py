@@ -18,7 +18,8 @@ from amo_bot.db.repositories import PopgunRepository
 LOGGER = logging.getLogger("amo.plugins.popgun")
 BERLIN_TZ = ZoneInfo("Europe/Berlin")
 PLUGIN_STATE_DIR = Path("data") / "plugin_state" / "popgun"
-POPGUN_EXCHANGE_ID = "binance"
+POPGUN_EXCHANGE_ID = "binanceusdm"
+POPGUN_EXCHANGE_NAME = "Binance USD-M Futures/Perps"
 DEFAULT_SYMBOLS = [
     "BTCUSDT",
     "ETHUSDT",
@@ -127,9 +128,11 @@ class CcxtCandleClient:
     @staticmethod
     def normalize_exchange_symbol(symbol: str) -> str:
         if "/" in symbol:
+            if ":" not in symbol and symbol.endswith("/USDT"):
+                return f"{symbol}:USDT"
             return symbol
         if symbol.endswith("USDT"):
-            return f"{symbol[:-4]}/USDT"
+            return f"{symbol[:-4]}/USDT:USDT"
         return symbol
 
     def resolve_symbol(self, symbol: str) -> str:
@@ -596,9 +599,15 @@ async def handle_command(context: Any, host_api: Any) -> None:
         except Exception as exc:
             LOGGER.warning(
                 "popgun symbol validation failed",
-                extra={**base_extra, "symbol": symbol, "error_class": type(exc).__name__},
+                extra={
+                    **base_extra,
+                    "symbol": symbol,
+                    "exchange_id": POPGUN_EXCHANGE_ID,
+                    "exchange_name": POPGUN_EXCHANGE_NAME,
+                    "error_class": type(exc).__name__,
+                },
             )
-            await host_api.reply(chat_id, message_id, f"Symbol nicht auf Binance gefunden: {symbol}")
+            await host_api.reply(chat_id, message_id, f"Symbol nicht auf {POPGUN_EXCHANGE_NAME} gefunden: {symbol}")
             LOGGER.info(
                 "popgun command handled",
                 extra={**base_extra, "outcome": "symbol_not_found", "action": "add", "symbol": symbol},
@@ -649,6 +658,7 @@ async def handle_worker(context: Any, host_api: Any) -> dict[str, Any]:
             "request_pause_seconds": request_pause_seconds,
             "batch_pause_seconds": batch_pause_seconds,
             "exchange_id": candle_client.exchange_id,
+            "exchange_name": POPGUN_EXCHANGE_NAME,
         },
     )
 
@@ -661,7 +671,11 @@ async def handle_worker(context: Any, host_api: Any) -> dict[str, Any]:
         for symbol in unsupported_symbols:
             LOGGER.warning(
                 "popgun symbol unsupported on exchange",
-                extra={"symbol": symbol, "exchange_id": candle_client.exchange_id},
+                extra={
+                    "symbol": symbol,
+                    "exchange_id": candle_client.exchange_id,
+                    "exchange_name": POPGUN_EXCHANGE_NAME,
+                },
             )
         if unsupported_symbols:
             unsupported_symbol_set = set(unsupported_symbols)
