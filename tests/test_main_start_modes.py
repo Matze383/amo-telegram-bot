@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 
 from amo_bot import main as main_module
+from amo_bot.process_control import StopResult
 
 
 class _StopFlow(RuntimeError):
@@ -28,6 +29,7 @@ def _set_env(monkeypatch, tmp_path, webui_host: str = "127.0.0.1") -> None:
     monkeypatch.setenv("WEBUI_SECRET_KEY", "unit-test-webui-secret-key-0123456789abcdef")
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'bot.db'}")
     monkeypatch.setenv("OFFSET_STATE_FILE", str(tmp_path / "offset.json"))
+    monkeypatch.setenv("BOT_PID_FILE", str(tmp_path / "amo_bot.pid"))
     monkeypatch.setenv("AMO_PLUGIN_DIR", str(tmp_path / "plugins"))
     monkeypatch.setenv("WEBUI_OWNER_TELEGRAM_ID", "")
     monkeypatch.setenv("WEBUI_HOST", webui_host)
@@ -51,8 +53,62 @@ def test_run_webui_mode_starts_flask_only(monkeypatch, tmp_path) -> None:
     assert app.run_calls == [("0.0.0.0", 8080, None)]
 
 
+def test_run_stop_cli_uses_pid_file_without_starting_runtime(monkeypatch, tmp_path, capsys) -> None:
+    _set_env(monkeypatch, tmp_path)
+    pid_path = tmp_path / "custom.pid"
+    calls: list[str] = []
+
+    monkeypatch.setattr(
+        main_module,
+        "stop_running_bot",
+        lambda pid_file: calls.append(pid_file) or StopResult(True, "stopped"),
+    )
+    monkeypatch.setattr(
+        main_module,
+        "init_db",
+        lambda database_url: (_ for _ in ()).throw(AssertionError("init_db must not run for --stop")),
+    )
+
+    try:
+        main_module.run(["--stop", "--pid-file", str(pid_path)])
+    except SystemExit as exc:
+        assert exc.code == 0
+    else:
+        raise AssertionError("--stop should exit with SystemExit")
+
+    assert calls == [str(pid_path)]
+    assert capsys.readouterr().out.strip() == "stopped"
+
+
+def test_run_stop_cli_does_not_validate_full_settings(monkeypatch, tmp_path, capsys) -> None:
+    pid_path = tmp_path / "amo_bot.pid"
+    monkeypatch.setenv("DOTENV_PATH", str(tmp_path / "missing.env"))
+    monkeypatch.setenv("BOT_PID_FILE", str(pid_path))
+
+    monkeypatch.setattr(
+        main_module,
+        "get_settings",
+        lambda: (_ for _ in ()).throw(AssertionError("get_settings must not run for --stop")),
+    )
+    monkeypatch.setattr(
+        main_module,
+        "stop_running_bot",
+        lambda pid_file: StopResult(False, f"checked {pid_file}"),
+    )
+
+    try:
+        main_module.run(["--stop"])
+    except SystemExit as exc:
+        assert exc.code == 1
+    else:
+        raise AssertionError("--stop should exit with SystemExit")
+
+    assert capsys.readouterr().out.strip() == f"checked {pid_path}"
+
+
 def test_run_serve_mode_starts_webui_and_runs_polling(monkeypatch, tmp_path) -> None:
     _set_env(monkeypatch, tmp_path, webui_host="0.0.0.0")
+    pid_path = tmp_path / "amo_bot.pid"
     app = _DummyApp()
     threading_calls: list[dict[str, object]] = []
 
@@ -75,6 +131,7 @@ def test_run_serve_mode_starts_webui_and_runs_polling(monkeypatch, tmp_path) -> 
     polling_call = {"created": False, "awaited": False}
 
     async def _fake_run_polling(*args, **kwargs):  # noqa: ANN002,ANN003
+        assert pid_path.exists()
         polling_call["created"] = True
         polling_call["awaited"] = True
 
@@ -100,11 +157,13 @@ def test_run_serve_mode_starts_webui_and_runs_polling(monkeypatch, tmp_path) -> 
     assert threading_calls[0]["name"] == "flask-webui"
     assert threading_calls[0]["started"] is True
     assert polling_call == {"created": True, "awaited": True}
+    assert not pid_path.exists()
 
 
 def test_run_dreaming_starts_inside_polling_event_loop(monkeypatch, tmp_path) -> None:
     _set_env(monkeypatch, tmp_path)
     monkeypatch.setenv("DREAMING_ENABLED", "1")
+    pid_path = tmp_path / "amo_bot.pid"
 
     lifecycle: list[tuple[str, bool]] = []
 
@@ -127,6 +186,7 @@ def test_run_dreaming_starts_inside_polling_event_loop(monkeypatch, tmp_path) ->
             pass
 
     async def _fake_run_polling(*args, **kwargs):  # noqa: ANN002,ANN003
+        assert pid_path.exists()
         lifecycle.append(("polling", True))
         raise _StopFlow()
 
@@ -140,6 +200,7 @@ def test_run_dreaming_starts_inside_polling_event_loop(monkeypatch, tmp_path) ->
         pass
 
     assert lifecycle == [("init", True), ("start", True), ("polling", True), ("stop", False)]
+    assert not pid_path.exists()
 
 
 def test_run_webui_mode_does_not_start_dreaming(monkeypatch, tmp_path) -> None:

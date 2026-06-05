@@ -115,7 +115,7 @@ def test_popgun_detector_ignores_negative_cases() -> None:
     ) is None
 
 
-def test_popgun_fixed_timeframes_are_bybit_usdt_futures_supported_and_skip_5m() -> None:
+def test_popgun_fixed_timeframes_are_bybit_usdt_futures_perps_supported_and_skip_5m() -> None:
     popgun = _load_popgun_module()
 
     assert popgun.POPGUN_EXCHANGE_ID == "bybit"
@@ -125,7 +125,7 @@ def test_popgun_fixed_timeframes_are_bybit_usdt_futures_supported_and_skip_5m() 
     assert "5m" not in popgun.DEFAULT_TIMEFRAMES
 
 
-def test_ccxt_candle_client_defaults_to_bybit_usdt_perp_symbol_resolution(monkeypatch) -> None:
+def test_ccxt_candle_client_defaults_to_bybit_usdt_futures_perps_symbol_resolution(monkeypatch) -> None:
     popgun = _load_popgun_module()
     created_configs: list[dict[str, object]] = []
 
@@ -139,9 +139,20 @@ def test_ccxt_candle_client_defaults_to_bybit_usdt_perp_symbol_resolution(monkey
 
         def load_markets(self) -> None:
             self.markets = {
-                "BTC/USDT:USDT": {"swap": True, "linear": True, "quote": "USDT", "settle": "USDT"},
+                "BTC/USDT:USDT": {
+                    "swap": True,
+                    "linear": True,
+                    "quote": "USDT",
+                    "settle": "USDT",
+                },
                 "ETH/USDT": {"spot": True, "quote": "USDT"},
-                "PAXG/USDT:USDT": {"swap": True, "linear": True, "quote": "USDT", "settle": "USDT"},
+                "PAXG/USDT:USDT": {
+                    "swap": True,
+                    "linear": True,
+                    "quote": "USDT",
+                    "settle": "USDT",
+                },
+                "BTC/USDT": {"spot": True, "quote": "USDT", "active": True},
                 "BTC/USD:BTC": {"swap": True, "linear": False, "quote": "USD", "settle": "BTC"},
             }
 
@@ -168,14 +179,14 @@ def test_ccxt_candle_client_defaults_to_bybit_usdt_perp_symbol_resolution(monkey
     except _BadSymbol as exc:
         assert "XAGUSDT" in str(exc)
     else:
-        raise AssertionError("XAGUSDT should not resolve when Bybit USDT perp markets do not include it")
+        raise AssertionError("XAGUSDT should not resolve when Bybit USDT Futures/Perps markets do not include it")
 
     try:
         client.resolve_symbol("ETH/USDT")
     except _BadSymbol as exc:
         assert "ETH/USDT" in str(exc)
     else:
-        raise AssertionError("ETH/USDT spot should not resolve for Bybit USDT perps")
+        raise AssertionError("ETH/USDT spot should not resolve for Bybit USDT Futures/Perps")
 
 
 def test_popgun_on_off_is_topic_scoped(tmp_path, monkeypatch) -> None:
@@ -250,7 +261,7 @@ def test_popgunadd_adds_one_symbol_for_current_topic_and_dedupes(tmp_path, monke
     assert _FakeClient.calls == [{"exchange_id": "bybit"}, {"exchange_id": "bybit"}]
 
 
-def test_popgunadd_rejects_symbol_missing_on_bybit_usdt_futures(tmp_path, monkeypatch, caplog) -> None:
+def test_popgunadd_rejects_symbol_missing_on_bybit_usdt_futures_perps(tmp_path, monkeypatch, caplog) -> None:
     monkeypatch.chdir(tmp_path)
     db_url = _db_url(tmp_path, "popgun_add_missing.sqlite")
     popgun = _load_popgun_module()
@@ -682,7 +693,7 @@ def test_popgun_worker_fetches_globally_and_fans_out_to_subscribed_topics(tmp_pa
     assert all("BTCUSDT 15m" in message[1] for message in host.sent)
 
 
-def test_popgun_worker_skips_symbols_unsupported_by_bybit_usdt_futures(tmp_path, monkeypatch, caplog) -> None:
+def test_popgun_worker_skips_symbols_unsupported_by_bybit_usdt_futures_perps(tmp_path, monkeypatch, caplog) -> None:
     monkeypatch.chdir(tmp_path)
     db_url = _db_url(tmp_path, "popgun_worker_unsupported.sqlite")
     popgun = _load_popgun_module()

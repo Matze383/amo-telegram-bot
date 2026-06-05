@@ -2,18 +2,22 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import threading
 from argparse import ArgumentParser
+
+from dotenv import load_dotenv
 
 from amo_bot.ai.providers import build_ai_provider
 from amo_bot.config.settings import get_settings
 from amo_bot.core.logging import setup_logging, log_event
 from amo_bot.db.base import create_session_factory
 from amo_bot.db.init_db import init_db
-from amo_bot.plugins.command_runtime import PluginCommandExecutor
 from amo_bot.db.repositories import TopicAgentMemoryRepository, UserRoleRepository
+from amo_bot.plugins.command_runtime import PluginCommandExecutor
 from amo_bot.plugins.loader import PluginLoader
 from amo_bot.plugins.scheduled_runtime import ScheduledPluginExecutor
+from amo_bot.process_control import pid_file, stop_running_bot
 from amo_bot.telegram.client import TelegramClient
 from amo_bot.telegram.commands import create_builtin_registry
 from amo_bot.telegram.chat_topic_persistence import ChatTopicPersistenceService
@@ -32,6 +36,21 @@ from amo_bot.db.repositories import WebToolRoleQuotaRepository
 
 
 logger = logging.getLogger(__name__)
+
+
+def _configured_pid_file_for_stop(override_pid_file: str | None) -> str:
+    if override_pid_file:
+        return override_pid_file
+
+    override_from_env_file = os.getenv("AMO_ENV_OVERRIDE", "1").lower() not in {
+        "0",
+        "false",
+        "no",
+        "off",
+    }
+    dotenv_path = os.getenv("DOTENV_PATH", ".env")
+    load_dotenv(dotenv_path=dotenv_path, override=override_from_env_file)
+    return os.getenv("BOT_PID_FILE", ".state/amo_bot.pid")
 
 
 async def _run_polling_with_runtimes(
@@ -68,13 +87,29 @@ def _build_parser() -> ArgumentParser:
     parser = ArgumentParser(prog="python -m amo_bot.main")
     parser.add_argument("--webui", action="store_true", help="Start Flask WebUI only")
     parser.add_argument("--serve", action="store_true", help="Start WebUI and Telegram polling together")
+    parser.add_argument("--pid-file", help="Override BOT_PID_FILE for this invocation")
+    parser.add_argument(
+        "--stop",
+        "--stop-running",
+        dest="stop_running",
+        action="store_true",
+        help="Send SIGTERM to the running AMO bot process recorded in the PID file",
+    )
     return parser
 
 
 def run(argv: list[str] | None = None) -> None:
     args = _build_parser().parse_args([] if argv is None else argv)
 
+    if args.stop_running:
+        configured_pid_file = _configured_pid_file_for_stop(args.pid_file)
+        result = stop_running_bot(configured_pid_file)
+        print(result.message)
+        raise SystemExit(0 if result.ok else 1)
+
     settings = get_settings()
+    configured_pid_file = args.pid_file or settings.bot_pid_file
+
     setup_logging()
     init_db(settings.database_url)
 
@@ -324,37 +359,59 @@ def run(argv: list[str] | None = None) -> None:
         max_scopes_per_run=settings.memory_daily_max_scopes_per_run,
     )
 
-    if args.webui:
-        app = create_flask_app(settings=settings)
+    with pid_file(configured_pid_file):
+        if args.webui:
+            app = create_flask_app(settings=settings)
+            log_event(
+                logger, logging.INFO,
+                event="bot.start",
+                component="main",
+                extra={"mode": "webui_only", "host": settings.webui_host, "port": settings.webui_port},
+            )
+            app.run(host=settings.webui_host, port=settings.webui_port)
+            return
+
+        if args.serve:
+            app = create_flask_app(settings=settings)
+
+            webui_thread = threading.Thread(
+                target=app.run,
+                kwargs={
+                    "host": settings.webui_host,
+                    "port": settings.webui_port,
+                    "use_reloader": False,
+                },
+                daemon=True,
+                name="flask-webui",
+            )
+            webui_thread.start()
+
+            log_event(
+                logger, logging.INFO,
+                event="bot.start",
+                component="main",
+                extra={"mode": "webui_plus_polling", "webui_host": settings.webui_host, "webui_port": settings.webui_port},
+            )
+            asyncio.run(
+                _run_polling_with_runtimes(
+                    dreaming_runtime=dreaming_runtime,
+                    daily_runtime=daily_runtime,
+                    tg=tg,
+                    offset_store=offset_store,
+                    timeout_seconds=settings.poll_timeout_seconds,
+                    limit=settings.poll_limit,
+                    retry_max_seconds=settings.poll_retry_max_seconds,
+                    dispatcher=dispatcher,
+                    scheduled_tick=scheduled_plugin_executor.run_due_once,
+                )
+            )
+            return
+
         log_event(
             logger, logging.INFO,
             event="bot.start",
             component="main",
-            extra={"mode": "webui_only", "host": settings.webui_host, "port": settings.webui_port},
-        )
-        app.run(host=settings.webui_host, port=settings.webui_port)
-        return
-
-    if args.serve:
-        app = create_flask_app(settings=settings)
-
-        webui_thread = threading.Thread(
-            target=app.run,
-            kwargs={
-                "host": settings.webui_host,
-                "port": settings.webui_port,
-                "use_reloader": False,
-            },
-            daemon=True,
-            name="flask-webui",
-        )
-        webui_thread.start()
-
-        log_event(
-            logger, logging.INFO,
-            event="bot.start",
-            component="main",
-            extra={"mode": "webui_plus_polling", "webui_host": settings.webui_host, "webui_port": settings.webui_port},
+            extra={"mode": "polling_only"},
         )
         asyncio.run(
             _run_polling_with_runtimes(
@@ -369,27 +426,6 @@ def run(argv: list[str] | None = None) -> None:
                 scheduled_tick=scheduled_plugin_executor.run_due_once,
             )
         )
-        return
-
-    log_event(
-        logger, logging.INFO,
-        event="bot.start",
-        component="main",
-        extra={"mode": "polling_only"},
-    )
-    asyncio.run(
-        _run_polling_with_runtimes(
-            dreaming_runtime=dreaming_runtime,
-            daily_runtime=daily_runtime,
-            tg=tg,
-            offset_store=offset_store,
-            timeout_seconds=settings.poll_timeout_seconds,
-            limit=settings.poll_limit,
-            retry_max_seconds=settings.poll_retry_max_seconds,
-            dispatcher=dispatcher,
-            scheduled_tick=scheduled_plugin_executor.run_due_once,
-        )
-    )
 
 
 if __name__ == "__main__":

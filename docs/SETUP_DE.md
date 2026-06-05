@@ -642,6 +642,30 @@ venv\Scripts\activate.bat
 python main.py
 ```
 
+### Bot stoppen (für systemd/Service-Integration)
+
+Um einen laufenden Bot über die PID-Datei zu stoppen (sendet SIGTERM für sauberes Herunterfahren):
+
+**Linux / macOS:**
+
+```bash
+source venv/bin/activate
+python main.py --stop
+```
+
+**Windows (PowerShell):**
+
+```powershell
+.\venv\Scripts\Activate.ps1
+python main.py --stop
+```
+
+**Alias:** `--stop-running` funktioniert ebenfalls.
+
+**Optional:** `--pid-file PATH` überschreibt den Standard-PID-Dateipfad.
+
+**Standard-PID-Datei:** `.state/amo_bot.pid` (konfigurierbar via `BOT_PID_FILE` in `.env`)
+
 ---
 
 ## Telegram Bot einrichten

@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     poll_limit: int = Field(default=100, alias="POLL_LIMIT")
     poll_retry_max_seconds: int = Field(default=30, alias="POLL_RETRY_MAX_SECONDS")
     offset_state_file: str = Field(default=".state/offset.json", alias="OFFSET_STATE_FILE")
+    bot_pid_file: str = Field(default=".state/amo_bot.pid", alias="BOT_PID_FILE")
 
     ai_provider: str = Field(default="ollama", alias="AI_PROVIDER")
 
