@@ -212,6 +212,248 @@ class TestWebtoolCapabilityDispatcherQuotaFirst:
         assert result.decision == "disabled"
         assert provider_calls == []  # Provider never called
 
+    def test_weather_evidence_quota_exceeded_denies_before_provider_call(self, session_factory):
+        """Structured weather evidence uses the same quota-first path."""
+        from amo_bot.db.repositories import WebToolRoleQuotaRepository
+        from amo_bot.telegram.webtool_evidence import DomainEvidenceResult, EvidenceSource
+
+        provider_calls = []
+
+        class TrackingWeatherProvider:
+            def get_weather(self, *, query: str, locale: str):
+                provider_calls.append(("weather", query, locale))
+                return DomainEvidenceResult(
+                    domain="weather",
+                    status="confirmed",
+                    confidence=0.9,
+                    text="Ort: Berlin. Stand: 2026-06-11T10:00. Aktuell: Temperatur 21 °C.",
+                    sources=(EvidenceSource("Open-Meteo", "https://api.open-meteo.com/v1/forecast", "2026-06-11T10:00:00+00:00"),),
+                )
+
+        with session_factory() as s:
+            quota_repo = WebToolRoleQuotaRepository(s)
+            quota_repo.upsert_role_quota(role=Role.NORMAL, mode="limited", daily_limit=1)
+            service = create_webtool_subagent_service(
+                quota_repo,
+                weather_evidence_provider=TrackingWeatherProvider(),
+            )
+            dispatcher = WebtoolCapabilityDispatcher(quota_repo, service=service)
+
+        first = dispatcher.execute(
+            WebtoolCapabilityRequest(
+                capability="weather_evidence",
+                user_id=42,
+                role=Role.NORMAL,
+                chat_id=-100,
+                query="Wetter in Berlin",
+                locale="de",
+            )
+        )
+        assert first.allowed is True
+        assert provider_calls == [("weather", "Wetter in Berlin", "de")]
+
+        provider_calls.clear()
+        second = dispatcher.execute(
+            WebtoolCapabilityRequest(
+                capability="weather_evidence",
+                user_id=42,
+                role=Role.NORMAL,
+                chat_id=-100,
+                query="Wetter in Hamburg",
+                locale="de",
+            )
+        )
+
+        assert second.allowed is False
+        assert second.decision == "quota_exceeded"
+        assert provider_calls == []
+
+    def test_crypto_evidence_disabled_role_denies_before_provider_call(self, session_factory):
+        """Structured crypto evidence provider is not called when quota policy denies."""
+        from amo_bot.db.repositories import WebToolRoleQuotaRepository
+
+        provider_calls = []
+
+        class TrackingCryptoProvider:
+            def get_crypto(self, *, query: str, locale: str):
+                provider_calls.append(("crypto", query, locale))
+                raise AssertionError("provider must not be called")
+
+        with session_factory() as s:
+            quota_repo = WebToolRoleQuotaRepository(s)
+            service = create_webtool_subagent_service(
+                quota_repo,
+                crypto_evidence_provider=TrackingCryptoProvider(),
+            )
+            dispatcher = WebtoolCapabilityDispatcher(quota_repo, service=service)
+
+        result = dispatcher.execute(
+            WebtoolCapabilityRequest(
+                capability="crypto_evidence",
+                user_id=42,
+                role=Role.IGNORE,
+                chat_id=-100,
+                query="ETH kurs jetzt",
+                locale="de",
+            )
+        )
+
+        assert result.allowed is False
+        assert result.decision == "disabled"
+        assert provider_calls == []
+
+    def test_crypto_evidence_quota_exceeded_denies_before_provider_call(self, session_factory):
+        """Structured crypto evidence uses quota counters before provider invocation."""
+        from amo_bot.db.repositories import WebToolRoleQuotaRepository
+        from amo_bot.telegram.webtool_evidence import DomainEvidenceResult, EvidenceSource
+
+        provider_calls = []
+
+        class TrackingCryptoProvider:
+            def get_crypto(self, *, query: str, locale: str):
+                provider_calls.append(("crypto", query, locale))
+                return DomainEvidenceResult(
+                    domain="crypto",
+                    status="confirmed",
+                    confidence=0.9,
+                    text="Asset: ethereum. Stand: 2026-06-11T10:00:00+00:00. Kurs: 3123 EUR.",
+                    sources=(EvidenceSource("CoinGecko", "https://api.coingecko.com/api/v3/simple/price", "2026-06-11T10:00:01+00:00"),),
+                )
+
+        with session_factory() as s:
+            quota_repo = WebToolRoleQuotaRepository(s)
+            quota_repo.upsert_role_quota(role=Role.NORMAL, mode="limited", daily_limit=1)
+            service = create_webtool_subagent_service(
+                quota_repo,
+                crypto_evidence_provider=TrackingCryptoProvider(),
+            )
+            dispatcher = WebtoolCapabilityDispatcher(quota_repo, service=service)
+
+        first = dispatcher.execute(
+            WebtoolCapabilityRequest(
+                capability="crypto_evidence",
+                user_id=42,
+                role=Role.NORMAL,
+                chat_id=-100,
+                query="ETH kurs jetzt",
+                locale="de",
+            )
+        )
+        assert first.allowed is True
+        assert provider_calls == [("crypto", "ETH kurs jetzt", "de")]
+
+        provider_calls.clear()
+        second = dispatcher.execute(
+            WebtoolCapabilityRequest(
+                capability="crypto_evidence",
+                user_id=42,
+                role=Role.NORMAL,
+                chat_id=-100,
+                query="BTC kurs jetzt",
+                locale="de",
+            )
+        )
+
+        assert second.allowed is False
+        assert second.decision == "quota_exceeded"
+        assert provider_calls == []
+
+    def test_weather_evidence_success_is_quota_and_audit_relevant(self, session_factory):
+        """Successful structured weather evidence increments quota and writes metadata-only audit."""
+        from amo_bot.db.models import WebToolAuditEvent
+        from amo_bot.db.repositories import WebToolRoleQuotaRepository
+        from amo_bot.telegram.webtool_evidence import DomainEvidenceResult, EvidenceSource
+
+        class WeatherProvider:
+            def get_weather(self, *, query: str, locale: str):
+                return DomainEvidenceResult(
+                    domain="weather",
+                    status="confirmed",
+                    confidence=0.9,
+                    text="Ort: Berlin. Stand: 2026-06-11T10:00. Aktuell: Temperatur 21 °C.",
+                    sources=(EvidenceSource("Open-Meteo", "https://api.open-meteo.com/v1/forecast", "2026-06-11T10:00:01+00:00"),),
+                    warnings=("weather_code_requires_interpretation",),
+                )
+
+        with session_factory() as s:
+            quota_repo = WebToolRoleQuotaRepository(s)
+            quota_repo.upsert_role_quota(role=Role.NORMAL, mode="limited", daily_limit=2)
+            service = create_webtool_subagent_service(quota_repo, weather_evidence_provider=WeatherProvider())
+            dispatcher = WebtoolCapabilityDispatcher(quota_repo, service=service)
+
+            result = dispatcher.execute(
+                WebtoolCapabilityRequest(
+                    capability="weather_evidence",
+                    user_id=42,
+                    role=Role.NORMAL,
+                    chat_id=-100,
+                    query="SECRET_QUERY Wetter in Berlin API_KEY=sk-test",
+                    locale="de",
+                )
+            )
+
+            assert result.allowed is True
+            assert result.result_type == "weather_evidence"
+            assert result.metadata["operation"] == "weather_evidence"
+            assert result.metadata["source_names"] == ("Open-Meteo",)
+            metadata_values = str(list(result.metadata.values()))
+            assert "SECRET_QUERY" not in metadata_values
+            assert "API_KEY" not in metadata_values
+            assert "sk-test" not in metadata_values
+
+            events = s.query(WebToolAuditEvent).order_by(WebToolAuditEvent.id.asc()).all()
+            assert events[-1].operation_type == "weather_evidence"
+            assert events[-1].decision == "allow"
+            assert events[-1].count == 1
+
+    def test_crypto_evidence_success_is_quota_and_audit_relevant(self, session_factory):
+        """Successful structured crypto evidence increments quota and writes metadata-only audit."""
+        from amo_bot.db.models import WebToolAuditEvent
+        from amo_bot.db.repositories import WebToolRoleQuotaRepository
+        from amo_bot.telegram.webtool_evidence import DomainEvidenceResult, EvidenceSource
+
+        class CryptoProvider:
+            def get_crypto(self, *, query: str, locale: str):
+                return DomainEvidenceResult(
+                    domain="crypto",
+                    status="confirmed",
+                    confidence=0.9,
+                    text="Asset: ethereum. Stand: 2026-06-11T10:00:00+00:00. Kurs: 3123 EUR.",
+                    sources=(EvidenceSource("CoinGecko", "https://api.coingecko.com/api/v3/simple/price", "2026-06-11T10:00:01+00:00"),),
+                    warnings=("market_prices_are_volatile",),
+                )
+
+        with session_factory() as s:
+            quota_repo = WebToolRoleQuotaRepository(s)
+            quota_repo.upsert_role_quota(role=Role.NORMAL, mode="limited", daily_limit=2)
+            service = create_webtool_subagent_service(quota_repo, crypto_evidence_provider=CryptoProvider())
+            dispatcher = WebtoolCapabilityDispatcher(quota_repo, service=service)
+
+            result = dispatcher.execute(
+                WebtoolCapabilityRequest(
+                    capability="crypto_evidence",
+                    user_id=42,
+                    role=Role.NORMAL,
+                    chat_id=-100,
+                    query="SECRET_QUERY ETH kurs jetzt API_KEY=sk-test",
+                    locale="de",
+                )
+            )
+
+            assert result.allowed is True
+            assert result.result_type == "crypto_evidence"
+            assert result.metadata["operation"] == "crypto_evidence"
+            assert result.metadata["source_names"] == ("CoinGecko",)
+            metadata_values = str(list(result.metadata.values()))
+            assert "SECRET_QUERY" not in metadata_values
+            assert "API_KEY" not in metadata_values
+            assert "sk-test" not in metadata_values
+
+            events = s.query(WebToolAuditEvent).order_by(WebToolAuditEvent.id.asc()).all()
+            assert events[-1].operation_type == "crypto_evidence"
+            assert events[-1].decision == "allow"
+            assert events[-1].count == 1
+
     def test_dispatcher_maps_result_correctly(self, session_factory):
         """Successful dispatch maps text/sources/hosts/result_type correctly."""
         from amo_bot.db.repositories import WebToolRoleQuotaRepository

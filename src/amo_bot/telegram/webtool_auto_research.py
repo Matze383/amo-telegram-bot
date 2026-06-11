@@ -37,7 +37,7 @@ _SPORTS_TOURNAMENT_RE = re.compile(
 )
 _SPORTS_CURRENT_DETAIL_RE = re.compile(
     r"\b(?:"
-    r"vorrunde|gruppenphase|gruppe|spielplan|tabelle|ergebnis(?:se)?|"
+    r"vorrunde|gruppenphase|gruppe|gruppen|spielplan|tabelle|ergebnis(?:se)?|"
     r"result(?:s)?|fixture(?:s)?|standing(?:s)?|table|aufstellung(?:en)?|"
     r"qualifikation|qualifying|qualifier|kader|gruppe(?:n)?spiel(?:e)?|"
     r"spieltag|runde|halbfinale|finale"
@@ -50,6 +50,14 @@ _SPORTS_CURRENT_INTENT_RE = re.compile(
     r"next|upcoming|schedule|score|scored|plays?|fixtures?|standings?|"
     r"result(?:s)?|table|line\s*up|lineup"
     r")\b",
+    re.IGNORECASE,
+)
+_MARKET_CURRENT_SIGNAL_RE = re.compile(
+    r"\b(?:aktie|stock|share|shares|nasdaq|nyse|dax|etf|nvidia|nvda|tesla|tsla|apple|aapl|microsoft|msft)\b",
+    re.IGNORECASE,
+)
+_MARKET_CURRENT_INTENT_RE = re.compile(
+    r"\b(?:macht|steht|stand|kurs|price|preis|current|aktuell|jetzt|now|wert|market)\b",
     re.IGNORECASE,
 )
 
@@ -96,9 +104,19 @@ def decide_auto_research(text: str, *, now: datetime | None = None) -> AutoResea
         and _SPORTS_CURRENT_DETAIL_RE.search(raw)
         and (_SPORTS_CURRENT_INTENT_RE.search(raw) or re.search(r"\b(?:wie|was|wann|wer|wo)\b", lowered))
     )
+    has_market_current_signal = bool(
+        _MARKET_CURRENT_SIGNAL_RE.search(raw)
+        and (_MARKET_CURRENT_INTENT_RE.search(raw) or re.search(r"\b(?:wie|was)\b", lowered))
+    )
 
-    if has_temporal or has_year or has_date or has_current_year or has_sports_current_signal:
-        reason = "sports_current_info_signal" if has_sports_current_signal and not (has_temporal or has_year or has_date or has_current_year) else "current_info_signal"
+    if has_temporal or has_year or has_date or has_current_year or has_sports_current_signal or has_market_current_signal:
+        reason = (
+            "sports_current_info_signal"
+            if has_sports_current_signal and not (has_temporal or has_year or has_date or has_current_year or has_market_current_signal)
+            else "market_current_info_signal"
+            if has_market_current_signal and not (has_temporal or has_year or has_date or has_current_year)
+            else "current_info_signal"
+        )
         return AutoResearchDecision(True, "websearch", reason, _sanitize_text(raw, max_len=220), "")
 
     classifier_decision = classify_current_data(

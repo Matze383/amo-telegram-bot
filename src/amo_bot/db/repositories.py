@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta, timezone
 from typing import TYPE_CHECKING
 
-from sqlalchemy import and_, func, or_, select, text
+from sqlalchemy import and_, func, or_, select, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -31,6 +31,7 @@ from amo_bot.db.models import (
     PopgunTopicSetting,
     PrivateChatPolicy,
     PromptContextDoc,
+    ResearchProviderHealth,
     RetrievableMemory,
     TelegramChat,
     TelegramTopic,
@@ -453,6 +454,150 @@ class WebToolQuotaDecision:
     reason: str
     error: str | None = None
     timing_ms: int | None = None
+
+
+@dataclass(slots=True)
+class ResearchProviderHealthRecord:
+    provider_name: str
+    success_count: int = 0
+    failure_count: int = 0
+    timeout_count: int = 0
+    rate_limit_count: int = 0
+    last_success_at: datetime | None = None
+    last_failure_at: datetime | None = None
+    last_error: str = ""
+
+
+class ResearchProviderHealthRepository:
+    """Persist provider health without storing query text, URLs, prompts, or secrets."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def load_provider_health(self, provider_name: str) -> ResearchProviderHealthRecord:
+        normalized_name = self._normalize_provider_name(provider_name)
+        row = self._session.scalar(
+            select(ResearchProviderHealth).where(ResearchProviderHealth.provider_name == normalized_name)
+        )
+        if row is None:
+            return ResearchProviderHealthRecord(provider_name=normalized_name)
+        return self._to_record(row)
+
+    def record_success(self, provider_name: str, *, occurred_at: datetime | None = None) -> ResearchProviderHealthRecord:
+        when = occurred_at or datetime.now(timezone.utc)
+        row = self._get_or_create(provider_name)
+        normalized_name = row.provider_name
+        self._session.execute(
+            update(ResearchProviderHealth)
+            .where(ResearchProviderHealth.provider_name == normalized_name)
+            .values(
+                success_count=func.coalesce(ResearchProviderHealth.success_count, 0) + 1,
+                last_success_at=when,
+                last_error="",
+                updated_at=when,
+            )
+            .execution_options(synchronize_session=False)
+        )
+        self._session.commit()
+        return self.load_provider_health(normalized_name)
+
+    def record_failure(
+        self,
+        provider_name: str,
+        *,
+        reason: str,
+        occurred_at: datetime | None = None,
+    ) -> ResearchProviderHealthRecord:
+        return self._record_negative(provider_name, reason=reason, occurred_at=occurred_at)
+
+    def record_timeout(
+        self,
+        provider_name: str,
+        *,
+        reason: str = "timeout",
+        occurred_at: datetime | None = None,
+    ) -> ResearchProviderHealthRecord:
+        return self._record_negative(provider_name, reason=reason, occurred_at=occurred_at, timeout=True)
+
+    def record_rate_limit(
+        self,
+        provider_name: str,
+        *,
+        reason: str = "rate_limit",
+        occurred_at: datetime | None = None,
+    ) -> ResearchProviderHealthRecord:
+        return self._record_negative(provider_name, reason=reason, occurred_at=occurred_at, rate_limit=True)
+
+    @staticmethod
+    def _normalize_provider_name(provider_name: str) -> str:
+        normalized = (provider_name or "").strip()
+        if not normalized:
+            raise ValueError("provider_name is required")
+        return normalized[:128]
+
+    @classmethod
+    def _to_record(cls, row: ResearchProviderHealth) -> ResearchProviderHealthRecord:
+        return ResearchProviderHealthRecord(
+            provider_name=row.provider_name,
+            success_count=int(row.success_count or 0),
+            failure_count=int(row.failure_count or 0),
+            timeout_count=int(row.timeout_count or 0),
+            rate_limit_count=int(row.rate_limit_count or 0),
+            last_success_at=row.last_success_at,
+            last_failure_at=row.last_failure_at,
+            last_error=row.last_error or "",
+        )
+
+    def _get_or_create(self, provider_name: str) -> ResearchProviderHealth:
+        normalized_name = self._normalize_provider_name(provider_name)
+        row = self._session.scalar(
+            select(ResearchProviderHealth).where(ResearchProviderHealth.provider_name == normalized_name)
+        )
+        if row is not None:
+            return row
+        row = ResearchProviderHealth(provider_name=normalized_name)
+        self._session.add(row)
+        try:
+            self._session.flush()
+        except IntegrityError:
+            self._session.rollback()
+            row = self._session.scalar(
+                select(ResearchProviderHealth).where(ResearchProviderHealth.provider_name == normalized_name)
+            )
+            if row is None:
+                raise
+        return row
+
+    def _record_negative(
+        self,
+        provider_name: str,
+        *,
+        reason: str,
+        occurred_at: datetime | None,
+        timeout: bool = False,
+        rate_limit: bool = False,
+    ) -> ResearchProviderHealthRecord:
+        when = occurred_at or datetime.now(timezone.utc)
+        row = self._get_or_create(provider_name)
+        normalized_name = row.provider_name
+        values = {
+            "failure_count": func.coalesce(ResearchProviderHealth.failure_count, 0) + 1,
+            "last_failure_at": when,
+            "last_error": (reason or "failure")[:512],
+            "updated_at": when,
+        }
+        if timeout:
+            values["timeout_count"] = func.coalesce(ResearchProviderHealth.timeout_count, 0) + 1
+        if rate_limit:
+            values["rate_limit_count"] = func.coalesce(ResearchProviderHealth.rate_limit_count, 0) + 1
+        self._session.execute(
+            update(ResearchProviderHealth)
+            .where(ResearchProviderHealth.provider_name == normalized_name)
+            .values(**values)
+            .execution_options(synchronize_session=False)
+        )
+        self._session.commit()
+        return self.load_provider_health(normalized_name)
 
 
 class WebToolRoleQuotaRepository:

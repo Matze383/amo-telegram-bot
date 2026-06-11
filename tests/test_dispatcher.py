@@ -13,6 +13,7 @@ from amo_bot.telegram.dispatcher import Dispatcher, MessagePersistence
 from amo_bot.telegram.owner_notify import OwnerNotifier
 from amo_bot.telegram.role_resolver import InMemoryRoleResolver
 from amo_bot.telegram.chat_topic_persistence import ChatTopicPersistenceService
+from amo_bot.telegram.outbound_text import TELEGRAM_SAFE_MESSAGE_LIMIT
 
 
 def test_dispatcher_routes_command_and_calls_send() -> None:
@@ -42,6 +43,50 @@ def test_dispatcher_routes_command_and_calls_send() -> None:
     asyncio.run(dispatcher.handle_raw_update(raw_update))
 
     assert sent == [(99, "pong", None)]
+
+
+def test_dispatcher_send_text_splits_and_persists_each_chunk() -> None:
+    sent: list[tuple[int, str, int | None]] = []
+    persisted: list[tuple[int, int | None, int, str]] = []
+
+    async def fake_send(chat_id: int, text: str, message_thread_id: int | None = None) -> object:
+        message_id = len(sent) + 100
+        sent.append((chat_id, text, message_thread_id))
+        return {"message_id": message_id}
+
+    class _Persistence:
+        async def persist_message(self, message):  # noqa: ANN001
+            raise AssertionError("not used")
+
+        async def persist_bot_sent_message(
+            self,
+            *,
+            chat_id: int,
+            message_thread_id: int | None,
+            message_id: int,
+            text: str,
+            bot_username: str | None = None,  # noqa: ARG002
+        ) -> None:
+            persisted.append((chat_id, message_thread_id, message_id, text))
+
+    dispatcher = Dispatcher(
+        command_registry=CommandRegistry(),
+        role_resolver=StaticRoleResolver(Role.NORMAL),
+        send_text=fake_send,
+        message_persistence=_Persistence(),  # type: ignore[arg-type]
+    )
+    text = " ".join(f"token{idx:04d}" for idx in range(700))
+
+    asyncio.run(dispatcher._send_text(-100, text, 872))
+
+    assert len(sent) == 2
+    assert all(chat_id == -100 and thread_id == 872 for chat_id, _text, thread_id in sent)
+    assert all(len(chunk) <= TELEGRAM_SAFE_MESSAGE_LIMIT for _chat_id, chunk, _thread_id in sent)
+    assert "".join(chunk for _chat_id, chunk, _thread_id in sent) == text
+    assert persisted == [
+        (-100, 872, 100, sent[0][1]),
+        (-100, 872, 101, sent[1][1]),
+    ]
 
 
 def test_owner_restart_command_sends_ack_and_terminates() -> None:

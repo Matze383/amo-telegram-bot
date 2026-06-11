@@ -6,16 +6,22 @@ from types import SimpleNamespace
 
 from amo_bot.ai.router import AIRouterDecision, AIRouterReasonCode
 from amo_bot.auth.roles import Role
-from amo_bot.telegram.dispatcher import (
-    Dispatcher,
+from amo_bot.telegram.dispatcher import Dispatcher
+from amo_bot.telegram.webtool_research_orchestrator import (
     _chain_diagnostic_snapshot,
     _format_auto_research_no_result_note,
     _format_auto_research_success_note,
-    should_chain_auto_research,
     _select_chain_urls,
+    sanitize_auto_research_user_response,
+    should_chain_auto_research,
 )
 from amo_bot.telegram.update_parser import TelegramChat, TelegramMessage, TelegramUser
-from amo_bot.telegram.webtool_chat_integration import build_empty_result_retry_query
+from amo_bot.telegram.webtool_chat_integration import (
+    WebtoolChatTrigger,
+    build_empty_result_retry_query,
+    build_web_research_followup_query,
+    build_webtool_request,
+)
 
 
 class _RoleResolver:
@@ -129,6 +135,19 @@ def test_webtool_trigger_dispatches_through_dispatcher(monkeypatch):
     assert len(d.webtool_dispatcher.calls) == 1
 
 
+def test_webtool_request_defaults_to_five_search_results():
+    request = build_webtool_request(
+        trigger=WebtoolChatTrigger(capability="websearch", query="current facts", url=""),
+        user_id=123,
+        role=Role.ADMIN,
+        chat_id=-100,
+        topic_id=7,
+        locale="en",
+    )
+
+    assert request.max_results == 5
+
+
 def test_quota_denied_no_provider_call_and_user_gets_limit_text(monkeypatch):
     monkeypatch.setattr("amo_bot.telegram.dispatcher.AIRouter.decide", lambda self, **kwargs: _allowing_router_decision())
     result = SimpleNamespace(allowed=False, decision="quota_exceeded", reason="quota_exceeded", text="", sources=(), hosts=(), error=None)
@@ -151,6 +170,25 @@ def test_provider_success_returns_sanitized_compact_output(monkeypatch):
     d, sent = _mk_dispatcher(result)
     asyncio.run(d._maybe_handle_ai_autoreply(message=_mk_message("@amo_bot websearch: test"), role=Role.ADMIN, bot_username="amo_bot", from_parsed_update=True))
     assert sent[0] == "Websearch: foo bar"
+
+
+def test_webtool_trigger_does_not_return_large_raw_result_to_chat(monkeypatch):
+    monkeypatch.setattr("amo_bot.telegram.dispatcher.AIRouter.decide", lambda self, **kwargs: _allowing_router_decision())
+    result = SimpleNamespace(
+        allowed=True,
+        decision="allow",
+        reason="search_completed",
+        text=("raw-page " * 300) + "END_MARKER_SHOULD_BE_OMITTED",
+        sources=("https://a",),
+        hosts=("a",),
+        error=None,
+    )
+    d, sent = _mk_dispatcher(result)
+    asyncio.run(d._maybe_handle_ai_autoreply(message=_mk_message("@amo_bot websearch: test"), role=Role.ADMIN, bot_username="amo_bot", from_parsed_update=True))
+
+    assert len(sent[0]) < 760
+    assert "truncated" in sent[0]
+    assert "END_MARKER_SHOULD_BE_OMITTED" not in sent[0]
 
 
 def test_auto_research_injects_strict_context_without_chain_for_weak_current_intent(monkeypatch):
@@ -179,11 +217,44 @@ def test_auto_research_injects_strict_context_without_chain_for_weak_current_int
     assert "Do NOT claim or imply that the bot has no web tools" in calls[0]
     assert "no live data capability" in calls[0]
     assert "cannot search the web" in calls[0]
-    assert "Use the supplied web summary as primary evidence" in calls[0]
+    assert "Use the supplied web result text as primary evidence" in calls[0]
     assert "do NOT override it with stale memory/priors" in calls[0]
     assert "do NOT invent dates, prices, levels" in calls[0]
     assert "available live sources do not confirm that exact value" in calls[0]
     assert "Source hosts: a, b" in calls[0]
+
+
+def test_auto_research_prompt_uses_bounded_web_summary(monkeypatch):
+    monkeypatch.setattr("amo_bot.telegram.dispatcher.AIRouter.decide", lambda self, **kwargs: _allowing_router_decision())
+    result = SimpleNamespace(
+        allowed=True,
+        decision="allow",
+        reason="search_completed",
+        text=("long-live-summary " * 300) + "RAW_TAIL_SHOULD_NOT_SURVIVE",
+        sources=("https://a",),
+        hosts=("a",),
+        error=None,
+    )
+    d, sent = _mk_dispatcher(result)
+    calls = []
+
+    async def _ask(prompt: str) -> str:
+        calls.append(prompt)
+        return "normal ai"
+
+    d.ai_service.ask = _ask
+    asyncio.run(
+        d._maybe_handle_ai_autoreply(
+            message=_mk_message("@amo_bot current bitcoin price now?", reply_to_is_bot=False, reply_to_user_is_bot=False, reply_to_username=""),
+            role=Role.ADMIN,
+            bot_username="amo_bot",
+            from_parsed_update=True,
+        )
+    )
+
+    assert sent[0] == "normal ai"
+    assert calls and "truncated" in calls[0]
+    assert "RAW_TAIL_SHOULD_NOT_SURVIVE" not in calls[0]
 
 
 def test_auto_research_empty_result_injects_no_live_warning(monkeypatch):
@@ -340,6 +411,34 @@ def test_empty_result_retry_query_simplifies_generic_current_question():
     assert "such" not in query.lower()
 
 
+def test_followup_query_strips_bot_answer_marker_and_stale_values_from_context():
+    query = build_web_research_followup_query(
+        feedback_text="such weiter, prüfe andere Quellen",
+        context_text="Bot answer: BTC lag bei 100 USD und 95 EUR. Thema Bitcoin Kurs.",
+    )
+
+    assert "such weiter" in query
+    assert "andere Quellen" in query
+    assert "Bot answer" not in query
+    assert "100" not in query
+    assert "95" not in query
+    assert "Bitcoin" in query
+
+
+def test_followup_query_strips_copied_bot_answer_fragment_from_feedback():
+    query = build_web_research_followup_query(
+        feedback_text="@amo_bot such weiter, andere Quellen. Bot answer: BTC war 100 USD und falsch.",
+        context_text="Thema Bitcoin Kurs.",
+    )
+
+    assert "such weiter" in query
+    assert "andere Quellen" in query
+    assert "Bitcoin Kurs" in query
+    assert "Bot answer" not in query
+    assert "100" not in query
+    assert "falsch" not in query
+
+
 def test_chain_diagnostic_snapshot_is_metadata_only_and_splits_host_counts():
     diagnostics = _chain_diagnostic_snapshot(
         search_hosts=("search-one.example", "search-two.example", "search-three.example", "search-four.example", "search-five.example"),
@@ -390,6 +489,23 @@ def test_select_chain_urls_caps_at_five_and_dedupes_hosts():
         "https://four.example/d",
         "https://five.example/e",
     )
+
+
+def test_select_chain_urls_prefers_https_and_skips_redirect_search_urls():
+    urls = _select_chain_urls((
+        "http://one.example/plain",
+        "https://tracker.example/redirect?url=https://target.example/page",
+        "https://search.example/search?q=bitcoin",
+        "https://one.example/secure",
+        "https://two.example/news",
+        "https://two.example/duplicate",
+    ))
+
+    assert urls == (
+        "https://one.example/secure",
+        "https://two.example/news",
+    )
+
 
 def test_auto_research_empty_result_retry_failure_forbids_stale_estimate(monkeypatch):
     monkeypatch.setattr("amo_bot.telegram.dispatcher.AIRouter.decide", lambda self, **kwargs: _allowing_router_decision())
@@ -485,12 +601,12 @@ def test_auto_research_current_rate_query_chains_static_scrape_into_prompt(monke
     )
     assert sent[0] == "normal ai"
     assert [c.capability for c in d.webtool_dispatcher.calls] == ["websearch", "webscraping", "webscraping"]
-    assert calls and "AUTO-RESEARCH (LIVE WEB + PAGE EXTRACTION)" in calls[0]
+    assert calls and "AUTO-RESEARCH (LIVE WEB + SOURCE CHECK)" in calls[0]
     assert "host=rates.example" in calls[0]
     assert "EUR USD current exchange rate" in calls[0]
 
 
-def test_auto_research_current_non_market_query_chains_static_scrape_into_prompt(monkeypatch):
+def test_auto_research_current_news_query_requires_multiple_checked_sources(monkeypatch):
     monkeypatch.setattr("amo_bot.telegram.dispatcher.AIRouter.decide", lambda self, **kwargs: _allowing_router_decision())
     search = SimpleNamespace(allowed=True, decision="allow", reason="search_completed", text="Python latest news", sources=("https://python.example/news",), hosts=("python.example",), error=None)
     scrape = SimpleNamespace(
@@ -502,7 +618,7 @@ def test_auto_research_current_non_market_query_chains_static_scrape_into_prompt
         hosts=("python.example",),
         error=None,
     )
-    d, _sent = _mk_sequence_dispatcher([search, scrape])
+    d, sent = _mk_sequence_dispatcher([search, scrape])
     calls = []
 
     async def _ask(prompt: str) -> str:
@@ -519,8 +635,9 @@ def test_auto_research_current_non_market_query_chains_static_scrape_into_prompt
         )
     )
     assert [c.capability for c in d.webtool_dispatcher.calls] == ["websearch", "webscraping"]
-    assert "AUTO-RESEARCH (LIVE WEB + PAGE EXTRACTION)" in calls[0]
-    assert "Python release page contains current news" in calls[0]
+    assert calls == []
+    assert sent and "mehreren geprüften Quellen" in sent[0]
+    assert "Python release page contains current news" not in sent[0]
 
 
 def test_auto_research_timeless_ordinary_query_does_not_chain(monkeypatch):
@@ -543,7 +660,7 @@ def test_auto_research_timeless_ordinary_query_does_not_chain(monkeypatch):
         )
     )
     assert [c.capability for c in d.webtool_dispatcher.calls] == []
-    assert "PAGE EXTRACTION" not in calls[0]
+    assert "SOURCE CHECK" not in calls[0]
 
 
 def test_auto_research_static_empty_then_browser_fallback_succeeds(monkeypatch):
@@ -593,9 +710,100 @@ def test_auto_research_followup_extraction_failure_is_truthful(monkeypatch):
             from_parsed_update=True,
         )
     )
-    assert "WEB SEARCH SUCCEEDED, FOLLOW-UP EXTRACTION UNCONFIRMED" in calls[0]
-    assert "follow-up page extraction produced no usable confirmation" in calls[0]
+    assert "WEB SEARCH SUCCEEDED, SOURCE CHECK INCONCLUSIVE" in calls[0]
+    assert "checking the linked source pages produced no additional usable confirmation" in calls[0]
     assert "Do NOT say or imply that the bot has no web tools" in calls[0]
+
+
+def test_weather_auto_research_uses_unconfirmed_source_fallback_for_snippet_only_result(monkeypatch):
+    monkeypatch.setattr("amo_bot.telegram.dispatcher.AIRouter.decide", lambda self, **kwargs: _allowing_router_decision())
+    search = SimpleNamespace(
+        allowed=True,
+        decision="allow",
+        reason="search_completed",
+        text="Berlin weather today: covered sky, 10 to 20°C, night 11°C, gusts 16 to 28 km/h.",
+        sources=("https://weather.example/berlin",),
+        hosts=("weather.example",),
+        error=None,
+    )
+    failed_scrape = SimpleNamespace(allowed=False, decision="deny", reason="empty_result", text="", sources=(), hosts=(), error=None)
+    failed_browser = SimpleNamespace(allowed=False, decision="provider_unavailable", reason="browser_provider_not_configured", text="", sources=(), hosts=(), error="No browser")
+    d, sent = _mk_sequence_dispatcher([search, failed_scrape, failed_browser])
+    calls = []
+
+    async def _ask(prompt: str) -> str:
+        calls.append(prompt)
+        return (
+            "Heute in Berlin ist der Himmel bedeckt, die Sonne bleibt versteckt. "
+            "Die Temperaturen liegen bei **10 bis 20°C**, nachts sinken sie auf **11°C**. "
+            "Es wehen Böen mit **16 bis 28 km/h**. "
+            "Die detaillierten Live-Daten der Folge-Extraktion konnten nicht vollständig bestätigt werden – "
+            "die Angaben basieren auf der Suchübersicht."
+        )
+
+    d.ai_service.ask = _ask
+    asyncio.run(
+        d._maybe_handle_ai_autoreply(
+            message=_mk_message("@amo_bot Wie ist das Wetter heute in Berlin?", reply_to_is_bot=False, reply_to_user_is_bot=False, reply_to_username=""),
+            role=Role.ADMIN,
+            bot_username="amo_bot",
+            from_parsed_update=True,
+        )
+    )
+
+    assert [c.capability for c in d.webtool_dispatcher.calls] == ["websearch", "webscraping", "browser"]
+    assert calls == []
+    assert sent and "Folge-Extraktion" not in sent[0]
+    assert "Suchübersicht" not in sent[0]
+    assert "Heute in Berlin ist der Himmel bedeckt" not in sent[0]
+    assert "10 bis 20" not in sent[0]
+    assert "16 bis 28" not in sent[0]
+    assert "nicht belastbar bestätigen" in sent[0]
+    assert "unbestätigten Wetterwerte" in sent[0]
+    assert "Quelle/Stand: weather.example; aktuelle Websuche, Detailquelle nicht bestätigt." in sent[0]
+
+
+def test_auto_research_response_sanitizer_rewrites_technical_terms():
+    text = sanitize_auto_research_user_response(
+        "Die detaillierten Live-Daten der Folge-Extraktion konnten nicht vollständig bestätigt werden – "
+        "die Angaben basieren auf der Suchübersicht."
+    )
+
+    assert "Folge-Extraktion" not in text
+    assert "Suchübersicht" not in text
+    assert text == (
+        "Die Angaben stammen aus den verfügbaren Web-Suchergebnissen; "
+        "eine zusätzliche Seitenbestätigung war diesmal nicht möglich."
+    )
+
+
+def test_weather_auto_research_no_result_returns_clear_no_live_source_fallback(monkeypatch):
+    monkeypatch.setattr("amo_bot.telegram.dispatcher.AIRouter.decide", lambda self, **kwargs: _allowing_router_decision())
+    empty = SimpleNamespace(allowed=False, decision="deny", reason="provider_timeout", text="", sources=(), hosts=(), error=None)
+    d, sent = _mk_dispatcher(empty)
+    calls = []
+
+    async def _ask(prompt: str) -> str:
+        calls.append(prompt)
+        return "Heute in Berlin soll es sonnig sein."
+
+    d.ai_service.ask = _ask
+    asyncio.run(
+        d._maybe_handle_ai_autoreply(
+            message=_mk_message("@amo_bot Wetter heute in Berlin?", reply_to_is_bot=False, reply_to_user_is_bot=False, reply_to_username=""),
+            role=Role.ADMIN,
+            bot_username="amo_bot",
+            from_parsed_update=True,
+        )
+    )
+
+    assert [c.capability for c in d.webtool_dispatcher.calls] == ["websearch"]
+    assert calls == []
+    assert sent == [
+        "Ich kann das aktuelle Wetter für Berlin gerade nicht belastbar bestätigen. "
+        "Die Live-Websuche hat in diesem Versuch keine verwertbare Wetterquelle geliefert; ich rate deshalb nicht aus Vorwissen.\n"
+        "Quelle/Stand: keine bestätigte Live-Wetterquelle in diesem Versuch."
+    ]
 
 
 def test_user_feedback_followup_reply_triggers_search_and_extraction_without_freshness_terms(monkeypatch):
@@ -639,9 +847,10 @@ def test_user_feedback_followup_reply_triggers_search_and_extraction_without_fre
         )
     )
     assert [c.capability for c in d.webtool_dispatcher.calls] == ["websearch", "webscraping"]
-    assert "Bot answer" in d.webtool_dispatcher.calls[0].query
+    assert "Bot answer" not in d.webtool_dispatcher.calls[0].query
+    assert "Solarförderung" in d.webtool_dispatcher.calls[0].query
     assert "such weiter" in d.webtool_dispatcher.calls[0].query
-    assert "FOLLOW-UP AUTO-RESEARCH (LIVE WEB + PAGE EXTRACTION)" in calls[0]
+    assert "FOLLOW-UP AUTO-RESEARCH (LIVE WEB + SOURCE CHECK)" in calls[0]
     assert "user feedback requested more/different sources" in calls[0]
 
 
@@ -691,8 +900,8 @@ def test_user_feedback_followup_extraction_failure_prompt_is_truthful(monkeypatc
     )
     assert [c.capability for c in d.webtool_dispatcher.calls] == ["websearch", "webscraping", "browser"]
     assert "FOLLOW-UP AUTO-RESEARCH STATUS" in calls[0]
-    assert "WEB SEARCH SUCCEEDED, FOLLOW-UP EXTRACTION UNCONFIRMED" in calls[0]
-    assert "still could not confirm" in calls[0]
+    assert "WEB SEARCH SUCCEEDED, SOURCE CHECK INCONCLUSIVE" in calls[0]
+    assert "available web results could not fully confirm" in calls[0]
 
 
 def test_auto_research_chain_caps_urls_browser_and_text(monkeypatch):
@@ -753,7 +962,7 @@ def test_auto_research_success_note_forbids_no_tool_claims_and_prefers_live_sour
     assert "Do NOT claim or imply that the bot has no web tools" in note
     assert "no live data capability" in note
     assert "cannot search the web" in note
-    assert "Use the supplied web summary as primary evidence" in note
+    assert "Use the supplied web result text as primary evidence" in note
     assert "available live sources do not confirm that exact value" in note
     assert "do not say no webtools" in note
     assert "Source hosts: a, b" in note

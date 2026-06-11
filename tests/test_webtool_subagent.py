@@ -57,6 +57,19 @@ def subagent_service(session_factory):
 class TestWebtoolSubagentAllowed:
     """Happy path: allowed operations."""
 
+    def test_websearch_request_defaults_to_five_results(self):
+        request = WebtoolSubagentRequest(
+            operation_type=WebtoolOperationType.WEBSEARCH,
+            user_id=42,
+            role=Role.OWNER,
+            chat_id=-100,
+            topic_id=None,
+            day="2026-05-29",
+            query="current facts",
+        )
+
+        assert request.max_results == 5
+
     def test_websearch_allowed_for_unlimited_role(self, subagent_service):
         service, session_factory = subagent_service
 
@@ -566,8 +579,57 @@ class TestWebtoolSubagentSanitization:
         result = service.execute(request)
 
         assert result.allowed is True
-        assert len(result.sanitized.text) <= 9000  # Should be capped + "[truncated]"
-        assert "[truncated]" in result.sanitized.text or len(result.sanitized.text) < 10000
+        assert len(result.sanitized.text) <= 8000
+        assert "oversized webtool result omitted from active context" in result.sanitized.text
+
+    def test_browser_text_length_capped(self):
+        """Browser provider text is also truncated before returning to callers."""
+        from amo_bot.ai.webtool_subagent import WebtoolSubagentService
+
+        class LongBrowserProvider:
+            def render(self, *, url: str, timeout_seconds: float):
+                return {
+                    "url": url,
+                    "status_code": 200,
+                    "text": ("B" * 100_000) + "RAW_BROWSER_TAIL_SHOULD_NOT_SURVIVE",
+                }
+
+        from unittest.mock import MagicMock
+
+        mock_quota_decision = MagicMock()
+        mock_quota_decision.allowed = True
+        mock_quota_decision.decision = "allow"
+        mock_quota_decision.reason = "unlimited"
+        mock_quota_decision.limit = 0
+        mock_quota_decision.current_count = 0
+        mock_quota_decision.remaining = None
+        mock_quota_decision.timing_ms = 5
+
+        mock_repo = MagicMock()
+        mock_repo.check_quota.return_value = mock_quota_decision
+
+        service = WebtoolSubagentService(
+            quota_repo=mock_repo,
+            browser_provider=LongBrowserProvider(),
+        )
+
+        request = WebtoolSubagentRequest(
+            operation_type=WebtoolOperationType.BROWSER,
+            user_id=42,
+            role=Role.OWNER,
+            chat_id=-100,
+            topic_id=None,
+            day="2026-05-29",
+            url="https://example.com/page",
+        )
+
+        result = service.execute(request)
+
+        assert result.allowed is True
+        assert result.sanitized.result_type == "browser_text"
+        assert len(result.sanitized.text) <= 8000
+        assert "oversized webtool result omitted from active context" in result.sanitized.text
+        assert "RAW_BROWSER_TAIL_SHOULD_NOT_SURVIVE" not in result.sanitized.text
 
     def test_null_bytes_removed(self):
         """Null bytes are removed from text."""

@@ -38,6 +38,15 @@ Dieses Release bringt erhebliche Verbesserungen bei der Web-Recherche-Zuverläss
 
 **Opt-out:** Wer keine Reaktions-Feedback-Lernung wünscht, sollte Bot-Nachrichten nicht mit Emoji reagieren oder explizit korrigierenden Text senden.
 
+### Auto-Web-Research: Provider-Registry & Quality-Gates
+
+- **Source/Provider Registry:** Interne Registry für Weather- und Crypto-Provider mit definierten Default-Kandidaten.
+- **Weather-Provider:** Open-Meteo (primär) + wttr.in (Fallback) für Wetterabfragen.
+- **Crypto-Provider:** CoinGecko (primär) + Binance public ticker (Fallback), bewusst eng auf BTC/ETH in USD/USDT begrenzt; unbekannte Assets oder EUR-Paare führen zu Fail-Closed-Verhalten.
+- **Health-Monitoring:** Provider-Health wird über den Prozesslauf geteilt; DB Session/Quota Repository wird pro Execute frisch initialisiert.
+- **Fail-Closed:** Stock/Sports-Daten bleiben ohne strukturierte Provider fail-closed (keine unsicheren Annahmen).
+- **Quota/Audit:** Metadata-only Persistenz für Audit-Zwecke; keine sensitiven Daten in Logs.
+
 ### Sicherheit & Privacy
 
 - Keine Secrets in Release-Dokumentation.

@@ -32,6 +32,8 @@ class WebtoolOperationType:
     WEBSEARCH = "websearch"
     WEBSCRAPING = "webscraping"
     BROWSER = "browser"
+    WEATHER_EVIDENCE = "weather_evidence"
+    CRYPTO_EVIDENCE = "crypto_evidence"
 
 
 # Prompt injection patterns to sanitize from result text
@@ -159,6 +161,23 @@ class WebtoolBrowserProvider(Protocol):
         """Return dict with url/status_code/text."""
         ...
 
+
+class WebtoolWeatherEvidenceProvider(Protocol):
+    """Protocol for structured weather evidence providers."""
+
+    def get_weather(self, *, query: str, locale: str):
+        """Return structured DomainEvidenceResult for weather."""
+        ...
+
+
+class WebtoolCryptoEvidenceProvider(Protocol):
+    """Protocol for structured crypto evidence providers."""
+
+    def get_crypto(self, *, query: str, locale: str):
+        """Return structured DomainEvidenceResult for crypto."""
+        ...
+
+
 class WebtoolSubagentService:
     """Service for executing webtools with quota checks and sanitization.
 
@@ -176,6 +195,7 @@ class WebtoolSubagentService:
     # Output limits for sanitization
     _MAX_RESULT_TEXT_CHARS = 8000
     _MAX_SNIPPET_CHARS = 500
+    _TRUNCATION_MARKER = "\n[truncated: oversized webtool result omitted from active context]"
 
     def __init__(
         self,
@@ -183,6 +203,8 @@ class WebtoolSubagentService:
         search_provider: WebtoolSearchProvider | None = None,
         scrape_provider: WebtoolScrapeProvider | None = None,
         browser_provider: WebtoolBrowserProvider | None = None,
+        weather_evidence_provider: WebtoolWeatherEvidenceProvider | None = None,
+        crypto_evidence_provider: WebtoolCryptoEvidenceProvider | None = None,
         search_timeout_seconds: float = _DEFAULT_SEARCH_TIMEOUT_SECONDS,
         scrape_timeout_seconds: float = _DEFAULT_SCRAPE_TIMEOUT_SECONDS,
     ) -> None:
@@ -190,6 +212,8 @@ class WebtoolSubagentService:
         self._search_provider = search_provider
         self._scrape_provider = scrape_provider
         self._browser_provider = browser_provider
+        self._weather_evidence_provider = weather_evidence_provider
+        self._crypto_evidence_provider = crypto_evidence_provider
         self._search_timeout = search_timeout_seconds
         self._scrape_timeout = scrape_timeout_seconds
 
@@ -248,6 +272,10 @@ class WebtoolSubagentService:
                 return self._execute_webscraping(request, metadata)
             elif request.operation_type == WebtoolOperationType.BROWSER:
                 return self._execute_browser(request, metadata)
+            elif request.operation_type == WebtoolOperationType.WEATHER_EVIDENCE:
+                return self._execute_weather_evidence(request, metadata)
+            elif request.operation_type == WebtoolOperationType.CRYPTO_EVIDENCE:
+                return self._execute_crypto_evidence(request, metadata)
             else:
                 return self._unsupported_result(request, metadata, "unknown_operation_type")
         except Exception as exc:
@@ -460,6 +488,97 @@ class WebtoolSubagentService:
                 error=f"Browser failed: {type(exc).__name__}",
             )
 
+    def _execute_weather_evidence(self, request: WebtoolSubagentRequest, metadata: dict) -> WebtoolSubagentResult:
+        """Execute structured weather evidence behind the webtool quota/audit path."""
+        if self._weather_evidence_provider is None:
+            return WebtoolSubagentResult(
+                allowed=False,
+                decision="provider_unavailable",
+                reason="weather_provider_not_configured",
+                sanitized=self._empty_result(),
+                metadata=metadata,
+                error="No weather evidence provider configured",
+            )
+        try:
+            result = self._weather_evidence_provider.get_weather(query=request.query, locale=request.locale)
+            return self._evidence_result_to_subagent_result(
+                result,
+                metadata,
+                result_type="weather_evidence",
+                empty_reason="weather_evidence_unconfirmed",
+            )
+        except Exception as exc:
+            return self._execution_error_result(request, metadata, exc)
+
+    def _execute_crypto_evidence(self, request: WebtoolSubagentRequest, metadata: dict) -> WebtoolSubagentResult:
+        """Execute structured crypto evidence behind the webtool quota/audit path."""
+        if self._crypto_evidence_provider is None:
+            return WebtoolSubagentResult(
+                allowed=False,
+                decision="provider_unavailable",
+                reason="crypto_provider_not_configured",
+                sanitized=self._empty_result(),
+                metadata=metadata,
+                error="No crypto evidence provider configured",
+            )
+        try:
+            result = self._crypto_evidence_provider.get_crypto(query=request.query, locale=request.locale)
+            return self._evidence_result_to_subagent_result(
+                result,
+                metadata,
+                result_type="crypto_evidence",
+                empty_reason="crypto_evidence_unconfirmed",
+            )
+        except Exception as exc:
+            return self._execution_error_result(request, metadata, exc)
+
+    def _evidence_result_to_subagent_result(
+        self,
+        result,
+        metadata: dict,
+        *,
+        result_type: str,
+        empty_reason: str,
+    ) -> WebtoolSubagentResult:
+        """Map structured evidence to sanitized output without adding content to metadata."""
+        evidence_sources = tuple(getattr(result, "sources", ()) or ())
+        source_urls = tuple(str(getattr(source, "url", "") or "") for source in evidence_sources if getattr(source, "url", ""))
+        source_names = tuple(str(getattr(source, "name", "") or "") for source in evidence_sources if getattr(source, "name", ""))
+        source_hosts = tuple(host for url in source_urls if (host := self._extract_host(url)))
+        metadata.update(
+            {
+                "evidence_domain": str(getattr(result, "domain", "")),
+                "evidence_status": str(getattr(result, "status", "")),
+                "evidence_confidence": float(getattr(result, "confidence", 0.0) or 0.0),
+                "source_count": len(source_urls),
+                "source_names": source_names[:5],
+                "warning_count": len(getattr(result, "warnings", ()) or ()),
+            }
+        )
+        if not getattr(result, "confirmed", False):
+            return WebtoolSubagentResult(
+                allowed=False,
+                decision="deny",
+                reason=str(getattr(result, "status", "") or empty_reason),
+                sanitized=self._empty_result(),
+                metadata=metadata,
+                error=None,
+            )
+        sanitized = WebtoolSanitizedResult(
+            text=self._cap_result_text(self._sanitize_text(str(getattr(result, "text", "") or ""))),
+            sources=source_urls,
+            hosts=source_hosts,
+            result_type=result_type,
+        )
+        return WebtoolSubagentResult(
+            allowed=True,
+            decision="allow",
+            reason=f"{result_type}_completed",
+            sanitized=sanitized,
+            metadata=metadata,
+            error=None,
+        )
+
     def _sanitize_search_results(self, results: list[dict[str, str]]) -> WebtoolSanitizedResult:
         """Sanitize search results: compact text + sources/hosts separated."""
         texts: list[str] = []
@@ -483,10 +602,7 @@ class WebtoolSubagentService:
                 compact = f"{i}. {title}: {snippet}".strip(": ")
                 texts.append(compact)
 
-        combined_text = "\n".join(texts)
-        # Apply length cap
-        if len(combined_text) > self._MAX_RESULT_TEXT_CHARS:
-            combined_text = combined_text[: self._MAX_RESULT_TEXT_CHARS] + "\n[truncated]"
+        combined_text = self._cap_result_text("\n".join(texts))
 
         return WebtoolSanitizedResult(
             text=combined_text,
@@ -505,10 +621,7 @@ class WebtoolSubagentService:
         hosts = (host,) if host else ()
         sources = (url,) if url else ()
 
-        # Compact format
-        combined_text = text[: self._MAX_RESULT_TEXT_CHARS]
-        if len(text) > self._MAX_RESULT_TEXT_CHARS:
-            combined_text += "\n[truncated]"
+        combined_text = self._cap_result_text(text)
 
         return WebtoolSanitizedResult(
             text=combined_text,
@@ -516,6 +629,12 @@ class WebtoolSubagentService:
             hosts=hosts,
             result_type="webscraping_text",
         )
+
+    def _cap_result_text(self, text: str) -> str:
+        if len(text) <= self._MAX_RESULT_TEXT_CHARS:
+            return text
+        keep = max(0, self._MAX_RESULT_TEXT_CHARS - len(self._TRUNCATION_MARKER))
+        return text[:keep].rstrip() + self._TRUNCATION_MARKER
 
     def _sanitize_text(self, text: str) -> str:
         """Sanitize text: remove/neutralize prompt injection patterns."""
@@ -643,6 +762,8 @@ def create_webtool_subagent_service(
     search_provider: WebtoolSearchProvider | None = None,
     scrape_provider: WebtoolScrapeProvider | None = None,
     browser_provider: WebtoolBrowserProvider | None = None,
+    weather_evidence_provider: WebtoolWeatherEvidenceProvider | None = None,
+    crypto_evidence_provider: WebtoolCryptoEvidenceProvider | None = None,
 ) -> WebtoolSubagentService:
     """Factory to create webtool subagent service.
 
@@ -661,13 +782,21 @@ def create_webtool_subagent_service(
     Returns:
         Configured WebtoolSubagentService instance.
     """
-    if search_provider is not None or scrape_provider is not None:
+    if (
+        search_provider is not None
+        or scrape_provider is not None
+        or browser_provider is not None
+        or weather_evidence_provider is not None
+        or crypto_evidence_provider is not None
+    ):
         # Real providers injected — no fakes even if use_fake_providers=True
         return WebtoolSubagentService(
             quota_repo=quota_repo,
             search_provider=search_provider,
             scrape_provider=scrape_provider,
             browser_provider=browser_provider,
+            weather_evidence_provider=weather_evidence_provider,
+            crypto_evidence_provider=crypto_evidence_provider,
         )
 
     if use_fake_providers:
@@ -680,4 +809,6 @@ def create_webtool_subagent_service(
         search_provider=search_provider,
         scrape_provider=scrape_provider,
         browser_provider=browser_provider,
+        weather_evidence_provider=weather_evidence_provider,
+        crypto_evidence_provider=crypto_evidence_provider,
     )

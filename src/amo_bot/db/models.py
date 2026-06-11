@@ -290,6 +290,79 @@ class PopgunAlertState(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 
+class ResearchProvider(Base):
+    __tablename__ = "research_providers"
+    __table_args__ = (
+        UniqueConstraint("provider_name", name="uq_research_providers_provider_name"),
+        Index("ix_research_providers_domain_enabled", "domain", "enabled"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    provider_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    source_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    domain: Mapped[str] = mapped_column(String(64), nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="1")
+    default_priority: Mapped[int] = mapped_column(Integer, nullable=False, default=100, server_default="100")
+    fallback_allowed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="1")
+    min_confidence: Mapped[float] = mapped_column(Float, nullable=False, default=0.0, server_default="0")
+    max_age_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    metadata_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+
+class ResearchProviderHealth(Base):
+    __tablename__ = "research_provider_health"
+    __table_args__ = (UniqueConstraint("provider_name", name="uq_research_provider_health_provider_name"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    provider_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    success_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    failure_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    timeout_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    rate_limit_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    last_success_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_failure_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_error: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+
+class ResearchSourceObservation(Base):
+    __tablename__ = "research_source_observations"
+    __table_args__ = (
+        Index("ix_research_source_observations_provider_domain", "provider_name", "domain"),
+        Index("ix_research_source_observations_created_at", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    provider_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    source_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    domain: Mapped[str] = mapped_column(String(64), nullable=False)
+    outcome: Mapped[str] = mapped_column(String(64), nullable=False)
+    confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    warning_codes_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    metadata_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class ResearchEvalCase(Base):
+    __tablename__ = "research_eval_cases"
+    __table_args__ = (
+        Index("ix_research_eval_cases_domain_enabled", "domain", "enabled"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    case_key: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
+    domain: Mapped[str] = mapped_column(String(64), nullable=False)
+    locale: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    sanitized_prompt: Mapped[str] = mapped_column(Text, nullable=False)
+    expected_status: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    expected_metadata_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="1")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+
 DEFAULT_ROLES: list[tuple[Role, int]] = [
     (Role.OWNER, 0),
     (Role.ADMIN, 10),

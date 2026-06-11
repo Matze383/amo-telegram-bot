@@ -30,9 +30,15 @@ from amo_bot.webui.flask_app import create_flask_app
 from amo_bot.ai.dreaming_runtime import DreamingRuntime
 from amo_bot.ai.daily_memory_runtime import DailyMemoryRuntime
 from amo_bot.ai.webtool_dispatcher import WebtoolCapabilityDispatcher
-from amo_bot.ai.webtool_provider_adapter import RealBrowserProviderAdapter, RealWebsearchProviderAdapter
+from amo_bot.ai.webtool_provider_adapter import RealBrowserProviderAdapter, RealWebscrapeProviderAdapter, RealWebsearchProviderAdapter
 from amo_bot.ai.webtool_subagent import create_webtool_subagent_service
 from amo_bot.db.repositories import WebToolRoleQuotaRepository
+from amo_bot.telegram.webtool_evidence import (
+    DbBackedProviderHealthRegistry,
+    ResilientCryptoEvidenceProvider,
+    ResilientWeatherEvidenceProvider,
+    WebEvidencePipeline,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -81,6 +87,36 @@ async def _run_polling_with_runtimes(
     finally:
         await daily_runtime.stop()
         await dreaming_runtime.stop()
+
+
+class SessionBoundWebtoolCapabilityDispatcher:
+    """Create quota repo per execute call while reusing provider health in-process."""
+
+    def __init__(self, *, session_factory) -> None:
+        self._session_factory = session_factory
+        provider_health = DbBackedProviderHealthRegistry(session_factory=session_factory)
+        self._weather_evidence_provider = ResilientWeatherEvidenceProvider(health=provider_health)
+        self._crypto_evidence_provider = ResilientCryptoEvidenceProvider(health=provider_health)
+
+    def execute(self, request):
+        with self._session_factory() as session:
+            quota_repo = WebToolRoleQuotaRepository(session)
+            browser_provider = None
+            candidate = RealBrowserProviderAdapter()
+            if candidate.available:
+                browser_provider = candidate
+            search_provider = RealWebsearchProviderAdapter(quota_limiter=quota_repo)
+            scrape_provider = RealWebscrapeProviderAdapter()
+            service = create_webtool_subagent_service(
+                quota_repo=quota_repo,
+                search_provider=search_provider,
+                scrape_provider=scrape_provider,
+                browser_provider=browser_provider,
+                weather_evidence_provider=self._weather_evidence_provider,
+                crypto_evidence_provider=self._crypto_evidence_provider,
+            )
+            dispatcher = WebtoolCapabilityDispatcher(quota_repo=quota_repo, service=service)
+            return dispatcher.execute(request)
 
 
 def _build_parser() -> ArgumentParser:
@@ -288,29 +324,8 @@ def run(argv: list[str] | None = None) -> None:
         bot_username=settings.bot_username,
     )
 
-    class _SessionBoundWebtoolCapabilityDispatcher:
-        """Create quota repo + capability dispatcher per execute call using fresh DB session."""
-
-        def __init__(self, *, session_factory) -> None:
-            self._session_factory = session_factory
-
-        def execute(self, request):
-            with self._session_factory() as session:
-                quota_repo = WebToolRoleQuotaRepository(session)
-                browser_provider = None
-                candidate = RealBrowserProviderAdapter()
-                if candidate.available:
-                    browser_provider = candidate
-                search_provider = RealWebsearchProviderAdapter(quota_limiter=quota_repo)
-                service = create_webtool_subagent_service(
-                    quota_repo=quota_repo,
-                    search_provider=search_provider,
-                    browser_provider=browser_provider,
-                )
-                dispatcher = WebtoolCapabilityDispatcher(quota_repo=quota_repo, service=service)
-                return dispatcher.execute(request)
-
-    webtool_dispatcher = _SessionBoundWebtoolCapabilityDispatcher(session_factory=session_factory)
+    webtool_dispatcher = SessionBoundWebtoolCapabilityDispatcher(session_factory=session_factory)
+    web_evidence_pipeline = WebEvidencePipeline()
 
     dispatcher = Dispatcher(
         command_registry=command_registry,
@@ -326,6 +341,7 @@ def run(argv: list[str] | None = None) -> None:
         ai_service=ai_service,
         owner_notifier=owner_notifier,
         webtool_dispatcher=webtool_dispatcher,
+        web_evidence_pipeline=web_evidence_pipeline,
         prompt_timezone=settings.dreaming_timezone,
     )
 

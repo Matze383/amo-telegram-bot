@@ -2,6 +2,86 @@
 
 ---
 
+## [Unreleased] – Web Research Provider Registry & Health Monitoring
+
+**Datum / Date:** 2026-06-11
+
+### 🇩🇪 Deutsch
+
+#### Übersicht
+Erweiterte Webtool-Infrastruktur mit Provider-Registry, Health-Monitoring und Quality-Gates für zuverlässigere Datenquellen.
+
+#### Neu
+- **Source/Provider Registry:** Zentrale Registry für Weather- und Crypto-Provider mit definierten Default-Kandidaten.
+- **Weather-Provider:** Open-Meteo (primär) + wttr.in (Fallback) für Wetterabfragen.
+- **Crypto-Provider:** CoinGecko (primär) + Binance public ticker (Fallback), eng begrenzt auf BTC/ETH in USD/USDT; unbekannte Assets oder EUR-Paare führen zu Fail-Closed.
+- **Health-Monitoring (DB-gestützt):** Provider-Health wird in der Datenbank persistiert (`research_provider_health`) und über Neustarts hinweg nutzbar.
+- **Research-Tabellen:** Neue DB-Tabellen für zukünftige Research-Einheit: `research_providers`, `research_source_observations`, `research_eval_cases`.
+- **Stock/Sports:** Bleiben fail-closed ohne strukturierte Provider (keine unsicheren Annahmen).
+- **Quota/Audit:** Metadata-only Persistenz für Audit-Zwecke (keine raw Queries/URLs/Secrets).
+
+#### Technisch
+- **DB-Persistenz:** Provider-Health über Neustarts nutzbar; atomare Counter-Updates mit Race-Recovery bei first-create.
+- **Privacy:** Keine raw Queries/URLs/Secrets in Health-Daten – nur Metadata.
+- Keine neue Config erforderlich (bestehende `SEARXNG_BASE_URL` bleibt primärer Websearch-Provider).
+- Keine neuen Commands.
+- Fail-Closed-Verhalten bei nicht verifizierbaren Live-Daten.
+
+#### Maintenance / Datenbank-Migration
+Für bestehende Datenbanken können die Research-Tabellen gezielt über CLI erstellt werden:
+
+```bash
+# Dry-run: zeigt vorhandene/fehlende Tabellen
+python -m amo_bot.db.research_tables --database-url "$DATABASE_URL" --dry-run
+
+# Apply: erstellt fehlende Tabellen (Backup vorher empfohlen)
+python -m amo_bot.db.research_tables --database-url "$DATABASE_URL"
+```
+
+**Hinweise:**
+- Das Kommando erstellt **nur** die vier Research-Tabellen (`research_providers`, `research_provider_health`, `research_source_observations`, `research_eval_cases`).
+- Es berührt **keine** anderen Tabellen (kein `init_db`, kein Seeding).
+- **Sicherheit:** Die URL im Kommandozeilen-Argument kann in der Prozessliste sichtbar sein (ps/top). Secrets werden im Code nicht geloggt.
+
+### 🇬🇧 English
+
+#### Overview
+Enhanced web tool infrastructure with provider registry, health monitoring, and quality gates for more reliable data sources.
+
+#### New
+- **Source/Provider Registry:** Central registry for Weather and Crypto providers with defined default candidates.
+- **Weather Providers:** Open-Meteo (primary) + wttr.in (fallback) for weather queries.
+- **Crypto Providers:** CoinGecko (primary) + Binance public ticker (fallback), strictly limited to BTC/ETH in USD/USDT; unknown assets or EUR pairs result in fail-closed behavior.
+- **Health Monitoring (DB-backed):** Provider health persisted to database (`research_provider_health`) and survives restarts.
+- **Research Tables:** New DB tables for future research unit: `research_providers`, `research_source_observations`, `research_eval_cases`.
+- **Stock/Sports:** Remain fail-closed without structured providers (no unsafe assumptions).
+- **Quota/Audit:** Metadata-only persistence for audit purposes (no raw queries/URLs/secrets).
+
+#### Technical
+- **DB Persistence:** Provider health survives restarts; atomic counter updates with race recovery on first-create.
+- **Privacy:** No raw queries/URLs/secrets in health data – metadata only.
+- No new config required (existing `SEARXNG_BASE_URL` remains primary websearch provider).
+- No new commands.
+- Fail-closed behavior for unverifiable live data.
+
+#### Maintenance / Database Migration
+For existing databases, the research tables can be created specifically via CLI:
+
+```bash
+# Dry-run: shows existing/missing tables
+python -m amo_bot.db.research_tables --database-url "$DATABASE_URL" --dry-run
+
+# Apply: creates missing tables (backup recommended beforehand)
+python -m amo_bot.db.research_tables --database_url "$DATABASE_URL"
+```
+
+**Notes:**
+- This command creates **only** the four research tables (`research_providers`, `research_provider_health`, `research_source_observations`, `research_eval_cases`).
+- It does **not** touch any other tables (no `init_db`, no seeding).
+- **Security:** The URL in the command-line argument may be visible in the process list (ps/top). Secrets are not logged in code.
+
+---
+
 ## [Unreleased] – Auto Web Research Feedback Follow-up (v3)
 
 **Datum / Date:** 2026-06-01

@@ -16,6 +16,8 @@ class WebtoolChatTrigger:
 
 _FOLLOWUP_QUERY_MAX_CHARS = 220
 _EMPTY_RESULT_RETRY_QUERY_MAX_CHARS = 150
+_WEBTOOL_CHAT_RESULT_MAX_CHARS = 700
+_WEBTOOL_CONTEXT_RESULT_MAX_CHARS = 900
 
 _WEBSEARCH_PREFIX_RE = re.compile(r"^\s*websearch\s*:\s*(.+)$", re.IGNORECASE | re.DOTALL)
 _WEBSCRAPE_PREFIX_RE = re.compile(r"^\s*webscrape\s*:\s*(.+)$", re.IGNORECASE | re.DOTALL)
@@ -44,6 +46,14 @@ _FOLLOWUP_FILLER_RE = re.compile(
 )
 _OLD_ANSWER_MARKER_RE = re.compile(
     r"\b(?:bot\s+answer|assistant\s+answer|previous\s+answer|prior\s+answer|alte\s+antwort|vorherige\s+antwort|antwort)\s*:",
+    re.IGNORECASE,
+)
+_STALE_VALUE_RE = re.compile(
+    r"(?:[$€£]\s*)?\b\d+(?:[.,]\d+)?\s*(?:usd|eur|gbp|chf|jpy|cad|aud|dollar|euro|€|\$|%)?\b",
+    re.IGNORECASE,
+)
+_CONTEXT_TOPIC_RE = re.compile(
+    r"\b(?:zum\s+thema|thema|about|zu|for)\s+(.+?)(?:\s+(?:finden|gefunden|confirmed|bestätigt|bestaetigt)\b|[.!?]|$)",
     re.IGNORECASE,
 )
 _BTC_RE = re.compile(r"\b(?:btc|bitcoin)\b", re.IGNORECASE)
@@ -76,6 +86,24 @@ def _clean_empty_result_retry_text(text: str) -> str:
     cleaned = _FOLLOWUP_FILLER_RE.sub(" ", cleaned)
     cleaned = re.sub(r"https?://\S+", " ", cleaned)
     cleaned = re.sub(r"\bwebsearch\s*:\s*", " ", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" -–—:;,.!?\t\n\r")
+    return cleaned
+
+
+def _clean_followup_query_part(text: str, *, remove_stale_values: bool) -> str:
+    cleaned = _BOT_MENTION_RE.sub(" ", text or "")
+    old_answer_match = _OLD_ANSWER_MARKER_RE.search(cleaned)
+    if old_answer_match and not remove_stale_values and old_answer_match.start() > 0:
+        cleaned = cleaned[:old_answer_match.start()]
+    else:
+        cleaned = _OLD_ANSWER_MARKER_RE.sub(" ", cleaned)
+    cleaned = re.sub(r"https?://\S+", " ", cleaned)
+    cleaned = _MARKDOWN_PUNCT_RE.sub(" ", cleaned)
+    if remove_stale_values:
+        cleaned = _STALE_VALUE_RE.sub(" ", cleaned)
+    topic_match = _CONTEXT_TOPIC_RE.search(cleaned)
+    if topic_match:
+        cleaned = topic_match.group(1)
     cleaned = re.sub(r"\s+", " ", cleaned).strip(" -–—:;,.!?\t\n\r")
     return cleaned
 
@@ -154,8 +182,14 @@ def build_web_research_followup_query(*, feedback_text: str, context_text: str =
     so the provider sees that the request is for more/different sources. No
     logging layer should record this raw value.
     """
-    feedback = _compact_followup_query(feedback_text, max_len=120)
-    context = _compact_followup_query(context_text, max_len=160)
+    feedback = _compact_followup_query(
+        _clean_followup_query_part(feedback_text, remove_stale_values=False),
+        max_len=120,
+    )
+    context = _compact_followup_query(
+        _clean_followup_query_part(context_text, remove_stale_values=True),
+        max_len=160,
+    )
     if context:
         return _compact_followup_query(f"{context} {feedback}")
     return _compact_followup_query(feedback)
@@ -224,6 +258,24 @@ def format_webtool_quota_text(locale: str, role: Role) -> str:
     return f"Webtool-Limit für Rolle {role.value} erreicht."
 
 
+def compact_webtool_result_text(
+    text: str,
+    *,
+    max_chars: int = _WEBTOOL_CONTEXT_RESULT_MAX_CHARS,
+) -> str:
+    """Return a bounded one-line webtool result for prompts or chat output."""
+    compact = " ".join((text or "").split())
+    if max_chars < 1:
+        return ""
+    if len(compact) <= max_chars:
+        return compact
+    suffix_template = " ... [truncated; {omitted} chars omitted from active context]"
+    suffix = suffix_template.format(omitted=max(0, len(compact) - max_chars))
+    keep = max(0, max_chars - len(suffix))
+    suffix = suffix_template.format(omitted=len(compact) - keep)
+    return compact[:keep].rstrip() + suffix
+
+
 def format_webtool_success_text(*, locale: str, capability: str, text: str) -> str:
     if capability == "websearch":
         label = "Websearch"
@@ -232,7 +284,5 @@ def format_webtool_success_text(*, locale: str, capability: str, text: str) -> s
     else:
         label = "Browser"
     prefix = f"{label}: " if locale == "en" else f"{label}: "
-    compact = " ".join((text or "").split())
-    if len(compact) > 700:
-        compact = compact[:700].rstrip() + " …"
+    compact = compact_webtool_result_text(text, max_chars=_WEBTOOL_CHAT_RESULT_MAX_CHARS)
     return prefix + compact

@@ -100,6 +100,10 @@ def _map_operation_type(capability: str) -> str:
         return WebtoolOperationType.WEBSCRAPING
     if normalized == "browser":
         return WebtoolOperationType.BROWSER
+    if normalized in {"weather_evidence", "weather"}:
+        return WebtoolOperationType.WEATHER_EVIDENCE
+    if normalized in {"crypto_evidence", "crypto"}:
+        return WebtoolOperationType.CRYPTO_EVIDENCE
     return normalized
 
 
