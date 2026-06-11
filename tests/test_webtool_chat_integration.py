@@ -12,8 +12,10 @@ from amo_bot.telegram.webtool_research_orchestrator import (
     _format_auto_research_no_result_note,
     _format_auto_research_success_note,
     _select_chain_urls,
+    build_research_chain_plan,
     build_research_plan,
     sanitize_auto_research_user_response,
+    should_attempt_browser_fallback,
     should_chain_auto_research,
 )
 from amo_bot.telegram.update_parser import TelegramChat, TelegramMessage, TelegramUser
@@ -730,6 +732,116 @@ def test_research_plan_uses_source_observation_quality_for_followup():
     assert plan.should_followup_search is True
     assert plan.evidence_status == "weak_initial_evidence"
     assert "source_observation_weak" in plan.warning_codes
+
+
+def test_research_chain_plan_marks_snippet_only_and_single_source():
+    plan = build_research_chain_plan(
+        request_text="latest news about Python today",
+        capability="websearch",
+        reason="classifier_current_data",
+        search_text="1. Python release: latest update ... read more",
+        source_hosts=("news.example",),
+        source_urls=("https://news.example/python",),
+    )
+
+    assert plan.evidence_status == "weak_initial_evidence"
+    assert [step.operation for step in plan.steps] == ["webscraping"]
+    assert plan.steps[0].reason == "source_confirmation_check"
+    assert "snippet_only_result" in plan.warning_codes
+    assert "single_source_host" in plan.warning_codes
+
+
+def test_research_chain_plan_detects_table_dynamic_page_hint():
+    plan = build_research_chain_plan(
+        request_text="Bundesliga Tabelle live aktuell",
+        capability="websearch",
+        reason="classifier_current_data",
+        search_text="Live standings and results",
+        source_hosts=("sports.example",),
+        source_urls=("https://sports.example/live/table",),
+    )
+
+    assert "dynamic_page_hint" in plan.warning_codes
+    assert plan.steps[0].reason == "dynamic_domain_source_check"
+
+
+def test_research_chain_plan_marks_no_usable_source():
+    plan = build_research_chain_plan(
+        request_text="latest news about OpenAI today",
+        capability="websearch",
+        reason="classifier_current_data",
+        search_text="short",
+        source_hosts=(),
+        source_urls=(),
+    )
+
+    assert plan.evidence_status == "no_usable_source"
+    assert plan.steps == ()
+    assert "no_usable_source" in plan.warning_codes
+    assert "no_source_hosts" in plan.warning_codes
+
+
+def test_research_chain_plan_uses_conflicting_source_observation():
+    class _Record:
+        host = "conflict.example"
+        success_count = 2
+        failure_count = 0
+        warning_count = 0
+        conflict_count = 1
+
+    class _Reader:
+        def assess_hosts(self, *, domain: str, hosts: tuple[str, ...]):
+            assert domain == "news"
+            assert hosts == ("conflict.example",)
+            return (_Record(),)
+
+    plan = build_research_chain_plan(
+        request_text="latest news about OpenAI today",
+        capability="websearch",
+        reason="classifier_current_data",
+        search_text="OpenAI current news from source",
+        source_hosts=("conflict.example",),
+        source_urls=("https://conflict.example/openai",),
+        source_quality_reader=_Reader(),
+    )
+
+    assert plan.evidence_status == "weak_initial_evidence"
+    assert "source_observation_conflict" in plan.warning_codes
+
+
+def test_browser_fallback_decision_targets_js_placeholder_and_dynamic_pages():
+    js_scrape = SimpleNamespace(
+        allowed=True,
+        reason="scrape_completed",
+        text="Please enable JavaScript to view this app. Loading...",
+    )
+    js_quality = SimpleNamespace(usable=False, warning_codes=("extraction_js_placeholder",), text_length=52)
+
+    js_decision = should_attempt_browser_fallback(
+        request_text="current Nvidia stock price now",
+        url="https://markets.example/nvda",
+        search_text="Nvidia quote live",
+        scrape_result=js_scrape,
+        scrape_quality=js_quality,
+        static_failure_count=1,
+    )
+
+    assert js_decision.enabled is True
+    assert js_decision.reason == "js_placeholder"
+
+    empty_scrape = SimpleNamespace(allowed=False, reason="empty_result", text="")
+    weak_quality = SimpleNamespace(usable=False, warning_codes=("extraction_empty_text",), text_length=0)
+    dynamic_decision = should_attempt_browser_fallback(
+        request_text="Bundesliga Tabelle live aktuell",
+        url="https://sports.example/live/table",
+        search_text="Live table",
+        scrape_result=empty_scrape,
+        scrape_quality=weak_quality,
+        static_failure_count=1,
+    )
+
+    assert dynamic_decision.enabled is True
+    assert dynamic_decision.reason == "dynamic_page_hint"
 
 
 def test_auto_research_timeless_ordinary_query_does_not_chain(monkeypatch):

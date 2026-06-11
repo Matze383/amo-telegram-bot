@@ -132,6 +132,7 @@ class SearchPlanStep:
     operation: str
     reason: str
     query: str = ""
+    url: str = ""
     max_attempts: int = 1
 
 
@@ -146,6 +147,12 @@ class ResearchPlan:
     @property
     def should_followup_search(self) -> bool:
         return any(step.operation == "websearch" for step in self.steps)
+
+
+@dataclass(frozen=True, slots=True)
+class BrowserFallbackDecision:
+    enabled: bool
+    reason: str = ""
 
 
 class ResearchSourceQualityReader(Protocol):
@@ -544,7 +551,17 @@ class WebResearchOrchestrator:
         decision_auto: Any,
         is_followup_research: bool,
     ) -> tuple[tuple[str, ...], list[tuple[str, str, str]]]:
-        chain_urls = _select_chain_urls(tuple(tool_result.sources or ()))
+        chain_plan = build_research_chain_plan(
+            request_text=request.normalized_text,
+            capability=decision_auto.capability,
+            reason=decision_auto.reason,
+            search_text=getattr(tool_result, "text", "") or "",
+            source_hosts=tuple(getattr(tool_result, "hosts", ()) or ()),
+            source_urls=tuple(getattr(tool_result, "sources", ()) or ()),
+            source_quality_reader=self._source_quality_reader,
+        )
+        chain_steps = tuple(step for step in chain_plan.steps if step.operation == "webscraping" and step.url)
+        chain_urls = tuple(step.url for step in chain_steps)
         chain_extracts: list[tuple[str, str, str]] = []
         static_successes = 0
         browser_fallbacks_used = 0
@@ -571,7 +588,8 @@ class WebResearchOrchestrator:
                 error_class = type(error_value).__name__
                 error_class_buckets[error_class] = error_class_buckets.get(error_class, 0) + 1
 
-        for url in chain_urls:
+        for step in chain_steps:
+            url = step.url
             if static_successes >= _AUTO_RESEARCH_CHAIN_MAX_STATIC_SUCCESSES:
                 break
             chain_result = self._execute_url_tool(request, capability="webscraping", url=url)
@@ -586,7 +604,15 @@ class WebResearchOrchestrator:
                 chain_extracts.append(("webscraping", (tuple(chain_result.hosts or ()) or (_host_from_url(url),))[0], chain_text))
                 static_successes += 1
                 continue
-            if browser_fallbacks_used < _AUTO_RESEARCH_CHAIN_MAX_BROWSER_FALLBACKS:
+            browser_decision = should_attempt_browser_fallback(
+                request_text=request.normalized_text,
+                url=url,
+                search_text=getattr(tool_result, "text", "") or "",
+                scrape_result=chain_result,
+                scrape_quality=chain_quality,
+                static_failure_count=static_attempts,
+            )
+            if browser_fallbacks_used < _AUTO_RESEARCH_CHAIN_MAX_BROWSER_FALLBACKS and browser_decision.enabled:
                 browser_result = self._execute_url_tool(request, capability="browser", url=url)
                 browser_fallbacks_used += 1
                 browser_text = _compact_chain_text(browser_result.text or "")
@@ -622,6 +648,10 @@ class WebResearchOrchestrator:
                     timeout_count=timeout_count,
                     error_class_buckets=error_class_buckets,
                 ),
+                "plan_status": chain_plan.evidence_status,
+                "plan_warning_count": len(chain_plan.warning_codes),
+                "plan_step_count": len(chain_plan.steps),
+                "plan_reason_codes": tuple(sorted(set(chain_plan.warning_codes))),
                 "scope": request.scope,
                 "operation": decision_auto.capability,
             },
@@ -740,6 +770,92 @@ def build_research_plan(
         warning_codes=tuple(dict.fromkeys(warnings)),
         steps=steps,
     )
+
+
+def build_research_chain_plan(
+    *,
+    request_text: str,
+    capability: str,
+    reason: str | None,
+    search_text: str,
+    source_hosts: tuple[str, ...] = (),
+    source_urls: tuple[str, ...] = (),
+    source_quality_reader: ResearchSourceQualityReader | None = None,
+) -> ResearchPlan:
+    """Plan bounded source-page checks after a search, with metadata-only reason codes."""
+    domain = classify_evidence_domain(request_text)
+    hosts = _normalize_source_hosts(source_hosts=source_hosts, source_urls=source_urls)
+    urls = _select_chain_urls(source_urls)
+    warnings: list[str] = []
+
+    if capability != "websearch" or not should_chain_auto_research(request_text, capability=capability, reason=reason):
+        return ResearchPlan(domain=domain, evidence_status="chain_not_applicable", source_host_count=len(hosts))
+
+    search_quality = classify_extraction_quality(search_text, min_chars=_AUTO_RESEARCH_CHAIN_MIN_EXTRACT_CHARS)
+    warnings.extend(_chain_plan_initial_warnings(domain=domain, hosts=hosts, urls=urls, search_quality=search_quality))
+    source_quality = _assess_hosts_source_quality(domain=domain, hosts=hosts, reader=source_quality_reader)
+    if source_quality:
+        if source_quality.get("conflict_hosts"):
+            warnings.append("source_observation_conflict")
+        if source_quality.get("weak_hosts"):
+            warnings.append("source_observation_weak")
+
+    if _has_dynamic_page_hint(request_text=request_text, search_text=search_text, urls=urls, domain=domain):
+        warnings.append("dynamic_page_hint")
+
+    if not urls:
+        return ResearchPlan(
+            domain=domain,
+            evidence_status="no_usable_source",
+            source_host_count=len(hosts),
+            warning_codes=tuple(dict.fromkeys(warnings or ["no_usable_source"])),
+        )
+
+    steps = tuple(SearchPlanStep(operation="webscraping", reason=_source_check_reason(url=url, domain=domain), url=url) for url in urls)
+    status = "source_check_planned"
+    if warnings:
+        status = "weak_initial_evidence"
+    return ResearchPlan(
+        domain=domain,
+        evidence_status=status,
+        source_host_count=len(hosts),
+        warning_codes=tuple(dict.fromkeys(warnings)),
+        steps=steps,
+    )
+
+
+def should_attempt_browser_fallback(
+    *,
+    request_text: str,
+    url: str,
+    search_text: str,
+    scrape_result: Any,
+    scrape_quality: Any,
+    static_failure_count: int,
+) -> BrowserFallbackDecision:
+    """Decide whether a failed static source check deserves one bounded browser attempt."""
+    if getattr(scrape_result, "allowed", False) and getattr(scrape_quality, "usable", False):
+        return BrowserFallbackDecision(False)
+    quality_warnings = tuple(getattr(scrape_quality, "warning_codes", ()) or ())
+    failure_reason = _chain_failure_reason(
+        scrape_result,
+        int(getattr(scrape_quality, "text_length", 0) or 0),
+        quality_warnings=quality_warnings,
+    )
+    domain = classify_evidence_domain(request_text)
+    if "extraction_js_placeholder" in quality_warnings:
+        return BrowserFallbackDecision(True, "js_placeholder")
+    if _has_dynamic_page_hint(request_text=request_text, search_text=search_text, urls=(url,), domain=domain):
+        return BrowserFallbackDecision(True, "dynamic_page_hint")
+    if failure_reason in {"empty_text", "empty_result", "too_short", "extraction_too_short"}:
+        return BrowserFallbackDecision(True, "static_extraction_too_weak")
+    if failure_reason in {"timeout", "provider_unavailable"} and static_failure_count >= 1:
+        return BrowserFallbackDecision(True, "static_provider_failure")
+    if failure_reason.startswith("http_error") and static_failure_count >= 1:
+        if domain in {"stock", "sports", "news", "weather", "crypto"}:
+            return BrowserFallbackDecision(True, "domain_source_blocked")
+        return BrowserFallbackDecision(True, "static_source_blocked")
+    return BrowserFallbackDecision(False)
 
 
 def sanitize_auto_research_user_response(text: str) -> str:
@@ -873,6 +989,88 @@ def _build_planned_followup_query(*, request_text: str, domain: str, warnings: t
     query = f"{base} {suffix}"
     query = re.sub(r"\s+", " ", query).strip()
     return query[:140].rstrip()
+
+
+def _chain_plan_initial_warnings(
+    *,
+    domain: str,
+    hosts: tuple[str, ...],
+    urls: tuple[str, ...],
+    search_quality: Any,
+) -> tuple[str, ...]:
+    warnings: list[str] = []
+    if not urls:
+        warnings.append("no_usable_source")
+    if not hosts:
+        warnings.append("no_source_hosts")
+    elif len(hosts) < 2 and domain in {"news", "stock", "sports", "weather", "crypto"}:
+        warnings.append("single_source_host")
+    warning_codes = tuple(getattr(search_quality, "warning_codes", ()) or ())
+    if "extraction_snippet_like" in warning_codes:
+        warnings.append("snippet_only_result")
+    if "extraction_too_short" in warning_codes:
+        warnings.append("search_text_too_short")
+    if "extraction_conflicting_or_unconfirmed" in warning_codes:
+        warnings.append("search_text_conflict")
+    return tuple(dict.fromkeys(warnings))
+
+
+def _source_check_reason(*, url: str, domain: str) -> str:
+    if domain in {"stock", "sports"}:
+        return "dynamic_domain_source_check"
+    if _url_has_dynamic_hint(url):
+        return "dynamic_url_source_check"
+    return "source_confirmation_check"
+
+
+def _has_dynamic_page_hint(*, request_text: str, search_text: str, urls: tuple[str, ...], domain: str) -> bool:
+    if domain in {"stock", "sports"}:
+        return True
+    haystack = " ".join((request_text or "", search_text or "")).lower()
+    dynamic_terms = (
+        "table",
+        "tabelle",
+        "standings",
+        "spielplan",
+        "fixtures",
+        "results",
+        "ergebnisse",
+        "score",
+        "live",
+        "ticker",
+        "chart",
+        "quote",
+        "market",
+        "kurs",
+        "preis",
+        "price",
+        "loading",
+        "javascript",
+    )
+    if any(term in haystack for term in dynamic_terms):
+        return True
+    return any(_url_has_dynamic_hint(url) for url in urls)
+
+
+def _url_has_dynamic_hint(url: str) -> bool:
+    lowered = (url or "").lower()
+    dynamic_parts = (
+        "finance",
+        "market",
+        "quote",
+        "ticker",
+        "stock",
+        "sport",
+        "score",
+        "standings",
+        "table",
+        "tabelle",
+        "fixture",
+        "result",
+        "live",
+        "chart",
+    )
+    return any(part in lowered for part in dynamic_parts)
 
 
 def _merge_search_results(primary: Any, followup: Any) -> Any:
