@@ -19,6 +19,9 @@ Erweiterte Webtool-Infrastruktur mit Provider-Registry, Health-Monitoring und Qu
 - **Research-Tabellen:** Neue DB-Tabellen für zukünftige Research-Einheit: `research_providers`, `research_source_observations`, `research_eval_cases`.
 - **Stock/Sports:** Bleiben fail-closed ohne strukturierte Provider (keine unsicheren Annahmen).
 - **Quota/Audit:** Metadata-only Persistenz für Audit-Zwecke (keine raw Queries/URLs/Secrets).
+- **Source Observations:** Webtool success/fail-closed/error sowie Role-/Quota-Denials erzeugen automatisch persistente Source-Observations in `research_source_observations`.
+- **Eval Cases:** Negatives Research-/Source-Feedback erzeugt automatisch sanitisierte Eval-Cases in `research_eval_cases`.
+- **Privacy-Gate:** Alle Observations/Eval-Cases speichern ausschließlich Metadata (keine raw Queries, keine vollständigen URLs, keine Tokens/Secrets/Bearer-artigen Werte; `source_hosts` nur Hostnamen).
 
 #### Technisch
 - **DB-Persistenz:** Provider-Health über Neustarts nutzbar; atomare Counter-Updates mit Race-Recovery bei first-create.
@@ -56,6 +59,9 @@ Enhanced web tool infrastructure with provider registry, health monitoring, and 
 - **Research Tables:** New DB tables for future research unit: `research_providers`, `research_source_observations`, `research_eval_cases`.
 - **Stock/Sports:** Remain fail-closed without structured providers (no unsafe assumptions).
 - **Quota/Audit:** Metadata-only persistence for audit purposes (no raw queries/URLs/secrets).
+- **Source Observations:** Webtool success/fail-closed/error as well as role/quota denials automatically generate persistent source observations in `research_source_observations`.
+- **Eval Cases:** Negative research/source feedback automatically generates sanitized eval cases in `research_eval_cases`.
+- **Privacy Gate:** All observations/eval cases store metadata only (no raw queries, no full URLs, no tokens/secrets/bearer-like values; `source_hosts` contains hostnames only).
 
 #### Technical
 - **DB Persistence:** Provider health survives restarts; atomic counter updates with race recovery on first-create.

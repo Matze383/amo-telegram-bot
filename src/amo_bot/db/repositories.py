@@ -1,11 +1,14 @@
 from __future__ import annotations
 
-import json
 from collections import defaultdict
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta, timezone
+from hashlib import sha256
+import json
+import re
 from typing import TYPE_CHECKING
+from urllib.parse import urlparse
 
 from sqlalchemy import and_, func, or_, select, text, update
 from sqlalchemy.exc import IntegrityError
@@ -31,7 +34,9 @@ from amo_bot.db.models import (
     PopgunTopicSetting,
     PrivateChatPolicy,
     PromptContextDoc,
+    ResearchEvalCase,
     ResearchProviderHealth,
+    ResearchSourceObservation,
     RetrievableMemory,
     TelegramChat,
     TelegramTopic,
@@ -468,6 +473,33 @@ class ResearchProviderHealthRecord:
     last_error: str = ""
 
 
+@dataclass(frozen=True, slots=True)
+class ResearchSourceObservationRecord:
+    provider_name: str
+    domain: str
+    outcome: str
+    confidence: float | None = None
+    source_name: str | None = None
+    source_hosts: tuple[str, ...] = ()
+    source_count: int = 0
+    warning_count: int = 0
+    warning_codes: tuple[str, ...] = ()
+    error_class: str | None = None
+    timing_ms: int | None = None
+    created_at: datetime | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ResearchEvalCaseRecord:
+    case_key: str
+    domain: str
+    sanitized_prompt: str
+    locale: str | None = None
+    expected_status: str | None = None
+    expected_metadata: dict[str, object] | None = None
+    enabled: bool = True
+
+
 class ResearchProviderHealthRepository:
     """Persist provider health without storing query text, URLs, prompts, or secrets."""
 
@@ -598,6 +630,334 @@ class ResearchProviderHealthRepository:
         )
         self._session.commit()
         return self.load_provider_health(normalized_name)
+
+
+class ResearchSourceObservationRepository:
+    """Write metadata-only research source observations.
+
+    Stored fields intentionally exclude raw user queries, full URLs, prompts,
+    message text, and secrets. Source details are reduced to hostnames.
+    """
+
+    _SAFE_CODE_RE = re.compile(r"[^a-zA-Z0-9_.:-]+")
+    _URL_RE = re.compile(r"\b[a-z][a-z0-9+.-]*://\S+", re.I)
+    _HOSTLIKE_RE = re.compile(r"(?:^|[^a-z0-9-])(?:[a-z0-9-]+\.)+[a-z]{2,}(?:\b|[/:?#])", re.I)
+    _SENSITIVE_KEY_RE = re.compile(
+        r"(?:query|prompt|message|raw|text|secret|token|api[_-]?key|password|authorization|bearer|url|uri|link|endpoint)",
+        re.I,
+    )
+    _SENSITIVE_VALUE_RE = re.compile(
+        r"(?:"
+        r"bearer\s+[a-z0-9._~+/=-]{6,}|"
+        r"(?:^|[^a-z0-9])(?:api[_-]?key|token|secret|password|authorization|bearer)[^a-z0-9]?[a-z0-9][a-z0-9._~+/=-]{5,}"
+        r")",
+        re.I,
+    )
+    _ERROR_CLASS_RE = re.compile(r"\b([A-Z][A-Za-z0-9_]*(?:Error|Exception|Timeout|Failure))\b")
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def record_observation(
+        self,
+        *,
+        provider_name: str,
+        domain: str,
+        outcome: str,
+        confidence: float | None = None,
+        source_name: str | None = None,
+        source_hosts: Sequence[str] | None = None,
+        source_urls: Sequence[str] | None = None,
+        source_count: int | None = None,
+        warning_codes: Sequence[str] | None = None,
+        warning_count: int | None = None,
+        error_class: str | None = None,
+        timing_ms: int | None = None,
+        created_at: datetime | None = None,
+        metadata: Mapping[str, object] | None = None,
+    ) -> ResearchSourceObservationRecord:
+        hosts = self._safe_hosts((*tuple(source_hosts or ()), *tuple(source_urls or ())))
+        warnings = self._safe_codes(warning_codes or ())
+        normalized_provider = self._safe_label(provider_name, default="unknown_provider", max_len=128)
+        normalized_domain = self._safe_label(domain, default="generic", max_len=64)
+        normalized_outcome = self._safe_label(outcome, default="unknown", max_len=64)
+        normalized_source_name = self._safe_optional_label(source_name, max_len=128)
+        normalized_error_class = self._safe_error_class(error_class)
+        normalized_timing = max(0, int(timing_ms)) if timing_ms is not None else None
+        normalized_confidence = self._safe_confidence(confidence)
+        normalized_source_count = max(0, int(source_count if source_count is not None else len(hosts)))
+        normalized_warning_count = max(0, int(warning_count if warning_count is not None else len(warnings)))
+        when = created_at or datetime.now(timezone.utc)
+
+        safe_metadata = {
+            "source_count": normalized_source_count,
+            "warning_count": normalized_warning_count,
+            "source_hosts": list(hosts[:10]),
+        }
+        if normalized_error_class:
+            safe_metadata["error_class"] = normalized_error_class
+        if normalized_timing is not None:
+            safe_metadata["timing_ms"] = normalized_timing
+        for key, value in (metadata or {}).items():
+            metadata_key = self._safe_metadata_key(str(key))
+            if not metadata_key:
+                continue
+            if isinstance(value, (str, int, float, bool)) or value is None:
+                safe_metadata[metadata_key] = self._safe_metadata_value(value, key=metadata_key)
+
+        self._session.add(
+            ResearchSourceObservation(
+                provider_name=normalized_provider,
+                source_name=normalized_source_name,
+                domain=normalized_domain,
+                outcome=normalized_outcome,
+                confidence=normalized_confidence,
+                warning_codes_json=json.dumps(list(warnings), sort_keys=True),
+                metadata_json=json.dumps(safe_metadata, sort_keys=True),
+                created_at=when,
+            )
+        )
+        self._session.commit()
+        return ResearchSourceObservationRecord(
+            provider_name=normalized_provider,
+            source_name=normalized_source_name,
+            domain=normalized_domain,
+            outcome=normalized_outcome,
+            confidence=normalized_confidence,
+            source_hosts=hosts,
+            source_count=normalized_source_count,
+            warning_count=normalized_warning_count,
+            warning_codes=warnings,
+            error_class=normalized_error_class,
+            timing_ms=normalized_timing,
+            created_at=when,
+        )
+
+    @classmethod
+    def _safe_label(cls, value: str | None, *, default: str, max_len: int) -> str:
+        raw = (value or "").strip()
+        if cls._contains_unsafe_text(raw):
+            return default[:max_len]
+        cleaned = cls._SAFE_CODE_RE.sub("_", raw)
+        cleaned = cleaned.strip("._:-")
+        return (cleaned or default)[:max_len]
+
+    @classmethod
+    def _safe_optional_label(cls, value: str | None, *, max_len: int) -> str | None:
+        if not value:
+            return None
+        if cls._contains_unsafe_text(value):
+            return None
+        cleaned = cls._safe_label(value, default="", max_len=max_len)
+        return cleaned or None
+
+    @classmethod
+    def _safe_codes(cls, values: Sequence[str]) -> tuple[str, ...]:
+        seen: set[str] = set()
+        result: list[str] = []
+        for value in values:
+            code = cls._safe_optional_label(str(value), max_len=96)
+            if not code or code in seen:
+                continue
+            seen.add(code)
+            result.append(code)
+        return tuple(result[:20])
+
+    @staticmethod
+    def _safe_confidence(value: float | None) -> float | None:
+        if value is None:
+            return None
+        try:
+            return min(1.0, max(0.0, float(value)))
+        except (TypeError, ValueError):
+            return None
+
+    @classmethod
+    def _safe_hosts(cls, values: Sequence[str]) -> tuple[str, ...]:
+        seen: set[str] = set()
+        result: list[str] = []
+        for value in values:
+            host = cls._extract_host(value)
+            if not host or host in seen:
+                continue
+            seen.add(host)
+            result.append(host)
+        return tuple(result[:10])
+
+    @staticmethod
+    def _extract_host(value: str) -> str:
+        raw = (value or "").strip()
+        if not raw:
+            return ""
+        candidate = raw if "://" in raw else f"https://{raw}"
+        try:
+            host = (urlparse(candidate).hostname or "").casefold().removeprefix("www.")
+        except Exception:
+            return ""
+        if not host or "/" in host or len(host) > 253:
+            return ""
+        return host
+
+    @classmethod
+    def _safe_metadata_key(cls, key: str) -> str | None:
+        if cls._SENSITIVE_KEY_RE.search(key or ""):
+            return None
+        return cls._safe_optional_label(key, max_len=64)
+
+    @classmethod
+    def _safe_metadata_value(cls, value: object, *, key: str) -> object:
+        if isinstance(value, str):
+            if cls._contains_unsafe_text(value):
+                return "redacted"
+            if not cls._is_categorical_metadata_value(key=key, value=value):
+                return "present"
+            cleaned = cls._safe_label(value, default="value", max_len=64)
+            return cleaned if cleaned != "value" else "present"
+        return value
+
+    @staticmethod
+    def _is_categorical_metadata_value(*, key: str, value: str) -> bool:
+        raw = (value or "").strip()
+        if not raw or len(raw) > 64 or re.search(r"\s", raw):
+            return False
+        return bool(re.fullmatch(r"[A-Za-z0-9_.:-]+", raw)) and any(
+            marker in key
+            for marker in (
+                "status",
+                "code",
+                "reason",
+                "decision",
+                "operation",
+                "outcome",
+                "domain",
+                "provider",
+                "class",
+                "type",
+            )
+        )
+
+    @classmethod
+    def _safe_error_class(cls, value: str | None) -> str | None:
+        if not value:
+            return None
+        match = cls._ERROR_CLASS_RE.search(value)
+        if match:
+            return match.group(1)[:128]
+        return cls._safe_optional_label(value, max_len=128)
+
+    @classmethod
+    def _contains_unsafe_text(cls, value: str | None) -> bool:
+        raw = (value or "").strip()
+        if not raw:
+            return False
+        return bool(cls._URL_RE.search(raw) or cls._HOSTLIKE_RE.search(raw) or cls._SENSITIVE_VALUE_RE.search(raw))
+
+
+class ResearchEvalCaseRepository:
+    """Persist sanitized research eval cases without retaining raw chat text."""
+
+    _SAFE_SUMMARY_RE = re.compile(r"https?://\S+|(?:[a-z0-9-]+\.)+[a-z]{2,}", re.I)
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def create_from_negative_feedback(
+        self,
+        *,
+        sanitized_summary: str,
+        failure_label: str,
+        domain: str = "generic",
+        locale: str | None = None,
+        evidence_status: str | None = None,
+        source_hosts: Sequence[str] | None = None,
+        expected_behavior: str = "improve future research answer quality without treating feedback as fact",
+        enabled: bool = True,
+    ) -> ResearchEvalCaseRecord:
+        summary = self._sanitize_summary(sanitized_summary)
+        if not summary:
+            raise ValueError("sanitized_summary is required")
+        normalized_domain = ResearchSourceObservationRepository._safe_label(domain, default="generic", max_len=64)
+        normalized_failure = ResearchSourceObservationRepository._safe_label(
+            failure_label,
+            default="negative_feedback",
+            max_len=64,
+        )
+        normalized_status = ResearchSourceObservationRepository._safe_optional_label(evidence_status, max_len=64)
+        hosts = ResearchSourceObservationRepository._safe_hosts(source_hosts or ())
+        expected_metadata = {
+            "failure_label": normalized_failure,
+            "source_hosts": list(hosts),
+            "expected_behavior": self._sanitize_summary(expected_behavior, max_len=256),
+        }
+        if normalized_status:
+            expected_metadata["evidence_status"] = normalized_status
+        case_key = self._case_key(
+            domain=normalized_domain,
+            summary=summary,
+            failure_label=normalized_failure,
+            evidence_status=normalized_status,
+            source_hosts=hosts,
+        )
+
+        row = self._session.scalar(select(ResearchEvalCase).where(ResearchEvalCase.case_key == case_key))
+        if row is None:
+            row = ResearchEvalCase(
+                case_key=case_key,
+                domain=normalized_domain,
+                locale=ResearchSourceObservationRepository._safe_optional_label(locale, max_len=16),
+                sanitized_prompt=summary,
+                expected_status=normalized_status or "needs_improvement",
+                expected_metadata_json=json.dumps(expected_metadata, sort_keys=True),
+                enabled=enabled,
+            )
+            self._session.add(row)
+        else:
+            row.domain = normalized_domain
+            row.locale = ResearchSourceObservationRepository._safe_optional_label(locale, max_len=16)
+            row.sanitized_prompt = summary
+            row.expected_status = normalized_status or "needs_improvement"
+            row.expected_metadata_json = json.dumps(expected_metadata, sort_keys=True)
+            row.enabled = enabled
+        self._session.commit()
+        return ResearchEvalCaseRecord(
+            case_key=case_key,
+            domain=normalized_domain,
+            locale=ResearchSourceObservationRepository._safe_optional_label(locale, max_len=16),
+            sanitized_prompt=summary,
+            expected_status=normalized_status or "needs_improvement",
+            expected_metadata=expected_metadata,
+            enabled=enabled,
+        )
+
+    @classmethod
+    def _sanitize_summary(cls, value: str, *, max_len: int = 512) -> str:
+        cleaned = cls._SAFE_SUMMARY_RE.sub("[redacted-source]", value or "")
+        cleaned = re.sub(r"\b(?:api[_-]?key|token|secret|password|authorization|bearer)\b\s*[:=]?\s*\S+", "[redacted-secret]", cleaned, flags=re.I)
+        cleaned = re.sub(r"\s+", " ", cleaned).strip()
+        return cleaned[:max_len].rstrip()
+
+    @staticmethod
+    def _case_key(
+        *,
+        domain: str,
+        summary: str,
+        failure_label: str,
+        evidence_status: str | None,
+        source_hosts: Sequence[str],
+    ) -> str:
+        digest = sha256(
+            json.dumps(
+                {
+                    "domain": domain,
+                    "summary": summary,
+                    "failure_label": failure_label,
+                    "evidence_status": evidence_status,
+                    "source_hosts": list(source_hosts),
+                },
+                sort_keys=True,
+            ).encode("utf-8")
+        ).hexdigest()[:24]
+        return f"feedback:{domain}:{digest}"[:128]
 
 
 class WebToolRoleQuotaRepository:

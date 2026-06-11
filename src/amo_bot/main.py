@@ -13,7 +13,7 @@ from amo_bot.config.settings import get_settings
 from amo_bot.core.logging import setup_logging, log_event
 from amo_bot.db.base import create_session_factory
 from amo_bot.db.init_db import init_db
-from amo_bot.db.repositories import TopicAgentMemoryRepository, UserRoleRepository
+from amo_bot.db.repositories import ResearchSourceObservationRepository, TopicAgentMemoryRepository, UserRoleRepository
 from amo_bot.plugins.command_runtime import PluginCommandExecutor
 from amo_bot.plugins.loader import PluginLoader
 from amo_bot.plugins.scheduled_runtime import ScheduledPluginExecutor
@@ -114,6 +114,7 @@ class SessionBoundWebtoolCapabilityDispatcher:
                 browser_provider=browser_provider,
                 weather_evidence_provider=self._weather_evidence_provider,
                 crypto_evidence_provider=self._crypto_evidence_provider,
+                observation_writer=ResearchSourceObservationRepository(session),
             )
             dispatcher = WebtoolCapabilityDispatcher(quota_repo=quota_repo, service=service)
             return dispatcher.execute(request)

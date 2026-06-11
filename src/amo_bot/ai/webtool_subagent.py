@@ -178,6 +178,29 @@ class WebtoolCryptoEvidenceProvider(Protocol):
         ...
 
 
+class ResearchObservationWriter(Protocol):
+    """Metadata-only writer for research source observations."""
+
+    def record_observation(
+        self,
+        *,
+        provider_name: str,
+        domain: str,
+        outcome: str,
+        confidence: float | None = None,
+        source_name: str | None = None,
+        source_hosts: tuple[str, ...] | None = None,
+        source_urls: tuple[str, ...] | None = None,
+        source_count: int | None = None,
+        warning_codes: tuple[str, ...] | None = None,
+        warning_count: int | None = None,
+        error_class: str | None = None,
+        timing_ms: int | None = None,
+        metadata: dict[str, object] | None = None,
+    ):
+        ...
+
+
 class WebtoolSubagentService:
     """Service for executing webtools with quota checks and sanitization.
 
@@ -205,6 +228,7 @@ class WebtoolSubagentService:
         browser_provider: WebtoolBrowserProvider | None = None,
         weather_evidence_provider: WebtoolWeatherEvidenceProvider | None = None,
         crypto_evidence_provider: WebtoolCryptoEvidenceProvider | None = None,
+        observation_writer: ResearchObservationWriter | None = None,
         search_timeout_seconds: float = _DEFAULT_SEARCH_TIMEOUT_SECONDS,
         scrape_timeout_seconds: float = _DEFAULT_SCRAPE_TIMEOUT_SECONDS,
     ) -> None:
@@ -214,6 +238,7 @@ class WebtoolSubagentService:
         self._browser_provider = browser_provider
         self._weather_evidence_provider = weather_evidence_provider
         self._crypto_evidence_provider = crypto_evidence_provider
+        self._observation_writer = observation_writer
         self._search_timeout = search_timeout_seconds
         self._scrape_timeout = scrape_timeout_seconds
 
@@ -255,7 +280,7 @@ class WebtoolSubagentService:
 
         # Step 2: Fail closed if quota denied
         if not quota_decision.allowed:
-            return WebtoolSubagentResult(
+            result = WebtoolSubagentResult(
                 allowed=False,
                 decision=quota_decision.decision,
                 reason=quota_decision.reason,
@@ -263,24 +288,28 @@ class WebtoolSubagentService:
                 metadata=metadata,
                 error=None,
             )
+            self._record_source_observation(request, result)
+            return result
 
         # Step 3: Execute operation based on type
         try:
             if request.operation_type == WebtoolOperationType.WEBSEARCH:
-                return self._execute_websearch(request, metadata)
+                result = self._execute_websearch(request, metadata)
             elif request.operation_type == WebtoolOperationType.WEBSCRAPING:
-                return self._execute_webscraping(request, metadata)
+                result = self._execute_webscraping(request, metadata)
             elif request.operation_type == WebtoolOperationType.BROWSER:
-                return self._execute_browser(request, metadata)
+                result = self._execute_browser(request, metadata)
             elif request.operation_type == WebtoolOperationType.WEATHER_EVIDENCE:
-                return self._execute_weather_evidence(request, metadata)
+                result = self._execute_weather_evidence(request, metadata)
             elif request.operation_type == WebtoolOperationType.CRYPTO_EVIDENCE:
-                return self._execute_crypto_evidence(request, metadata)
+                result = self._execute_crypto_evidence(request, metadata)
             else:
-                return self._unsupported_result(request, metadata, "unknown_operation_type")
+                result = self._unsupported_result(request, metadata, "unknown_operation_type")
         except Exception as exc:
             # Fail closed on any execution error
-            return self._execution_error_result(request, metadata, exc)
+            result = self._execution_error_result(request, metadata, exc)
+        self._record_source_observation(request, result)
+        return result
 
     def _check_quota(self, request: WebtoolSubagentRequest) -> WebToolQuotaDecision:
         """Check role quota for the operation."""
@@ -553,6 +582,7 @@ class WebtoolSubagentService:
                 "source_count": len(source_urls),
                 "source_names": source_names[:5],
                 "warning_count": len(getattr(result, "warnings", ()) or ()),
+                "warning_codes": tuple(str(item) for item in tuple(getattr(result, "warnings", ()) or ())[:20]),
             }
         )
         if not getattr(result, "confirmed", False):
@@ -717,6 +747,93 @@ class WebtoolSubagentService:
             error=f"Execution failed: {type(exc).__name__}",
         )
 
+    def _record_source_observation(self, request: WebtoolSubagentRequest, result: WebtoolSubagentResult) -> None:
+        if self._observation_writer is None:
+            return
+        is_quota_denial = self._is_quota_denial(result)
+        provider_name = "webtool_dispatcher" if is_quota_denial else self._observation_provider_name(request.operation_type)
+        domain = "webtool_dispatcher" if is_quota_denial else str(result.metadata.get("evidence_domain") or self._observation_domain(request.operation_type))
+        outcome = "denied" if is_quota_denial else str(result.metadata.get("evidence_status") or result.reason or result.decision)
+        confidence = result.metadata.get("evidence_confidence")
+        warning_codes = tuple(str(item) for item in result.metadata.get("warning_codes", ()) or ())
+        error_class = result.metadata.get("error_class")
+        observation_metadata = {
+            "operation": request.operation_type,
+            "decision": result.decision,
+            "reason": result.reason,
+        }
+        try:
+            self._observation_writer.record_observation(
+                provider_name=provider_name,
+                source_name=self._observation_source_name(request.operation_type, result),
+                domain=domain,
+                outcome=outcome,
+                confidence=float(confidence) if confidence is not None else None,
+                source_hosts=tuple(result.sanitized.hosts),
+                source_urls=tuple(result.sanitized.sources),
+                source_count=int(result.metadata.get("source_count", len(result.sanitized.sources)) or 0),
+                warning_codes=warning_codes,
+                warning_count=int(result.metadata.get("warning_count", len(warning_codes)) or 0),
+                error_class=str(error_class) if error_class else None,
+                timing_ms=int(result.metadata.get("timing_ms", 0) or 0),
+                metadata=observation_metadata,
+            )
+        except Exception as exc:
+            log_event(
+                logger,
+                logging.WARNING,
+                event="research_source_observation_write_failed",
+                component=_COMPONENT,
+                reason_code="observation_write_failed",
+                extra={
+                    "operation": request.operation_type,
+                    "provider_name": provider_name,
+                    "error_class": type(exc).__name__,
+                },
+            )
+
+    @staticmethod
+    def _is_quota_denial(result: WebtoolSubagentResult) -> bool:
+        return result.decision in {"disabled", "quota_exceeded"} or result.reason in {"role_disabled", "daily_limit_reached"}
+
+    @staticmethod
+    def _observation_provider_name(operation_type: str) -> str:
+        mapping = {
+            WebtoolOperationType.WEBSEARCH: "websearch_provider",
+            WebtoolOperationType.WEBSCRAPING: "webscrape_provider",
+            WebtoolOperationType.BROWSER: "browser_provider",
+            WebtoolOperationType.WEATHER_EVIDENCE: "weather_evidence_provider",
+            WebtoolOperationType.CRYPTO_EVIDENCE: "crypto_evidence_provider",
+        }
+        return mapping.get(operation_type, "unknown_webtool_provider")
+
+    @staticmethod
+    def _observation_domain(operation_type: str) -> str:
+        mapping = {
+            WebtoolOperationType.WEBSEARCH: "websearch",
+            WebtoolOperationType.WEBSCRAPING: "webscraping",
+            WebtoolOperationType.BROWSER: "browser",
+            WebtoolOperationType.WEATHER_EVIDENCE: "weather",
+            WebtoolOperationType.CRYPTO_EVIDENCE: "crypto",
+        }
+        return mapping.get(operation_type, "generic")
+
+    @staticmethod
+    def _observation_source_name(operation_type: str, result: WebtoolSubagentResult) -> str | None:
+        names = result.metadata.get("source_names")
+        if isinstance(names, tuple) and names:
+            return str(names[0])
+        if isinstance(names, list) and names:
+            return str(names[0])
+        source_names = {
+            WebtoolOperationType.WEBSEARCH: "websearch",
+            WebtoolOperationType.WEBSCRAPING: "webscrape",
+            WebtoolOperationType.BROWSER: "browser",
+            WebtoolOperationType.WEATHER_EVIDENCE: "structured_weather",
+            WebtoolOperationType.CRYPTO_EVIDENCE: "structured_crypto",
+        }
+        return source_names.get(operation_type)
+
 
 class FakeSearchProvider:
     """Deterministic fake search provider for testing."""
@@ -764,6 +881,7 @@ def create_webtool_subagent_service(
     browser_provider: WebtoolBrowserProvider | None = None,
     weather_evidence_provider: WebtoolWeatherEvidenceProvider | None = None,
     crypto_evidence_provider: WebtoolCryptoEvidenceProvider | None = None,
+    observation_writer: ResearchObservationWriter | None = None,
 ) -> WebtoolSubagentService:
     """Factory to create webtool subagent service.
 
@@ -797,6 +915,7 @@ def create_webtool_subagent_service(
             browser_provider=browser_provider,
             weather_evidence_provider=weather_evidence_provider,
             crypto_evidence_provider=crypto_evidence_provider,
+            observation_writer=observation_writer,
         )
 
     if use_fake_providers:
@@ -811,4 +930,5 @@ def create_webtool_subagent_service(
         browser_provider=browser_provider,
         weather_evidence_provider=weather_evidence_provider,
         crypto_evidence_provider=crypto_evidence_provider,
+        observation_writer=observation_writer,
     )

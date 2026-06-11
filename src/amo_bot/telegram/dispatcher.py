@@ -29,6 +29,7 @@ from amo_bot.db.repositories import (
     BotPeerRepository,
     PrivateChatPolicyRepository,
     PromptContextDocRepository,
+    ResearchEvalCaseRepository,
     RetrievableMemoryRepository,
     TopicAgentMemoryRepository,
     TopicRecentMessageRecord,
@@ -1059,7 +1060,10 @@ class Dispatcher:
             return
         stored_count = 0
         with create_session_factory(self.database_url)() as session:
-            service = LearningFeedbackService(RetrievableMemoryRepository(session))
+            service = LearningFeedbackService(
+                RetrievableMemoryRepository(session),
+                eval_case_writer=ResearchEvalCaseRepository(session),
+            )
             scope = LearningFeedbackScope(
                 chat_id=reaction.chat.id,
                 message_thread_id=reaction.message_thread_id,
@@ -1094,7 +1098,10 @@ class Dispatcher:
             return
         try:
             with create_session_factory(self.database_url)() as session:
-                service = LearningFeedbackService(RetrievableMemoryRepository(session))
+                service = LearningFeedbackService(
+                    RetrievableMemoryRepository(session),
+                    eval_case_writer=ResearchEvalCaseRepository(session),
+                )
                 service.process_text_feedback(
                     text=message.text,
                     scope=LearningFeedbackScope(
