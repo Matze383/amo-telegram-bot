@@ -50,6 +50,7 @@ from amo_bot.telegram.webtool_chat_integration import (
     parse_webtool_chat_trigger,
 )
 from amo_bot.telegram.webtool_research_orchestrator import (
+    DbBackedResearchSourceQualityReader,
     WebResearchOrchestrator,
     WebResearchOrchestratorRequest,
     sanitize_auto_research_user_response,
@@ -1457,6 +1458,11 @@ class Dispatcher:
             research_result = WebResearchOrchestrator(
                 webtool_dispatcher=self.webtool_dispatcher,
                 evidence_pipeline=self.web_evidence_pipeline,
+                source_quality_reader=(
+                    DbBackedResearchSourceQualityReader(session_factory=create_session_factory(self.database_url))
+                    if self.database_url is not None
+                    else None
+                ),
             ).execute(
                 WebResearchOrchestratorRequest(
                     message=message,

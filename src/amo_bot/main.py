@@ -34,10 +34,15 @@ from amo_bot.ai.webtool_provider_adapter import RealBrowserProviderAdapter, Real
 from amo_bot.ai.webtool_subagent import create_webtool_subagent_service
 from amo_bot.db.repositories import WebToolRoleQuotaRepository
 from amo_bot.telegram.webtool_evidence import (
+    BinanceTickerEvidenceProvider,
+    CoinGeckoEvidenceProvider,
     DbBackedProviderHealthRegistry,
+    OpenMeteoEvidenceProvider,
     ResilientCryptoEvidenceProvider,
     ResilientWeatherEvidenceProvider,
     WebEvidencePipeline,
+    WttrInEvidenceProvider,
+    build_evidence_candidates_from_db,
 )
 
 
@@ -95,8 +100,30 @@ class SessionBoundWebtoolCapabilityDispatcher:
     def __init__(self, *, session_factory) -> None:
         self._session_factory = session_factory
         provider_health = DbBackedProviderHealthRegistry(session_factory=session_factory)
-        self._weather_evidence_provider = ResilientWeatherEvidenceProvider(health=provider_health)
-        self._crypto_evidence_provider = ResilientCryptoEvidenceProvider(health=provider_health)
+        weather_candidates = build_evidence_candidates_from_db(
+            session_factory=session_factory,
+            domain="weather",
+            providers={
+                "open_meteo_weather": OpenMeteoEvidenceProvider(),
+                "wttr_in_weather": WttrInEvidenceProvider(),
+            },
+        )
+        crypto_candidates = build_evidence_candidates_from_db(
+            session_factory=session_factory,
+            domain="crypto",
+            providers={
+                "coingecko_crypto": CoinGeckoEvidenceProvider(),
+                "binance_crypto": BinanceTickerEvidenceProvider(),
+            },
+        )
+        self._weather_evidence_provider = ResilientWeatherEvidenceProvider(
+            weather_candidates,
+            health=provider_health,
+        )
+        self._crypto_evidence_provider = ResilientCryptoEvidenceProvider(
+            crypto_candidates,
+            health=provider_health,
+        )
 
     def execute(self, request):
         with self._session_factory() as session:

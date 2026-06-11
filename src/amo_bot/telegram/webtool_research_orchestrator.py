@@ -3,8 +3,8 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass
-from datetime import UTC, datetime
-from typing import Any
+from datetime import UTC, datetime, timedelta
+from typing import Any, Protocol
 from urllib.parse import parse_qs, urlparse
 
 from amo_bot.auth.roles import Role
@@ -124,10 +124,40 @@ class WebResearchOrchestratorResult:
     user_response: str = ""
 
 
+class ResearchSourceQualityReader(Protocol):
+    def assess_hosts(self, *, domain: str, hosts: tuple[str, ...]) -> tuple[Any, ...]:
+        ...
+
+
+class DbBackedResearchSourceQualityReader:
+    """Read sanitized source-observation health without reading queries or full URLs."""
+
+    def __init__(self, *, session_factory) -> None:
+        self._session_factory = session_factory
+
+    def assess_hosts(self, *, domain: str, hosts: tuple[str, ...]) -> tuple[Any, ...]:
+        from amo_bot.db.repositories import ResearchSourceObservationRepository
+
+        since = datetime.now(UTC) - timedelta(days=14)
+        with self._session_factory() as session:
+            return ResearchSourceObservationRepository(session).assess_recent_hosts(
+                domain=domain,
+                source_hosts=hosts,
+                since=since,
+            )
+
+
 class WebResearchOrchestrator:
-    def __init__(self, *, webtool_dispatcher: Any, evidence_pipeline: WebEvidencePipeline | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        webtool_dispatcher: Any,
+        evidence_pipeline: WebEvidencePipeline | None = None,
+        source_quality_reader: ResearchSourceQualityReader | None = None,
+    ) -> None:
         self._webtool_dispatcher = webtool_dispatcher
         self._evidence_pipeline = evidence_pipeline
+        self._source_quality_reader = source_quality_reader
 
     def execute(self, request: WebResearchOrchestratorRequest) -> WebResearchOrchestratorResult:
         if self._webtool_dispatcher is None:
@@ -224,10 +254,16 @@ class WebResearchOrchestrator:
             )
 
         if chain_extracts:
+            source_quality = _assess_chain_source_quality(
+                domain=classify_evidence_domain(request.normalized_text),
+                extracts=tuple(chain_extracts),
+                reader=self._source_quality_reader,
+            )
             news_gate_response = _format_news_insufficient_sources_response(
                 request_text=request.normalized_text,
                 extract_hosts=tuple(host for _, host, _ in chain_extracts),
                 locale=request.locale,
+                source_quality=source_quality,
             )
             if news_gate_response:
                 return WebResearchOrchestratorResult(user_response=news_gate_response)
@@ -576,23 +612,75 @@ def _format_domain_chain_unconfirmed_response(*, request_text: str, locale: str,
     return format_domain_fail_closed_response(domain=domain, locale=locale, warnings=(reason,))
 
 
-def _format_news_insufficient_sources_response(*, request_text: str, extract_hosts: tuple[str, ...], locale: str) -> str:
+def _format_news_insufficient_sources_response(
+    *,
+    request_text: str,
+    extract_hosts: tuple[str, ...],
+    locale: str,
+    source_quality: dict[str, Any] | None = None,
+) -> str:
     if classify_evidence_domain(request_text) != "news":
         return ""
-    distinct_hosts = {host for host in extract_hosts if host}
-    if len(distinct_hosts) >= 2:
+    usable_hosts = {host for host in extract_hosts if host}
+    if source_quality:
+        usable_hosts = set(source_quality.get("usable_hosts", usable_hosts))
+    if len(usable_hosts) >= 2 and not (source_quality or {}).get("conflict_hosts"):
         return ""
+    status = "fewer than two checked news sources in this attempt"
+    if source_quality and source_quality.get("conflict_hosts"):
+        status = "stored source observations indicate conflicting recent evidence for one or more checked sources"
+    elif source_quality and source_quality.get("weak_hosts"):
+        status = "stored source observations mark one or more checked sources as weak in this domain"
     if (locale or "").lower().startswith("en"):
         return (
             "I cannot reliably confirm the requested current news from multiple checked sources right now. "
             "I will not summarize news from snippets or a single uncorroborated source.\n"
-            "Source/status: fewer than two checked news sources in this attempt."
+            f"Source/status: {status}."
         )
     return (
         "Ich kann die angefragten aktuellen Nachrichten gerade nicht aus mehreren geprüften Quellen bestätigen. "
         "Ich fasse keine News aus Such-Snippets oder nur einer unbestätigten Quelle zusammen.\n"
-        "Quelle/Stand: weniger als zwei geprüfte Nachrichtenquellen in diesem Versuch."
+        f"Quelle/Stand: {status}."
     )
+
+
+def _assess_chain_source_quality(
+    *,
+    domain: str,
+    extracts: tuple[tuple[str, str, str], ...],
+    reader: ResearchSourceQualityReader | None,
+) -> dict[str, Any] | None:
+    if reader is None or domain == "generic":
+        return None
+    hosts = tuple(dict.fromkeys(host for _, host, _ in extracts if host))
+    if not hosts:
+        return None
+    try:
+        records = reader.assess_hosts(domain=domain, hosts=hosts)
+    except Exception:
+        logger.exception("research source quality read failed")
+        return None
+    usable_hosts: set[str] = set(hosts)
+    weak_hosts: set[str] = set()
+    conflict_hosts: set[str] = set()
+    for record in records:
+        host = str(getattr(record, "host", "") or "")
+        if not host:
+            continue
+        conflict_count = int(getattr(record, "conflict_count", 0) or 0)
+        failure_count = int(getattr(record, "failure_count", 0) or 0)
+        success_count = int(getattr(record, "success_count", 0) or 0)
+        if conflict_count > 0:
+            conflict_hosts.add(host)
+            usable_hosts.discard(host)
+        elif failure_count > success_count:
+            weak_hosts.add(host)
+            usable_hosts.discard(host)
+    return {
+        "usable_hosts": tuple(sorted(usable_hosts)),
+        "weak_hosts": tuple(sorted(weak_hosts)),
+        "conflict_hosts": tuple(sorted(conflict_hosts)),
+    }
 
 
 def _format_weather_unconfirmed_response(*, request_text: str, search_text: str, search_hosts: tuple[str, ...], locale: str) -> str:

@@ -424,6 +424,41 @@ class EvidenceProviderCandidate:
     provider: WeatherEvidenceProvider | CryptoEvidenceProvider
 
 
+def build_evidence_candidates_from_db(
+    *,
+    session_factory,
+    domain: str,
+    providers: dict[str, WeatherEvidenceProvider | CryptoEvidenceProvider],
+) -> tuple[EvidenceProviderCandidate, ...]:
+    """Build runtime candidates from DB provider metadata, matched to local implementations."""
+
+    from amo_bot.db.repositories import ResearchProviderRepository
+
+    with session_factory() as session:
+        records = ResearchProviderRepository(session).list_enabled_by_domain(domain)
+    candidates: list[EvidenceProviderCandidate] = []
+    for record in records:
+        provider = providers.get(record.provider_name)
+        if provider is None:
+            continue
+        candidates.append(
+            EvidenceProviderCandidate(
+                ProviderDefinition(
+                    name=record.provider_name,
+                    source_name=record.source_name,
+                    domain=record.domain,
+                    default_priority=record.default_priority,
+                    fallback_allowed=record.fallback_allowed,
+                    min_confidence=record.min_confidence,
+                    max_age_seconds=record.max_age_seconds,
+                    enabled_by_default=record.enabled,
+                ),
+                provider,
+            )
+        )
+    return tuple(candidates)
+
+
 def _quality_gate(result: DomainEvidenceResult, definition: ProviderDefinition) -> DomainEvidenceResult:
     flags: list[str] = list(result.quality_flags)
     if result.domain != definition.domain:
@@ -457,7 +492,7 @@ class ResilientWeatherEvidenceProvider:
         health: ProviderHealthStore | None = None,
     ) -> None:
         self._health = health or ProviderHealthRegistry()
-        self._candidates = candidates or (
+        self._candidates = candidates if candidates is not None else (
             EvidenceProviderCandidate(PROVIDER_REGISTRY["open_meteo_weather"], OpenMeteoEvidenceProvider()),
             EvidenceProviderCandidate(PROVIDER_REGISTRY["wttr_in_weather"], WttrInEvidenceProvider()),
         )
@@ -483,7 +518,7 @@ class ResilientCryptoEvidenceProvider:
         health: ProviderHealthStore | None = None,
     ) -> None:
         self._health = health or ProviderHealthRegistry()
-        self._candidates = candidates or (
+        self._candidates = candidates if candidates is not None else (
             EvidenceProviderCandidate(PROVIDER_REGISTRY["coingecko_crypto"], CoinGeckoEvidenceProvider()),
             EvidenceProviderCandidate(PROVIDER_REGISTRY["binance_crypto"], BinanceTickerEvidenceProvider()),
         )

@@ -17,7 +17,12 @@ from amo_bot.db.repositories import (
     RetrievableMemoryRepository,
     WebToolRoleQuotaRepository,
 )
+from amo_bot.telegram.research_eval_harness import run_research_eval_cases
 from amo_bot.telegram.webtool_evidence import DomainEvidenceResult, EvidenceSource
+from amo_bot.telegram.webtool_research_orchestrator import (
+    _assess_chain_source_quality,
+    _format_news_insufficient_sources_response,
+)
 
 
 class _WeatherProvider:
@@ -84,6 +89,51 @@ def test_observation_repository_stores_metadata_only_and_reduces_urls_to_hosts(t
     assert "https://api.example.com/path" not in stored
     assert "token=abc123" not in stored
     assert "custom_status" in stored
+
+
+def test_recent_source_observations_mark_conflicting_news_host_as_unusable(tmp_path):
+    session_factory = _session_factory(tmp_path)
+    with session_factory() as session:
+        repo = ResearchSourceObservationRepository(session)
+        repo.record_observation(
+            provider_name="webtool_chain",
+            domain="news",
+            outcome="confirmed",
+            source_hosts=("reliable.example",),
+            warning_codes=(),
+        )
+        repo.record_observation(
+            provider_name="webtool_chain",
+            domain="news",
+            outcome="confirmed",
+            source_hosts=("conflict.example",),
+            warning_codes=("source_conflict",),
+        )
+
+        class _Reader:
+            def assess_hosts(self, *, domain: str, hosts: tuple[str, ...]):
+                return repo.assess_recent_hosts(domain=domain, source_hosts=hosts)
+
+        source_quality = _assess_chain_source_quality(
+            domain="news",
+            extracts=(
+                ("webscraping", "reliable.example", "confirmed news text"),
+                ("webscraping", "conflict.example", "conflicting news text"),
+            ),
+            reader=_Reader(),
+        )
+
+    assert source_quality is not None
+    assert source_quality["usable_hosts"] == ("reliable.example",)
+    assert source_quality["conflict_hosts"] == ("conflict.example",)
+    response = _format_news_insufficient_sources_response(
+        request_text="latest news about Python",
+        extract_hosts=("reliable.example", "conflict.example"),
+        locale="en",
+        source_quality=source_quality,
+    )
+    assert "cannot reliably confirm" in response
+    assert "conflicting recent evidence" in response
 
 
 def test_observation_repository_redacts_secret_url_and_rawish_metadata_inputs(tmp_path):
@@ -328,6 +378,29 @@ def test_negative_learning_feedback_creates_sanitized_research_eval_case(tmp_pat
     metadata = json.loads(row.expected_metadata_json or "{}")
     assert metadata["failure_label"] == "source_quality_feedback"
     assert metadata["source_hosts"] == []
+
+
+def test_enabled_research_eval_cases_run_through_local_harness(tmp_path):
+    session_factory = _session_factory(tmp_path)
+    with session_factory() as session:
+        repo = ResearchEvalCaseRepository(session)
+        case = repo.create_from_negative_feedback(
+            sanitized_summary="Aktuelle News zu Python waren aus nur einer Quelle.",
+            failure_label="source_quality_feedback",
+            domain="news",
+            locale="de",
+            evidence_status="needs_multi_source_web",
+            source_hosts=("news.example",),
+        )
+        results = run_research_eval_cases(repo)
+
+    assert len(results) == 1
+    assert results[0].case_key == case.case_key
+    assert results[0].domain == "news"
+    assert results[0].prompt_domain == "news"
+    assert results[0].auto_research_enabled is True
+    assert results[0].would_chain is True
+    assert results[0].passed is True
 
 
 def test_positive_source_preference_does_not_create_research_eval_case(tmp_path):

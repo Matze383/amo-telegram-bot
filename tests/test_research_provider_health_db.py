@@ -15,6 +15,7 @@ from amo_bot.db.models import (
 )
 from amo_bot.db.repositories import ResearchProviderHealthRepository, WebToolRoleQuotaRepository
 from amo_bot.telegram.webtool_evidence import (
+    BinanceTickerEvidenceProvider,
     CoinGeckoEvidenceProvider,
     DbBackedProviderHealthRegistry,
     DomainEvidenceResult,
@@ -23,6 +24,7 @@ from amo_bot.telegram.webtool_evidence import (
     PROVIDER_REGISTRY,
     ProviderDefinition,
     ResilientCryptoEvidenceProvider,
+    build_evidence_candidates_from_db,
 )
 
 
@@ -84,6 +86,60 @@ def test_research_provider_tables_exist_and_seed_provider_models(tmp_path):
         assert provider is not None
         assert provider.domain == "weather"
         assert provider.source_name == "Open-Meteo"
+
+
+def test_db_provider_registry_filters_disabled_providers_and_preserves_metadata(tmp_path):
+    session_factory = _db(tmp_path)
+    with session_factory() as session:
+        coingecko = session.scalar(
+            select(ResearchProvider).where(ResearchProvider.provider_name == "coingecko_crypto")
+        )
+        assert coingecko is not None
+        coingecko.enabled = False
+        binance = session.scalar(
+            select(ResearchProvider).where(ResearchProvider.provider_name == "binance_crypto")
+        )
+        assert binance is not None
+        binance.default_priority = 5
+        binance.min_confidence = 0.82
+        session.commit()
+
+    candidates = build_evidence_candidates_from_db(
+        session_factory=session_factory,
+        domain="crypto",
+        providers={
+            "coingecko_crypto": CoinGeckoEvidenceProvider(client=_FakeClient([])),
+            "binance_crypto": BinanceTickerEvidenceProvider(client=_FakeClient([])),
+        },
+    )
+
+    assert [candidate.definition.name for candidate in candidates] == ["binance_crypto"]
+    assert candidates[0].definition.default_priority == 5
+    assert candidates[0].definition.min_confidence == 0.82
+
+
+def test_disabled_db_providers_do_not_fall_back_to_default_candidates(tmp_path):
+    session_factory = _db(tmp_path)
+    with session_factory() as session:
+        providers = session.scalars(select(ResearchProvider).where(ResearchProvider.domain == "crypto")).all()
+        assert providers
+        for provider in providers:
+            provider.enabled = False
+        session.commit()
+
+    candidates = build_evidence_candidates_from_db(
+        session_factory=session_factory,
+        domain="crypto",
+        providers={
+            "coingecko_crypto": CoinGeckoEvidenceProvider(client=_FakeClient([])),
+            "binance_crypto": BinanceTickerEvidenceProvider(client=_FakeClient([])),
+        },
+    )
+    result = ResilientCryptoEvidenceProvider(candidates).get_crypto(query="btc price", locale="en")
+
+    assert candidates == ()
+    assert result.status == "unavailable"
+    assert result.warnings == ("crypto_provider_not_configured",)
 
 
 def test_research_provider_health_repository_records_and_loads_outcomes(tmp_path):

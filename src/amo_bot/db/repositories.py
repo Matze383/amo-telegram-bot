@@ -35,6 +35,7 @@ from amo_bot.db.models import (
     PrivateChatPolicy,
     PromptContextDoc,
     ResearchEvalCase,
+    ResearchProvider,
     ResearchProviderHealth,
     ResearchSourceObservation,
     RetrievableMemory,
@@ -474,6 +475,19 @@ class ResearchProviderHealthRecord:
 
 
 @dataclass(frozen=True, slots=True)
+class ResearchProviderRecord:
+    provider_name: str
+    source_name: str
+    domain: str
+    enabled: bool
+    default_priority: int
+    fallback_allowed: bool
+    min_confidence: float
+    max_age_seconds: int | None = None
+    metadata: dict[str, object] | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class ResearchSourceObservationRecord:
     provider_name: str
     domain: str
@@ -498,6 +512,61 @@ class ResearchEvalCaseRecord:
     expected_status: str | None = None
     expected_metadata: dict[str, object] | None = None
     enabled: bool = True
+
+
+@dataclass(frozen=True, slots=True)
+class ResearchHostQualityRecord:
+    host: str
+    success_count: int = 0
+    failure_count: int = 0
+    warning_count: int = 0
+    conflict_count: int = 0
+
+    @property
+    def usable(self) -> bool:
+        return self.success_count > 0 and self.failure_count <= self.success_count + self.warning_count
+
+
+class ResearchProviderRepository:
+    """Read configured research providers without exposing query or URL data."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def list_enabled_by_domain(self, domain: str) -> tuple[ResearchProviderRecord, ...]:
+        normalized_domain = ResearchSourceObservationRepository._safe_label(
+            domain,
+            default="generic",
+            max_len=64,
+        )
+        rows = self._session.scalars(
+            select(ResearchProvider)
+            .where(and_(ResearchProvider.domain == normalized_domain, ResearchProvider.enabled.is_(True)))
+            .order_by(ResearchProvider.default_priority.asc(), ResearchProvider.provider_name.asc())
+        ).all()
+        return tuple(self._to_record(row) for row in rows)
+
+    @staticmethod
+    def _to_record(row: ResearchProvider) -> ResearchProviderRecord:
+        metadata: dict[str, object] | None = None
+        if row.metadata_json:
+            try:
+                parsed = json.loads(row.metadata_json)
+            except json.JSONDecodeError:
+                parsed = None
+            if isinstance(parsed, dict):
+                metadata = {str(key): value for key, value in parsed.items() if isinstance(value, (str, int, float, bool)) or value is None}
+        return ResearchProviderRecord(
+            provider_name=row.provider_name,
+            source_name=row.source_name,
+            domain=row.domain,
+            enabled=bool(row.enabled),
+            default_priority=int(row.default_priority or 100),
+            fallback_allowed=bool(row.fallback_allowed),
+            min_confidence=float(row.min_confidence or 0.0),
+            max_age_seconds=row.max_age_seconds,
+            metadata=metadata,
+        )
 
 
 class ResearchProviderHealthRepository:
@@ -733,6 +802,86 @@ class ResearchSourceObservationRepository:
             created_at=when,
         )
 
+    def assess_recent_hosts(
+        self,
+        *,
+        domain: str,
+        source_hosts: Sequence[str],
+        since: datetime | None = None,
+        limit: int = 250,
+    ) -> tuple[ResearchHostQualityRecord, ...]:
+        hosts = set(self._safe_hosts(source_hosts))
+        if not hosts:
+            return ()
+        normalized_domain = self._safe_label(domain, default="generic", max_len=64)
+        conditions = [ResearchSourceObservation.domain == normalized_domain]
+        if since is not None:
+            conditions.append(ResearchSourceObservation.created_at >= since)
+        rows = self._session.scalars(
+            select(ResearchSourceObservation)
+            .where(and_(*conditions))
+            .order_by(ResearchSourceObservation.created_at.desc())
+            .limit(max(1, min(int(limit), 1000)))
+        ).all()
+
+        counters = {host: {"success": 0, "failure": 0, "warning": 0, "conflict": 0} for host in hosts}
+        for row in rows:
+            row_hosts = self._metadata_hosts(row.metadata_json)
+            matched = hosts.intersection(row_hosts)
+            if not matched:
+                continue
+            warnings = self._warning_codes(row.warning_codes_json)
+            outcome = (row.outcome or "").strip().lower()
+            is_success = outcome in {"confirmed", "allow", "search_completed", "scrape_completed", "browser_completed"}
+            is_failure = not is_success and outcome not in {"unknown"}
+            has_conflict = any("conflict" in warning or "mismatch" in warning for warning in warnings)
+            for host in matched:
+                if is_success:
+                    counters[host]["success"] += 1
+                if is_failure:
+                    counters[host]["failure"] += 1
+                counters[host]["warning"] += len(warnings)
+                if has_conflict:
+                    counters[host]["conflict"] += 1
+
+        return tuple(
+            ResearchHostQualityRecord(
+                host=host,
+                success_count=values["success"],
+                failure_count=values["failure"],
+                warning_count=values["warning"],
+                conflict_count=values["conflict"],
+            )
+            for host, values in sorted(counters.items())
+        )
+
+    @classmethod
+    def _metadata_hosts(cls, metadata_json: str | None) -> tuple[str, ...]:
+        if not metadata_json:
+            return ()
+        try:
+            payload = json.loads(metadata_json)
+        except json.JSONDecodeError:
+            return ()
+        if not isinstance(payload, dict):
+            return ()
+        raw_hosts = payload.get("source_hosts")
+        if not isinstance(raw_hosts, list):
+            return ()
+        return cls._safe_hosts(tuple(str(host) for host in raw_hosts))
+
+    @classmethod
+    def _warning_codes(cls, warning_codes_json: str | None) -> tuple[str, ...]:
+        if not warning_codes_json:
+            return ()
+        try:
+            payload = json.loads(warning_codes_json)
+        except json.JSONDecodeError:
+            return ()
+        if not isinstance(payload, list):
+            return ()
+        return cls._safe_codes(tuple(str(item) for item in payload))
+
     @classmethod
     def _safe_label(cls, value: str | None, *, default: str, max_len: int) -> str:
         raw = (value or "").strip()
@@ -927,6 +1076,41 @@ class ResearchEvalCaseRepository:
             expected_status=normalized_status or "needs_improvement",
             expected_metadata=expected_metadata,
             enabled=enabled,
+        )
+
+    def list_enabled(self, *, domain: str | None = None, limit: int = 100) -> tuple[ResearchEvalCaseRecord, ...]:
+        conditions = [ResearchEvalCase.enabled.is_(True)]
+        if domain:
+            conditions.append(
+                ResearchEvalCase.domain
+                == ResearchSourceObservationRepository._safe_label(domain, default="generic", max_len=64)
+            )
+        rows = self._session.scalars(
+            select(ResearchEvalCase)
+            .where(and_(*conditions))
+            .order_by(ResearchEvalCase.updated_at.desc(), ResearchEvalCase.id.desc())
+            .limit(max(1, min(int(limit), 500)))
+        ).all()
+        return tuple(self._to_record(row) for row in rows)
+
+    @classmethod
+    def _to_record(cls, row: ResearchEvalCase) -> ResearchEvalCaseRecord:
+        metadata: dict[str, object] | None = None
+        if row.expected_metadata_json:
+            try:
+                parsed = json.loads(row.expected_metadata_json)
+            except json.JSONDecodeError:
+                parsed = None
+            if isinstance(parsed, dict):
+                metadata = parsed
+        return ResearchEvalCaseRecord(
+            case_key=row.case_key,
+            domain=row.domain,
+            locale=row.locale,
+            sanitized_prompt=row.sanitized_prompt,
+            expected_status=row.expected_status,
+            expected_metadata=metadata,
+            enabled=bool(row.enabled),
         )
 
     @classmethod

@@ -13,6 +13,10 @@ Erweiterte Webtool-Infrastruktur mit Provider-Registry, Health-Monitoring und Qu
 
 #### Neu
 - **Source/Provider Registry:** Zentrale Registry für Weather- und Crypto-Provider mit definierten Default-Kandidaten.
+- **DB-Source-Auswahl:** Provider-Auswahl nutzt `research_providers` plus Health/Freshness/Observations stärker für zuverlässigere Quellen.
+- **Kein Legacy-Fallback:** Explicit leere DB-Candidates fallen nicht mehr auf Legacy-Defaults zurück.
+- **Disabled-Provider-Schutz:** Disabled Provider bleiben dauerhaft disabled (keine automatische Reaktivierung).
+- **Source-Quality/Corroboration Gate:** News/Chain-Extracts erkennen Konflikte und zu schwache Quellen konservativer (Fail-Closed bei Unsicherheit).
 - **Weather-Provider:** Open-Meteo (primär) + wttr.in (Fallback) für Wetterabfragen.
 - **Crypto-Provider:** CoinGecko (primär) + Binance public ticker (Fallback), eng begrenzt auf BTC/ETH in USD/USDT; unbekannte Assets oder EUR-Paare führen zu Fail-Closed.
 - **Health-Monitoring (DB-gestützt):** Provider-Health wird in der Datenbank persistiert (`research_provider_health`) und über Neustarts hinweg nutzbar.
@@ -21,6 +25,7 @@ Erweiterte Webtool-Infrastruktur mit Provider-Registry, Health-Monitoring und Qu
 - **Quota/Audit:** Metadata-only Persistenz für Audit-Zwecke (keine raw Queries/URLs/Secrets).
 - **Source Observations:** Webtool success/fail-closed/error sowie Role-/Quota-Denials erzeugen automatisch persistente Source-Observations in `research_source_observations`.
 - **Eval Cases:** Negatives Research-/Source-Feedback erzeugt automatisch sanitisierte Eval-Cases in `research_eval_cases`.
+- **Eval Harness/Tests:** Test-Infrastruktur für stored sanitized Eval-Cases (Validierung von Source-Quality-Gates).
 - **Privacy-Gate:** Alle Observations/Eval-Cases speichern ausschließlich Metadata (keine raw Queries, keine vollständigen URLs, keine Tokens/Secrets/Bearer-artigen Werte; `source_hosts` nur Hostnamen).
 
 #### Technisch
@@ -53,6 +58,10 @@ Enhanced web tool infrastructure with provider registry, health monitoring, and 
 
 #### New
 - **Source/Provider Registry:** Central registry for Weather and Crypto providers with defined default candidates.
+- **DB-Source Selection:** Provider selection leverages `research_providers` plus Health/Freshness/Observations more strongly for more reliable sources.
+- **No Legacy Fallback:** Explicit empty DB candidates no longer fall back to Legacy defaults.
+- **Disabled-Provider Protection:** Disabled providers remain permanently disabled (no automatic reactivation).
+- **Source-Quality/Corroboration Gate:** News/Chain-extracts detect conflicts and overly weak sources more conservatively (fail-closed on uncertainty).
 - **Weather Providers:** Open-Meteo (primary) + wttr.in (fallback) for weather queries.
 - **Crypto Providers:** CoinGecko (primary) + Binance public ticker (fallback), strictly limited to BTC/ETH in USD/USDT; unknown assets or EUR pairs result in fail-closed behavior.
 - **Health Monitoring (DB-backed):** Provider health persisted to database (`research_provider_health`) and survives restarts.
@@ -61,6 +70,7 @@ Enhanced web tool infrastructure with provider registry, health monitoring, and 
 - **Quota/Audit:** Metadata-only persistence for audit purposes (no raw queries/URLs/secrets).
 - **Source Observations:** Webtool success/fail-closed/error as well as role/quota denials automatically generate persistent source observations in `research_source_observations`.
 - **Eval Cases:** Negative research/source feedback automatically generates sanitized eval cases in `research_eval_cases`.
+- **Eval Harness/Tests:** Test infrastructure for stored sanitized eval cases (validation of source-quality gates).
 - **Privacy Gate:** All observations/eval cases store metadata only (no raw queries, no full URLs, no tokens/secrets/bearer-like values; `source_hosts` contains hostnames only).
 
 #### Technical
