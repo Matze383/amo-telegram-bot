@@ -12,6 +12,7 @@ from amo_bot.telegram.webtool_research_orchestrator import (
     _format_auto_research_no_result_note,
     _format_auto_research_success_note,
     _select_chain_urls,
+    build_research_plan,
     sanitize_auto_research_user_response,
     should_chain_auto_research,
 )
@@ -609,6 +610,7 @@ def test_auto_research_current_rate_query_chains_static_scrape_into_prompt(monke
 def test_auto_research_current_news_query_requires_multiple_checked_sources(monkeypatch):
     monkeypatch.setattr("amo_bot.telegram.dispatcher.AIRouter.decide", lambda self, **kwargs: _allowing_router_decision())
     search = SimpleNamespace(allowed=True, decision="allow", reason="search_completed", text="Python latest news", sources=("https://python.example/news",), hosts=("python.example",), error=None)
+    followup_empty = SimpleNamespace(allowed=False, decision="deny", reason="empty_result", text="", sources=(), hosts=(), error=None)
     scrape = SimpleNamespace(
         allowed=True,
         decision="allow",
@@ -618,7 +620,7 @@ def test_auto_research_current_news_query_requires_multiple_checked_sources(monk
         hosts=("python.example",),
         error=None,
     )
-    d, sent = _mk_sequence_dispatcher([search, scrape])
+    d, sent = _mk_sequence_dispatcher([search, followup_empty, scrape])
     calls = []
 
     async def _ask(prompt: str) -> str:
@@ -634,10 +636,100 @@ def test_auto_research_current_news_query_requires_multiple_checked_sources(monk
             from_parsed_update=True,
         )
     )
-    assert [c.capability for c in d.webtool_dispatcher.calls] == ["websearch", "webscraping"]
+    assert [c.capability for c in d.webtool_dispatcher.calls] == ["websearch", "websearch", "webscraping"]
+    assert "multiple sources" in d.webtool_dispatcher.calls[1].query
     assert calls == []
     assert sent and "mehreren geprüften Quellen" in sent[0]
     assert "Python release page contains current news" not in sent[0]
+
+
+def test_auto_research_weak_news_evidence_plans_followup_and_uses_second_source(monkeypatch):
+    monkeypatch.setattr("amo_bot.telegram.dispatcher.AIRouter.decide", lambda self, **kwargs: _allowing_router_decision())
+    first_search = SimpleNamespace(
+        allowed=True,
+        decision="allow",
+        reason="search_completed",
+        text="Python latest news from first source",
+        sources=("https://python.example/news",),
+        hosts=("python.example",),
+        error=None,
+    )
+    second_search = SimpleNamespace(
+        allowed=True,
+        decision="allow",
+        reason="search_completed",
+        text="Python latest news corroborated by second source",
+        sources=("https://release.example/python",),
+        hosts=("release.example",),
+        error=None,
+    )
+    first_scrape = SimpleNamespace(
+        allowed=True,
+        decision="allow",
+        reason="scrape_completed",
+        text="Python release page contains current news and version update details for today.",
+        sources=("https://python.example/news",),
+        hosts=("python.example",),
+        error=None,
+    )
+    second_scrape = SimpleNamespace(
+        allowed=True,
+        decision="allow",
+        reason="scrape_completed",
+        text="Second source confirms the same current Python release news with matching details.",
+        sources=("https://release.example/python",),
+        hosts=("release.example",),
+        error=None,
+    )
+    d, sent = _mk_sequence_dispatcher([first_search, second_search, first_scrape, second_scrape])
+    calls = []
+
+    async def _ask(prompt: str) -> str:
+        calls.append(prompt)
+        return "normal ai"
+
+    d.ai_service.ask = _ask
+    asyncio.run(
+        d._maybe_handle_ai_autoreply(
+            message=_mk_message("@amo_bot was gibt es heute Neues zu Python?", reply_to_is_bot=False, reply_to_user_is_bot=False, reply_to_username=""),
+            role=Role.ADMIN,
+            bot_username="amo_bot",
+            from_parsed_update=True,
+        )
+    )
+
+    assert sent == ["normal ai"]
+    assert [c.capability for c in d.webtool_dispatcher.calls] == ["websearch", "websearch", "webscraping", "webscraping"]
+    assert "multiple sources" in d.webtool_dispatcher.calls[1].query
+    assert "Python latest news corroborated by second source" in calls[0]
+    assert "Second source confirms" in calls[0]
+
+
+def test_research_plan_uses_source_observation_quality_for_followup():
+    class _Record:
+        host = "weak.example"
+        success_count = 0
+        failure_count = 2
+        warning_count = 0
+        conflict_count = 0
+
+    class _Reader:
+        def assess_hosts(self, *, domain: str, hosts: tuple[str, ...]):
+            assert domain == "news"
+            assert hosts == ("weak.example",)
+            return (_Record(),)
+
+    plan = build_research_plan(
+        request_text="latest news about Python",
+        capability="websearch",
+        reason="classifier_current_data",
+        source_hosts=("weak.example",),
+        source_quality_reader=_Reader(),
+    )
+
+    assert plan.should_followup_search is True
+    assert plan.evidence_status == "weak_initial_evidence"
+    assert "source_observation_weak" in plan.warning_codes
 
 
 def test_auto_research_timeless_ordinary_query_does_not_chain(monkeypatch):

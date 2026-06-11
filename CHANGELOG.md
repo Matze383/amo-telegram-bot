@@ -2,6 +2,48 @@
 
 ---
 
+## [Unreleased] – Search Planner & Auto Follow-up Research
+
+**Datum / Date:** 2026-06-11
+
+### 🇩🇪 Deutsch
+
+#### Übersicht
+Automatische Follow-up-Recherche mit geplantem Search-Planner: Erkennung schwacher initialer Evidenz und gezielte Verbesserung durch maximal einen Follow-up-Websearch.
+
+#### Neu
+- **ResearchPlan / SearchPlanStep:** Strukturierte Planung von Follow-up-Suchen in `webtool_research_orchestrator.py`.
+- **Schwache Evidenz-Erkennung:** Auto-Research erkennt einseitige News, geringe Source-Host-Coverage oder schwache/konfliktbehaftete `source_observations`.
+- **Geplanter Follow-up:** Höchstens ein geplanter `websearch` als Follow-up bei unzureichender initialer Evidenz.
+- **Ergebnis-Merging:** Brauchbare Follow-up-Ergebnisse werden mit initialen Ergebnissen gemerged und durch die bestehende Search->Scrape Chain weiterverarbeitet.
+- **Fail-Closed:** Bei weiterhin unzureichender Evidenz nach Follow-up: sicheres Fail-Closed-Verhalten.
+- **Eval Harness:** Erweiterte Test-Infrastruktur für Search-Planner-Validierung.
+
+#### Technisch / Privacy
+- **Logging:** Metadata-only (keine raw Queries, keine vollen URLs).
+- Keine neuen Commands.
+- Keine neue Config erforderlich.
+
+### 🇬🇧 English
+
+#### Overview
+Automatic follow-up research with planned search planner: detection of weak initial evidence and targeted improvement through at most one follow-up websearch.
+
+#### New
+- **ResearchPlan / SearchPlanStep:** Structured planning of follow-up searches in `webtool_research_orchestrator.py`.
+- **Weak Evidence Detection:** Auto-research detects one-sided news, low source-host coverage, or weak/conflicting `source_observations`.
+- **Planned Follow-up:** At most one planned `websearch` as follow-up when initial evidence is insufficient.
+- **Result Merging:** Viable follow-up results are merged with initial results and processed through the existing Search->Scrape Chain.
+- **Fail-Closed:** Safe fail-closed behavior when evidence remains insufficient after follow-up.
+- **Eval Harness:** Extended test infrastructure for search planner validation.
+
+#### Technical / Privacy
+- **Logging:** Metadata-only (no raw queries, no full URLs).
+- No new commands.
+- No new config required.
+
+---
+
 ## [Unreleased] – Web Research Provider Registry & Health Monitoring
 
 **Datum / Date:** 2026-06-11

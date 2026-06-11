@@ -4,6 +4,7 @@ import logging
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from typing import Any, Protocol
 from urllib.parse import parse_qs, urlparse
 
@@ -49,6 +50,7 @@ _AUTO_RESEARCH_CHAIN_FINAL_CAP = 1600
 _AUTO_RESEARCH_SEARCH_SUMMARY_CAP = 900
 _AUTO_RESEARCH_CHAIN_SNIPPET_CAP = 500
 _AUTO_RESEARCH_CHAIN_MIN_EXTRACT_CHARS = 40
+_AUTO_RESEARCH_PLAN_MAX_FOLLOWUP_SEARCHES = 1
 _AUTO_RESEARCH_CHAIN_FRESHNESS_RE = re.compile(
     r"\b(?:"
     r"current|aktuell(?:e[nrms]?)?|jetzt|heute|live|realtime|real-time|right\s+now|"
@@ -122,6 +124,27 @@ class WebResearchOrchestratorRequest:
 class WebResearchOrchestratorResult:
     auto_note: str = ""
     user_response: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class SearchPlanStep:
+    operation: str
+    reason: str
+    query: str = ""
+    max_attempts: int = 1
+
+
+@dataclass(frozen=True, slots=True)
+class ResearchPlan:
+    domain: str
+    evidence_status: str
+    source_host_count: int
+    warning_codes: tuple[str, ...] = ()
+    steps: tuple[SearchPlanStep, ...] = ()
+
+    @property
+    def should_followup_search(self) -> bool:
+        return any(step.operation == "websearch" for step in self.steps)
 
 
 class ResearchSourceQualityReader(Protocol):
@@ -239,6 +262,22 @@ class WebResearchOrchestrator:
                 )
             )
 
+        plan = build_research_plan(
+            request_text=request.normalized_text,
+            capability=decision_auto.capability,
+            reason=decision_auto.reason,
+            source_hosts=tuple(tool_result.hosts or ()),
+            source_urls=tuple(tool_result.sources or ()),
+            source_quality_reader=self._source_quality_reader,
+        )
+        if plan.should_followup_search:
+            tool_result = self._run_planned_followup_search(
+                request,
+                current_result=tool_result,
+                plan=plan,
+                is_followup_research=is_followup_research,
+            )
+
         chain_extracts: list[tuple[str, str, str]] = []
         chain_urls: tuple[str, ...] = ()
         if should_chain_auto_research(
@@ -332,6 +371,51 @@ class WebResearchOrchestrator:
         if result.domain == "generic" or result.status == "not_applicable":
             return None
         self._log_domain_evidence(request, result)
+        return result
+
+    def _run_planned_followup_search(
+        self,
+        request: WebResearchOrchestratorRequest,
+        *,
+        current_result: Any,
+        plan: ResearchPlan,
+        is_followup_research: bool,
+    ) -> Any:
+        result = current_result
+        attempts = 0
+        for step in plan.steps:
+            if step.operation != "websearch" or not step.query:
+                continue
+            if attempts >= _AUTO_RESEARCH_PLAN_MAX_FOLLOWUP_SEARCHES:
+                break
+            attempts += 1
+            followup_request = build_webtool_request(
+                trigger=WebtoolChatTrigger(capability="websearch", query=step.query, url=""),
+                user_id=request.message.from_user.id,
+                role=request.role,
+                chat_id=request.message.chat.id,
+                topic_id=request.message.message_thread_id,
+                locale=request.locale,
+            )
+            followup_result = self._webtool_dispatcher.execute(followup_request)
+            self._log_result(
+                event="ai.webtool.research_plan_followup",
+                request=request,
+                mode="followup_plan" if is_followup_research else "auto_plan",
+                operation="websearch",
+                decision=step.reason,
+                result=followup_result,
+                extra={
+                    "scope": request.scope,
+                    "plan_domain": plan.domain,
+                    "plan_status": plan.evidence_status,
+                    "plan_warning_count": len(plan.warning_codes),
+                    "source_host_count": plan.source_host_count,
+                    "attempt": attempts,
+                },
+            )
+            if followup_result.allowed and (followup_result.text or "").strip():
+                result = _merge_search_results(result, followup_result)
         return result
 
     def _run_structured_evidence(self, request: WebResearchOrchestratorRequest, *, domain: str) -> DomainEvidenceResult:
@@ -597,6 +681,54 @@ def should_chain_auto_research(text: str, *, capability: str, reason: str | None
     return True
 
 
+def build_research_plan(
+    *,
+    request_text: str,
+    capability: str,
+    reason: str | None,
+    source_hosts: tuple[str, ...] = (),
+    source_urls: tuple[str, ...] = (),
+    source_quality_reader: ResearchSourceQualityReader | None = None,
+) -> ResearchPlan:
+    """Plan a bounded extra search when initial web evidence is too narrow."""
+    domain = classify_evidence_domain(request_text)
+    hosts = _normalize_source_hosts(source_hosts=source_hosts, source_urls=source_urls)
+    warnings: list[str] = []
+    evidence_status = "adequate_initial_evidence"
+
+    if (
+        capability != "websearch"
+        or reason == "user_feedback_followup"
+        or not should_chain_auto_research(request_text, capability=capability, reason=reason)
+    ):
+        return ResearchPlan(domain=domain, evidence_status=evidence_status, source_host_count=len(hosts))
+
+    if not hosts:
+        warnings.append("no_source_hosts")
+    elif len(hosts) < 2 and domain in {"news", "stock", "sports", "generic"}:
+        warnings.append("single_source_host")
+
+    source_quality = _assess_hosts_source_quality(domain=domain, hosts=hosts, reader=source_quality_reader)
+    if source_quality:
+        if source_quality.get("conflict_hosts"):
+            warnings.append("source_observation_conflict")
+        if source_quality.get("weak_hosts"):
+            warnings.append("source_observation_weak")
+
+    if not warnings:
+        return ResearchPlan(domain=domain, evidence_status=evidence_status, source_host_count=len(hosts))
+
+    query = _build_planned_followup_query(request_text=request_text, domain=domain, warnings=tuple(warnings))
+    steps = (SearchPlanStep(operation="websearch", reason="weak_initial_evidence", query=query),) if query else ()
+    return ResearchPlan(
+        domain=domain,
+        evidence_status="weak_initial_evidence",
+        source_host_count=len(hosts),
+        warning_codes=tuple(dict.fromkeys(warnings)),
+        steps=steps,
+    )
+
+
 def sanitize_auto_research_user_response(text: str) -> str:
     """Remove internal webtool pipeline terms from an auto-research answer."""
     cleaned = text or ""
@@ -681,6 +813,73 @@ def _assess_chain_source_quality(
         "weak_hosts": tuple(sorted(weak_hosts)),
         "conflict_hosts": tuple(sorted(conflict_hosts)),
     }
+
+
+def _assess_hosts_source_quality(
+    *,
+    domain: str,
+    hosts: tuple[str, ...],
+    reader: ResearchSourceQualityReader | None,
+) -> dict[str, Any] | None:
+    if reader is None or domain == "generic" or not hosts:
+        return None
+    return _assess_chain_source_quality(
+        domain=domain,
+        extracts=tuple(("websearch", host, "host-only source quality check") for host in hosts),
+        reader=reader,
+    )
+
+
+def _normalize_source_hosts(*, source_hosts: tuple[str, ...], source_urls: tuple[str, ...]) -> tuple[str, ...]:
+    hosts: list[str] = []
+    for raw in (*source_hosts, *source_urls):
+        host = _host_from_url(raw) if "://" in (raw or "") else (raw or "").strip().lower()
+        host = host.removeprefix("www.")
+        if host and host not in hosts:
+            hosts.append(host)
+    return tuple(hosts[:10])
+
+
+def _build_planned_followup_query(*, request_text: str, domain: str, warnings: tuple[str, ...]) -> str:
+    base = build_empty_result_retry_query(request_text)
+    if not base:
+        base = re.sub(r"https?://\S+", " ", request_text or "")
+        base = re.sub(r"\s+", " ", base).strip()
+    if not base:
+        return ""
+    suffixes = {
+        "news": "latest confirmed multiple sources",
+        "stock": "current official market data source",
+        "sports": "current official standings results",
+        "crypto": "current price official market data",
+        "weather": "current forecast official weather source",
+    }
+    suffix = suffixes.get(domain, "current corroborating sources")
+    if any("conflict" in warning for warning in warnings):
+        suffix = f"{suffix} corroboration"
+    query = f"{base} {suffix}"
+    query = re.sub(r"\s+", " ", query).strip()
+    return query[:140].rstrip()
+
+
+def _merge_search_results(primary: Any, followup: Any) -> Any:
+    primary_text = (getattr(primary, "text", "") or "").strip()
+    followup_text = (getattr(followup, "text", "") or "").strip()
+    text = "\n".join(part for part in (primary_text, followup_text) if part)
+    sources = tuple(dict.fromkeys((*tuple(getattr(primary, "sources", ()) or ()), *tuple(getattr(followup, "sources", ()) or ()))))
+    hosts = _normalize_source_hosts(
+        source_hosts=tuple(dict.fromkeys((*tuple(getattr(primary, "hosts", ()) or ()), *tuple(getattr(followup, "hosts", ()) or ())))),
+        source_urls=sources,
+    )
+    return SimpleNamespace(
+        allowed=True,
+        decision=getattr(followup, "decision", getattr(primary, "decision", "allow")),
+        reason="search_completed_with_planned_followup",
+        text=text,
+        sources=sources,
+        hosts=hosts,
+        error=None,
+    )
 
 
 def _format_weather_unconfirmed_response(*, request_text: str, search_text: str, search_hosts: tuple[str, ...], locale: str) -> str:

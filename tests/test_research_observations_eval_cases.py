@@ -403,6 +403,29 @@ def test_enabled_research_eval_cases_run_through_local_harness(tmp_path):
     assert results[0].passed is True
 
 
+def test_research_eval_case_marks_weak_initial_source_as_followup_planned(tmp_path):
+    session_factory = _session_factory(tmp_path)
+    with session_factory() as session:
+        repo = ResearchEvalCaseRepository(session)
+        case = repo.create_from_negative_feedback(
+            sanitized_summary="Latest News zu Python wurden nur aus einer Quelle beantwortet.",
+            failure_label="source_quality_feedback",
+            domain="news",
+            locale="de",
+            evidence_status="low_quality",
+            source_hosts=("single-source.example",),
+        )
+        results = run_research_eval_cases(repo)
+
+    assert len(results) == 1
+    assert results[0].case_key == case.case_key
+    assert results[0].domain == "news"
+    assert results[0].would_chain is True
+    assert results[0].would_followup_on_weak_initial_evidence is True
+    assert results[0].passed is True
+    assert results[0].reason == "weak_initial_evidence_would_plan_followup"
+
+
 def test_positive_source_preference_does_not_create_research_eval_case(tmp_path):
     session_factory = _session_factory(tmp_path)
 
