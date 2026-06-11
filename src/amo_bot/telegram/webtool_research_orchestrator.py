@@ -29,6 +29,7 @@ from amo_bot.telegram.webtool_evidence import (
     format_domain_evidence_note,
     format_domain_fail_closed_response,
 )
+from amo_bot.telegram.webtool_news_corroboration import NewsCorroborationResult, assess_news_corroboration
 
 
 _COMPONENT = "telegram.webtool_research_orchestrator"
@@ -301,6 +302,13 @@ class WebResearchOrchestrator:
             )
 
         if chain_extracts:
+            news_corroboration_response = _format_news_corroboration_response(
+                request_text=request.normalized_text,
+                extracts=tuple(chain_extracts),
+                locale=request.locale,
+            )
+            if news_corroboration_response:
+                return WebResearchOrchestratorResult(user_response=news_corroboration_response)
             source_quality = _assess_chain_source_quality(
                 domain=classify_evidence_domain(request.normalized_text),
                 extracts=tuple(chain_extracts),
@@ -903,6 +911,51 @@ def _format_news_insufficient_sources_response(
         "Ich fasse keine News aus Such-Snippets oder nur einer unbestätigten Quelle zusammen.\n"
         f"Quelle/Stand: {status}."
     )
+
+
+def _format_news_corroboration_response(
+    *,
+    request_text: str,
+    extracts: tuple[tuple[str, str, str], ...],
+    locale: str,
+) -> str:
+    if classify_evidence_domain(request_text) != "news":
+        return ""
+    result = assess_news_corroboration(extracts)
+    if result.corroborated:
+        return ""
+    return _format_news_uncorroborated_response(result=result, locale=locale)
+
+
+def _format_news_uncorroborated_response(*, result: NewsCorroborationResult, locale: str) -> str:
+    status = _news_corroboration_status_text(result)
+    if (locale or "").lower().startswith("en"):
+        return (
+            "I cannot reliably confirm the requested current news at claim level right now. "
+            "The checked sources did not provide enough independent, current corroboration from multiple checked sources, so I will not smooth over uncertainty or conflicts.\n"
+            f"Source/status: {status}."
+        )
+    return (
+        "Ich kann die angefragten aktuellen Nachrichten gerade nicht auf Aussage-Ebene belastbar bestätigen. "
+        "Die geprüften Quellen liefern nicht genug unabhängige, aktuelle Bestätigung aus mehreren geprüften Quellen; Unsicherheiten oder Konflikte glätte ich deshalb nicht.\n"
+        f"Quelle/Stand: {status}."
+    )
+
+
+def _news_corroboration_status_text(result: NewsCorroborationResult) -> str:
+    if result.status == "conflicting_claims":
+        hosts = ", ".join(result.conflict_hosts[:3]) or "checked sources"
+        return f"conflicting checked claims across {hosts}"
+    if result.status == "stale_sources":
+        hosts = ", ".join(result.stale_hosts[:3]) or "checked sources"
+        return f"only stale recognizable publication dates from {hosts}"
+    if result.status == "weak_repeated_snippet":
+        hosts = ", ".join(result.supporting_hosts[:3]) or "checked sources"
+        return f"multiple hosts repeat the same weak snippet-like claim from {hosts}"
+    if result.status == "no_corroborated_claim":
+        stale = f"; stale hosts ignored: {', '.join(result.stale_hosts[:3])}" if result.stale_hosts else ""
+        return f"no same claim confirmed by two current checked sources{stale}"
+    return "no compact claim candidates found in checked source text"
 
 
 def _assess_chain_source_quality(
