@@ -99,9 +99,15 @@ class SessionBoundWebtoolCapabilityDispatcher:
 
     def __init__(self, *, session_factory) -> None:
         self._session_factory = session_factory
-        provider_health = DbBackedProviderHealthRegistry(session_factory=session_factory)
+        self._provider_health = DbBackedProviderHealthRegistry(session_factory=session_factory)
+        self._weather_evidence_provider = None
+        self._crypto_evidence_provider = None
+
+    def _ensure_evidence_providers(self) -> None:
+        if self._weather_evidence_provider is not None and self._crypto_evidence_provider is not None:
+            return
         weather_candidates = build_evidence_candidates_from_db(
-            session_factory=session_factory,
+            session_factory=self._session_factory,
             domain="weather",
             providers={
                 "open_meteo_weather": OpenMeteoEvidenceProvider(),
@@ -109,7 +115,7 @@ class SessionBoundWebtoolCapabilityDispatcher:
             },
         )
         crypto_candidates = build_evidence_candidates_from_db(
-            session_factory=session_factory,
+            session_factory=self._session_factory,
             domain="crypto",
             providers={
                 "coingecko_crypto": CoinGeckoEvidenceProvider(),
@@ -118,14 +124,15 @@ class SessionBoundWebtoolCapabilityDispatcher:
         )
         self._weather_evidence_provider = ResilientWeatherEvidenceProvider(
             weather_candidates,
-            health=provider_health,
+            health=self._provider_health,
         )
         self._crypto_evidence_provider = ResilientCryptoEvidenceProvider(
             crypto_candidates,
-            health=provider_health,
+            health=self._provider_health,
         )
 
     def execute(self, request):
+        self._ensure_evidence_providers()
         with self._session_factory() as session:
             quota_repo = WebToolRoleQuotaRepository(session)
             browser_provider = None
@@ -172,7 +179,7 @@ def run(argv: list[str] | None = None) -> None:
         raise SystemExit(0 if result.ok else 1)
 
     settings = get_settings()
-    configured_pid_file = args.pid_file or settings.bot_pid_file
+    configured_pid_file = args.pid_file or getattr(settings, "bot_pid_file", _configured_pid_file_for_stop(None))
 
     setup_logging()
     init_db(settings.database_url)

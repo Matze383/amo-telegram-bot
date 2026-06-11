@@ -13,8 +13,30 @@ from amo_bot.db.models import AuditEvent, ImageAnalyzeAuditEvent, PluginPolicyAl
 from amo_bot.telegram.update_parser import TelegramAttachment
 from amo_bot.db.repositories import PluginRepository
 from amo_bot.ai.image_analyze_orchestrator import ImageAnalyzeOrchestrator
-from amo_bot.plugins.command_runtime import CommandActor, CommandInvocation, PluginCommandExecutor
+from amo_bot.plugins.command_runtime import CommandActor, CommandInvocation, PluginCommandExecutor, PluginHostAPI
 from amo_bot.plugins.loader import PluginLoader
+
+
+def test_plugin_host_api_does_not_truncate_long_direct_send_or_reply() -> None:
+    sent: list[tuple[int, str]] = []
+    replied: list[tuple[int, int, str, int | None]] = []
+
+    async def _send(chat_id: int, text: str) -> object:
+        sent.append((chat_id, text))
+        return {"ok": True}
+
+    async def _reply(chat_id: int, message_id: int, text: str, message_thread_id: int | None = None) -> object:
+        replied.append((chat_id, message_id, text, message_thread_id))
+        return {"ok": True}
+
+    host_api = PluginHostAPI(send_message=_send, reply=_reply, required_permissions={"send_message"})
+    text = "x" * 4200
+
+    asyncio.run(host_api.send_message(123, text))
+    asyncio.run(host_api.reply(123, 9, text))
+
+    assert sent == [(123, text)]
+    assert replied == [(123, 9, text, None)]
 
 
 def _mk_executor(
@@ -418,6 +440,32 @@ async def handle_command(context, host_api):
 
     assert sent == [(77, "sandbox:plug")]
     assert replied == [(77, 9, "sandbox-ack", None)]
+
+
+def test_plugin_command_sandbox_splits_long_send_message(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'plugin_runtime_sandbox_long_send.db'}"
+    init_db(db_url)
+
+    executor, sent, replied, _, _ = _mk_executor(
+        tmp_path,
+        db_url,
+        "sandbox_long_send_demo",
+        """
+async def handle_command(context, host_api):
+    await host_api.send_message(context.chat_id, "x" * 4200)
+""",
+    )
+
+    asyncio.run(
+        executor.execute(
+            actor=CommandActor(telegram_user_id=100, role=Role.ADMIN),
+            invocation=CommandInvocation(command_name="plug", argument=None, chat_id=77, message_id=9),
+        )
+    )
+
+    assert [len(text) for _, text in sent] == [4000, 200]
+    assert "".join(text for _, text in sent) == "x" * 4200
+    assert replied == []
 
 
 def test_plugin_command_delyt_without_arg_structured_reply_payload_is_handled_via_worker(tmp_path) -> None:

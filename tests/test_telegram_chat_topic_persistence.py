@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 
 from amo_bot.db.models import User
-from amo_bot.db.repositories import UserRoleRepository
+from amo_bot.db.repositories import TopicAgentMemoryRepository, UserRoleRepository
 from amo_bot.telegram.update_parser import TelegramChat as ParsedTelegramChat, TelegramMessage, TelegramUser
 
 from amo_bot.auth.roles import Role
@@ -1104,6 +1105,61 @@ def test_topic_text_without_mention_or_reply_persists_recent_and_sends_no_ai_res
     recent = _recent_messages_for_scope(db_url, scope_type="topic", chat_id=-12001, topic_id=501)
     assert len(recent) == 1
     assert recent[0].message_text == "ein normaler text"
+    ai_replies = [m for m in sent_group_text if m[1] != "Bitte kläre Consent privat mit dem Bot."]
+    assert ai_replies == []
+
+
+def test_enabled_topic_message_persists_recent_and_is_visible_to_daily_memory(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'persist_recent_enabled_topic_daily.db'}"
+    init_db(db_url)
+    sent_group_text: list[tuple[int, str, int | None]] = []
+    dispatcher = _build_dispatcher(db_url, sent_group_text=sent_group_text)
+
+    with create_session_factory(db_url)() as session:
+        TopicAgentMemoryRepository(session).upsert_config(
+            scope_type="topic",
+            chat_id=-12011,
+            topic_id=511,
+            ai_enabled=True,
+            response_mode="mention_or_reply",
+            recent_context_window_size=20,
+        )
+
+    asyncio.run(
+        dispatcher.handle_raw_update(
+            _mk_update(
+                update_id=211,
+                user_id=9011,
+                chat_id=-12011,
+                chat_type="supergroup",
+                title="Forum",
+                message_thread_id=511,
+                text="fresh enabled topic text",
+            )
+        )
+    )
+
+    with create_session_factory(db_url)() as session:
+        repo = TopicAgentMemoryRepository(session)
+        recent = repo.list_recent(scope_type="topic", chat_id=-12011, topic_id=511)
+        assert [row.message_text for row in recent] == ["fresh enabled topic text"]
+
+        result = repo.aggregate_recent_messages_to_daily_memory(
+            scope_type="topic",
+            chat_id=-12011,
+            topic_id=511,
+            now=datetime(2026, 6, 8, 9, 0, tzinfo=UTC),
+            min_messages=1,
+        )
+        assert result.recent_rows_seen == 1
+        assert result.daily_rows_upserted == 1
+        assert repo.get_daily_memory(
+            scope_type="topic",
+            chat_id=-12011,
+            topic_id=511,
+            memory_date=recent[0].created_at.date().isoformat(),
+        ) is not None
+
     ai_replies = [m for m in sent_group_text if m[1] != "Bitte kläre Consent privat mit dem Bot."]
     assert ai_replies == []
 

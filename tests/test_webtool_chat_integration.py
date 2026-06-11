@@ -807,6 +807,61 @@ def test_auto_research_followup_extraction_failure_is_truthful(monkeypatch):
     assert "Do NOT say or imply that the bot has no web tools" in calls[0]
 
 
+def test_auto_research_stock_search_hit_with_unusable_scrape_fails_closed(monkeypatch):
+    monkeypatch.setattr("amo_bot.telegram.dispatcher.AIRouter.decide", lambda self, **kwargs: _allowing_router_decision())
+    search = SimpleNamespace(
+        allowed=True,
+        decision="allow",
+        reason="search_completed",
+        text="Nvidia stock live price appears in the search snippet.",
+        sources=("https://markets.example/nvda",),
+        hosts=("markets.example",),
+        error=None,
+    )
+    followup_empty = SimpleNamespace(allowed=False, decision="deny", reason="empty_result", text="", sources=(), hosts=(), error=None)
+    js_placeholder = SimpleNamespace(
+        allowed=True,
+        decision="allow",
+        reason="scrape_completed",
+        text="Please enable JavaScript to view this app. Loading...",
+        sources=("https://markets.example/nvda",),
+        hosts=("markets.example",),
+        error=None,
+    )
+    browser_unavailable = SimpleNamespace(
+        allowed=False,
+        decision="provider_unavailable",
+        reason="browser_provider_not_configured",
+        text="",
+        sources=(),
+        hosts=(),
+        error="No browser",
+    )
+    d, sent = _mk_sequence_dispatcher([search, followup_empty, js_placeholder, browser_unavailable])
+    calls = []
+
+    async def _ask(prompt: str) -> str:
+        calls.append(prompt)
+        return "normal ai"
+
+    d.ai_service.ask = _ask
+    asyncio.run(
+        d._maybe_handle_ai_autoreply(
+            message=_mk_message("@amo_bot current Nvidia stock price now?", reply_to_is_bot=False, reply_to_user_is_bot=False, reply_to_username=""),
+            role=Role.ADMIN,
+            bot_username="amo_bot",
+            from_parsed_update=True,
+        )
+    )
+
+    assert [c.capability for c in d.webtool_dispatcher.calls] == ["websearch", "websearch", "webscraping", "browser"]
+    assert calls == []
+    assert sent and "nicht belastbar bestätigen" in sent[0]
+    assert "Such-Snippets" in sent[0]
+    assert "Nvidia stock live price" not in sent[0]
+    assert "Please enable JavaScript" not in sent[0]
+
+
 def test_weather_auto_research_uses_unconfirmed_source_fallback_for_snippet_only_result(monkeypatch):
     monkeypatch.setattr("amo_bot.telegram.dispatcher.AIRouter.decide", lambda self, **kwargs: _allowing_router_decision())
     search = SimpleNamespace(

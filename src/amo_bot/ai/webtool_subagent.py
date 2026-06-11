@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Protocol
 
+from amo_bot.ai.research_extraction_quality import classify_extraction_quality
 from amo_bot.auth.roles import Role
 from amo_bot.core.logging import log_event
 from amo_bot.db.repositories import WebToolRoleQuotaRepository, WebToolQuotaDecision
@@ -413,6 +414,7 @@ class WebtoolSubagentService:
 
             # Build sanitized result
             sanitized = self._sanitize_scrape_result(result)
+            self._add_extraction_quality_metadata(metadata, sanitized.text)
 
             # Check HTTP status
             status_code = result.get("status_code", 0)
@@ -485,6 +487,7 @@ class WebtoolSubagentService:
                     error=f"HTTP error: {status_code}",
                 )
             sanitized = self._sanitize_scrape_result(result)
+            self._add_extraction_quality_metadata(metadata, sanitized.text)
             return WebtoolSubagentResult(
                 allowed=True,
                 decision="allow",
@@ -690,6 +693,18 @@ class WebtoolSubagentService:
             return host.lower() if host else ""
         except Exception:
             return ""
+
+    def _add_extraction_quality_metadata(self, metadata: dict, text: str) -> None:
+        quality = classify_extraction_quality(text)
+        existing_warnings = tuple(str(item) for item in metadata.get("warning_codes", ()) or ())
+        metadata.update(
+            {
+                "warning_codes": tuple(dict.fromkeys((*existing_warnings, *quality.warning_codes))),
+                "warning_count": len(tuple(dict.fromkeys((*existing_warnings, *quality.warning_codes)))),
+                "extraction_text_length_bucket": quality.text_length_bucket,
+                "extraction_quality_status": "usable" if quality.usable else "low_quality",
+            }
+        )
 
     def _build_metadata(
         self, request: WebtoolSubagentRequest, quota_decision: WebToolQuotaDecision, start_time: float

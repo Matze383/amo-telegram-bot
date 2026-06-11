@@ -112,7 +112,7 @@ class PluginHostAPI:
         text_clean = (text or "").strip()
         if not text_clean:
             raise ValueError("text must not be empty")
-        return await self._send_message(chat_id, text_clean[:4000])
+        return await self._send_message(chat_id, text_clean)
 
     async def reply(self, chat_id: int, message_id: int, text: str | dict[str, Any]) -> object:
         self._require_permission("send_message", "reply")
@@ -131,7 +131,7 @@ class PluginHostAPI:
         text_clean = (text_payload or "").strip()
         if not text_clean:
             raise ValueError("text must not be empty")
-        return await self._reply(chat_id, message_id, text_clean[:4000], None)
+        return await self._reply(chat_id, message_id, text_clean, None)
 
     async def answer_callback_query(self, callback_query_id: str, text: str | None = None) -> object:
         self._require_permission("send_message", "answer_callback_query")

@@ -5,6 +5,7 @@ import asyncio
 from amo_bot.auth.roles import Role
 from amo_bot.telegram.commands import CommandRegistry
 from amo_bot.telegram.dispatcher import Dispatcher
+from amo_bot.telegram.outbound_text import TELEGRAM_SAFE_MESSAGE_LIMIT
 
 
 class _RoleResolver:
@@ -40,13 +41,14 @@ class _RouterMention:
 
 
 class _AIService:
-    def __init__(self, *, request_endpoint: str, streaming_mode: str) -> None:
+    def __init__(self, *, request_endpoint: str, streaming_mode: str, answer: str = "final response") -> None:
         self.client = type("Client", (), {"request_endpoint": request_endpoint, "streaming_mode": streaming_mode})()
         self.last_stream_events: list[dict[str, object]] = []
+        self.answer = answer
 
     async def ask(self, _prompt: str) -> str:
         self.last_stream_events = [{"event": "start"}, {"event": "delta", "delta": "x"}, {"event": "done"}]
-        return "final response"
+        return self.answer
 
 
 def _mk_message(*, text: str, thread_id: int | None):
@@ -151,6 +153,36 @@ def test_both_gates_and_valid_trigger_with_request_context_invokes_live_path(mon
 
     assert [event["event"] for event in consumed] == ["start", "delta", "done"]
     assert sends == [(-100, "final response", 7)]
+
+
+def test_live_edit_final_response_is_split_before_injected_transport(monkeypatch) -> None:
+    consumed: list[dict[str, object]] = []
+
+    class _Adapter:
+        async def consume(self, **kwargs):
+            consumed.append(kwargs["event"])
+
+    answer = " ".join(f"token{idx:04d}" for idx in range(700))
+    dispatcher, sends = _mk_dispatcher(
+        ai_service=_AIService(request_endpoint="chat", streaming_mode="live_edit", answer=answer),
+        adapter=_Adapter(),
+    )
+    monkeypatch.setattr("amo_bot.telegram.dispatcher.AIRouter", _RouterMention)
+
+    asyncio.run(
+        dispatcher._maybe_handle_ai_autoreply(
+            message=_mk_message(text="@amo_bot hi", thread_id=7),
+            role=Role.ADMIN,
+            bot_username="amo_bot",
+            from_parsed_update=True,
+        )
+    )
+
+    assert [event["event"] for event in consumed] == ["start", "delta", "done"]
+    assert len(sends) == 2
+    assert all(chat_id == -100 and thread_id == 7 for chat_id, _text, thread_id in sends)
+    assert all(len(text) <= TELEGRAM_SAFE_MESSAGE_LIMIT for _chat_id, text, _thread_id in sends)
+    assert "".join(text for _chat_id, text, _thread_id in sends) == answer
 
 
 def test_live_edit_requires_request_scoped_context_thread(monkeypatch) -> None:

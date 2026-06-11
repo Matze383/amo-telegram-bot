@@ -36,9 +36,8 @@ def _make_settings(
         "WEBUI_SESSION_COOKIE_SECURE": webui_session_cookie_secure,
         "WEBUI_LOGIN_DELAY_BASE_SECONDS": 0.25,
         "WEBUI_LOGIN_DELAY_MAX_SECONDS": 1.0,
+        "WEBUI_OWNER_TELEGRAM_ID": webui_owner_telegram_id,
     }
-    if webui_owner_telegram_id is not None:
-        payload["WEBUI_OWNER_TELEGRAM_ID"] = webui_owner_telegram_id
     return Settings(_env_file=None, **payload)
 
 

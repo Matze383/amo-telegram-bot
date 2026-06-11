@@ -17,6 +17,27 @@ def test_cp_f1_budget_cap() -> None:
     assert result.excluded[0].reason == "budget_exceeded"
 
 
+def test_cp_f1_tool_result_source_is_bounded_before_budgeting() -> None:
+    marker = "FULL_RAW_TOOL_OUTPUT_SHOULD_NOT_SURVIVE"
+    result = build_contextwindow_v1(
+        token_budget=1000,
+        sources=[
+            ContextWindowSource(
+                source_id="web-fetch",
+                source_type="tool_result",
+                text=("A" * 2500) + marker,
+                priority=1,
+            ),
+        ],
+    )
+
+    assert [x.source_id for x in result.included] == ["web-fetch"]
+    assert len(result.context_text) <= 1600
+    assert "oversized tool result omitted from active context" in result.context_text
+    assert marker not in result.context_text
+    assert result.included[0].metadata["truncated"] is True
+
+
 def test_cp_f1_sensitive_suppression_default() -> None:
     marker = "CP_F1_BENIGN_MARKER_SENSITIVE_BLOCKED"
     result = build_contextwindow_v1(

@@ -38,6 +38,16 @@ class _FailingWeatherProvider:
         raise RuntimeError("contains secret token=abc123")
 
 
+class _JsPlaceholderScrapeProvider:
+    def fetch(self, *, url: str, timeout_seconds: float):
+        return {
+            "url": url,
+            "status_code": 200,
+            "headers": {"content-type": "text/html"},
+            "text": "Please enable JavaScript to view this app. Loading...",
+        }
+
+
 def _session_factory(tmp_path):
     database_url = f"sqlite:///{tmp_path / 'research_observations.sqlite3'}"
     init_db(database_url)
@@ -296,6 +306,33 @@ def test_webtool_provider_unavailable_writes_fail_closed_observation(tmp_path):
     assert row.outcome == "weather_provider_not_configured"
     assert row.domain == "weather"
     assert json.loads(row.metadata_json or "{}")["source_count"] == 0
+
+
+def test_unusable_scrape_writes_extraction_quality_warning_observation(tmp_path):
+    session_factory = _session_factory(tmp_path)
+
+    with session_factory() as session:
+        service = create_webtool_subagent_service(
+            quota_repo=WebToolRoleQuotaRepository(session),
+            scrape_provider=_JsPlaceholderScrapeProvider(),
+            observation_writer=ResearchSourceObservationRepository(session),
+        )
+        result = service.execute(_request(operation_type=WebtoolOperationType.WEBSCRAPING))
+        row = session.scalar(select(ResearchSourceObservation))
+
+    assert result.allowed is True
+    assert "extraction_js_placeholder" in result.metadata["warning_codes"]
+    assert row is not None
+    assert row.provider_name == "webscrape_provider"
+    assert row.outcome == "scrape_completed"
+    warnings = json.loads(row.warning_codes_json or "[]")
+    assert "extraction_js_placeholder" in warnings
+    payload = json.loads(row.metadata_json or "{}")
+    assert payload["source_hosts"] == ["leaky.example"]
+    stored = f"{row.warning_codes_json}\n{row.metadata_json}"
+    assert "Please enable JavaScript" not in stored
+    assert "leaky.example/path" not in stored
+    assert "token=abc123" not in stored
 
 
 def test_webtool_role_disabled_and_quota_denied_write_dispatcher_observations(tmp_path):

@@ -27,6 +27,9 @@ _SAFE_METADATA_INT_BOUNDS: dict[str, tuple[int, int]] = {
 }
 
 _SAFE_METADATA_BOOL_KEYS: frozenset[str] = frozenset({"flag"})
+_SOURCE_TEXT_CHAR_LIMITS: dict[str, int] = {
+    "tool_result": 1600,
+}
 
 _ALLOWED_SOURCE_TYPES: frozenset[str] = frozenset(
     {
@@ -119,6 +122,16 @@ def _safe_meta(meta: dict[str, str | int | bool] | None) -> dict[str, str | int 
     return redacted
 
 
+def _bounded_source_text(text: str, *, source_type: str) -> tuple[str, bool]:
+    stripped = text.strip()
+    limit = _SOURCE_TEXT_CHAR_LIMITS.get(source_type)
+    if limit is None or len(stripped) <= limit:
+        return stripped, False
+    suffix = "\n[truncated: oversized tool result omitted from active context]"
+    keep = max(0, limit - len(suffix))
+    return stripped[:keep].rstrip() + suffix, True
+
+
 def build_contextwindow_v1(
     *,
     sources: list[ContextWindowSource],
@@ -174,7 +187,7 @@ def build_contextwindow_v1(
             )
             continue
 
-        text = source.text.strip()
+        text, truncated = _bounded_source_text(source.text, source_type=normalized_source_type)
         needed = _estimate_tokens(text)
         if needed == 0:
             excluded.append(
@@ -205,7 +218,12 @@ def build_contextwindow_v1(
                 source_id=source.source_id,
                 source_type=source.source_type,
                 reason="included",
-                metadata={**meta, "priority": source.priority, "estimated_tokens": needed},
+                metadata={
+                    **meta,
+                    "priority": source.priority,
+                    "estimated_tokens": needed,
+                    **({"truncated": True} if truncated else {}),
+                },
             )
         )
 

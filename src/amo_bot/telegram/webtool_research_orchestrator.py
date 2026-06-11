@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from typing import Any, Protocol
 from urllib.parse import parse_qs, urlparse
 
+from amo_bot.ai.research_extraction_quality import classify_extraction_quality, extraction_length_bucket
 from amo_bot.auth.roles import Role
 from amo_bot.core.logging import log_event
 from amo_bot.telegram.update_parser import TelegramMessage
@@ -555,9 +556,13 @@ class WebResearchOrchestrator:
 
         def record_chain_attempt(result: Any, text_len: int) -> None:
             nonlocal timeout_count
-            reason_bucket = _chain_failure_reason(result, text_len)
+            quality = classify_extraction_quality(
+                getattr(result, "text", "") or "",
+                min_chars=_AUTO_RESEARCH_CHAIN_MIN_EXTRACT_CHARS,
+            )
+            reason_bucket = _chain_failure_reason(result, text_len, quality_warnings=quality.warning_codes)
             reason_buckets[reason_bucket] = reason_buckets.get(reason_bucket, 0) + 1
-            length_bucket = _content_length_bucket(text_len)
+            length_bucket = quality.text_length_bucket
             content_length_buckets[length_bucket] = content_length_buckets.get(length_bucket, 0) + 1
             if "timeout" in reason_bucket:
                 timeout_count += 1
@@ -573,7 +578,11 @@ class WebResearchOrchestrator:
             static_attempts += 1
             chain_text = _compact_chain_text(chain_result.text or "")
             record_chain_attempt(chain_result, len(chain_text))
-            if chain_result.allowed and len(chain_text) >= _AUTO_RESEARCH_CHAIN_MIN_EXTRACT_CHARS:
+            chain_quality = classify_extraction_quality(
+                chain_text,
+                min_chars=_AUTO_RESEARCH_CHAIN_MIN_EXTRACT_CHARS,
+            )
+            if chain_result.allowed and chain_quality.usable:
                 chain_extracts.append(("webscraping", (tuple(chain_result.hosts or ()) or (_host_from_url(url),))[0], chain_text))
                 static_successes += 1
                 continue
@@ -582,7 +591,11 @@ class WebResearchOrchestrator:
                 browser_fallbacks_used += 1
                 browser_text = _compact_chain_text(browser_result.text or "")
                 record_chain_attempt(browser_result, len(browser_text))
-                if browser_result.allowed and len(browser_text) >= _AUTO_RESEARCH_CHAIN_MIN_EXTRACT_CHARS:
+                browser_quality = classify_extraction_quality(
+                    browser_text,
+                    min_chars=_AUTO_RESEARCH_CHAIN_MIN_EXTRACT_CHARS,
+                )
+                if browser_result.allowed and browser_quality.usable:
                     chain_extracts.append(("browser", (tuple(browser_result.hosts or ()) or (_host_from_url(url),))[0], browser_text))
                     break
 
@@ -993,18 +1006,10 @@ def _compact_chain_text(text: str, *, cap: int = _AUTO_RESEARCH_CHAIN_PER_PAGE_T
 
 
 def _content_length_bucket(length: int) -> str:
-    if length <= 0:
-        return "zero"
-    if length < _AUTO_RESEARCH_CHAIN_MIN_EXTRACT_CHARS:
-        return "short"
-    if length < 500:
-        return "usable_small"
-    if length < 1500:
-        return "usable_medium"
-    return "usable_large"
+    return extraction_length_bucket(length, min_chars=_AUTO_RESEARCH_CHAIN_MIN_EXTRACT_CHARS)
 
 
-def _chain_failure_reason(result: Any, text_len: int) -> str:
+def _chain_failure_reason(result: Any, text_len: int, *, quality_warnings: tuple[str, ...] = ()) -> str:
     if result is None:
         return "missing_result"
     if not getattr(result, "allowed", False):
@@ -1022,6 +1027,9 @@ def _chain_failure_reason(result: Any, text_len: int) -> str:
         return "empty_text"
     if text_len < _AUTO_RESEARCH_CHAIN_MIN_EXTRACT_CHARS:
         return "too_short"
+    if quality_warnings:
+        first = quality_warnings[0]
+        return first.removeprefix("extraction_")[:64] or "low_quality_extraction"
     return "usable"
 
 

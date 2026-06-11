@@ -365,13 +365,13 @@ Das `host_api`-Objekt bietet diese async-Methoden:
 **`await host_api.send_message(chat_id: int, text: str)`**
 - Sendet eine Nachricht an den angegebenen Chat
 - Benötigt `send_message`-Berechtigung
-- Text wird auf 4000 Zeichen gekürzt
+- Lange Texte werden automatisch in mehrere Nachrichten (≤4000 Zeichen) aufgeteilt
 - Wirft `PluginCapabilityError`, wenn Berechtigung nicht gewährt
 
 **`await host_api.reply(chat_id: int, message_id: int, text: str)`**
 - Antwortet auf eine spezifische Nachricht
 - Benötigt `send_message`-Berechtigung
-- Text wird auf 4000 Zeichen gekürzt
+- Lange Texte werden automatisch in mehrere Nachrichten (≤4000 Zeichen) aufgeteilt; nur der erste Chunk antwortet auf die Originalnachricht
 
 **`await host_api.send_photo(chat_id: int, file_path: str, caption: str = "", *, message_thread_id: int | None = None, mime_type: str | None = None)`** (Nur Sandbox)
 - Sendet ein Foto an den angegebenen Chat
@@ -1075,13 +1075,13 @@ The `host_api` object provides these async methods:
 **`await host_api.send_message(chat_id: int, text: str)`**
 - Sends a message to the specified chat
 - Requires `send_message` permission
-- Text is truncated to 4000 chars
+- Long texts are automatically split into multiple messages (≤4000 chars each)
 - Raises `PluginCapabilityError` if permission not granted
 
 **`await host_api.reply(chat_id: int, message_id: int, text: str)`**
 - Replies to a specific message
 - Requires `send_message` permission
-- Text is truncated to 4000 chars
+- Long texts are automatically split into multiple messages (≤4000 chars each); only the first chunk replies to the original message
 
 **`await host_api.send_photo(chat_id: int, file_path: str, caption: str = "", *, message_thread_id: int | None = None, mime_type: str | None = None)`** (Sandbox-only)
 - Sends a photo to the specified chat
