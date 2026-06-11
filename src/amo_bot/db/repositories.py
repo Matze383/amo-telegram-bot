@@ -57,6 +57,14 @@ if TYPE_CHECKING:
     from amo_bot.plugins.manifest import PluginManifest
 
 
+def _ensure_aware_utc(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
 @dataclass(slots=True)
 class RoleChangeResult:
     changed: bool
@@ -485,6 +493,9 @@ class ResearchProviderRecord:
     min_confidence: float
     max_age_seconds: int | None = None
     metadata: dict[str, object] | None = None
+    selection_score: int | None = None
+    health_penalty: int = 0
+    observation_penalty: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -546,6 +557,72 @@ class ResearchProviderRepository:
         ).all()
         return tuple(self._to_record(row) for row in rows)
 
+    def list_ranked_by_domain(
+        self,
+        domain: str,
+        *,
+        observation_window: timedelta = timedelta(days=7),
+        observation_limit: int = 500,
+    ) -> tuple[ResearchProviderRecord, ...]:
+        """Rank enabled providers from DB health and metadata-only observations."""
+
+        normalized_domain = ResearchSourceObservationRepository._safe_label(
+            domain,
+            default="generic",
+            max_len=64,
+        )
+        rows = self._session.scalars(
+            select(ResearchProvider)
+            .where(and_(ResearchProvider.domain == normalized_domain, ResearchProvider.enabled.is_(True)))
+            .order_by(ResearchProvider.default_priority.asc(), ResearchProvider.provider_name.asc())
+        ).all()
+        if not rows:
+            return ()
+
+        providers = tuple(row.provider_name for row in rows)
+        health_rows = self._session.scalars(
+            select(ResearchProviderHealth).where(ResearchProviderHealth.provider_name.in_(providers))
+        ).all()
+        health_by_provider = {row.provider_name: row for row in health_rows}
+        observation_penalties = self._observation_penalties(
+            domain=normalized_domain,
+            providers=providers,
+            since=datetime.now(timezone.utc) - observation_window,
+            limit=observation_limit,
+        )
+
+        ranked: list[ResearchProviderRecord] = []
+        for row in rows:
+            health_penalty = self._health_penalty(health_by_provider.get(row.provider_name))
+            observation_penalty = observation_penalties.get(row.provider_name, 0)
+            record = self._to_record(row)
+            score = record.default_priority + health_penalty + observation_penalty
+            ranked.append(
+                ResearchProviderRecord(
+                    provider_name=record.provider_name,
+                    source_name=record.source_name,
+                    domain=record.domain,
+                    enabled=record.enabled,
+                    default_priority=record.default_priority,
+                    fallback_allowed=record.fallback_allowed,
+                    min_confidence=record.min_confidence,
+                    max_age_seconds=record.max_age_seconds,
+                    metadata=record.metadata,
+                    selection_score=score,
+                    health_penalty=health_penalty,
+                    observation_penalty=observation_penalty,
+                )
+            )
+        return tuple(
+            sorted(
+                ranked,
+                key=lambda record: (
+                    record.selection_score if record.selection_score is not None else record.default_priority,
+                    record.provider_name,
+                ),
+            )
+        )
+
     @staticmethod
     def _to_record(row: ResearchProvider) -> ResearchProviderRecord:
         metadata: dict[str, object] | None = None
@@ -567,6 +644,85 @@ class ResearchProviderRepository:
             max_age_seconds=row.max_age_seconds,
             metadata=metadata,
         )
+
+    @staticmethod
+    def _health_penalty(row: ResearchProviderHealth | None) -> int:
+        if row is None:
+            return 0
+        penalty = min(int(row.failure_count or 0), 5) * 10
+        penalty += min(int(row.timeout_count or 0), 3) * 8
+        penalty += min(int(row.rate_limit_count or 0), 3) * 12
+        last_failure = _ensure_aware_utc(row.last_failure_at)
+        last_success = _ensure_aware_utc(row.last_success_at)
+        now = datetime.now(timezone.utc)
+        if last_failure and now - last_failure < timedelta(minutes=15):
+            penalty += 30
+        if last_success and now - last_success < timedelta(minutes=15):
+            penalty -= 10
+        return penalty
+
+    def _observation_penalties(
+        self,
+        *,
+        domain: str,
+        providers: Sequence[str],
+        since: datetime,
+        limit: int,
+    ) -> dict[str, int]:
+        if not providers:
+            return {}
+        rows = self._session.scalars(
+            select(ResearchSourceObservation)
+            .where(
+                and_(
+                    ResearchSourceObservation.domain == domain,
+                    ResearchSourceObservation.provider_name.in_(tuple(providers)),
+                    ResearchSourceObservation.created_at >= since,
+                )
+            )
+            .order_by(ResearchSourceObservation.created_at.desc())
+            .limit(max(1, min(int(limit), 2000)))
+        ).all()
+        stats: dict[str, dict[str, float]] = defaultdict(
+            lambda: {
+                "success": 0.0,
+                "failure": 0.0,
+                "warning": 0.0,
+                "conflict": 0.0,
+                "confidence_sum": 0.0,
+                "confidence_count": 0.0,
+            }
+        )
+        for row in rows:
+            provider = row.provider_name
+            warnings = ResearchSourceObservationRepository._warning_codes(row.warning_codes_json)
+            outcome = (row.outcome or "").strip().lower()
+            if outcome in {"confirmed", "allow", "search_completed", "scrape_completed", "browser_completed"}:
+                stats[provider]["success"] += 1
+            elif outcome and outcome != "unknown":
+                stats[provider]["failure"] += 1
+            stats[provider]["warning"] += len(warnings)
+            if any("conflict" in warning or "mismatch" in warning for warning in warnings):
+                stats[provider]["conflict"] += 1
+            if row.confidence is not None:
+                stats[provider]["confidence_sum"] += max(0.0, min(1.0, float(row.confidence)))
+                stats[provider]["confidence_count"] += 1
+
+        penalties: dict[str, int] = {}
+        for provider, values in stats.items():
+            penalty = 0
+            penalty += int(min(values["failure"], 5) * 8)
+            penalty += int(min(values["warning"], 10))
+            penalty += int(min(values["conflict"], 3) * 15)
+            penalty -= int(min(values["success"], 5) * 3)
+            if values["confidence_count"]:
+                average_confidence = values["confidence_sum"] / values["confidence_count"]
+                if average_confidence < 0.5:
+                    penalty += 10
+                elif average_confidence >= 0.85:
+                    penalty -= 4
+            penalties[provider] = penalty
+        return penalties
 
 
 class ResearchProviderHealthRepository:

@@ -11,9 +11,15 @@ from amo_bot.db.init_db import init_db
 from amo_bot.db.models import (
     ResearchProvider,
     ResearchProviderHealth,
+    ResearchSourceObservation,
     WebToolAuditEvent,
 )
-from amo_bot.db.repositories import ResearchProviderHealthRepository, WebToolRoleQuotaRepository
+from amo_bot.db.repositories import (
+    ResearchProviderHealthRepository,
+    ResearchProviderRepository,
+    ResearchSourceObservationRepository,
+    WebToolRoleQuotaRepository,
+)
 from amo_bot.telegram.webtool_evidence import (
     BinanceTickerEvidenceProvider,
     CoinGeckoEvidenceProvider,
@@ -140,6 +146,102 @@ def test_disabled_db_providers_do_not_fall_back_to_default_candidates(tmp_path):
     assert candidates == ()
     assert result.status == "unavailable"
     assert result.warnings == ("crypto_provider_not_configured",)
+
+
+def test_db_provider_selection_uses_health_to_deprioritize_degraded_source(tmp_path):
+    session_factory = _db(tmp_path)
+    with session_factory() as session:
+        ResearchProviderHealthRepository(session).record_timeout("coingecko_crypto", reason="timeout")
+
+    candidates = build_evidence_candidates_from_db(
+        session_factory=session_factory,
+        domain="crypto",
+        providers={
+            "coingecko_crypto": CoinGeckoEvidenceProvider(client=_FakeClient([])),
+            "binance_crypto": BinanceTickerEvidenceProvider(client=_FakeClient([])),
+        },
+    )
+
+    assert [candidate.definition.name for candidate in candidates] == ["binance_crypto", "coingecko_crypto"]
+    assert candidates[1].definition.default_priority > PROVIDER_REGISTRY["coingecko_crypto"].default_priority
+
+
+def test_db_provider_selection_uses_recent_observation_quality(tmp_path):
+    session_factory = _db(tmp_path)
+    with session_factory() as session:
+        coingecko = session.scalar(
+            select(ResearchProvider).where(ResearchProvider.provider_name == "coingecko_crypto")
+        )
+        binance = session.scalar(
+            select(ResearchProvider).where(ResearchProvider.provider_name == "binance_crypto")
+        )
+        assert coingecko is not None and binance is not None
+        coingecko.default_priority = 10
+        binance.default_priority = 10
+        session.commit()
+
+        observations = ResearchSourceObservationRepository(session)
+        observations.record_observation(
+            provider_name="coingecko_crypto",
+            domain="crypto",
+            outcome="low_quality",
+            confidence=0.3,
+            warning_codes=("source_conflict", "stale"),
+            source_hosts=("api.coingecko.com",),
+        )
+        observations.record_observation(
+            provider_name="binance_crypto",
+            domain="crypto",
+            outcome="confirmed",
+            confidence=0.9,
+            source_hosts=("api.binance.com",),
+        )
+
+    with session_factory() as session:
+        ranked = ResearchProviderRepository(session).list_ranked_by_domain("crypto")
+
+    assert [record.provider_name for record in ranked] == ["binance_crypto", "coingecko_crypto"]
+    assert ranked[0].observation_penalty < ranked[1].observation_penalty
+
+
+def test_db_provider_selection_fail_closed_when_no_runtime_provider_matches(tmp_path):
+    session_factory = _db(tmp_path)
+
+    candidates = build_evidence_candidates_from_db(
+        session_factory=session_factory,
+        domain="crypto",
+        providers={},
+    )
+    result = ResilientCryptoEvidenceProvider(candidates).get_crypto(query="BTC price now", locale="en")
+
+    assert candidates == ()
+    assert result.status == "unavailable"
+    assert result.text == ""
+    assert result.warnings == ("crypto_provider_not_configured",)
+
+
+def test_db_provider_selection_reads_metadata_only_without_writing_private_query(tmp_path):
+    session_factory = _db(tmp_path)
+    with session_factory() as session:
+        ResearchSourceObservationRepository(session).record_observation(
+            provider_name="coingecko_crypto",
+            domain="crypto",
+            outcome="confirmed",
+            confidence=0.9,
+            source_urls=("https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&token=abc123",),
+            warning_codes=("normal_warning",),
+            metadata={"query": "BTC price now token=abc123", "safe_status": "confirmed"},
+        )
+
+    with session_factory() as session:
+        ranked = ResearchProviderRepository(session).list_ranked_by_domain("crypto")
+        rows = session.scalars(select(ResearchSourceObservation)).all()
+
+    assert ranked
+    stored = "\n".join(f"{row.provider_name} {row.domain} {row.warning_codes_json} {row.metadata_json}" for row in rows)
+    assert "BTC price now" not in stored
+    assert "token=abc123" not in stored
+    assert "ids=bitcoin" not in stored
 
 
 def test_research_provider_health_repository_records_and_loads_outcomes(tmp_path):

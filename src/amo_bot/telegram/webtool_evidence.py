@@ -435,19 +435,20 @@ def build_evidence_candidates_from_db(
     from amo_bot.db.repositories import ResearchProviderRepository
 
     with session_factory() as session:
-        records = ResearchProviderRepository(session).list_enabled_by_domain(domain)
+        records = ResearchProviderRepository(session).list_ranked_by_domain(domain)
     candidates: list[EvidenceProviderCandidate] = []
     for record in records:
         provider = providers.get(record.provider_name)
         if provider is None:
             continue
+        priority = record.selection_score if record.selection_score is not None else record.default_priority
         candidates.append(
             EvidenceProviderCandidate(
                 ProviderDefinition(
                     name=record.provider_name,
                     source_name=record.source_name,
                     domain=record.domain,
-                    default_priority=record.default_priority,
+                    default_priority=priority,
                     fallback_allowed=record.fallback_allowed,
                     min_confidence=record.min_confidence,
                     max_age_seconds=record.max_age_seconds,
