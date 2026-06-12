@@ -937,8 +937,11 @@ Der WebUI-Zugang kann über Telegram-Commands gesteuert werden. Das ermöglicht 
 | `/webui status` | Zeigt, ob das WebUI-Zugangsfenster OPEN oder CLOSED ist, und die verbleibende Zeit bei offenem Fenster | Privater Chat, nur Owner |
 | `/webui on` | Öffnet das WebUI-Zugangsfenster für 60 Minuten (verlängert bei bereits offenem Fenster) | Privater Chat, nur Owner |
 | `/webui off` | Schließt das WebUI-Zugangsfenster sofort | Privater Chat, nur Owner |
+| `/restart` | Sendet eine Bestätigung und beendet den Bot-Prozess für einen kontrollierten Supervisor-Restart | Privater Chat, nur Owner |
 
 **Wichtig:** Diese Commands funktionieren nur im **privaten Chat** (nicht in Gruppen) und nur für den **Owner**.
+
+Bei `/restart` wird vor dem Prozessende eine Ack-Nachricht gesendet. Außerdem sichert AMO den aktuellen Polling-Offset vor dem Restart, damit dieselbe Telegram-Update-ID nach dem Neustart keine Restart-Schleife auslöst.
 
 ### Zugriffsverweigerungs-Gründe
 

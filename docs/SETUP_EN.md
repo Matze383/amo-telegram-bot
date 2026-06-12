@@ -937,8 +937,11 @@ The WebUI access can be controlled via Telegram commands. This allows the owner 
 | `/webui status` | Shows whether the WebUI access window is OPEN or CLOSED, and the remaining time if open | Private chat, Owner only |
 | `/webui on` | Opens the WebUI access window for 60 minutes (extends if already open) | Private chat, Owner only |
 | `/webui off` | Closes the WebUI access window immediately | Private chat, Owner only |
+| `/restart` | Sends an acknowledgement and exits the bot process for a controlled supervisor restart | Private chat, Owner only |
 
 **Important:** These commands only work in **private chats** (not in groups) and only for the **owner**.
+
+For `/restart`, AMO sends an acknowledgement before the process exits. It also persists the current polling offset before restarting so the same Telegram update ID cannot trigger a restart loop after startup.
 
 ### Access Denied Reasons
 

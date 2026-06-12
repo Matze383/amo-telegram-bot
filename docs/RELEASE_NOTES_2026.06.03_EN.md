@@ -43,6 +43,7 @@ This release brings significant improvements to web research reliability, databa
 - No secrets in release documentation.
 - Memory scope isolation: No cross-scope access.
 - Daily Memory and Dreaming share the same night window (02:00–05:00 Europe/Berlin).
+- **Owner restart:** `/restart` is documented as an owner-only operator command; AMO acknowledges the command before process exit and persists the polling offset to prevent restart loops.
 
 ### Upgrade Notes for Admins
 

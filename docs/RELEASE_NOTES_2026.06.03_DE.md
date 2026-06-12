@@ -52,6 +52,7 @@ Dieses Release bringt erhebliche Verbesserungen bei der Web-Recherche-Zuverläss
 - Keine Secrets in Release-Dokumentation.
 - Memory-Scope-Isolation: Kein Cross-Scope-Zugriff.
 - Daily Memory und Dreaming teilen das gleiche Nachtfenster (02:00–05:00 Europe/Berlin).
+- **Owner-Restart:** `/restart` ist als owner-only Operator-Befehl dokumentiert; AMO bestätigt den Befehl vor dem Prozessende und sichert den Polling-Offset gegen Restart-Schleifen.
 
 ### Upgrade-Hinweise für Admins
 
