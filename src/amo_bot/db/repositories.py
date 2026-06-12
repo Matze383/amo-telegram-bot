@@ -1162,6 +1162,22 @@ class ResearchEvalCaseRepository:
     """Persist sanitized research eval cases without retaining raw chat text."""
 
     _SAFE_SUMMARY_RE = re.compile(r"https?://\S+|(?:[a-z0-9-]+\.)+[a-z]{2,}", re.I)
+    _DOMAIN_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+        ("weather", re.compile(r"\b(?:wetter|weather|temperatur|temperature|regen|rain|forecast|vorhersage)\b", re.I)),
+        ("sports", re.compile(r"\b(?:fußball|fussball|football|soccer|wm|weltmeisterschaft|world\s+cup|bundesliga|champions\s+league|tabelle|standings?|spielplan|fixtures?|score|ergebnis(?:se)?)\b", re.I)),
+        ("crypto", re.compile(r"\b(?:btc|bitcoin|eth|ethereum|crypto|krypto|kryptow(?:ä|ae)hrung|coin|token|blockchain)\b", re.I)),
+        ("finance", re.compile(r"\b(?:aktie|stock|share|shares|börse|boerse|nasdaq|nyse|dax|etf|fundamental|research|dividende|earnings|kurs|price|preis)\b", re.I)),
+        ("news", re.compile(r"\b(?:news|nachrichten|breaking|latest|neueste(?:n)?|meldung(?:en)?|presse|bericht(?:e)?)\b", re.I)),
+        ("local_info", re.compile(r"\b(?:in der n(?:ä|ae)he|near me|adresse|address|öffnungszeit(?:en)?|oeffnungszeit(?:en)?|restaurant|laden|geschäft|geschaeft|lokal|local)\b", re.I)),
+        ("generic_current_facts", re.compile(r"\b(?:aktuell|current|heute|today|jetzt|now|202\d|neueste(?:n)?|latest|status|stand)\b", re.I)),
+    )
+    _FAILURE_CLASS_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+        ("source_quality", re.compile(r"\b(?:quelle|source|domain|seite|website|link|url|abschreiber|primärquelle|primaerquelle|corroborat|korrobor)\b", re.I)),
+        ("insufficient_evidence", re.compile(r"\b(?:nicht genug|not enough|zu wenig|nur eine(?:r)? quelle|single[-\s]?source|oberfl(?:ä|ae)chlich|reicht nicht)\b", re.I)),
+        ("incorrect_answer", re.compile(r"\b(?:falsch|wrong|incorrect|stimmt nicht|nicht korrekt|korrigier|correction|halluzin)\b", re.I)),
+        ("stale_data", re.compile(r"\b(?:veraltet|stale|old|nicht aktuell|outdated|expired|alter stand)\b", re.I)),
+        ("routing", re.compile(r"\b(?:nicht gesucht|nicht recherchiert|search weiter|such weiter|andere quellen|browser|scrape)\b", re.I)),
+    )
 
     def __init__(self, session: Session) -> None:
         self._session = session
@@ -1181,16 +1197,18 @@ class ResearchEvalCaseRepository:
         summary = self._sanitize_summary(sanitized_summary)
         if not summary:
             raise ValueError("sanitized_summary is required")
-        normalized_domain = ResearchSourceObservationRepository._safe_label(domain, default="generic", max_len=64)
         normalized_failure = ResearchSourceObservationRepository._safe_label(
             failure_label,
             default="negative_feedback",
             max_len=64,
         )
+        normalized_domain = self._classify_domain(summary, fallback=domain)
+        failure_class = self._classify_failure_class(summary, fallback=normalized_failure)
         normalized_status = ResearchSourceObservationRepository._safe_optional_label(evidence_status, max_len=64)
         hosts = ResearchSourceObservationRepository._safe_hosts(source_hosts or ())
         expected_metadata = {
             "failure_label": normalized_failure,
+            "failure_class": failure_class,
             "source_hosts": list(hosts),
             "expected_behavior": self._sanitize_summary(expected_behavior, max_len=256),
         }
@@ -1275,6 +1293,40 @@ class ResearchEvalCaseRepository:
         cleaned = re.sub(r"\b(?:api[_-]?key|token|secret|password|authorization|bearer)\b\s*[:=]?\s*\S+", "[redacted-secret]", cleaned, flags=re.I)
         cleaned = re.sub(r"\s+", " ", cleaned).strip()
         return cleaned[:max_len].rstrip()
+
+    @classmethod
+    def _classify_domain(cls, summary: str, *, fallback: str) -> str:
+        normalized_fallback = ResearchSourceObservationRepository._safe_label(
+            fallback,
+            default="generic",
+            max_len=64,
+        )
+        if normalized_fallback not in {"generic", "source_quality", "analysis"}:
+            return normalized_fallback
+        for domain, pattern in cls._DOMAIN_PATTERNS:
+            if pattern.search(summary):
+                if normalized_fallback == "source_quality" and domain == "generic_current_facts":
+                    continue
+                return domain
+        return normalized_fallback
+
+    @classmethod
+    def _classify_failure_class(cls, summary: str, *, fallback: str) -> str:
+        for failure_class, pattern in cls._FAILURE_CLASS_PATTERNS:
+            if pattern.search(summary):
+                return failure_class
+        normalized_fallback = ResearchSourceObservationRepository._safe_label(
+            fallback,
+            default="negative_feedback",
+            max_len=64,
+        )
+        if normalized_fallback == "negative_reaction_feedback":
+            return "answer_quality_risk"
+        if normalized_fallback == "negative_answer_feedback":
+            return "answer_quality"
+        if normalized_fallback == "source_quality_feedback":
+            return "source_quality"
+        return normalized_fallback
 
     @staticmethod
     def _case_key(

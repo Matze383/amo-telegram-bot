@@ -17,7 +17,7 @@ from amo_bot.db.repositories import (
     RetrievableMemoryRepository,
     WebToolRoleQuotaRepository,
 )
-from amo_bot.telegram.research_eval_harness import run_research_eval_cases
+from amo_bot.telegram.research_eval_harness import build_research_eval_report, run_research_eval_cases
 from amo_bot.telegram.webtool_evidence import DomainEvidenceResult, EvidenceSource
 from amo_bot.telegram.webtool_research_orchestrator import (
     _assess_chain_source_quality,
@@ -479,3 +479,85 @@ def test_positive_source_preference_does_not_create_research_eval_case(tmp_path)
 
     assert result.stored is True
     assert row is None
+
+
+def test_research_eval_case_classifies_domain_and_failure_without_raw_leaks(tmp_path):
+    session_factory = _session_factory(tmp_path)
+
+    with session_factory() as session:
+        repo = ResearchEvalCaseRepository(session)
+        case = repo.create_from_negative_feedback(
+            sanitized_summary=(
+                "BTC Kurs war falsch und nur eine Quelle; "
+                "https://bad.example/path?token=abc123 wurde kopiert."
+            ),
+            failure_label="negative_answer_feedback",
+            domain="generic",
+            evidence_status="needs_improvement",
+            source_hosts=("https://bad.example/path?token=abc123", "good.example"),
+        )
+        row = session.scalar(select(ResearchEvalCase))
+
+    assert row is not None
+    assert case.domain == "crypto"
+    metadata = json.loads(row.expected_metadata_json or "{}")
+    assert metadata["failure_class"] == "source_quality"
+    stored = f"{row.sanitized_prompt}\n{row.expected_metadata_json}"
+    assert "bad.example/path" not in stored
+    assert "token=abc123" not in stored
+    assert "https://bad.example" not in stored
+    assert metadata["source_hosts"] == ["bad.example", "good.example"]
+
+
+def test_research_eval_cases_deduplicate_by_sanitized_failure_metadata(tmp_path):
+    session_factory = _session_factory(tmp_path)
+
+    with session_factory() as session:
+        repo = ResearchEvalCaseRepository(session)
+        first = repo.create_from_negative_feedback(
+            sanitized_summary="Wetter Berlin war veraltet und nicht aktuell.",
+            failure_label="negative_answer_feedback",
+            domain="generic",
+            evidence_status="needs_improvement",
+        )
+        second = repo.create_from_negative_feedback(
+            sanitized_summary="Wetter Berlin war veraltet und nicht aktuell.",
+            failure_label="negative_answer_feedback",
+            domain="generic",
+            evidence_status="needs_improvement",
+        )
+        rows = session.scalars(select(ResearchEvalCase)).all()
+
+    assert first.case_key == second.case_key
+    assert len(rows) == 1
+    assert rows[0].domain == "weather"
+    metadata = json.loads(rows[0].expected_metadata_json or "{}")
+    assert metadata["failure_class"] == "stale_data"
+
+
+def test_research_eval_report_splits_routing_source_quality_and_answer_risk(tmp_path):
+    session_factory = _session_factory(tmp_path)
+
+    with session_factory() as session:
+        repo = ResearchEvalCaseRepository(session)
+        repo.create_from_negative_feedback(
+            sanitized_summary="Latest News zu Python wurden nur aus einer Quelle beantwortet.",
+            failure_label="source_quality_feedback",
+            domain="news",
+            evidence_status="low_quality",
+            source_hosts=("single-source.example",),
+        )
+        repo.create_from_negative_feedback(
+            sanitized_summary="Das war falsch und nicht korrekt, aber ohne Recherche-Bezug.",
+            failure_label="negative_answer_feedback",
+            domain="generic",
+            evidence_status="needs_improvement",
+        )
+        report = build_research_eval_report(repo)
+
+    assert report.total == 2
+    assert report.source_quality_pass == 1
+    assert report.source_quality_fail == 0
+    assert report.answer_quality_risk == 1
+    assert report.routing_fail == 1
+    assert {result.failure_class for result in report.results} == {"source_quality", "incorrect_answer"}
