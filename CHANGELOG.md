@@ -2,6 +2,42 @@
 
 ---
 
+## [Unreleased] – Entfernung Human-User-Consent / Removal of Human User Consent
+
+**Datum / Date:** 2026-06-12
+
+### 🇩🇪 Deutsch
+
+#### Übersicht
+Entfernung des expliziten Consent-Dialogs für menschliche Nutzer. Neue Human-User können den Bot automatisch nutzen.
+
+#### Geändert
+- **Consent-Pflicht entfernt:** Menschliche Nutzer benötigen keinen expliziten Consent-Dialog (`/accept`, `/consent`) mehr.
+- **Automatische Nutzung:** Human-User sind direkt nach dem ersten Kontakt nutzbar (Rolle `normal` als Default).
+- **Rollen-System bleibt:** Owner/Admin/VIP/Normal/Ignore-Rechte weiterhin aktiv.
+- **Bot-to-Bot unverändert:** Bot-to-Bot-Kommunikation erfordert weiterhin explizite Freigabe via Consent-Commands.
+
+#### Technisch
+- Keine `pending`/`declined`/`unreachable`-Runtime-Blocks mehr für Human-User.
+- Commands `/accept`, `/decline`, `/consent` weiterhin verfügbar für Bot-to-Bot-Freigabe.
+
+### 🇬🇧 English
+
+#### Overview
+Removal of explicit consent dialog for human users. New human users can now use the bot automatically.
+
+#### Changed
+- **Consent requirement removed:** Human users no longer need an explicit consent dialog (`/accept`, `/consent`).
+- **Automatic usage:** Human users are usable immediately after first contact (role `normal` as default).
+- **Role system remains:** Owner/Admin/VIP/Normal/Ignore permissions remain active.
+- **Bot-to-bot unchanged:** Bot-to-bot communication still requires explicit approval via consent commands.
+
+#### Technical
+- No more `pending`/`declined`/`unreachable` runtime blocks for human users.
+- Commands `/accept`, `/decline`, `/consent` remain available for bot-to-bot approval.
+
+---
+
 ## [Unreleased] – Search Planner & Auto Follow-up Research
 
 **Datum / Date:** 2026-06-11
@@ -73,7 +109,7 @@ Erweiterte Webtool-Infrastruktur mit Provider-Registry, Health-Monitoring und Qu
 #### Technisch
 - **DB-Persistenz:** Provider-Health über Neustarts nutzbar; atomare Counter-Updates mit Race-Recovery bei first-create.
 - **Privacy:** Keine raw Queries/URLs/Secrets in Health-Daten – nur Metadata.
-- Keine neue Config erforderlich (bestehende `SEARXNG_BASE_URL` bleibt primärer Websearch-Provider).
+- Keine neue Config erforderlich (bestehende `AMO_WEBSEARCH_SEARXNG_BASE_URL` bzw. Legacy-Alias `SEARXNG_BASE_URL` bleibt primärer Websearch-Provider).
 - Keine neuen Commands.
 - Fail-Closed-Verhalten bei nicht verifizierbaren Live-Daten.
 
@@ -118,7 +154,7 @@ Enhanced web tool infrastructure with provider registry, health monitoring, and 
 #### Technical
 - **DB Persistence:** Provider health survives restarts; atomic counter updates with race recovery on first-create.
 - **Privacy:** No raw queries/URLs/secrets in health data – metadata only.
-- No new config required (existing `SEARXNG_BASE_URL` remains primary websearch provider).
+- No new config required (existing `AMO_WEBSEARCH_SEARXNG_BASE_URL` or legacy alias `SEARXNG_BASE_URL` remains primary websearch provider).
 - No new commands.
 - Fail-closed behavior for unverifiable live data.
 
@@ -130,7 +166,7 @@ For existing databases, the research tables can be created specifically via CLI:
 python -m amo_bot.db.research_tables --database-url "$DATABASE_URL" --dry-run
 
 # Apply: creates missing tables (backup recommended beforehand)
-python -m amo_bot.db.research_tables --database_url "$DATABASE_URL"
+python -m amo_bot.db.research_tables --database-url "$DATABASE_URL"
 ```
 
 **Notes:**
@@ -182,7 +218,7 @@ Verbesserte automatische Web-Recherche für aktuelle/zeitnahe Fragen (Markt/Kurs
 #### Neu
 - **Search→Scrape Chain:** Automatische Folge von Websuche → statische Extraktion → optionaler Browser-Fallback (max. eine URL).
 - **Bounded/Transparent:** Verhalten ist begrenzt (max. eine URL bei static-extraction-miss) und transparent (keine Behauptungen über fehlende Tools).
-- **Keine neue Config:** Funktioniert mit bestehender SearXNG-Konfiguration (`SEARXNG_BASE_URL`).
+- **Keine neue Config:** Funktioniert mit bestehender SearXNG-Konfiguration (`AMO_WEBSEARCH_SEARXNG_BASE_URL` oder Legacy-Alias `SEARXNG_BASE_URL`).
 - **Keine neuen Commands:** Vollständig automatisch bei entsprechenden Intents (Fragen zu aktuellen Werten).
 
 #### Verhalten
@@ -205,7 +241,7 @@ Enhanced automatic web research for current/freshness-relevant questions (market
 #### New
 - **Search→Scrape Chain:** Automatic sequence of web search → static extraction → optional browser fallback (max one URL).
 - **Bounded/Transparent:** Behavior is bounded (max one URL on static-extraction-miss) and transparent (no claims about missing tools).
-- **No new config:** Works with existing SearXNG configuration (`SEARXNG_BASE_URL`).
+- **No new config:** Works with existing SearXNG configuration (`AMO_WEBSEARCH_SEARXNG_BASE_URL` or legacy alias `SEARXNG_BASE_URL`).
 - **No new commands:** Fully automatic for relevant intents (current value questions).
 
 #### Behavior
@@ -337,7 +373,7 @@ Wochenend-Release mit Korrekturen für Bildanalyse-Verhalten in privaten Chats u
 - **Fail-Closed für unbrauchbare Antworten:** Generische Ablehnungs-/Policy-Antworten des Providers werden als Fehler behandelt und auf eine wahrheitsgemäße "Nicht verfügbar"-Nachricht abgebildet.
 
 #### Websearch/SearXNG
-- **Konfiguration:** Websearch nutzt primär `SEARXNG_BASE_URL`, mit Fallback auf `AMO_WEBSEARCH_SEARXNG_BASE_URL`.
+- **Konfiguration:** Websearch nutzt primär `AMO_WEBSEARCH_SEARXNG_BASE_URL` (Legacy-Alias: `SEARXNG_BASE_URL`).
 - **Fail-closed:** Ohne konfigurierten SearXNG-Endpoint wird keine öffentliche Fallback-Suche verwendet; stattdessen wird leer/abgelehnt zurückgegeben. Wenn SearXNG konfiguriert ist, wird ausschließlich SearXNG verwendet – auch bei leeren/fehlerhaften Ergebnissen.
 - **URL-Sicherheit:** Öffentliche HTTP-URLs werden abgelehnt; HTTPS-URLs sind erlaubt. HTTP nur für Loopback/Private/Interne Netzwerke.
 - **Browser-Provider-Abhängigkeit:** Playwright-Runtime-Abhängigkeit und System-Chromium-Fallback, falls relevant.
@@ -355,7 +391,7 @@ Weekend release with fixes for image analysis behavior in private chats and webs
 - **Fail-Closed for Unusable Responses:** Generic refusal/policy responses from the provider are treated as failures and mapped to a truthful "unavailable" message.
 
 #### Websearch/SearXNG
-- **Configuration:** Websearch uses configured SearXNG JSON endpoint via `SEARXNG_BASE_URL` primary, with fallback to `AMO_WEBSEARCH_SEARXNG_BASE_URL`.
+- **Configuration:** Websearch uses configured SearXNG JSON endpoint via `AMO_WEBSEARCH_SEARXNG_BASE_URL` (legacy alias: `SEARXNG_BASE_URL`).
 - **Fail-Closed:** If no SearXNG endpoint is configured, no public fallback search is used; returns empty/denied instead. If SearXNG is configured, it is SearXNG-only, even when empty/error.
 - **URL Safety:** Public HTTP is rejected; HTTPS public is allowed; HTTP only for loopback/private/internal networks.
 - **Browser Provider Dependency:** Playwright runtime dependency and system Chromium fallback if relevant.
@@ -1143,13 +1179,13 @@ This is the first public release candidate of the AMO Telegram Bot. The software
 
 #### What's New
 
-- **Core Bot:** Fully implemented with role-based permission system (Owner, Admin, VIP, Normal, Ignore), consent management, and basic commands
+- **Core Bot:** Fully implemented with role-based permission system (Owner, Admin, VIP, Normal, Ignore) and basic commands. Note: Legacy consent management for human users has been removed (human users are now auto-approved; bot-to-bot communication remains consent-gated)
 - **Plugin System:** Manifest-based plugin loader with discovery, validation, registry, and activation (I1-I6 complete)
 - **WebUI:** Local Flask interface for management and configuration
 - **AI Integration:** `/ask` command, auto-replies, and memory system (Daily + Long Memory) via Ollama
 - **Topic Agent System:** Configurable per-topic AI behavior with memory curation (KI-A to KI-F4 complete)
 - **Core Plugins:** Policy-controlled AI capabilities for RSS feeds, web search, web scraping, API integration, context window builder, memory management, SQL read-only access (templates/views), and self-improvement proposals (CP-I1 and CP-Z1 complete)
-- **Image Analysis Coreplugin:** Secure image analysis interface (IMG-B4..IMG-B7) — default-off, stub implementation with policy/consent checks
+- **Image Analysis Coreplugin:** Secure image analysis interface (IMG-B4..IMG-B7) — default-off, stub implementation with policy/role checks (human users auto-approved; bot-to-bot remains consent-gated)
 - **Documentation:** Bilingual README, setup guides, and beta test instructions
 
 #### Known Limitations

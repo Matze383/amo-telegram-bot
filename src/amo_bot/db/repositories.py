@@ -16,7 +16,6 @@ from sqlalchemy.orm import Session
 
 from amo_bot.auth.roles import Role
 from amo_bot.core.context_filters import is_bot_authored_context_record, is_obvious_meta_status_message
-from amo_bot.consent import ConsentService
 from amo_bot.db.models import (
     AuditEvent,
     BotPeer,
@@ -1799,9 +1798,6 @@ class UserRoleRepository:
             user.first_name = first_name
             user.last_name = last_name
             user.last_seen_at = seen
-
-        if is_new_user:
-            ConsentService().ensure_pending_for_new_user(user, now=seen)
 
         self._session.commit()
         return user

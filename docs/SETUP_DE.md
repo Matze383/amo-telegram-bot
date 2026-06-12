@@ -174,7 +174,7 @@ WEBUI_PASSWORD=dein_sicheres_passwort
 WEBUI_OWNER_TELEGRAM_ID=deine_telegram_user_id
 
 # KI-Provider Konfiguration
-AI_PROVIDER=ollama  # ollama (Standard), openai, anthropic, google, openrouter, groq, mistral, xai, deepseek, together, fireworks, litellm, lmstudio, vllm oder sglang
+AI_PROVIDER=ollama  # ollama (Standard), openai, anthropic, google, openrouter, groq, mistral, xai, deepseek, together, fireworks, amazon-bedrock, litellm, lmstudio, vllm oder sglang
 
 # Optional: OpenAI (für /ask Kommando)
 # OPENAI_API_KEY=dein-openai-api-key-hier
@@ -252,6 +252,13 @@ AI_PROVIDER=ollama  # ollama (Standard), openai, anthropic, google, openrouter, 
 # SGLANG_MODEL=               # Modellname, den der SGLang Server bereitstellt
 # SGLANG_TIMEOUT_SECONDS=60   # höherer Timeout empfohlen für lokale Inferenz
 # SGLANG_BASE_URL=http://127.0.0.1:8000/v1
+
+# Optional: Amazon Bedrock (für /ask Kommando) - AWS Cloud
+# AWS_ACCESS_KEY_ID=          # optional; bei Verwendung von AWS-Profil weglassen
+# AWS_SECRET_ACCESS_KEY=      # optional; bei Verwendung von AWS-Profil weglassen
+# AWS_REGION=                 # z.B. us-east-1 (Standard: us-east-1)
+# BEDROCK_MODEL=              # z.B. anthropic.claude-3-5-sonnet-20241022-v2:0
+# BEDROCK_TIMEOUT_SECONDS=60  # höherer Timeout empfohlen für AWS API
 
 # Optional: Ollama (für /ask Kommando)
 OLLAMA_URL=http://127.0.0.1:11434
@@ -491,6 +498,40 @@ DREAMING_WINDOW_END=05:00
 ```
 
 > **Datenschutz-Hinweis:** Daily Memory Zusammenfassungen können begrenzte Auszüge aus Konversationen enthalten. Roher Nachrichteninhalt wird niemals geloggt. Ergebnisse werden in der Datenbank mit konfigurierbarer Aufbewahrung gespeichert; Logs enthalten nur Metadaten (Nachrichtenanzahl, Timestamps, Scope-IDs).
+
+---
+
+## Websearch / SearXNG (optional)
+
+Der Bot unterstützt optional Websearch-Funktionalität über eine SearXNG-Instanz. Dies ermöglicht KI-gestützte Recherche mit aktuellen Webinhalten.
+
+### Voraussetzungen
+
+- Eine laufende [SearXNG](https://github.com/searxng/searxng)-Instanz (selbst gehostet oder öffentlich)
+- Netzwerkzugriff vom Bot zur SearXNG-Instanz
+
+### Konfiguration
+
+| Variable | Standard | Beschreibung |
+|----------|----------|--------------|
+| `AMO_WEBSEARCH_SEARXNG_BASE_URL` | *(leer)* | Basis-URL der SearXNG-Instanz (z.B. `http://localhost:8080` oder `https://searx.example.com`) |
+| `AMO_WEBSEARCH_SEARXNG_TIMEOUT_SECONDS` | `30` | Timeout für Suchanfragen in Sekunden |
+| `AMO_WEBSEARCH_MAX_RESULTS` | `10` | Maximale Anzahl der Suchergebnisse |
+| `AMO_WEBSEARCH_SEARXNG_LANGUAGE` | `auto` | Spracheinstellung für Suchergebnisse (z.B. `de-DE`, `en-US`, `auto`) |
+| `AMO_WEBSEARCH_SEARXNG_CATEGORIES` | `general` | Komma-getrennte Liste von Suchkategorien (z.B. `general`, `news`, `images`) |
+
+### Beispiel-Konfiguration
+
+```ini
+# Websearch / SearXNG
+AMO_WEBSEARCH_SEARXNG_BASE_URL=http://localhost:8080
+AMO_WEBSEARCH_SEARXNG_TIMEOUT_SECONDS=30
+AMO_WEBSEARCH_MAX_RESULTS=10
+AMO_WEBSEARCH_SEARXNG_LANGUAGE=de-DE
+AMO_WEBSEARCH_SEARXNG_CATEGORIES=general,news
+```
+
+> **Hinweis:** Wenn `AMO_WEBSEARCH_SEARXNG_BASE_URL` nicht gesetzt ist, ist die Websearch-Funktionalität deaktiviert.
 
 ---
 
@@ -1144,7 +1185,6 @@ Das `image_analyse`-Coreplugin bietet eine sichere Bildanalyse-Schnittstelle fü
 - Außerhalb aktivierter Topics erfolgt keine automatische Bildanalyse
 
 **Nutzungs-Policy:**
-- `consent_required` (Standard: true) — Nutzer müssen Consent erteilt haben
 - `min_role` (Standard: admin) — Mindestrolle für Bildanalyse
 - Unterstützte Rollen: `owner` > `admin` > `vip` > `normal` > `ignore`
 
@@ -1196,7 +1236,6 @@ IMAGE_ANALYSIS_OLLAMA_VISION_MODELS=llava,llama3.2-vision,qwen2.5vl,kimi-k2.5
 
 **Deterministische Reason Codes:**
 - `not_enabled` — Bildanalyse ist deaktiviert
-- `consent_required` — Nutzer hat keinen Consent erteilt
 - `role_forbidden` — Nutzerrolle unzureichend
 - `role_disabled` — Rolle ist `ignore` oder auf `disabled` gesetzt
 - `quota_exceeded` — Rolling-24h-Limit erreicht (nur NORMAL/VIP)
@@ -1286,7 +1325,6 @@ Die folgenden Fehler werden explizit an Nutzer kommuniziert:
 Das WebUI zeigt den Bildanalyse-Status an:
 - **Enabled:** `true`/`false` — Ist die Bildanalyse aktiviert?
 - **Min Role:** Aktuelle Mindestrolle
-- **Consent Required:** Ist Consent erforderlich?
 
 **Hinweis:** Die Konfiguration erfolgt über Settings/Policy, nicht direkt über WebUI-Toggles.
 
@@ -1348,7 +1386,6 @@ Der Bot unterstützt das Senden von Bildern über Telegrams `send_photo`- und `s
 
 - `role_forbidden` — Nutzerrolle unzureichend zum Senden von Bildern
 - `topic_disabled` — Bildsendung für dieses Topic deaktiviert
-- `consent_required` — Nutzer hat keinen Consent erteilt
 - `rate_limited` — Zu viele Bildsendungen in kurzer Zeit
 - `invalid_file` — Dateityp oder Größe nicht erlaubt
 - `send_failed` — Telegram-API-Fehler (generische Nutzer-Nachricht)

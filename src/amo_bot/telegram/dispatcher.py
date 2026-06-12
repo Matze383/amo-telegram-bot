@@ -844,18 +844,7 @@ class Dispatcher:
         return command_name.casefold() in {"accept", "decline", "consent", "start"}
 
     def _is_consent_blocked(self, *, user_id: int, role: Role, command_name: str, chat_type: str | None) -> bool:
-        if self.database_url is None:
-            return False
-        session_factory = create_session_factory(self.database_url)
-        with session_factory() as session:
-            user = session.query(User).filter(User.telegram_user_id == user_id).one_or_none()
-            if user is None:
-                return False
-            return ConsentService().is_effectively_blocked(
-                user,
-                global_role=role,
-                is_owner=role is Role.OWNER,
-            )
+        return False
 
     def _is_user_unreachable(self, user_id: int) -> bool:
         if self.database_url is None:
@@ -1298,19 +1287,6 @@ class Dispatcher:
                         message_thread_id=message.message_thread_id,
                         event_type="ai_autoreply_denied",
                         payload={"reason": "user_missing", "router_reason": decision.reason_code.value},
-                    )
-                    session.commit()
-                    return
-
-                if ConsentService().is_effectively_blocked(user, global_role=role, is_owner=role is Role.OWNER):
-                    self._write_ai_audit(
-                        session=session,
-                        actor_user_id=message.from_user.id,
-                        chat_id=message.chat.id,
-                        message_id=message.message_id,
-                        message_thread_id=message.message_thread_id,
-                        event_type="ai_autoreply_denied",
-                        payload={"reason": "consent_denied", "router_reason": decision.reason_code.value},
                     )
                     session.commit()
                     return

@@ -4,7 +4,6 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from amo_bot.auth.roles import Role
-from amo_bot.consent.prompt_service import ConsentPromptService
 from amo_bot.db.init_db import init_db
 from amo_bot.db.models import User
 from amo_bot.db.repositories import UserRoleRepository
@@ -162,7 +161,7 @@ def test_accept_and_decline_notify_owner(tmp_path) -> None:
         engine.dispose()
 
 
-def test_start_private_pending_returns_policy_buttons(tmp_path) -> None:
+def test_start_private_pending_returns_ready_status_without_policy_buttons(tmp_path) -> None:
     db_url = f"sqlite:///{tmp_path / 'consent_start_pending.db'}"
     init_db(db_url)
     engine = create_engine(db_url)
@@ -183,17 +182,12 @@ def test_start_private_pending_returns_policy_buttons(tmp_path) -> None:
         assert cmd is not None
 
         out = asyncio.run(cmd.handler(_ctx(command_name="start", user_id=1101, chat_id=1101)))
-        assert isinstance(out, dict)
-        assert out["text"] == ConsentPromptService.build_prompt_text("de")
-        markup = out.get("reply_markup")
-        assert isinstance(markup, dict)
-        assert markup["inline_keyboard"][0][0]["callback_data"] == "consent:accept"
-        assert markup["inline_keyboard"][0][1]["callback_data"] == "consent:decline"
+        assert out == "Consent ist bereits akzeptiert. ✅"
     finally:
         engine.dispose()
 
 
-def test_start_private_unreachable_resets_to_pending_and_returns_buttons(tmp_path) -> None:
+def test_start_private_unreachable_returns_ready_status_without_reset(tmp_path) -> None:
     db_url = f"sqlite:///{tmp_path / 'consent_start_unreachable.db'}"
     init_db(db_url)
     engine = create_engine(db_url)
@@ -214,21 +208,16 @@ def test_start_private_unreachable_resets_to_pending_and_returns_buttons(tmp_pat
         assert cmd is not None
 
         out = asyncio.run(cmd.handler(_ctx(command_name="start", user_id=1102, chat_id=1102)))
-        assert isinstance(out, dict)
-        assert out["text"] == ConsentPromptService.build_prompt_text("de")
-        markup = out.get("reply_markup")
-        assert isinstance(markup, dict)
-        assert markup["inline_keyboard"][0][0]["callback_data"] == "consent:accept"
-        assert markup["inline_keyboard"][0][1]["callback_data"] == "consent:decline"
+        assert out == "Consent ist bereits akzeptiert. ✅"
 
         with session_factory() as session:
             user = session.query(User).filter_by(telegram_user_id=1102).one()
-            assert user.consent_status == "pending"
+            assert user.consent_status == "unreachable"
     finally:
         engine.dispose()
 
 
-def test_start_private_unknown_user_creates_profile_and_returns_buttons(tmp_path) -> None:
+def test_start_private_unknown_user_creates_normal_profile_without_policy_buttons(tmp_path) -> None:
     db_url = f"sqlite:///{tmp_path / 'consent_start_unknown.db'}"
     init_db(db_url)
     engine = create_engine(db_url)
@@ -239,17 +228,13 @@ def test_start_private_unknown_user_creates_profile_and_returns_buttons(tmp_path
         assert cmd is not None
 
         out = asyncio.run(cmd.handler(_ctx(command_name="start", user_id=1103, chat_id=1103)))
-        assert isinstance(out, dict)
-        assert out["text"] == ConsentPromptService.build_prompt_text("de")
-        markup = out.get("reply_markup")
-        assert isinstance(markup, dict)
-        assert markup["inline_keyboard"][0][0]["callback_data"] == "consent:accept"
-        assert markup["inline_keyboard"][0][1]["callback_data"] == "consent:decline"
+        assert out == "Consent ist bereits akzeptiert. ✅"
 
         with session_factory() as session:
             user = session.query(User).filter_by(telegram_user_id=1103).one_or_none()
             assert user is not None
-            assert user.consent_status == "pending"
+            assert user.role.name == "normal"
+            assert user.consent_status == "accepted"
     finally:
         engine.dispose()
 
@@ -265,7 +250,7 @@ def test_start_group_returns_short_private_hint(tmp_path) -> None:
     assert out == "Bitte öffne die Policy privat über den Button."
 
 
-def test_start_private_pending_returns_english_prompt_buttons(tmp_path) -> None:
+def test_start_private_pending_returns_english_ready_status_without_policy_buttons(tmp_path) -> None:
     db_url = f"sqlite:///{tmp_path / 'consent_start_pending_en.db'}"
     init_db(db_url)
     engine = create_engine(db_url)
@@ -286,11 +271,6 @@ def test_start_private_pending_returns_english_prompt_buttons(tmp_path) -> None:
         assert cmd is not None
 
         out = asyncio.run(cmd.handler(_ctx(command_name="start", user_id=1201, chat_id=1201, locale="en")))
-        assert isinstance(out, dict)
-        assert out["text"] == ConsentPromptService.build_prompt_text("en")
-        markup = out.get("reply_markup")
-        assert isinstance(markup, dict)
-        assert markup["inline_keyboard"][0][0]["text"] == "✅ Accept"
-        assert markup["inline_keyboard"][0][1]["text"] == "❌ Decline"
+        assert out == "Consent has already been accepted. ✅"
     finally:
         engine.dispose()

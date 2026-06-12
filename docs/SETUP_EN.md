@@ -174,7 +174,7 @@ WEBUI_PASSWORD=your_secure_password
 WEBUI_OWNER_TELEGRAM_ID=your_telegram_user_id
 
 # AI Provider Configuration
-AI_PROVIDER=ollama  # ollama (default), openai, anthropic, google, openrouter, groq, mistral, xai, deepseek, together, fireworks, litellm, lmstudio, vllm, or sglang
+AI_PROVIDER=ollama  # ollama (default), openai, anthropic, google, openrouter, groq, mistral, xai, deepseek, together, fireworks, amazon-bedrock, litellm, lmstudio, vllm, or sglang
 
 # Optional: OpenAI (for /ask command)
 # OPENAI_API_KEY=your-openai-api-key-here
@@ -252,6 +252,13 @@ AI_PROVIDER=ollama  # ollama (default), openai, anthropic, google, openrouter, g
 # SGLANG_MODEL=               # model name exposed by the SGLang server
 # SGLANG_TIMEOUT_SECONDS=60   # higher timeout recommended for local inference
 # SGLANG_BASE_URL=http://127.0.0.1:8000/v1
+
+# Optional: Amazon Bedrock (for /ask command) - AWS Cloud
+# AWS_ACCESS_KEY_ID=          # optional; omit when using AWS profile
+# AWS_SECRET_ACCESS_KEY=      # optional; omit when using AWS profile
+# AWS_REGION=                 # e.g. us-east-1 (default: us-east-1)
+# BEDROCK_MODEL=              # e.g. anthropic.claude-3-5-sonnet-20241022-v2:0
+# BEDROCK_TIMEOUT_SECONDS=60  # higher timeout recommended for AWS API
 
 # Optional: Ollama (for /ask command)
 OLLAMA_URL=http://127.0.0.1:11434
@@ -491,6 +498,40 @@ DREAMING_WINDOW_END=05:00
 ```
 
 > **Privacy Note:** Daily Memory summaries may contain bounded digest text derived from conversations. Raw message content is never logged. Results are stored in the database with configurable retention; logs contain metadata only (message counts, timestamps, scope IDs).
+
+---
+
+## Websearch / SearXNG (optional)
+
+The bot optionally supports web search functionality via a SearXNG instance. This enables AI-powered research with current web content.
+
+### Prerequisites
+
+- A running [SearXNG](https://github.com/searxng/searxng) instance (self-hosted or public)
+- Network access from the bot to the SearXNG instance
+
+### Configuration
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `AMO_WEBSEARCH_SEARXNG_BASE_URL` | *(empty)* | Base URL of your SearXNG instance (e.g., `http://localhost:8080` or `https://searx.example.com`) |
+| `AMO_WEBSEARCH_SEARXNG_TIMEOUT_SECONDS` | `30` | Timeout for search requests in seconds |
+| `AMO_WEBSEARCH_MAX_RESULTS` | `10` | Maximum number of search results |
+| `AMO_WEBSEARCH_SEARXNG_LANGUAGE` | `auto` | Language preference for search results (e.g., `de-DE`, `en-US`, `auto`) |
+| `AMO_WEBSEARCH_SEARXNG_CATEGORIES` | `general` | Comma-separated list of search categories (e.g., `general`, `news`, `images`) |
+
+### Example Configuration
+
+```ini
+# Websearch / SearXNG
+AMO_WEBSEARCH_SEARXNG_BASE_URL=http://localhost:8080
+AMO_WEBSEARCH_SEARXNG_TIMEOUT_SECONDS=30
+AMO_WEBSEARCH_MAX_RESULTS=10
+AMO_WEBSEARCH_SEARXNG_LANGUAGE=en-US
+AMO_WEBSEARCH_SEARXNG_CATEGORIES=general,news
+```
+
+> **Note:** If `AMO_WEBSEARCH_SEARXNG_BASE_URL` is not set, web search functionality is disabled.
 
 ---
 
@@ -1144,7 +1185,6 @@ The `image_analyze` coreplugin provides a secure image analysis interface for AI
 - Outside enabled topics, no automatic image analysis is performed
 
 **Usage Policy:**
-- `consent_required` (default: true) — Users must have granted consent
 - `min_role` (default: admin) — Minimum role for image analysis
 - Supported roles: `owner` > `admin` > `vip` > `normal` > `ignore`
 
@@ -1196,7 +1236,6 @@ IMAGE_ANALYSIS_OLLAMA_VISION_MODELS=llava,llama3.2-vision,qwen2.5vl,kimi-k2.5
 
 **Deterministic Reason Codes:**
 - `not_enabled` — Image analysis is disabled
-- `consent_required` — User has not granted consent
 - `role_forbidden` — User role insufficient
 - `role_disabled` — Role is `ignore` or set to `disabled`
 - `quota_exceeded` — Rolling 24h limit reached (NORMAL/VIP only)
@@ -1286,7 +1325,6 @@ The following errors are explicitly communicated to users:
 The WebUI displays the image analysis status:
 - **Enabled:** `true`/`false` — Is image analysis enabled?
 - **Min Role:** Current minimum role requirement
-- **Consent Required:** Is consent required?
 
 **Note:** Configuration is done via settings/policy, not directly through WebUI toggles.
 
@@ -1348,7 +1386,6 @@ The bot supports sending images via Telegram's `send_photo` and `send_document` 
 
 - `role_forbidden` — User role insufficient to send images
 - `topic_disabled` — Image sending disabled for this topic
-- `consent_required` — User has not granted consent
 - `rate_limited` — Too many image sends in short time
 - `invalid_file` — File type or size not allowed
 - `send_failed` — Telegram API error (generic user message)

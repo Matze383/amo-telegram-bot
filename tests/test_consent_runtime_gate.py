@@ -63,43 +63,31 @@ def _seed_user(db_url: str, *, user_id: int, role: str, consent: str) -> None:
         session.commit()
 
 
-def test_pending_blocks_normal_and_allows_accept_then_ping(tmp_path) -> None:
+def test_pending_human_normal_can_use_bot_without_accept(tmp_path) -> None:
     db_url = f"sqlite:///{tmp_path / 'consent_gate_pending.db'}"
     dispatcher, sender = _bootstrap_dispatcher(db_url)
     _seed_user(db_url, user_id=1101, role="normal", consent="pending")
 
     asyncio.run(dispatcher.handle_raw_update(_mk_update(uid=1101, chat_id=1101, text="/ping", update_id=1)))
-    assert sender.sent[-1][1] == "Bitte bestätige zuerst mit /accept oder prüfe /consent."
-
-    asyncio.run(dispatcher.handle_raw_update(_mk_update(uid=1101, chat_id=1101, text="/accept", update_id=2)))
-    assert "Consent akzeptiert" in sender.sent[-1][1]
-
-    asyncio.run(dispatcher.handle_raw_update(_mk_update(uid=1101, chat_id=1101, text="/ping", update_id=3)))
     assert sender.sent[-1] == (1101, "pong", None)
 
 
-def test_declined_blocks_normal_but_accept_allows_reactivation(tmp_path) -> None:
+def test_declined_human_normal_can_use_bot_without_reactivation(tmp_path) -> None:
     db_url = f"sqlite:///{tmp_path / 'consent_gate_declined.db'}"
     dispatcher, sender = _bootstrap_dispatcher(db_url)
     _seed_user(db_url, user_id=1102, role="normal", consent="declined")
 
     asyncio.run(dispatcher.handle_raw_update(_mk_update(uid=1102, chat_id=1102, text="/help", update_id=1)))
-    assert sender.sent[-1][1] == "Bitte bestätige zuerst mit /accept oder prüfe /consent."
-
-    asyncio.run(dispatcher.handle_raw_update(_mk_update(uid=1102, chat_id=1102, text="/accept", update_id=2)))
-    assert "Consent akzeptiert" in sender.sent[-1][1]
+    assert sender.sent[-1][1].startswith("Verfügbare Befehle:")
 
 
-def test_unreachable_blocks_normal_and_shows_unreachable_hint_but_accept_allowed(tmp_path) -> None:
+def test_unreachable_human_normal_can_use_bot_without_private_start(tmp_path) -> None:
     db_url = f"sqlite:///{tmp_path / 'consent_gate_unreachable.db'}"
     dispatcher, sender = _bootstrap_dispatcher(db_url)
     _seed_user(db_url, user_id=1103, role="normal", consent="unreachable")
 
     asyncio.run(dispatcher.handle_raw_update(_mk_update(uid=1103, chat_id=1103, text="/ping", update_id=1)))
-    assert sender.sent[-1][1] == "Bitte starte den Bot privat und bestätige mit /accept."
-
-    asyncio.run(dispatcher.handle_raw_update(_mk_update(uid=1103, chat_id=1103, text="/accept", update_id=2)))
-    assert "Consent akzeptiert" in sender.sent[-1][1]
+    assert sender.sent[-1] == (1103, "pong", None)
 
 
 def test_accepted_allows_normal_usage(tmp_path) -> None:
@@ -129,13 +117,13 @@ def test_global_ignore_stays_blocked_even_when_owner_or_accepted(tmp_path) -> No
     assert sender.sent == []
 
 
-def test_group_response_is_privacy_preserving(tmp_path) -> None:
+def test_group_human_normal_with_declined_consent_is_not_privacy_blocked(tmp_path) -> None:
     db_url = f"sqlite:///{tmp_path / 'consent_gate_group_privacy.db'}"
     dispatcher, sender = _bootstrap_dispatcher(db_url)
     _seed_user(db_url, user_id=1107, role="normal", consent="declined")
 
     asyncio.run(dispatcher.handle_raw_update(_mk_update(uid=1107, chat_id=-1107, chat_type="group", text="/ping", update_id=1)))
-    assert sender.sent[-1][1] == "Bitte kläre Consent privat mit dem Bot."
+    assert sender.sent[-1] == (-1107, "pong", None)
 
 
 def test_bot_messages_do_not_trigger_runtime_gate(tmp_path) -> None:

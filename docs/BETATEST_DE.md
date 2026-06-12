@@ -143,8 +143,11 @@ POLL_RETRY_MAX_SECONDS=30
 OFFSET_STATE_FILE=.state/offset.json
 
 # SearXNG Websearch (optional – für Websearch-Feature)
-# SEARXNG_BASE_URL=https://your-searxng-instance.com  # Primäre Konfiguration
-# AMO_WEBSEARCH_SEARXNG_BASE_URL=https://fallback.com  # Fallback (optional)
+# AMO_WEBSEARCH_SEARXNG_BASE_URL=https://your-searxng-instance.com
+# AMO_WEBSEARCH_SEARXNG_TIMEOUT_SECONDS=30
+# AMO_WEBSEARCH_MAX_RESULTS=10
+# AMO_WEBSEARCH_SEARXNG_LANGUAGE=de-DE
+# AMO_WEBSEARCH_SEARXNG_CATEGORIES=general
 # Hinweis: Nur HTTPS-URLs für öffentliche Endpunkte erlaubt. HTTP nur für Loopback/Private.
 ```
 
@@ -271,25 +274,11 @@ Starte einen privaten Chat mit deinem Bot:
 - Sende: `/help`
 - Erwartet: Liste der verfügbaren Commands (abhängig von deiner Rolle)
 
-**Test 3: /consent**
-- Sende: `/consent`
-- Erwartet: Zeigt deinen aktuellen Consent-Status und verfügbare Commands
-  - **Privater Chat**: Vollständiger Status und Details werden angezeigt
-  - **Gruppen**: Nur Datenschutzhinweis (keine Statusdetails in Gruppen aus Datenschutzgründen)
-
-**Test 4: /accept**
-- Sende: `/accept`
-- Erwartet: Bestätigung, dass Consent akzeptiert wurde
-- Hinweis: Falls du zuvor abgelehnt hast, kannst du später mit `/accept` erneut zustimmen
-
-**Test 5: /decline**
-- Sende: `/decline`
-- Erwartet: Bestätigung, dass Consent abgelehnt wurde
-- Hinweis: Du kannst später mit `/accept` erneut zustimmen, falls du deine Meinung änderst
-
-**Test 6: /role**
+**Test 3: /role**
 - Sende: `/role`
 - Erwartet: Deine aktuelle Rolle (z.B. "owner")
+
+> **Hinweis zur Nutzung:** Human-User können den Bot automatisch nutzen. Kein Consent-Dialog erforderlich. Rollen (owner/admin/vip/normal/ignore) steuern weiterhin Berechtigungen. Bot-to-Bot-Kommunikation erfordert weiterhin explizite Freigabe.
 
 ---
 
@@ -443,13 +432,12 @@ Der Bot kann bei Erwähnung oder als Antwort in **aktiven Scopes** (Themen oder 
 
 **Voraussetzungen:**
 - Nutzer muss Rolle `vip`, `admin` oder `owner` haben
-- Nutzer muss Consent akzeptiert haben (`/accept`)
 - Der Scope (Thema oder privater Chat) muss KI-aktiviert konfiguriert sein
 - Der KI-Service muss konfiguriert sein (Ollama, OpenAI, Anthropic, Google, OpenRouter, Groq, Mistral, xAI oder DeepSeek)
 
 **Audit-Events:**
 - `ai_autoreply_sent` — Antwort erfolgreich gesendet
-- `ai_autoreply_denied` — Blockiert (Rolle oder Consent)
+- `ai_autoreply_denied` — Blockiert (Rolle oder andere Einschränkung)
 - `ai_autoreply_error` — Fehler beim KI-Service
 
 **Hinweis:** Dies ist separate vom `/ask`-Kommando. Auto-Antwort wird implizit durch Erwähnungen/Antworten ausgelöst; `/ask` ist ein explizites Kommando.
@@ -608,92 +596,7 @@ Wenn `WEBUI_PUBLIC_MODE=true`, blockiert das HTTP-Request-Gate den Zugriff auf g
 - Globale manuelle Memories sind in v1 deaktiviert. Sensibel wirkende Tokens/Secrets/System-Prompt-Inhalte und Texte über 1000 Zeichen werden abgelehnt.
 - Normale Nachrichten wie `remember: ...` werden in v1 nicht automatisch übernommen.
 
-### Consent Commands (Block 1)
-
-Der Bot enthält nun ein Consent-Management über Telegram-Commands.
-
-**Test-Schritte:**
-
-1. **`/consent` im privaten Chat testen:**
-   - Sende: `/consent`
-   - Erwartet: Zeigt aktuellen Consent-Status, Details und verfügbare Commands
-
-2. **`/accept` testen:**
-   - Sende: `/accept`
-   - Erwartet: Bestätigung, dass Consent akzeptiert wurde
-
-3. **`/decline` testen:**
-   - Sende: `/decline`
-   - Erwartet: Bestätigung, dass Consent abgelehnt wurde
-
-4. **`/consent` nach Ablehnung testen:**
-   - Sende: `/consent`
-   - Erwartet: Zeigt abgelehnten Status und erinnert daran, dass du jederzeit mit `/accept` erneut zustimmen kannst
-
-5. **Erneutes Annehmen testen:**
-   - Sende: `/accept` (nach vorheriger Ablehnung)
-   - Erwartet: Consent erneut erfolgreich akzeptiert
-
-6. **`/consent` in Gruppen testen:**
-   - Sende: `/consent` in einer Gruppe, in der der Bot vorhanden ist
-   - Erwartet: Nur Datenschutzhinweis — keine Consent-Statusdetails in Gruppen aus Datenschutzgründen
-
-**Checkliste:**
-- [ ] `/consent` im privaten Chat zeigt vollständigen Status
-- [ ] `/accept` bestätigt Consent akzeptiert
-- [ ] `/decline` bestätigt Consent abgelehnt
-- [ ] `/consent` zeigt abgelehnten Status korrekt
-- [ ] `/accept` funktioniert nach vorheriger Ablehnung
-- [ ] `/consent` in Gruppen zeigt nur Datenschutzhinweis (keine Details)
-
----
-
-### Automatischer privater Consent-DM-Prompt (Block 2)
-
-Der Bot sendet automatisch einen privaten Consent-Hinweis an Nutzer mit dem Status "pending" (noch nicht akzeptiert oder abgelehnt).
-
-**Funktionsweise:**
-- Wenn ein pending User in einer Gruppe gesehen wird, sendet der Bot automatisch eine private DM mit Consent-Hinweis
-- Die DM enthält **Inline-Buttons** (✅ Akzeptieren / ❌ Ablehnen) für schnelle Zustimmung, plus Fallback-Commands: `/accept`, `/decline`, `/consent`
-- **One-Shot-Policy:** Genau 1 automatische DM pro User — wird nur gesendet wenn `consent_prompt_count == 0`. Nach erfolgreicher Zustellung wird `prompt_count` auf 1 gesetzt, keine weiteren automatischen DMs.
-- **Unerreichbare User:** Wenn der Bot kein privates Gespräch starten kann (User hat den Bot nicht gestartet), wird der User als `unreachable` markiert und erhält keine Prompts. Der User muss den Bot privat starten und `/accept` (oder den Akzeptieren-Button) nutzen, um zu consenten.
-
-**Test-Schritte:**
-
-1. **Automatischen Prompt testen:**
-   - Einen neuen User zu einer Gruppe hinzufügen, in der der Bot ist
-   - User sollte genau eine private DM vom Bot mit dem Consent-Hinweis erhalten
-
-2. **One-Shot-Policy testen:**
-   - Nach Erhalt des ersten (und einzigen) automatischen Prompts erhält der User keine weiteren automatischen DMs
-   - Der `consent_prompt_count` wird nach erfolgreicher Zustellung auf 1 gesetzt
-
-3. **Unerreichbar-Handling testen:**
-   - Wenn der User noch keinen privaten Chat mit dem Bot gestartet hat, kann die DM nicht zugestellt werden
-   - User wird im System als `unreachable` markiert
-   - Um erreichbar zu werden und zu consenten, muss der User den Bot zuerst privat starten und `/accept` nutzen
-
-**Checkliste:**
-- [ ] Pending-User erhalten genau einen automatischen DM-Prompt beim ersten Erscheinen in Gruppen
-- [ ] DM enthält **Inline-Buttons** (Akzeptieren/Ablehnen) und `/accept`, `/decline`, `/consent` Fallback-Commands
-- [ ] Inline-Buttons funktionieren: Akzeptieren-Button setzt Consent auf akzeptiert, Ablehnen-Button setzt Consent auf abgelehnt
-- [ ] Fallback-Commands bleiben nutzbar neben Buttons
-- [ ] One-Shot-Policy eingehalten: nur 1 automatischer Prompt pro User (bei `consent_prompt_count == 0`)
-- [ ] Keine automatischen Retries nach erfolgreicher Zustellung oder Fehler
-- [ ] Unerreichbare User werden entsprechend markiert und müssen den Bot privat starten, um zu consenten
-- [ ] Runtime-Gate blockiert normale Nutzung für `pending`/`declined`/`unreachable` User
-- [ ] Erlaubte Commands funktionieren trotz Gate: `/accept`, `/decline`, `/consent`, `/start`
-- [ ] `accepted` User können alle Commands normal nutzen
-- [ ] Owner-Bypass funktioniert für Consent (Owner kann den Bot immer nutzen)
-- [ ] Globale `ignore`-Rolle bleibt blockierend unabhängig vom Consent
-
-**Runtime Consent Gate:** Das Runtime-Gate ist **jetzt aktiv**. Nutzer mit Status `pending`, `declined` oder `unreachable` können normale Bot-Funktionen nicht nutzen, bis sie `/accept` senden.
-
-**Erlaubte Commands trotz Gate:** `/accept`, `/decline`, `/consent`, `/start` — diese funktionieren immer.
-
-**Verhalten in Gruppen:** In Gruppen wird nur ein datenschonender Hinweis gezeigt. Keine Statusdetails werden preisgegeben.
-
-**Private Block-Nachricht:** Blockierte User im privaten Chat werden aufgefordert, `/accept` oder `/consent` zu nutzen. Für `unreachable` User: Bot zuerst privat starten, dann `/accept`.
+> **Hinweis zur Nutzung:** Human-User können den Bot automatisch nutzen. Kein Consent-Dialog erforderlich. Rollen (owner/admin/vip/normal/ignore) steuern weiterhin Berechtigungen. Bot-to-Bot-Kommunikation erfordert weiterhin explizite Freigabe (siehe Abschnitt "Bot-zu-Bot-Freigabe").
 
 ---
 
@@ -864,7 +767,7 @@ Das Bildanalyse-Coreplugin bietet eine sichere, default-off Bildanalyse für KI 
 
 **Voraussetzungen:**
 - `vip`, `admin` oder `owner` Rolle (`ignore` ist immer blockiert)
-- Consent erteilt (`/accept`)
+- Topic/Quota-Gates beachten
 
 **Rollenbasierte Limits (IMG-B8):**
 | Rolle | Limit |
@@ -956,8 +859,8 @@ Der Bot unterstützt das Senden von Bildern über Telegram mit Policy/Role/Topic
 
 **Voraussetzungen:**
 - `vip`, `admin` oder `owner` Rolle
-- Consent erteilt (`/accept`)
 - Bildsendung für das Topic aktiviert
+- Quota-Limits beachten
 
 **Policy-Gates:**
 - Dieselben Rollenprüfungen wie bei Textnachrichten (`send_message`-Capability)
@@ -1270,9 +1173,6 @@ Nutze diese Checkliste für deinen Test:
 - [ ] WebUI startet ohne Fehler
 - [ ] Privater Chat /ping: OK
 - [ ] Privater Chat /help: OK
-- [ ] Privater Chat /consent: OK
-- [ ] Privater Chat /accept: OK
-- [ ] Privater Chat /decline: OK
 - [ ] Privater Chat /role: OK
 - [ ] Gruppen-Test /ping: OK
 - [ ] Gruppen-Test /help: OK
@@ -1303,7 +1203,7 @@ Nutze diese Checkliste für deinen Test:
 - [ ] IMG-B3 Größenlimit (oversize-Handling): OK / Nicht getestet
 - [ ] IMG-B4 Bildsendung via Telegram-API: OK / Nicht getestet
 - [ ] IMG-B4 Topic-sichere Bildsendung (message_thread_id): OK / Nicht getestet
-- [ ] IMG-B4 Deny-Verhalten (Rolle/Consent/Topic-Gates): OK / Nicht getestet
+- [ ] IMG-B4 Deny-Verhalten (Rolle/Topic/Quota-Gates): OK / Nicht getestet
 - [ ] IMG-B5 WebUI Bildanalyse pro Topic (inherit/enabled/disabled): OK / Nicht getestet
 - [ ] IMG-B7 WebUI Image Analysis Role Quotas (/users Seite, disabled/unlimited/limited): OK / Nicht getestet
 - [ ] Security Headers vorhanden (Browser-Dev-Tools prüfen): OK

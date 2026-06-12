@@ -38,6 +38,24 @@ This release brings significant improvements to web research reliability, databa
 
 **Opt-out:** If you do not want reaction-based learning, avoid reacting to bot messages with emoji or provide explicit corrective text.
 
+### Auto Web Research: Provider-Registry & Quality-Gates
+
+- **Source/Provider Registry:** Central registry for Weather and Crypto providers with defined default candidates.
+- **DB-Source Selection:** Provider selection leverages `research_providers` plus Health/Freshness/Observations more strongly for more reliable sources.
+- **No Legacy Fallback:** Explicit empty DB candidates no longer fall back to Legacy defaults.
+- **Disabled-Provider Protection:** Disabled providers remain permanently disabled (no automatic reactivation).
+- **Source-Quality/Corroboration Gate:** News/Chain-extracts detect conflicts and overly weak sources more conservatively (fail-closed on uncertainty).
+- **Weather Providers:** Open-Meteo (primary) + wttr.in (fallback) for weather queries.
+- **Crypto Providers:** CoinGecko (primary) + Binance public ticker (fallback), strictly limited to BTC/ETH in USD/USDT; unknown assets or EUR pairs result in fail-closed behavior.
+- **Health Monitoring (DB-backed):** Provider health persisted to database (`research_provider_health`) and survives restarts.
+- **Research Tables:** New DB tables for future research unit: `research_providers`, `research_source_observations`, `research_eval_cases`.
+- **Stock/Sports:** Remain fail-closed without structured providers (no unsafe assumptions).
+- **Quota/Audit:** Metadata-only persistence for audit purposes (no raw queries/URLs/secrets).
+- **Source Observations:** Webtool success/fail-closed/error as well as role/quota denials automatically generate persistent source observations in `research_source_observations`.
+- **Eval Cases:** Negative research/source feedback automatically generates sanitized eval cases in `research_eval_cases`.
+- **Eval Harness/Tests:** Test infrastructure for stored sanitized eval cases (validation of source-quality gates).
+- **Privacy Gate:** All observations/eval cases store metadata only (no raw queries, no full URLs, no tokens/secrets/bearer-like values; `source_hosts` contains hostnames only).
+
 ### Security & Privacy
 
 - No secrets in release documentation.
@@ -65,7 +83,7 @@ This release brings significant improvements to web research reliability, databa
    ```
 
 3. **SearXNG for Current Data:**
-   - Configure `SEARXNG_BASE_URL` for Auto Web Research.
+   - Configure `AMO_WEBSEARCH_SEARXNG_BASE_URL` for Auto Web Research.
    - Only HTTPS URLs allowed for public endpoints.
 
 4. **Learning Feedback Memory:**

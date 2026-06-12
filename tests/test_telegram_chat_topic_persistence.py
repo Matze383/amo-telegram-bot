@@ -309,7 +309,7 @@ def test_new_message_auto_discovers_user_with_default_normal_role(tmp_path) -> N
         assert user.last_name == "A"
         assert user.first_seen_at is not None
         assert user.last_seen_at is not None
-        assert user.consent_status == "pending"
+        assert user.consent_status == "accepted"
 
 
 def test_followup_message_updates_profile_and_last_seen_without_overwriting_role(tmp_path) -> None:
@@ -350,7 +350,7 @@ def test_followup_message_updates_profile_and_last_seen_without_overwriting_role
         assert after.last_seen_at is not None
         assert before_seen is not None
         assert after.last_seen_at >= before_seen
-        assert after.consent_status == "pending"
+        assert after.consent_status == "accepted"
 
 
 def test_followup_message_keeps_declined_and_unreachable_consent_status(tmp_path) -> None:
@@ -418,7 +418,7 @@ def test_followup_message_keeps_declined_and_unreachable_consent_status(tmp_path
 
 
 
-def test_discovery_pending_user_triggers_private_consent_prompt(tmp_path) -> None:
+def test_discovery_new_human_user_does_not_trigger_private_consent_prompt(tmp_path) -> None:
     db_url = f"sqlite:///{tmp_path / 'persist_user_prompt.db'}"
     init_db(db_url)
     sent_private: list[tuple[int, str]] = []
@@ -430,20 +430,19 @@ def test_discovery_pending_user_triggers_private_consent_prompt(tmp_path) -> Non
         )
     )
 
-    assert len(sent_private) == 1
-    assert sent_private[0][0] == 6001
-    assert "/accept" in sent_private[0][1]
+    assert sent_private == []
 
     sf = create_session_factory(db_url)
     with sf() as session:
         user = session.scalar(select(User).where(User.telegram_user_id == 6001))
         assert user is not None
-        assert user.consent_status == "pending"
-        assert user.consent_prompt_count == 1
-        assert user.consent_prompted_at is not None
+        assert user.role.name == "normal"
+        assert user.consent_status == "accepted"
+        assert user.consent_prompt_count == 0
+        assert user.consent_prompted_at is None
 
 
-def test_discovery_forbidden_private_dm_marks_unreachable(tmp_path) -> None:
+def test_discovery_does_not_dm_or_mark_unreachable_when_private_dm_would_fail(tmp_path) -> None:
     from amo_bot.telegram.client import TelegramApiError
     from amo_bot.telegram.owner_notify import OwnerNotifier
 
@@ -485,19 +484,16 @@ def test_discovery_forbidden_private_dm_marks_unreachable(tmp_path) -> None:
     with sf() as session:
         user = session.scalar(select(User).where(User.telegram_user_id == 6002))
         assert user is not None
-        assert user.consent_status == "unreachable"
+        assert user.consent_status == "accepted"
         assert user.consent_prompt_count == 0
         assert user.consent_prompted_at is None
 
-    assert len(sent_owner) == 2
+    assert len(sent_owner) == 1
     assert sent_owner[0][0] == 9999
     assert "Neuer User erfasst" in sent_owner[0][1]
-    assert sent_owner[1][0] == 9999
-    assert "Policy-DM nicht zustellbar" in sent_owner[1][1]
-    assert "/start" in sent_owner[1][1]
 
 
-def test_discovery_prompts_only_once_for_pending_user(tmp_path) -> None:
+def test_discovery_never_prompts_human_user(tmp_path) -> None:
     db_url = f"sqlite:///{tmp_path / 'persist_user_prompt_rate_limited.db'}"
     init_db(db_url)
     sent_private: list[tuple[int, str]] = []
@@ -514,7 +510,7 @@ def test_discovery_prompts_only_once_for_pending_user(tmp_path) -> None:
         )
     )
 
-    assert len(sent_private) == 1
+    assert sent_private == []
 
 
 def test_discovery_prompt_skips_user_with_existing_prompt_count(tmp_path) -> None:
@@ -730,7 +726,7 @@ def test_new_user_discovery_notifies_owner_once(tmp_path) -> None:
     assert "Neuer User erfasst" in sent_owner[0][1]
 
 
-def test_repeated_message_from_unreachable_user_does_not_notify_owner_again(tmp_path) -> None:
+def test_repeated_message_with_private_dm_error_has_no_consent_notifications(tmp_path) -> None:
     from amo_bot.telegram.client import TelegramApiError
     from amo_bot.telegram.owner_notify import OwnerNotifier
 
@@ -776,12 +772,12 @@ def test_repeated_message_from_unreachable_user_does_not_notify_owner_again(tmp_
     unreachable_notifies = [text for _, text in sent_owner if "Policy-DM nicht zustellbar" in text]
     fallback_notifies = [text for _, text in sent_owner if "Gruppenfallback für Consent gesendet" in text]
     prompted_notifies = [text for _, text in sent_owner if "Policy-DM erfolgreich gesendet" in text]
-    assert len(unreachable_notifies) == 1
+    assert len(unreachable_notifies) == 0
     assert len(fallback_notifies) == 0
     assert len(prompted_notifies) == 0
 
 
-def test_owner_unreachable_notify_failure_does_not_break_persistence(tmp_path) -> None:
+def test_owner_consent_notify_failure_path_is_not_called_for_human_discovery(tmp_path) -> None:
     from amo_bot.telegram.client import TelegramApiError
     from amo_bot.telegram.owner_notify import OwnerNotifier
 
@@ -822,7 +818,7 @@ def test_owner_unreachable_notify_failure_does_not_break_persistence(tmp_path) -
     with sf() as session:
         user = session.scalar(select(User).where(User.telegram_user_id == 7002))
         assert user is not None
-        assert user.consent_status == "unreachable"
+        assert user.consent_status == "accepted"
 
 
 def test_owner_notify_failure_does_not_break_persistence(tmp_path) -> None:
@@ -851,7 +847,7 @@ def test_owner_notify_failure_does_not_break_persistence(tmp_path) -> None:
         assert user is not None
 
 
-def test_forbidden_dm_group_fallback_contains_button_url_and_preserves_thread(tmp_path) -> None:
+def test_forbidden_dm_sends_no_human_consent_group_fallback(tmp_path) -> None:
     from amo_bot.telegram.client import TelegramApiError
 
     db_url = f"sqlite:///{tmp_path / 'persist_fallback_button_thread.db'}"
@@ -881,27 +877,11 @@ def test_forbidden_dm_group_fallback_contains_button_url_and_preserves_thread(tm
         )
     )
 
-    consent_block_msgs = [m for m in sent_group_text if m[1] == "Bitte kläre Consent privat mit dem Bot."]
-    assert len(consent_block_msgs) == 1
-    assert consent_block_msgs[0][2] == 872
-
-    assert len(sent_group_markup) == 1
-    chat_id, text, markup, thread_id = sent_group_markup[0]
-    assert chat_id == -108101
-    assert thread_id == 872
-    assert text == (
-        "Willkommen @u8101 in G. "
-        "Ich bin der KI-Bot der Gruppe. "
-        "Damit du mich nutzen kannst und ich mit dir interagieren kann, "
-        "musst du den Nutzungsbedingungen zustimmen."
-    )
-    button = markup["inline_keyboard"][0][0]
-    assert button["text"] == "Policy privat öffnen"
-    assert button["url"] == "https://t.me/AmoBot?start=consent"
-    assert "/start" not in text
+    assert sent_group_text == [(-108101, "pong", 872)]
+    assert sent_group_markup == []
 
 
-def test_forbidden_dm_without_bot_username_uses_text_only_fallback(tmp_path) -> None:
+def test_forbidden_dm_without_bot_username_sends_no_human_consent_fallback(tmp_path) -> None:
     from amo_bot.telegram.client import TelegramApiError
 
     db_url = f"sqlite:///{tmp_path / 'persist_fallback_text_only.db'}"
@@ -924,23 +904,10 @@ def test_forbidden_dm_without_bot_username_uses_text_only_fallback(tmp_path) -> 
     )
 
     assert sent_group_markup == []
-    fallback_msgs = [
-        m
-        for m in sent_group_text
-        if m[1]
-        == (
-            "Willkommen @u8102 in G. "
-            "Ich bin der KI-Bot der Gruppe. "
-            "Damit du mich nutzen kannst und ich mit dir interagieren kann, "
-            "musst du den Nutzungsbedingungen zustimmen."
-        )
-    ]
-    assert len(fallback_msgs) == 1
-    block_msgs = [m for m in sent_group_text if m[1] == "Bitte kläre Consent privat mit dem Bot."]
-    assert len(block_msgs) == 1
+    assert sent_group_text == [(-108102, "pong", None)]
 
 
-def test_forbidden_dm_existing_group_user_sends_no_group_fallback(tmp_path) -> None:
+def test_forbidden_dm_existing_group_user_still_sends_no_group_fallback(tmp_path) -> None:
     from amo_bot.telegram.client import TelegramApiError
 
     db_url = f"sqlite:///{tmp_path / 'persist_existing_user_no_group_fallback.db'}"
@@ -967,13 +934,13 @@ def test_forbidden_dm_existing_group_user_sends_no_group_fallback(tmp_path) -> N
     ]
     consent_block_msgs = [m for m in sent_group_text if m[1] == "Bitte kläre Consent privat mit dem Bot."]
 
-    assert len(fallback_msgs) == 1
-    assert len(consent_block_msgs) == 2
-    assert len(sent_group_markup) == 1
+    assert len(fallback_msgs) == 0
+    assert len(consent_block_msgs) == 0
+    assert sent_group_markup == []
 
 
 
-def test_discovery_chat_not_found_private_dm_marks_unreachable_without_persistence_error(tmp_path, caplog) -> None:
+def test_discovery_chat_not_found_private_dm_is_not_attempted(tmp_path, caplog) -> None:
     from amo_bot.telegram.client import TelegramApiError
 
     db_url = f"sqlite:///{tmp_path / 'persist_chat_not_found_unreachable.db'}"
@@ -1004,15 +971,13 @@ def test_discovery_chat_not_found_private_dm_marks_unreachable_without_persisten
     with sf() as session:
         user = session.scalar(select(User).where(User.telegram_user_id == 8106))
         assert user is not None
-        assert user.consent_status == "unreachable"
+        assert user.consent_status == "accepted"
         assert user.consent_prompt_count == 0
         assert user.consent_prompted_at is None
 
-    assert len(sent_group_markup) == 1
-    assert sent_group_markup[0][0] == -108106
-    assert sent_group_markup[0][3] is None
+    assert sent_group_markup == []
     block_msgs = [m for m in sent_group_text if m[1] == "Bitte kläre Consent privat mit dem Bot."]
-    assert len(block_msgs) == 1
+    assert len(block_msgs) == 0
 
 def test_dm_success_sends_no_group_fallback(tmp_path) -> None:
     db_url = f"sqlite:///{tmp_path / 'persist_no_group_fallback_on_dm_success.db'}"
@@ -1035,13 +1000,13 @@ def test_dm_success_sends_no_group_fallback(tmp_path) -> None:
         )
     )
 
-    assert len(sent_private) == 1
+    assert sent_private == []
     assert sent_group_markup == []
     block_msgs = [m for m in sent_group_text if m[1] == "Bitte kläre Consent privat mit dem Bot."]
-    assert len(block_msgs) == 1
+    assert len(block_msgs) == 0
 
 
-def test_new_user_dm_success_notifies_owner_about_prompt_delivery(tmp_path) -> None:
+def test_new_user_dm_success_does_not_notify_owner_about_prompt_delivery(tmp_path) -> None:
     from amo_bot.telegram.owner_notify import OwnerNotifier
 
     db_url = f"sqlite:///{tmp_path / 'persist_owner_notify_prompt_sent.db'}"
@@ -1079,7 +1044,7 @@ def test_new_user_dm_success_notifies_owner_about_prompt_delivery(tmp_path) -> N
     )
 
     prompt_notifies = [text for _, text in sent_owner if "Policy-DM erfolgreich gesendet" in text]
-    assert len(prompt_notifies) == 1
+    assert len(prompt_notifies) == 0
 
 
 def test_topic_text_without_mention_or_reply_persists_recent_and_sends_no_ai_response(tmp_path) -> None:
@@ -1340,8 +1305,8 @@ def test_unreachable_dm_group_fallback_notifies_owner_when_fallback_sent(tmp_pat
 
     unreachable_notifies = [text for _, text in sent_owner if "Policy-DM nicht zustellbar" in text]
     fallback_notifies = [text for _, text in sent_owner if "Gruppenfallback für Consent gesendet" in text]
-    assert len(unreachable_notifies) == 1
-    assert len(fallback_notifies) == 1
+    assert len(unreachable_notifies) == 0
+    assert len(fallback_notifies) == 0
 
 
 def test_persist_bot_sent_message_stores_reply_context_lookup_metadata(tmp_path) -> None:

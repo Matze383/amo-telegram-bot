@@ -40,12 +40,21 @@ Dieses Release bringt erhebliche Verbesserungen bei der Web-Recherche-Zuverläss
 
 ### Auto-Web-Research: Provider-Registry & Quality-Gates
 
-- **Source/Provider Registry:** Interne Registry für Weather- und Crypto-Provider mit definierten Default-Kandidaten.
+- **Source/Provider Registry:** Zentrale Registry für Weather- und Crypto-Provider mit definierten Default-Kandidaten.
+- **DB-Source-Auswahl:** Provider-Auswahl nutzt `research_providers` plus Health/Freshness/Observations stärker für zuverlässigere Quellen.
+- **Kein Legacy-Fallback:** Explizit leere DB-Kandidaten fallen nicht mehr auf Legacy-Defaults zurück.
+- **Disabled-Provider-Schutz:** Deaktivierte Provider bleiben dauerhaft deaktiviert (keine automatische Reaktivierung).
+- **Source-Quality/Korreboration-Gate:** News/Chain-extractions erkennen Konflikte und übermäßig schwache Quellen konservativer (Fail-Closed bei Unsicherheit).
 - **Weather-Provider:** Open-Meteo (primär) + wttr.in (Fallback) für Wetterabfragen.
 - **Crypto-Provider:** CoinGecko (primär) + Binance public ticker (Fallback), bewusst eng auf BTC/ETH in USD/USDT begrenzt; unbekannte Assets oder EUR-Paare führen zu Fail-Closed-Verhalten.
-- **Health-Monitoring:** Provider-Health wird über den Prozesslauf geteilt; DB Session/Quota Repository wird pro Execute frisch initialisiert.
-- **Fail-Closed:** Stock/Sports-Daten bleiben ohne strukturierte Provider fail-closed (keine unsicheren Annahmen).
+- **Health-Monitoring (DB-gestützt):** Provider-Health wird in der Datenbank persistiert (`research_provider_health`) und überlebt Restarts.
+- **Research-Tabellen:** Neue DB-Tabellen für zukünftige Research-Unit: `research_providers`, `research_source_observations`, `research_eval_cases`.
+- **Stock/Sports:** Bleiben ohne strukturierte Provider fail-closed (keine unsicheren Annahmen).
 - **Quota/Audit:** Metadata-only Persistenz für Audit-Zwecke; keine sensitiven Daten in Logs.
+- **Source-Observations:** Webtool Success/Fail-Closed/Error sowie Role/Quota-Denials generieren automatisch persistente Source-Observations in `research_source_observations`.
+- **Eval-Cases:** Negative Research/Source-Feedbacks generieren automatisch anonymisierte Eval-Cases in `research_eval_cases`.
+- **Eval Harness/Tests:** Test-Infrastruktur für gespeicherte anonymisierte Eval-Cases (Validierung der Source-Quality-Gates).
+- **Privacy-Gate:** Alle Observations/Eval-Cases speichern nur Metadaten (keine Raw-Queries, keine vollen URLs, keine Tokens/Secrets/Bearer-Werte; `source_hosts` enthält nur Hostnamen).
 
 ### Sicherheit & Privacy
 
@@ -74,7 +83,7 @@ Dieses Release bringt erhebliche Verbesserungen bei der Web-Recherche-Zuverläss
    ```
 
 3. **SearXNG für aktuelle Daten:**
-   - `SEARXNG_BASE_URL` konfigurieren für Auto-Web-Research.
+   - `AMO_WEBSEARCH_SEARXNG_BASE_URL` konfigurieren für Auto-Web-Research.
    - Nur HTTPS-URLs für öffentliche Endpunkte erlaubt.
 
 4. **Learning Feedback Memory:**
