@@ -7,6 +7,8 @@ from typing import Any, Protocol
 
 import httpx
 
+from amo_bot.telegram.webtool_domain_profiles import build_domain_research_profile
+
 
 @dataclass(frozen=True, slots=True)
 class EvidenceSource:
@@ -307,7 +309,8 @@ PROVIDER_REGISTRY: dict[str, ProviderDefinition] = {
 _WEATHER_RE = re.compile(r"\b(?:wetter|weather|temperatur|temperature|regen|rain|forecast|vorhersage)\b", re.IGNORECASE)
 _CRYPTO_RE = re.compile(r"\b(?:btc|bitcoin|eth|ethereum|crypto|krypto|kryptow(?:ä|ae)hrung|kurs|price|preis)\b", re.IGNORECASE)
 _STOCK_RE = re.compile(
-    r"\b(?:aktie|stock|share|shares|nasdaq|nyse|dax|etf|nvidia|nvda|tesla|tsla|apple|aapl|microsoft|msft)\b",
+    r"\b(?:aktie|aktien|stock|share|shares|nasdaq|nyse|dax|etf|börse|boerse|ticker|filing|filings|"
+    r"fundamental|fundamentals|research|dividende|dividend|earnings|kgv|nvidia|nvda|tesla|tsla|apple|aapl|microsoft|msft)\b",
     re.IGNORECASE,
 )
 _SPORTS_RE = re.compile(
@@ -317,17 +320,25 @@ _SPORTS_RE = re.compile(
 )
 _NEWS_RE = re.compile(r"\b(?:news|nachrichten|neueste(?:n)?|latest|breaking|was\s+gibt\s+es\s+(?:heute\s+)?neues)\b", re.IGNORECASE)
 _CURRENT_MARKET_RE = re.compile(r"\b(?:kurs|price|preis|jetzt|now|aktuell|current|macht|steht)\b", re.IGNORECASE)
+_FINANCE_RESEARCH_SIGNAL_RE = re.compile(
+    r"\b(?:fundamental|research|filing|filings|earnings|dividende|dividend|kgv)\b",
+    re.IGNORECASE,
+)
 
 
 def classify_evidence_domain(text: str) -> str:
     raw = text or ""
     if _WEATHER_RE.search(raw):
         return "weather"
-    if _CRYPTO_RE.search(raw) and re.search(r"\b(?:btc|bitcoin|eth|ethereum|crypto|krypto|kurs|price|preis)\b", raw, re.IGNORECASE):
+    if _CRYPTO_RE.search(raw) and re.search(
+        r"\b(?:btc|bitcoin|eth|ethereum|crypto|krypto|kurs|price|preis)\b",
+        raw,
+        re.IGNORECASE,
+    ):
         if re.search(r"\b(?:aktie|stock|share|shares)\b", raw, re.IGNORECASE):
             return "stock"
         return "crypto"
-    if _STOCK_RE.search(raw) and _CURRENT_MARKET_RE.search(raw):
+    if _STOCK_RE.search(raw) and (_CURRENT_MARKET_RE.search(raw) or _FINANCE_RESEARCH_SIGNAL_RE.search(raw)):
         return "stock"
     if _SPORTS_RE.search(raw):
         return "sports"
@@ -391,9 +402,11 @@ class WebEvidencePipeline:
         *,
         weather_provider: WeatherEvidenceProvider | None = None,
         crypto_provider: CryptoEvidenceProvider | None = None,
+        session_factory=None,
     ) -> None:
         self._weather_provider = weather_provider
         self._crypto_provider = crypto_provider
+        self._session_factory = session_factory
 
     def evaluate(self, *, query: str, locale: str) -> DomainEvidenceResult:
         domain = classify_evidence_domain(query)
@@ -406,7 +419,27 @@ class WebEvidencePipeline:
                 return _unavailable(domain, "crypto_provider_not_configured")
             return self._crypto_provider.get_crypto(query=query, locale=locale)
         if domain in {"stock", "sports"}:
-            return _unavailable(domain, f"{domain}_structured_provider_not_configured")
+            profile = build_domain_research_profile(
+                session_factory=self._session_factory,
+                domain=domain,
+                query=query,
+            )
+            if not profile.usable:
+                return DomainEvidenceResult(
+                    domain=domain,
+                    status="unavailable",
+                    confidence=0.0,
+                    text="",
+                    warnings=profile.warnings or (f"{domain}_domain_profile_not_configured",),
+                )
+            source_text = ", ".join(profile.source_names[:3]) or "DB source registry"
+            return DomainEvidenceResult(
+                domain=domain,
+                status="needs_profiled_web_research",
+                confidence=0.0,
+                text=f"Need: {profile.need}. Strategy: {profile.strategy}. Candidate sources: {source_text}.",
+                warnings=profile.warnings,
+            )
         if domain == "news":
             return DomainEvidenceResult(
                 domain="news",

@@ -1,13 +1,20 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 import httpx
+from sqlalchemy import select
 
 from amo_bot.auth.roles import Role
+from amo_bot.db.base import create_session_factory
+from amo_bot.db.init_db import init_db
+from amo_bot.db.models import ResearchProvider
+from amo_bot.db.repositories import ResearchProviderHealthRepository
+from amo_bot.telegram.webtool_domain_profiles import build_domain_research_profile
 import amo_bot.telegram.webtool_evidence as evidence_module
 from amo_bot.telegram.webtool_evidence import (
     BinanceTickerEvidenceProvider,
@@ -85,6 +92,48 @@ def _fresh_iso() -> str:
 
 def _old_iso(hours: int = 24) -> str:
     return (datetime.now(UTC) - timedelta(hours=hours)).replace(microsecond=0).isoformat()
+
+
+def _db(tmp_path):
+    database_url = f"sqlite:///{tmp_path / 'webtool_evidence.sqlite3'}"
+    init_db(database_url)
+    return create_session_factory(database_url)
+
+
+def _add_research_provider(
+    session_factory,
+    *,
+    provider_name: str,
+    source_name: str,
+    domain: str,
+    profile_needs: str,
+    source_type: str = "structured_official",
+    strategy: str = "structured_first",
+    enabled: bool = True,
+    default_priority: int = 5,
+) -> None:
+    with session_factory() as session:
+        session.add(
+            ResearchProvider(
+                provider_name=provider_name,
+                source_name=source_name,
+                domain=domain,
+                enabled=enabled,
+                default_priority=default_priority,
+                fallback_allowed=True,
+                min_confidence=0.8,
+                max_age_seconds=900,
+                metadata_json=json.dumps(
+                    {
+                        "profile_needs": profile_needs,
+                        "source_type": source_type,
+                        "strategy": strategy,
+                    },
+                    sort_keys=True,
+                ),
+            )
+        )
+        session.commit()
 
 
 _TEST_WEATHER_FALLBACK = ProviderDefinition(
@@ -568,9 +617,165 @@ def test_pipeline_fail_closed_for_stock_and_sports_without_structured_provider()
     sports = pipeline.evaluate(query="Wie stehen die Gruppen der Fußball WM?", locale="de")
 
     assert stock.status == "unavailable"
-    assert stock.warnings == ("stock_structured_provider_not_configured",)
+    assert stock.warnings == ("stock_domain_profile_not_configured",)
     assert sports.status == "unavailable"
-    assert sports.warnings == ("sports_structured_provider_not_configured",)
+    assert sports.warnings == ("sports_domain_profile_not_configured",)
+
+
+def test_finance_quote_profile_uses_db_ranked_source_strategy(tmp_path):
+    session_factory = _db(tmp_path)
+    _add_research_provider(
+        session_factory,
+        provider_name="finance_official_quote",
+        source_name="Official Exchange",
+        domain="stock",
+        profile_needs="finance_quote",
+    )
+
+    profile = build_domain_research_profile(
+        session_factory=session_factory,
+        domain="stock",
+        query="NVDA stock price now",
+    )
+    result = WebEvidencePipeline(session_factory=session_factory).evaluate(query="NVDA stock price now", locale="en")
+
+    assert profile.usable is True
+    assert profile.need == "finance_quote"
+    assert profile.strategy == "structured_first"
+    assert profile.provider_names == ("finance_official_quote",)
+    assert result.status == "needs_profiled_web_research"
+    assert "finance_quote" in " ".join(result.warnings)
+    assert "Official Exchange" in result.text
+
+
+def test_finance_profile_ranking_adjusts_from_db_health(tmp_path):
+    session_factory = _db(tmp_path)
+    _add_research_provider(
+        session_factory,
+        provider_name="finance_quote_primary",
+        source_name="Primary Quote Source",
+        domain="stock",
+        profile_needs="finance_quote",
+        default_priority=5,
+    )
+    _add_research_provider(
+        session_factory,
+        provider_name="finance_quote_backup",
+        source_name="Backup Quote Source",
+        domain="stock",
+        profile_needs="finance_quote",
+        default_priority=20,
+    )
+    with session_factory() as session:
+        ResearchProviderHealthRepository(session).record_timeout("finance_quote_primary", reason="timeout")
+
+    profile = build_domain_research_profile(
+        session_factory=session_factory,
+        domain="stock",
+        query="NVDA stock price now",
+    )
+
+    assert profile.usable is True
+    assert profile.provider_names[:2] == ("finance_quote_backup", "finance_quote_primary")
+
+
+def test_finance_research_profile_is_distinct_from_live_quote(tmp_path):
+    session_factory = _db(tmp_path)
+    _add_research_provider(
+        session_factory,
+        provider_name="finance_filings_research",
+        source_name="Issuer Filings",
+        domain="stock",
+        profile_needs="finance_research",
+        source_type="official_filings",
+    )
+
+    result = WebEvidencePipeline(session_factory=session_factory).evaluate(
+        query="Nvidia fundamentals filings and dividend research",
+        locale="en",
+    )
+
+    assert result.status == "needs_profiled_web_research"
+    assert "finance_research" in " ".join(result.warnings)
+    assert "Issuer Filings" in result.text
+
+
+def test_finance_unknown_entity_fails_closed_without_guessing_ticker(tmp_path):
+    session_factory = _db(tmp_path)
+    _add_research_provider(
+        session_factory,
+        provider_name="finance_quote_source",
+        source_name="Quote Source",
+        domain="stock",
+        profile_needs="finance_quote",
+    )
+
+    result = WebEvidencePipeline(session_factory=session_factory).evaluate(query="Was macht die Aktie jetzt?", locale="de")
+
+    assert result.status == "unavailable"
+    assert result.text == ""
+    assert result.warnings == ("stock_entity_not_identified",)
+
+
+def test_sport_profiles_cover_schedule_table_and_result_needs(tmp_path):
+    session_factory = _db(tmp_path)
+    _add_research_provider(
+        session_factory,
+        provider_name="sport_official_competition",
+        source_name="Official Competition Site",
+        domain="sports",
+        profile_needs="sport_schedule,sport_table,sport_result",
+    )
+
+    pipeline = WebEvidencePipeline(session_factory=session_factory)
+    schedule = pipeline.evaluate(query="WM Spielplan heute", locale="de")
+    table = pipeline.evaluate(query="WM Gruppen Tabelle", locale="de")
+    result = pipeline.evaluate(query="WM Ergebnis live", locale="de")
+
+    assert schedule.status == table.status == result.status == "needs_profiled_web_research"
+    assert "sport_schedule" in " ".join(schedule.warnings)
+    assert "sport_table" in " ".join(table.warnings)
+    assert "sport_result" in " ".join(result.warnings)
+    assert "Official Competition Site" in schedule.text
+
+
+def test_sport_unknown_competition_fails_closed(tmp_path):
+    session_factory = _db(tmp_path)
+    _add_research_provider(
+        session_factory,
+        provider_name="sport_table_source",
+        source_name="Sport Table Source",
+        domain="sports",
+        profile_needs="sport_table",
+    )
+
+    result = WebEvidencePipeline(session_factory=session_factory).evaluate(query="Wie ist die Tabelle?", locale="de")
+
+    assert result.status == "unavailable"
+    assert result.text == ""
+    assert result.warnings == ("sports_competition_not_identified",)
+
+
+def test_domain_profile_source_unavailable_fails_closed_from_db_state(tmp_path):
+    session_factory = _db(tmp_path)
+    _add_research_provider(
+        session_factory,
+        provider_name="disabled_finance_quote",
+        source_name="Disabled Finance Source",
+        domain="stock",
+        profile_needs="finance_quote",
+        enabled=False,
+    )
+
+    with session_factory() as session:
+        disabled = session.scalar(select(ResearchProvider).where(ResearchProvider.provider_name == "disabled_finance_quote"))
+        assert disabled is not None and disabled.enabled is False
+
+    result = WebEvidencePipeline(session_factory=session_factory).evaluate(query="NVDA stock price now", locale="en")
+
+    assert result.status == "unavailable"
+    assert result.text == ""
+    assert result.warnings == ("stock_domain_profile_no_usable_source:finance_quote",)
 
 
 def test_autoresearch_stock_does_not_use_search_snippet_numbers(monkeypatch):

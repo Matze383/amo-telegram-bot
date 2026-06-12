@@ -223,7 +223,10 @@ class WebResearchOrchestrator:
         if domain_evidence is not None:
             if domain_evidence.confirmed:
                 return WebResearchOrchestratorResult(auto_note=format_domain_evidence_note(domain_evidence))
-            if domain_evidence.domain in {"weather", "crypto", "stock", "sports"}:
+            if (
+                domain_evidence.status != "needs_profiled_web_research"
+                and domain_evidence.domain in {"weather", "crypto", "stock", "sports"}
+            ):
                 return WebResearchOrchestratorResult(
                     user_response=format_domain_fail_closed_response(
                         domain=domain_evidence.domain,
