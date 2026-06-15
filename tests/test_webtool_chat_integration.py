@@ -635,6 +635,15 @@ def test_auto_research_world_cup_2026_brazil_result_rejects_partial_opponent_and
         hosts=("de.wikipedia.org", "web.de"),
         error=None,
     )
+    followup = SimpleNamespace(
+        allowed=True,
+        decision="allow",
+        reason="search_completed",
+        text="Brazil World Cup 2026 group stage: Haiti is listed as an opponent; another source mentions a draw without score.",
+        sources=(),
+        hosts=(),
+        error=None,
+    )
     scrape1 = SimpleNamespace(
         allowed=True,
         decision="allow",
@@ -659,7 +668,7 @@ def test_auto_research_world_cup_2026_brazil_result_rejects_partial_opponent_and
         hosts=("web.de",),
         error=None,
     )
-    d, sent = _mk_sequence_dispatcher([search, scrape1, scrape2])
+    d, sent = _mk_sequence_dispatcher([search, followup, scrape1, scrape2])
 
     async def _ask(prompt: str) -> str:
         raise AssertionError("partial sports result evidence must fail closed before synthesis")
@@ -680,10 +689,87 @@ def test_auto_research_world_cup_2026_brazil_result_rejects_partial_opponent_and
     )
 
     assert sent
+    assert [c.capability for c in d.webtool_dispatcher.calls][:2] == ["websearch", "websearch"]
     assert "Ich finde kein belastbares Ergebnis" in sent[0]
     assert "sports_result_opponent_score_not_confirmed" in sent[0]
     assert "Haiti" not in sent[0]
     assert "7:1" not in sent[0]
+
+
+def test_auto_research_world_cup_2026_brazil_result_uses_followup_match_score(monkeypatch):
+    monkeypatch.setattr("amo_bot.telegram.dispatcher.AIRouter.decide", lambda self, **kwargs: _allowing_router_decision())
+    search = SimpleNamespace(
+        allowed=True,
+        decision="allow",
+        reason="search_completed",
+        text=(
+            "Brazil World Cup 2026 group stage: Brazil had a stuttering start and a draw, "
+            "but no exact opponent or result is named."
+        ),
+        sources=("https://de.wikipedia.org/wiki/Fussball-Weltmeisterschaft_2026", "https://web.de/sport/wm-2026/live"),
+        hosts=("de.wikipedia.org", "web.de"),
+        error=None,
+    )
+    followup = SimpleNamespace(
+        allowed=True,
+        decision="allow",
+        reason="search_completed",
+        text="Brazil drew Switzerland 1-1 at the World Cup 2026.",
+        sources=("https://scores.example/world-cup-2026/brazil-switzerland",),
+        hosts=("scores.example",),
+        error=None,
+    )
+    scrape1 = SimpleNamespace(
+        allowed=True,
+        decision="allow",
+        reason="scrape_completed",
+        text="Brazil World Cup 2026 group stage lists Haiti as a group opponent but no score here.",
+        sources=("https://de.wikipedia.org/wiki/Fussball-Weltmeisterschaft_2026",),
+        hosts=("de.wikipedia.org",),
+        error=None,
+    )
+    scrape2 = SimpleNamespace(
+        allowed=True,
+        decision="allow",
+        reason="scrape_completed",
+        text="Brazil World Cup 2026 group stage live blog says Brazil had a draw without exact score in this snippet.",
+        sources=("https://web.de/sport/wm-2026/live",),
+        hosts=("web.de",),
+        error=None,
+    )
+    scrape3 = SimpleNamespace(
+        allowed=True,
+        decision="allow",
+        reason="scrape_completed",
+        text="Brazil drew Switzerland 1-1 at the World Cup 2026.",
+        sources=("https://scores.example/world-cup-2026/brazil-switzerland",),
+        hosts=("scores.example",),
+        error=None,
+    )
+    d, sent = _mk_sequence_dispatcher([search, followup, scrape1, scrape2, scrape3])
+
+    async def _ask(prompt: str) -> str:
+        assert "Brazil drew Switzerland 1-1 at the World Cup 2026" in prompt
+        return "Brasilien spielte bei der WM 2026 gegen Switzerland 1-1."
+
+    d.ai_service.ask = _ask
+    asyncio.run(
+        d._maybe_handle_ai_autoreply(
+            message=_mk_message(
+                "@amo_bot Gegen wen hat Brasilien in der Vorrunde der WM 2026 schon gespielt und wie war das Ergebnis?",
+                reply_to_is_bot=False,
+                reply_to_user_is_bot=False,
+                reply_to_username="",
+            ),
+            role=Role.ADMIN,
+            bot_username="amo_bot",
+            from_parsed_update=True,
+        )
+    )
+
+    assert [c.capability for c in d.webtool_dispatcher.calls][:2] == ["websearch", "websearch"]
+    assert "opponent score" in d.webtool_dispatcher.calls[1].query
+    assert sent == ["Brasilien spielte bei der WM 2026 gegen Switzerland 1-1."]
 
 
 def test_auto_research_empty_result_retries_once_with_stable_btc_query_and_chains(monkeypatch):
@@ -1185,6 +1271,24 @@ def test_research_chain_plan_marks_snippet_only_and_single_source():
     assert plan.steps[0].reason == "source_confirmation_check"
     assert "snippet_only_result" in plan.warning_codes
     assert "single_source_host" in plan.warning_codes
+
+
+def test_research_plan_follows_up_concrete_sports_result_without_opponent_score():
+    plan = build_research_plan(
+        request_text="Gegen wen hat Brasilien in der Vorrunde der WM 2026 schon gespielt und wie war das Ergebnis?",
+        capability="websearch",
+        reason="sports_current_info_signal",
+        search_text=(
+            "Brazil World Cup 2026 group stage lists Haiti as an opponent. "
+            "Another source mentions a draw without the exact score."
+        ),
+        source_hosts=("de.wikipedia.org", "web.de"),
+        source_urls=("https://de.wikipedia.org/wiki/Fussball-Weltmeisterschaft_2026", "https://web.de/sport/wm-2026/live"),
+    )
+
+    assert plan.should_followup_search is True
+    assert "sports_result_opponent_score_missing" in plan.warning_codes
+    assert "opponent score" in plan.steps[0].query
 
 
 def test_research_chain_plan_detects_table_dynamic_page_hint():

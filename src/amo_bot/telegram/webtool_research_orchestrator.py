@@ -56,6 +56,11 @@ _AUTO_RESEARCH_SEARCH_SUMMARY_CAP = 900
 _AUTO_RESEARCH_CHAIN_SNIPPET_CAP = 500
 _AUTO_RESEARCH_CHAIN_MIN_EXTRACT_CHARS = 40
 _AUTO_RESEARCH_PLAN_MAX_FOLLOWUP_SEARCHES = 1
+_SPORTS_RESULT_SCORE_RE = re.compile(r"\b\d{1,2}\s*(?:-|:|–|—)\s*\d{1,2}\b")
+_SPORTS_RESULT_RELATION_RE = re.compile(
+    r"\b(?:against|vs\.?|versus|gegen|beat|beats|defeated|lost|drew|draw|unentschieden)\b",
+    re.IGNORECASE,
+)
 _AUTO_RESEARCH_CHAIN_FRESHNESS_RE = re.compile(
     r"\b(?:"
     r"current|aktuell(?:e[nrms]?)?|jetzt|heute|live|realtime|real-time|right\s+now|"
@@ -324,9 +329,11 @@ class WebResearchOrchestrator:
             request_text=request.normalized_text,
             capability=decision_auto.capability,
             reason=decision_auto.reason,
+            search_text=tool_result.text,
             source_hosts=tuple(tool_result.hosts or ()),
             source_urls=tuple(tool_result.sources or ()),
             source_quality_reader=self._source_quality_reader,
+            allow_sports_result_followup=not retry_attempted,
         )
         if plan.should_followup_search:
             tool_result = self._run_planned_followup_search(
@@ -926,9 +933,11 @@ def build_research_plan(
     request_text: str,
     capability: str,
     reason: str | None,
+    search_text: str = "",
     source_hosts: tuple[str, ...] = (),
     source_urls: tuple[str, ...] = (),
     source_quality_reader: ResearchSourceQualityReader | None = None,
+    allow_sports_result_followup: bool = True,
 ) -> ResearchPlan:
     """Plan a bounded extra search when initial web evidence is too narrow."""
     domain = classify_evidence_domain(request_text)
@@ -954,6 +963,11 @@ def build_research_plan(
             warnings.append("source_observation_conflict")
         if source_quality.get("weak_hosts"):
             warnings.append("source_observation_weak")
+    if allow_sports_result_followup and _is_concrete_sports_result_question(request_text) and not _sports_result_has_opponent_score(
+        search_text,
+        request_text=request_text,
+    ):
+        warnings.append("sports_result_opponent_score_missing")
 
     if not warnings:
         return ResearchPlan(domain=domain, evidence_status=evidence_status, source_host_count=len(hosts))
@@ -1130,7 +1144,11 @@ def _sports_result_text_matches_scope(text: str, *, request_text: str) -> bool:
     if competition and not _contains_sports_scope_token(raw, str(competition)):
         return False
     phase = terms.get("phase")
-    if phase and not _contains_sports_scope_token(raw, str(phase)):
+    if (
+        phase
+        and not _contains_sports_scope_token(raw, str(phase))
+        and not _sports_result_has_opponent_score(raw, request_text=request_text)
+    ):
         return False
     return True
 
@@ -1143,22 +1161,21 @@ def _contains_sports_scope_token(text: str, token: str) -> bool:
 
 def _sports_result_has_opponent_score(text: str, *, request_text: str) -> bool:
     raw = text or ""
-    if not raw.strip() or not _sports_result_text_matches_scope(raw, request_text=request_text):
+    if not raw.strip():
         return False
-    score_re = r"\b\d{1,2}\s*(?:-|:|–|—)\s*\d{1,2}\b"
     for unit in _sports_result_evidence_units(raw):
         if not _sports_result_unit_matches_scope(unit, request_text=request_text):
             continue
-        for match in re.finditer(score_re, unit):
+        for match in _SPORTS_RESULT_SCORE_RE.finditer(unit):
             window = unit[max(0, match.start() - 120) : match.end() + 120]
-            if re.search(
-                r"\b(?:against|vs\.?|versus|gegen|beat|beats|defeated|lost|drew|draw|unentschieden)\b",
-                window,
-                re.IGNORECASE,
-            ):
+            if _SPORTS_RESULT_RELATION_RE.search(window):
                 return True
             team = re.escape(sports_query.first_team(request_text) or "")
-            if team and re.search(rf"\b{team}\b.{0,80}{score_re}.{0,80}\b[A-ZÄÖÜ][A-Za-zÄÖÜäöüß.-]{{2,}}\b", window):
+            if team and re.search(
+                rf"(?:\b{team}\b.{0,80}{_SPORTS_RESULT_SCORE_RE.pattern}.{0,80}\b[A-ZÄÖÜ][A-Za-zÄÖÜäöüß.-]{{2,}}\b|"
+                rf"\b[A-ZÄÖÜ][A-Za-zÄÖÜäöüß.-]{{2,}}\b.{0,80}{_SPORTS_RESULT_SCORE_RE.pattern}.{0,80}\b{team}\b)",
+                window,
+            ):
                 return True
     return False
 
@@ -1343,6 +1360,8 @@ def _build_planned_followup_query(*, request_text: str, domain: str, warnings: t
         "weather": "current forecast official weather source",
     }
     suffix = suffixes.get(domain, "current corroborating sources")
+    if domain == "sports" and "sports_result_opponent_score_missing" in warnings:
+        suffix = "current match result opponent score official sources"
     if any("conflict" in warning for warning in warnings):
         suffix = f"{suffix} corroboration"
     query = f"{base} {suffix}"
