@@ -175,6 +175,67 @@ class ResearchPlan:
 
 
 @dataclass(frozen=True, slots=True)
+class QueryPlannerStageOutput:
+    """Stage 1: normalized query intent and the first tool operation to attempt."""
+
+    enabled: bool
+    domain: str
+    capability: str
+    reason: str
+    query: str = ""
+    url: str = ""
+    is_followup_research: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class SearchExecutionStageOutput:
+    """Stage 2: bounded websearch/webtool execution result metadata."""
+
+    result: Any
+    capability: str
+    reason: str
+    retry_attempted: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class SourceSelectionStageOutput:
+    """Stage 3: selected source URLs and follow-up search plan."""
+
+    plan: ResearchPlan
+    selected_urls: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class ExtractionBrowserStageOutput:
+    """Stage 4: checked source-page evidence from static extraction/browser."""
+
+    plan: ResearchPlan
+    attempted_urls: tuple[str, ...] = ()
+    extracts: tuple[tuple[str, str, str], ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class EvidenceValidationStageOutput:
+    """Stage 5: final evidence gate before answer synthesis."""
+
+    domain: str
+    status: str
+    can_synthesize: bool
+    search_text: str = ""
+    search_hosts: tuple[str, ...] = ()
+    checked_extracts: tuple[tuple[str, str, str], ...] = ()
+    warnings: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class AnswerSynthesisStageOutput:
+    """Stage 6: safe answer context or deterministic fail-closed response."""
+
+    auto_note: str = ""
+    user_response: str = ""
+
+
+@dataclass(frozen=True, slots=True)
 class SportsResultEvidenceAssessment:
     confirmed: bool
     confidence: float
@@ -263,29 +324,21 @@ class WebResearchOrchestrator:
         if self._webtool_dispatcher is None:
             return WebResearchOrchestratorResult()
 
-        decision_auto = decide_auto_research(request.normalized_text)
-        is_followup_research = False
-        if (
-            not decision_auto.enabled
-            and request.is_triggered_path
-            and is_web_research_followup_feedback(request.normalized_text)
-        ):
-            followup_query = build_web_research_followup_query(
-                feedback_text=request.normalized_text,
-                context_text=request.reply_context_text,
-            )
-            if followup_query:
-                decision_auto = type("_AutoFollowup", (), {
-                    "enabled": True,
-                    "capability": "websearch",
-                    "reason": "user_feedback_followup",
-                    "query": followup_query,
-                    "url": "",
-                })()
-                is_followup_research = True
-
-        if not decision_auto.enabled:
+        query_stage = build_query_planner_stage(
+            request_text=request.normalized_text,
+            is_triggered_path=request.is_triggered_path,
+            reply_context_text=request.reply_context_text,
+        )
+        if not query_stage.enabled:
             return WebResearchOrchestratorResult()
+        decision_auto = SimpleNamespace(
+            enabled=query_stage.enabled,
+            capability=query_stage.capability,
+            reason=query_stage.reason,
+            query=query_stage.query,
+            url=query_stage.url,
+        )
+        is_followup_research = query_stage.is_followup_research
 
         domain_evidence = self._evaluate_domain_evidence(request)
         if domain_evidence is not None:
@@ -353,16 +406,19 @@ class WebResearchOrchestrator:
                 )
             )
 
-        plan = build_research_plan(
-            request_text=request.normalized_text,
+        search_stage = SearchExecutionStageOutput(
+            result=tool_result,
             capability=decision_auto.capability,
             reason=decision_auto.reason,
-            search_text=tool_result.text,
-            source_hosts=tuple(tool_result.hosts or ()),
-            source_urls=tuple(tool_result.sources or ()),
+            retry_attempted=retry_attempted,
+        )
+        source_selection = build_source_selection_stage(
+            request_text=request.normalized_text,
+            search_execution=search_stage,
             source_quality_reader=self._source_quality_reader,
             allow_sports_result_followup=not retry_attempted,
         )
+        plan = source_selection.plan
         if plan.should_followup_search:
             tool_result = self._run_planned_followup_search(
                 request,
@@ -370,9 +426,16 @@ class WebResearchOrchestrator:
                 plan=plan,
                 is_followup_research=is_followup_research,
             )
+            search_stage = SearchExecutionStageOutput(
+                result=tool_result,
+                capability=decision_auto.capability,
+                reason=decision_auto.reason,
+                retry_attempted=retry_attempted,
+            )
 
         chain_extracts: list[tuple[str, str, str]] = []
         chain_urls: tuple[str, ...] = ()
+        extraction_stage: ExtractionBrowserStageOutput | None = None
         if should_chain_auto_research(
             request.normalized_text,
             capability=decision_auto.capability,
@@ -388,6 +451,16 @@ class WebResearchOrchestrator:
                 request=request,
                 chain_urls=chain_urls,
                 chain_extracts=tuple(chain_extracts),
+            )
+            extraction_stage = build_extraction_browser_stage(
+                request_text=request.normalized_text,
+                capability=decision_auto.capability,
+                reason=decision_auto.reason,
+                search_text=getattr(tool_result, "text", "") or "",
+                source_hosts=tuple(getattr(tool_result, "hosts", ()) or ()),
+                source_urls=tuple(getattr(tool_result, "sources", ()) or ()),
+                extracts=tuple(chain_extracts),
+                source_quality_reader=self._source_quality_reader,
             )
 
         if chain_extracts:
@@ -456,13 +529,19 @@ class WebResearchOrchestrator:
                 locale=request.locale,
             )
         else:
-            domain_unconfirmed = _format_domain_chain_unconfirmed_response(
+            validation_stage = validate_research_evidence(
                 request_text=request.normalized_text,
-                locale=request.locale,
-                reason="snippet_only_result",
+                search_execution=search_stage,
+                extraction=extraction_stage,
             )
-            if domain_unconfirmed:
-                return WebResearchOrchestratorResult(user_response=domain_unconfirmed)
+            synthesis_stage = synthesize_research_answer(
+                validation=validation_stage,
+                capability=decision_auto.capability,
+                locale=request.locale,
+                followup=is_followup_research,
+            )
+            if synthesis_stage.user_response:
+                return WebResearchOrchestratorResult(user_response=synthesis_stage.user_response)
             user_response = _format_weather_unconfirmed_response(
                 request_text=request.normalized_text,
                 search_text=tool_result.text,
@@ -471,12 +550,7 @@ class WebResearchOrchestrator:
             )
             if user_response:
                 return WebResearchOrchestratorResult(user_response=user_response)
-            auto_note = _format_auto_research_success_note(
-                capability=decision_auto.capability,
-                text=tool_result.text,
-                hosts=tuple(tool_result.hosts or ()),
-                locale=request.locale,
-            )
+            auto_note = synthesis_stage.auto_note
         return WebResearchOrchestratorResult(auto_note=auto_note)
 
     def _evaluate_domain_evidence(self, request: WebResearchOrchestratorRequest) -> DomainEvidenceResult | None:
@@ -1058,6 +1132,193 @@ def build_research_chain_plan(
         source_host_count=len(hosts),
         warning_codes=tuple(dict.fromkeys(warnings)),
         steps=steps,
+    )
+
+
+def build_query_planner_stage(
+    *,
+    request_text: str,
+    is_triggered_path: bool = False,
+    reply_context_text: str = "",
+) -> QueryPlannerStageOutput:
+    """Build the query-planner contract without executing any tool."""
+    decision_auto = decide_auto_research(request_text)
+    is_followup_research = False
+    if not decision_auto.enabled and is_triggered_path and is_web_research_followup_feedback(request_text):
+        followup_query = build_web_research_followup_query(
+            feedback_text=request_text,
+            context_text=reply_context_text,
+        )
+        if followup_query:
+            decision_auto = SimpleNamespace(
+                enabled=True,
+                capability="websearch",
+                reason="user_feedback_followup",
+                query=followup_query,
+                url="",
+            )
+            is_followup_research = True
+    return QueryPlannerStageOutput(
+        enabled=bool(decision_auto.enabled),
+        domain=classify_evidence_domain(request_text),
+        capability=str(getattr(decision_auto, "capability", "") or ""),
+        reason=str(getattr(decision_auto, "reason", "") or ""),
+        query=str(getattr(decision_auto, "query", "") or ""),
+        url=str(getattr(decision_auto, "url", "") or ""),
+        is_followup_research=is_followup_research,
+    )
+
+
+def build_source_selection_stage(
+    *,
+    request_text: str,
+    search_execution: SearchExecutionStageOutput,
+    source_quality_reader: ResearchSourceQualityReader | None = None,
+    allow_sports_result_followup: bool = True,
+) -> SourceSelectionStageOutput:
+    """Build the source-selection contract from a completed search stage."""
+    result = search_execution.result
+    plan = build_research_plan(
+        request_text=request_text,
+        capability=search_execution.capability,
+        reason=search_execution.reason,
+        search_text=getattr(result, "text", "") or "",
+        source_hosts=tuple(getattr(result, "hosts", ()) or ()),
+        source_urls=tuple(getattr(result, "sources", ()) or ()),
+        source_quality_reader=source_quality_reader,
+        allow_sports_result_followup=allow_sports_result_followup,
+    )
+    chain_plan = build_research_chain_plan(
+        request_text=request_text,
+        capability=search_execution.capability,
+        reason=search_execution.reason,
+        search_text=getattr(result, "text", "") or "",
+        source_hosts=tuple(getattr(result, "hosts", ()) or ()),
+        source_urls=tuple(getattr(result, "sources", ()) or ()),
+        source_quality_reader=source_quality_reader,
+    )
+    selected_urls = tuple(step.url for step in chain_plan.steps if step.operation == "webscraping" and step.url)
+    return SourceSelectionStageOutput(plan=plan, selected_urls=selected_urls)
+
+
+def build_extraction_browser_stage(
+    *,
+    request_text: str,
+    capability: str,
+    reason: str | None,
+    search_text: str,
+    source_hosts: tuple[str, ...],
+    source_urls: tuple[str, ...],
+    extracts: tuple[tuple[str, str, str], ...] = (),
+    source_quality_reader: ResearchSourceQualityReader | None = None,
+) -> ExtractionBrowserStageOutput:
+    """Build the extraction/browser contract from selected and checked sources."""
+    plan = build_research_chain_plan(
+        request_text=request_text,
+        capability=capability,
+        reason=reason,
+        search_text=search_text,
+        source_hosts=source_hosts,
+        source_urls=source_urls,
+        source_quality_reader=source_quality_reader,
+    )
+    attempted_urls = tuple(step.url for step in plan.steps if step.operation == "webscraping" and step.url)
+    return ExtractionBrowserStageOutput(plan=plan, attempted_urls=attempted_urls, extracts=extracts)
+
+
+def validate_research_evidence(
+    *,
+    request_text: str,
+    search_execution: SearchExecutionStageOutput,
+    extraction: ExtractionBrowserStageOutput | None = None,
+) -> EvidenceValidationStageOutput:
+    """Validate that final answer evidence is explicit checked evidence where required."""
+    result = search_execution.result
+    domain = classify_evidence_domain(request_text)
+    search_text = getattr(result, "text", "") or ""
+    search_hosts = tuple(getattr(result, "hosts", ()) or ())
+    checked_extracts = tuple(extraction.extracts if extraction is not None else ())
+    warnings: list[str] = []
+
+    if checked_extracts:
+        return EvidenceValidationStageOutput(
+            domain=domain,
+            status="checked_evidence_available",
+            can_synthesize=True,
+            search_text=search_text,
+            search_hosts=search_hosts,
+            checked_extracts=checked_extracts,
+        )
+
+    if extraction is not None:
+        warnings = list(extraction.plan.warning_codes)
+        status = "source_check_inconclusive" if extraction.attempted_urls else "snippet_only_result"
+    else:
+        status = "search_result_only"
+
+    current_fact_domain = domain in {"weather", "crypto", "stock", "sports", "news"}
+    chain_required = should_chain_auto_research(
+        request_text,
+        capability=search_execution.capability,
+        reason=search_execution.reason,
+    )
+    if current_fact_domain and chain_required:
+        primary_warning = "snippet_only_result" if not (extraction and extraction.attempted_urls) else "source_check_inconclusive"
+        warnings = [primary_warning, *(warning for warning in warnings if warning != primary_warning)]
+        return EvidenceValidationStageOutput(
+            domain=domain,
+            status=status,
+            can_synthesize=False,
+            search_text=search_text,
+            search_hosts=search_hosts,
+            checked_extracts=(),
+            warnings=tuple(dict.fromkeys(warnings)),
+        )
+
+    return EvidenceValidationStageOutput(
+        domain=domain,
+        status=status,
+        can_synthesize=True,
+        search_text=search_text,
+        search_hosts=search_hosts,
+        checked_extracts=(),
+        warnings=tuple(dict.fromkeys(warnings)),
+    )
+
+
+def synthesize_research_answer(
+    *,
+    validation: EvidenceValidationStageOutput,
+    capability: str,
+    locale: str,
+    followup: bool = False,
+) -> AnswerSynthesisStageOutput:
+    """Produce the answer-synthesizer contract from validated evidence only."""
+    if not validation.can_synthesize:
+        response = format_domain_fail_closed_response(
+            domain=validation.domain,
+            locale=locale,
+            warnings=tuple(dict.fromkeys((validation.status, *validation.warnings))),
+        )
+        return AnswerSynthesisStageOutput(user_response=response)
+    if validation.checked_extracts:
+        return AnswerSynthesisStageOutput(
+            auto_note=_format_auto_research_chained_success_note(
+                capability=capability,
+                search_text=validation.search_text,
+                search_hosts=validation.search_hosts,
+                extracts=validation.checked_extracts,
+                followup=followup,
+                locale=locale,
+            )
+        )
+    return AnswerSynthesisStageOutput(
+        auto_note=_format_auto_research_success_note(
+            capability=capability,
+            text=validation.search_text,
+            hosts=validation.search_hosts,
+            locale=locale,
+        )
     )
 
 
