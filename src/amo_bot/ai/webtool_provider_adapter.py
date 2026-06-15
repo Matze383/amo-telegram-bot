@@ -531,23 +531,46 @@ class _AllowAllCoreQuotaLimiter:
 
 
 class RealWebscrapeProviderAdapter:
+    _DEFAULT_UA = _CorepluginSearchProviderAdapter._DDG_UA
+    _DEFAULT_ACCEPT = "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8"
+    _DEFAULT_ACCEPT_LANGUAGE = "en-US,en;q=0.9,de;q=0.8"
+
     def __init__(
         self,
         *,
         policy: WebscrapingPolicyConfig | None = None,
         http_get: Any = None,
+        headers: dict[str, str] | None = None,
     ) -> None:
         self._policy = policy or _default_webscraping_policy()
-        self._http_get = http_get or _default_http_get
+        self._headers = _default_static_fetch_headers(headers)
+        self._http_get = http_get or self._default_http_get
 
     def fetch(self, *, url: str, timeout_seconds: float) -> dict[str, object]:
         request = WebscrapingInput(url=url.strip())
+        policy = self._policy
+        if policy is _DEFAULT_WEBSCRAPING_POLICY:
+            policy = _policy_for_single_public_url(url, timeout_seconds=timeout_seconds)
         result = execute_webscraping_static_html(
             request=request,
-            policy=self._policy,
+            policy=policy,
             http_get=self._http_get,
         )
         return _map_webscraping_result(result, url)
+
+    def _default_http_get(self, url: str, timeout_seconds: float) -> WebscrapingHTTPResponse:
+        try:
+            with httpx.Client(timeout=timeout_seconds, follow_redirects=True, headers=self._headers) as client:
+                response = client.get(url)
+        except httpx.TimeoutException as exc:
+            raise TimeoutError("Static scrape timed out") from exc
+        except httpx.HTTPError as exc:
+            raise RuntimeError("Static scrape request failed") from exc
+        return WebscrapingHTTPResponse(
+            status_code=int(response.status_code),
+            headers=dict(response.headers),
+            body=response.content,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -689,22 +712,52 @@ def _is_private_or_internal_ip(ip: ipaddress._BaseAddress) -> bool:
     )
 
 
+_DEFAULT_WEBSCRAPING_POLICY = WebscrapingPolicyConfig(
+    enabled=False,
+    allow_local_hosts=False,
+    allowlist_hosts=frozenset(),
+    timeout_seconds=3.0,
+    max_response_bytes=1_000_000,
+    max_output_chars=4000,
+    allowed_mime_prefixes=("text/html", "application/xhtml+xml"),
+    enforce_robots=True,
+    robots_disallow_prefixes=("/",),
+)
+
+
 def _default_webscraping_policy() -> WebscrapingPolicyConfig:
+    return _DEFAULT_WEBSCRAPING_POLICY
+
+
+def _policy_for_single_public_url(url: str, *, timeout_seconds: float) -> WebscrapingPolicyConfig:
+    parsed = _validate_browser_target_url(url)
+    host = (parsed.hostname or "").strip().lower().rstrip(".")
+    bounded_timeout = min(max(float(timeout_seconds), 0.5), 12.0)
     return WebscrapingPolicyConfig(
-        enabled=False,
+        enabled=True,
         allow_local_hosts=False,
-        allowlist_hosts=frozenset(),
-        timeout_seconds=3.0,
+        allowlist_hosts=frozenset({host}),
+        timeout_seconds=bounded_timeout,
         max_response_bytes=1_000_000,
         max_output_chars=4000,
         allowed_mime_prefixes=("text/html", "application/xhtml+xml"),
-        enforce_robots=True,
-        robots_disallow_prefixes=("/",),
+        enforce_robots=False,
+        robots_disallow_prefixes=(),
     )
 
 
-def _default_http_get(url: str, timeout_seconds: float) -> WebscrapingHTTPResponse:
-    raise TimeoutError("No HTTP getter configured")
+def _default_static_fetch_headers(overrides: dict[str, str] | None = None) -> dict[str, str]:
+    headers = {
+        "User-Agent": os.getenv("AMO_WEBSCRAPE_USER_AGENT", RealWebscrapeProviderAdapter._DEFAULT_UA).strip()
+        or RealWebscrapeProviderAdapter._DEFAULT_UA,
+        "Accept": os.getenv("AMO_WEBSCRAPE_ACCEPT", RealWebscrapeProviderAdapter._DEFAULT_ACCEPT).strip()
+        or RealWebscrapeProviderAdapter._DEFAULT_ACCEPT,
+        "Accept-Language": os.getenv("AMO_WEBSCRAPE_ACCEPT_LANGUAGE", RealWebscrapeProviderAdapter._DEFAULT_ACCEPT_LANGUAGE).strip()
+        or RealWebscrapeProviderAdapter._DEFAULT_ACCEPT_LANGUAGE,
+    }
+    if overrides:
+        headers.update({str(key): str(value) for key, value in overrides.items() if str(key).strip() and str(value).strip()})
+    return headers
 
 
 def _map_webscraping_result(result: Any, original_url: str) -> dict[str, object]:
@@ -715,9 +768,15 @@ def _map_webscraping_result(result: Any, original_url: str) -> dict[str, object]
             "headers": {},
             "text": result.extracted_text or "",
         }
+    status_raw = (getattr(result, "audit_payload", {}) or {}).get("status_code")
+    try:
+        status_code = int(status_raw) if status_raw is not None and str(status_raw).isdigit() else 0
+    except (TypeError, ValueError):
+        status_code = 0
     return {
         "url": original_url,
-        "status_code": 0,
+        "status_code": status_code,
         "headers": {},
         "text": "",
+        "reason_code": getattr(result, "reason_code", "fetch_failed"),
     }

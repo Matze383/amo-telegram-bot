@@ -7,6 +7,7 @@ from typing import Any, Protocol
 
 import httpx
 
+from amo_bot.telegram import sports_query
 from amo_bot.telegram.webtool_domain_profiles import build_domain_research_profile
 
 
@@ -313,11 +314,6 @@ _STOCK_RE = re.compile(
     r"fundamental|fundamentals|research|dividende|dividend|earnings|kgv|nvidia|nvda|tesla|tsla|apple|aapl|microsoft|msft)\b",
     re.IGNORECASE,
 )
-_SPORTS_RE = re.compile(
-    r"\b(?:wm|weltmeisterschaft|world\s+cup|em|europameisterschaft|euro|bundesliga|champions\s+league|"
-    r"gruppe(?:n)?|tabelle|standings?|spielplan|fixtures?|score|ergebnis(?:se)?|punkte|points)\b",
-    re.IGNORECASE,
-)
 _NEWS_RE = re.compile(r"\b(?:news|nachrichten|neueste(?:n)?|latest|breaking|was\s+gibt\s+es\s+(?:heute\s+)?neues)\b", re.IGNORECASE)
 _CURRENT_MARKET_RE = re.compile(r"\b(?:kurs|price|preis|jetzt|now|aktuell|current|macht|steht)\b", re.IGNORECASE)
 _FINANCE_RESEARCH_SIGNAL_RE = re.compile(
@@ -340,14 +336,27 @@ def classify_evidence_domain(text: str) -> str:
         return "crypto"
     if _STOCK_RE.search(raw) and (_CURRENT_MARKET_RE.search(raw) or _FINANCE_RESEARCH_SIGNAL_RE.search(raw)):
         return "stock"
-    if _SPORTS_RE.search(raw):
+    if sports_query.has_sports_signal(raw):
         return "sports"
     if _NEWS_RE.search(raw):
         return "news"
     return "generic"
 
 
-def format_domain_evidence_note(result: DomainEvidenceResult) -> str:
+def _target_answer_language_instruction(locale: str) -> str:
+    if (locale or "").lower().startswith("en"):
+        return (
+            "Target answer language: English. Keep source names, team names, titles, "
+            "and technical identifiers in their original wording when appropriate."
+        )
+    return (
+        "Ziel-Antwortsprache: Deutsch. Übersetze oder verändere keine Quellennamen, "
+        "Teamnamen, Titel, Zahlen, Datumsangaben oder technischen Bezeichner; übernimm "
+        "sie im Original, wenn sie aus der Quelle stammen."
+    )
+
+
+def format_domain_evidence_note(result: DomainEvidenceResult, *, locale: str = "de") -> str:
     source_lines = "\n".join(
         f"- {source.name}: {source.url} (Stand: {source.fetched_at})" for source in result.sources[:5]
     )
@@ -355,6 +364,7 @@ def format_domain_evidence_note(result: DomainEvidenceResult) -> str:
     warnings = f"\nWarnings:\n{warning_text}" if warning_text else ""
     return (
         "DOMAIN EVIDENCE (STRUCTURED/FRESH) — STRICT INSTRUCTION:\n"
+        f"{_target_answer_language_instruction(locale)}\n"
         f"Domain: {result.domain}; evidence status: {result.status}; confidence: {result.confidence:.2f}.\n"
         "Use this structured evidence before generic web snippets or model memory. "
         "Do NOT invent numbers, standings, forecasts, prices, or timestamps beyond this evidence. "

@@ -13,7 +13,8 @@ from amo_bot.auth.roles import Role
 from amo_bot.db.base import create_session_factory
 from amo_bot.db.init_db import init_db
 from amo_bot.db.models import ResearchProvider
-from amo_bot.db.repositories import ResearchProviderHealthRepository
+from amo_bot.db.repositories import ResearchProviderHealthRepository, ResearchSourceObservationRepository
+from amo_bot.telegram import sports_query
 from amo_bot.telegram.webtool_domain_profiles import build_domain_research_profile
 import amo_bot.telegram.webtool_evidence as evidence_module
 from amo_bot.telegram.webtool_evidence import (
@@ -739,6 +740,161 @@ def test_sport_profiles_cover_schedule_table_and_result_needs(tmp_path):
     assert "Official Competition Site" in schedule.text
 
 
+def test_sport_world_cup_2026_german_hyphenated_group_stage_identifies_result_need(tmp_path):
+    session_factory = _db(tmp_path)
+    _add_research_provider(
+        session_factory,
+        provider_name="sport_official_competition",
+        source_name="Official Competition Site",
+        domain="sports",
+        profile_needs="sport_schedule,sport_table,sport_result",
+    )
+
+    query = "Gegen wen hat Brasilien in der Vorrunde der WM 2026 schon gespielt und wie war das Ergebnis?"
+    profile = build_domain_research_profile(session_factory=session_factory, domain="sports", query=query)
+    result = WebEvidencePipeline(session_factory=session_factory).evaluate(query=query, locale="de")
+
+    assert classify_evidence_domain(query) == "sports"
+    assert profile.need == "sport_result"
+    assert profile.usable is True
+    assert result.status == "needs_profiled_web_research"
+    assert "sports_competition_not_identified" not in result.warnings
+    assert "sport_result" in " ".join(result.warnings)
+
+
+def test_sport_query_registry_normalizes_competition_year_phase_and_need():
+    cases = {
+        "FIFA World Cup 2026 group stage results": {
+            "competition": "world cup",
+            "year": 2026,
+            "phase": "group stage",
+            "need": "sport_result",
+        },
+        "Euro 2024 standings": {
+            "competition": "euro",
+            "year": 2024,
+            "phase": None,
+            "need": "sport_table",
+        },
+    }
+
+    for query, expected in cases.items():
+        assert sports_query.query_terms(query) == expected
+        assert sports_query.has_competition(query)
+        assert sports_query.has_sports_signal(query)
+
+
+def test_sport_query_registry_detects_canonical_team_names():
+    cases = {
+        "Brazil World Cup 2026 group stage result": "Brazil",
+        "Germany Euro 2024 result": "Germany",
+    }
+
+    for query, expected_team in cases.items():
+        assert sports_query.first_team(query) == expected_team
+
+
+def test_sport_query_registry_detects_canonical_team_names_for_any_registered_team(monkeypatch):
+    monkeypatch.setattr(
+        sports_query,
+        "TEAM_NAME_ALIASES",
+        (
+            *sports_query.TEAM_NAME_ALIASES,
+            sports_query.SportsAlias(canonical="Los Angeles Lakers", aliases=("lakers",)),
+        ),
+    )
+
+    assert sports_query.first_team("Los Angeles Lakers NBA result") == "Los Angeles Lakers"
+    assert sports_query.first_team("Lakers NBA result") == "Los Angeles Lakers"
+
+
+def test_sport_profile_can_use_learned_reliable_source_observations(tmp_path):
+    session_factory = _db(tmp_path)
+    with session_factory() as session:
+        repo = ResearchSourceObservationRepository(session)
+        for _ in range(2):
+            repo.record_observation(
+                provider_name="websearch_provider",
+                domain="sports",
+                outcome="search_completed",
+                confidence=0.8,
+                source_hosts=("scores.example",),
+            )
+
+    profile = build_domain_research_profile(
+        session_factory=session_factory,
+        domain="sports",
+        query="WM Gruppen Tabelle",
+    )
+    result = WebEvidencePipeline(session_factory=session_factory).evaluate(query="WM Gruppen Tabelle", locale="de")
+
+    assert profile.usable is True
+    assert profile.strategy == "learned_search_scrape_chain"
+    assert profile.source_names == ("scores.example",)
+    assert "learned_sources:scores.example" in profile.warnings
+    assert result.status == "needs_profiled_web_research"
+    assert "scores.example" in result.text
+
+
+def test_sport_profile_ignores_weak_learned_source_observations(tmp_path):
+    session_factory = _db(tmp_path)
+    with session_factory() as session:
+        repo = ResearchSourceObservationRepository(session)
+        repo.record_observation(
+            provider_name="websearch_provider",
+            domain="sports",
+            outcome="search_completed",
+            confidence=0.8,
+            source_hosts=("scores.example",),
+        )
+        repo.record_observation(
+            provider_name="websearch_provider",
+            domain="sports",
+            outcome="empty_result",
+            confidence=0.2,
+            source_hosts=("scores.example",),
+        )
+        repo.record_observation(
+            provider_name="websearch_provider",
+            domain="sports",
+            outcome="search_completed",
+            confidence=0.7,
+            source_hosts=("scores.example",),
+            warning_codes=("single_source_host",),
+        )
+
+    result = WebEvidencePipeline(session_factory=session_factory).evaluate(query="WM Gruppen Tabelle", locale="de")
+
+    assert result.status == "unavailable"
+    assert result.warnings == ("sports_domain_profile_no_usable_source:sport_table",)
+
+
+def test_sport_profile_ignores_conflicting_learned_source_observations(tmp_path):
+    session_factory = _db(tmp_path)
+    with session_factory() as session:
+        repo = ResearchSourceObservationRepository(session)
+        repo.record_observation(
+            provider_name="websearch_provider",
+            domain="sports",
+            outcome="search_completed",
+            confidence=0.8,
+            source_hosts=("scores.example",),
+        )
+        repo.record_observation(
+            provider_name="websearch_provider",
+            domain="sports",
+            outcome="search_completed",
+            confidence=0.8,
+            source_hosts=("scores.example",),
+            warning_codes=("source_conflict",),
+        )
+
+    result = WebEvidencePipeline(session_factory=session_factory).evaluate(query="WM Gruppen Tabelle", locale="de")
+
+    assert result.status == "unavailable"
+    assert result.warnings == ("sports_domain_profile_no_usable_source:sport_table",)
+
+
 def test_sport_unknown_competition_fails_closed(tmp_path):
     session_factory = _db(tmp_path)
     _add_research_provider(
@@ -847,12 +1003,15 @@ def test_autoresearch_crypto_uses_structured_evidence_before_search(monkeypatch)
     assert d.webtool_dispatcher.calls[0].capability == "crypto_evidence"
     assert sent == ["normal ai"]
     assert calls and "DOMAIN EVIDENCE (STRUCTURED/FRESH)" in calls[0]
+    assert "Übersetze oder verändere keine Quellennamen" in calls[0]
+    assert "Teamnamen, Titel, Zahlen, Datumsangaben oder technischen Bezeichner" in calls[0]
+    assert "übernimm sie im Original, wenn sie aus der Quelle stammen" in calls[0]
     assert "3123 EUR" in calls[0]
     assert "Binance: https://api.binance.com/api/v3/ticker/24hr" in calls[0]
     assert "ETH snippet 1 EUR" not in calls[0]
 
 
-def test_autoresearch_sports_does_not_use_search_snippet_table(monkeypatch):
+def test_autoresearch_sports_missing_profile_uses_websearch_but_not_snippet_table(monkeypatch):
     monkeypatch.setattr("amo_bot.telegram.dispatcher.AIRouter.decide", lambda self, **kwargs: _allowing_router_decision())
     search = SimpleNamespace(
         allowed=True,
@@ -863,8 +1022,26 @@ def test_autoresearch_sports_does_not_use_search_snippet_table(monkeypatch):
         hosts=("sports.example",),
         error=None,
     )
-    d, sent = _mk_dispatcher(search)
+    followup_empty = SimpleNamespace(allowed=False, decision="deny", reason="empty_result", text="", sources=(), hosts=(), error=None)
+    failed_scrape = SimpleNamespace(allowed=False, decision="deny", reason="empty_result", text="", sources=(), hosts=(), error=None)
+    failed_browser = SimpleNamespace(
+        allowed=False,
+        decision="provider_unavailable",
+        reason="browser_provider_not_configured",
+        text="",
+        sources=(),
+        hosts=(),
+        error="No browser",
+    )
+    d, sent = _mk_sequence_dispatcher([search, followup_empty, failed_scrape, failed_browser])
     d.web_evidence_pipeline = WebEvidencePipeline()
+    calls = []
+
+    async def _ask(prompt: str) -> str:
+        calls.append(prompt)
+        return "normal ai"
+
+    d.ai_service.ask = _ask
 
     asyncio.run(
         d._maybe_handle_ai_autoreply(
@@ -875,6 +1052,7 @@ def test_autoresearch_sports_does_not_use_search_snippet_table(monkeypatch):
         )
     )
 
-    assert d.webtool_dispatcher.calls == []
+    assert [c.capability for c in d.webtool_dispatcher.calls] == ["websearch", "websearch", "webscraping", "browser"]
+    assert calls == []
     assert sent and "Tabelle oder den Stand" in sent[0]
     assert "Team X" not in sent[0]

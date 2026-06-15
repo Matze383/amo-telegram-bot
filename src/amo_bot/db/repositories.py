@@ -1010,6 +1010,74 @@ class ResearchSourceObservationRepository:
             for host, values in sorted(counters.items())
         )
 
+    def list_reliable_hosts(
+        self,
+        *,
+        domain: str,
+        since: datetime | None = None,
+        limit: int = 500,
+        max_hosts: int = 5,
+        min_success_count: int = 1,
+    ) -> tuple[ResearchHostQualityRecord, ...]:
+        """Return recently successful hosts for a domain from metadata-only observations."""
+
+        normalized_domain = self._safe_label(domain, default="generic", max_len=64)
+        conditions = [ResearchSourceObservation.domain == normalized_domain]
+        if since is not None:
+            conditions.append(ResearchSourceObservation.created_at >= since)
+        rows = self._session.scalars(
+            select(ResearchSourceObservation)
+            .where(and_(*conditions))
+            .order_by(ResearchSourceObservation.created_at.desc())
+            .limit(max(1, min(int(limit), 2000)))
+        ).all()
+
+        counters: dict[str, dict[str, int]] = defaultdict(
+            lambda: {"success": 0, "failure": 0, "warning": 0, "conflict": 0}
+        )
+        for row in rows:
+            hosts = self._metadata_hosts(row.metadata_json)
+            if not hosts:
+                continue
+            warnings = self._warning_codes(row.warning_codes_json)
+            outcome = (row.outcome or "").strip().lower()
+            is_success = outcome in {"confirmed", "allow", "search_completed", "scrape_completed", "browser_completed"}
+            is_failure = not is_success and outcome not in {"unknown"}
+            has_conflict = any("conflict" in warning or "mismatch" in warning for warning in warnings)
+            for host in hosts:
+                if is_success:
+                    counters[host]["success"] += 1
+                if is_failure:
+                    counters[host]["failure"] += 1
+                counters[host]["warning"] += len(warnings)
+                if has_conflict:
+                    counters[host]["conflict"] += 1
+
+        records = [
+            ResearchHostQualityRecord(
+                host=host,
+                success_count=values["success"],
+                failure_count=values["failure"],
+                warning_count=values["warning"],
+                conflict_count=values["conflict"],
+            )
+            for host, values in counters.items()
+            if values["success"] >= max(1, int(min_success_count))
+            and values["failure"] == 0
+            and values["warning"] == 0
+            and values["conflict"] == 0
+        ]
+        return tuple(
+            sorted(
+                records,
+                key=lambda record: (
+                    -(record.success_count - record.failure_count - record.conflict_count),
+                    record.warning_count,
+                    record.host,
+                ),
+            )[: max(1, min(int(max_hosts), 20))]
+        )
+
     @classmethod
     def _metadata_hosts(cls, metadata_json: str | None) -> tuple[str, ...]:
         if not metadata_json:

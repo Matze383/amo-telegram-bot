@@ -13,6 +13,10 @@ import amo_bot.telegram.webtool_evidence as evidence_module
 from amo_bot.main import SessionBoundWebtoolCapabilityDispatcher
 
 
+class _StopFlow(RuntimeError):
+    pass
+
+
 class _Response:
     def __init__(self, payload):
         self._payload = payload
@@ -151,3 +155,42 @@ def test_runtime_webtool_wrapper_reuses_provider_health_across_execute_calls(mon
         "https://api.binance.com/api/v3/ticker/24hr",
         "https://api.binance.com/api/v3/ticker/24hr",
     ]
+
+
+def test_main_runtime_wires_session_factory_into_web_evidence_pipeline(monkeypatch, tmp_path):
+    from amo_bot import main as main_module
+
+    monkeypatch.setenv("BOT_TOKEN", "123:ABC")
+    monkeypatch.setenv("WEBUI_PASSWORD", "secret")
+    monkeypatch.setenv("WEBUI_SECRET_KEY", "unit-test-webui-secret-key-0123456789abcdef")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'bot.db'}")
+    monkeypatch.setenv("OFFSET_STATE_FILE", str(tmp_path / "offset.json"))
+    monkeypatch.setenv("BOT_PID_FILE", str(tmp_path / "amo_bot.pid"))
+    monkeypatch.setenv("AMO_PLUGIN_DIR", str(tmp_path / "plugins"))
+    monkeypatch.setenv("WEBUI_OWNER_TELEGRAM_ID", "")
+    monkeypatch.setenv("AMO_ENV_OVERRIDE", "0")
+
+    captured: dict[str, object] = {}
+
+    class _DummyPipeline:
+        def __init__(self, *, session_factory=None) -> None:
+            captured["pipeline_session_factory"] = session_factory
+
+    class _DummyDispatcher:
+        def __init__(self, **kwargs) -> None:  # noqa: ANN003
+            captured["dispatcher_pipeline"] = kwargs["web_evidence_pipeline"]
+
+    async def _fake_run_polling(*args, **kwargs):  # noqa: ANN002,ANN003
+        raise _StopFlow()
+
+    monkeypatch.setattr(main_module, "WebEvidencePipeline", _DummyPipeline)
+    monkeypatch.setattr(main_module, "Dispatcher", _DummyDispatcher)
+    monkeypatch.setattr(main_module, "run_polling", _fake_run_polling)
+
+    try:
+        main_module.run([])
+    except _StopFlow:
+        pass
+
+    assert captured["pipeline_session_factory"] is not None
+    assert captured["dispatcher_pipeline"].__class__ is _DummyPipeline

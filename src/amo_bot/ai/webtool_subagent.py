@@ -88,6 +88,7 @@ class WebtoolSubagentRequest:
         url: For webscraping: the target URL.
         locale: Optional locale for websearch (default "en").
         max_results: Optional max results for websearch (default 5).
+        evidence_domain: Optional classified research domain for metadata-only learning.
     """
     operation_type: str
     user_id: int
@@ -99,6 +100,7 @@ class WebtoolSubagentRequest:
     url: str = ""
     locale: str = "en"
     max_results: int = 5
+    evidence_domain: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -419,13 +421,15 @@ class WebtoolSubagentService:
             # Check HTTP status
             status_code = result.get("status_code", 0)
             if not (200 <= status_code < 300):
+                provider_reason = str(result.get("reason_code") or "").strip()
+                reason = f"http_error_{status_code}" if status_code else (provider_reason or "http_error_0")
                 return WebtoolSubagentResult(
                     allowed=False,
                     decision="deny",
-                    reason=f"http_error_{status_code}",
+                    reason=reason,
                     sanitized=self._empty_result(),
                     metadata=metadata,
-                    error=f"HTTP error: {status_code}",
+                    error=f"HTTP error: {status_code}" if status_code else reason,
                 )
 
             return WebtoolSubagentResult(
@@ -712,7 +716,7 @@ class WebtoolSubagentService:
         """Build metadata-only audit info (no query/url content)."""
         elapsed_ms = int((time.perf_counter() - start_time) * 1000)
 
-        return {
+        metadata = {
             "role": request.role.value,
             "user_id": request.user_id,
             "chat_id": request.chat_id,
@@ -726,6 +730,9 @@ class WebtoolSubagentService:
             "timing_ms": elapsed_ms + (quota_decision.timing_ms or 0),
             # No query, no url, no content, no prompts, no secrets
         }
+        if request.evidence_domain:
+            metadata["evidence_domain"] = request.evidence_domain
+        return metadata
 
     def _empty_result(self) -> WebtoolSanitizedResult:
         """Return empty sanitized result."""

@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from typing import Iterable
+
+from amo_bot.telegram import sports_query
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,15 +52,6 @@ _FINANCE_STOPWORDS = {
     "Boerse",
 }
 
-_SPORT_SCHEDULE_RE = re.compile(r"\b(?:spielplan|fixtures?|schedule|termine|matches|partien|spiele)\b", re.IGNORECASE)
-_SPORT_TABLE_RE = re.compile(r"\b(?:tabelle|standings?|gruppe(?:n)?|group(?:s)?|punkte|points|rangliste)\b", re.IGNORECASE)
-_SPORT_RESULT_RE = re.compile(r"\b(?:ergebnis(?:se)?|result(?:s)?|score|scores?|live|stand)\b", re.IGNORECASE)
-_SPORT_COMPETITION_RE = re.compile(
-    r"\b(?:wm|weltmeisterschaft|world\s+cup|em|europameisterschaft|euro|bundesliga|champions\s+league|"
-    r"europa\s+league|premier\s+league|la\s+liga|serie\s+a|nba|nfl|nhl|mlb|dfb\s+pokal)\b",
-    re.IGNORECASE,
-)
-
 
 def build_domain_research_profile(*, session_factory, domain: str, query: str) -> DomainResearchProfile:
     """Build a metadata-driven finance/sport source profile from the DB registry."""
@@ -89,6 +83,13 @@ def build_domain_research_profile(*, session_factory, domain: str, query: str) -
 
     matching = tuple(record for record in records if _record_supports_need(record.metadata or {}, need))
     if not matching:
+        learned = _learned_profile_from_observations(
+            session_factory=session_factory,
+            domain=normalized_domain,
+            need=need,
+        )
+        if learned is not None:
+            return learned
         return DomainResearchProfile(
             domain=normalized_domain,
             need=need,
@@ -109,6 +110,35 @@ def build_domain_research_profile(*, session_factory, domain: str, query: str) -
     )
 
 
+def _learned_profile_from_observations(*, session_factory, domain: str, need: str) -> DomainResearchProfile | None:
+    if domain != "sports":
+        return None
+
+    from amo_bot.db.repositories import ResearchSourceObservationRepository
+
+    since = datetime.now(UTC) - timedelta(days=14)
+    with session_factory() as session:
+        hosts = ResearchSourceObservationRepository(session).list_reliable_hosts(
+            domain=domain,
+            since=since,
+            max_hosts=3,
+            min_success_count=2,
+        )
+    if not hosts:
+        return None
+
+    source_names = tuple(record.host for record in hosts)
+    return DomainResearchProfile(
+        domain=domain,
+        need=need,
+        strategy="learned_search_scrape_chain",
+        candidate_count=len(source_names),
+        provider_names=tuple(f"learned_host:{host}" for host in source_names),
+        source_names=source_names,
+        warnings=(f"{domain}_domain_profile_learned_source:{need}", f"learned_sources:{'|'.join(source_names)}"),
+    )
+
+
 def _infer_need(domain: str, query: str) -> tuple[str, tuple[str, ...]]:
     raw = query or ""
     if domain == "stock":
@@ -121,15 +151,9 @@ def _infer_need(domain: str, query: str) -> tuple[str, tuple[str, ...]]:
         return "finance_research", ()
 
     if domain == "sports":
-        if not _SPORT_COMPETITION_RE.search(raw):
+        if not sports_query.has_competition(raw):
             return "sport_unknown_competition", ("sports_competition_not_identified",)
-        if _SPORT_TABLE_RE.search(raw):
-            return "sport_table", ()
-        if _SPORT_SCHEDULE_RE.search(raw):
-            return "sport_schedule", ()
-        if _SPORT_RESULT_RE.search(raw):
-            return "sport_result", ()
-        return "sport_context", ()
+        return sports_query.infer_need(raw), ()
 
     return "generic", ()
 

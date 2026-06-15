@@ -360,7 +360,7 @@ def run(argv: list[str] | None = None) -> None:
     )
 
     webtool_dispatcher = SessionBoundWebtoolCapabilityDispatcher(session_factory=session_factory)
-    web_evidence_pipeline = WebEvidencePipeline()
+    web_evidence_pipeline = WebEvidencePipeline(session_factory=session_factory)
 
     dispatcher = Dispatcher(
         command_registry=command_registry,

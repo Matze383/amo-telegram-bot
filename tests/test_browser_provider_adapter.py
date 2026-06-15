@@ -6,9 +6,11 @@ import pytest
 
 from amo_bot.ai.webtool_provider_adapter import (
     RealBrowserProviderAdapter,
+    RealWebscrapeProviderAdapter,
     _PlaywrightDeps,
     _detect_system_chromium_executable,
 )
+from amo_bot.ai.webscraping_coreplugin import WebscrapingHTTPResponse, WebscrapingPolicyConfig
 
 
 def test_browser_adapter_blocks_non_https():
@@ -169,3 +171,66 @@ def test_browser_adapter_uses_playwright_default_if_no_system_chromium(monkeypat
     out = adapter.render(url="https://example.com", timeout_seconds=1.0)
     assert out["status_code"] == 200
     assert launch_calls == [{"headless": True}]
+
+
+def test_static_scrape_adapter_default_fetch_uses_generic_browser_headers(monkeypatch):
+    captured: dict[str, object] = {}
+
+    class _FakeResponse:
+        status_code = 200
+        headers = {"content-type": "text/html; charset=utf-8"}
+        content = b"<html><body><h1>Static headline</h1><p>Visible page text.</p></body></html>"
+
+    class _FakeClient:
+        def __init__(self, *, timeout, follow_redirects, headers):
+            captured["timeout"] = timeout
+            captured["follow_redirects"] = follow_redirects
+            captured["headers"] = headers
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def get(self, url):
+            captured["url"] = url
+            return _FakeResponse()
+
+    monkeypatch.setattr("amo_bot.ai.webtool_provider_adapter.httpx.Client", _FakeClient)
+
+    adapter = RealWebscrapeProviderAdapter()
+    out = adapter.fetch(url="https://93.184.216.34/page", timeout_seconds=1.5)
+
+    assert out["status_code"] == 200
+    assert "Static headline" in str(out["text"])
+    assert captured["timeout"] == 1.5
+    assert captured["follow_redirects"] is True
+    headers = captured["headers"]
+    assert isinstance(headers, dict)
+    assert headers["User-Agent"].startswith("Mozilla/5.0")
+    assert "text/html" in headers["Accept"]
+    assert "en-US" in headers["Accept-Language"]
+
+
+def test_static_scrape_adapter_preserves_http_status_reason():
+    def fake_http_get(url: str, timeout_seconds: float) -> WebscrapingHTTPResponse:
+        return WebscrapingHTTPResponse(
+            status_code=403,
+            headers={"content-type": "text/html"},
+            body=b"<html><body>blocked</body></html>",
+        )
+
+    adapter = RealWebscrapeProviderAdapter(
+        policy=WebscrapingPolicyConfig(
+            enabled=True,
+            allowlist_hosts=frozenset({"example.com"}),
+            enforce_robots=False,
+        ),
+        http_get=fake_http_get,
+    )
+
+    out = adapter.fetch(url="https://example.com/page", timeout_seconds=1.0)
+
+    assert out["status_code"] == 403
+    assert out["reason_code"] == "http_status_not_ok"

@@ -1,11 +1,18 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from types import SimpleNamespace
 
+from sqlalchemy import select
+
 from amo_bot.ai.router import AIRouterDecision, AIRouterReasonCode
 from amo_bot.auth.roles import Role
+from amo_bot.db.base import create_session_factory
+from amo_bot.db.init_db import init_db
+from amo_bot.db.models import ResearchSourceObservation
+from amo_bot.db.repositories import UserRoleRepository
 from amo_bot.telegram.dispatcher import Dispatcher
 from amo_bot.telegram.webtool_research_orchestrator import (
     _chain_diagnostic_snapshot,
@@ -21,9 +28,11 @@ from amo_bot.telegram.webtool_research_orchestrator import (
 from amo_bot.telegram.update_parser import TelegramChat, TelegramMessage, TelegramUser
 from amo_bot.telegram.webtool_chat_integration import (
     WebtoolChatTrigger,
+    build_empty_result_retry_queries,
     build_empty_result_retry_query,
     build_web_research_followup_query,
     build_webtool_request,
+    sanitize_webtool_user_facing_text,
 )
 
 
@@ -109,6 +118,18 @@ def _mk_sequence_dispatcher(webtool_results):
     return d, sent
 
 
+def _db_url(tmp_path):
+    database_url = f"sqlite:///{tmp_path / 'webtool_chat.sqlite3'}"
+    init_db(database_url)
+    with create_session_factory(database_url)() as session:
+        UserRoleRepository(session).set_user_role(
+            actor_telegram_user_id=123,
+            target_telegram_user_id=123,
+            role=Role.ADMIN,
+        )
+    return database_url
+
+
 def _allowing_router_decision() -> AIRouterDecision:
     return AIRouterDecision(
         passthrough=True,
@@ -175,6 +196,35 @@ def test_provider_success_returns_sanitized_compact_output(monkeypatch):
     assert sent[0] == "Websearch: foo bar"
 
 
+def test_webtool_success_strips_tool_traces_and_markdown_tables(monkeypatch):
+    monkeypatch.setattr("amo_bot.telegram.dispatcher.AIRouter.decide", lambda self, **kwargs: _allowing_router_decision())
+    result = SimpleNamespace(
+        allowed=True,
+        decision="allow",
+        reason="search_completed",
+        text=(
+            "<tool>web_search</tool>\n"
+            "<query>Brasilien WM 2026 heute Ergebnis 15. Juni</query>\n"
+            "| Team | Ergebnis |\n"
+            "| --- | --- |\n"
+            "| Brasilien | 2:1 |\n"
+            "| Gegner | 1:2 |\n"
+        ),
+        sources=("https://a",),
+        hosts=("a",),
+        error=None,
+    )
+    d, sent = _mk_dispatcher(result)
+    asyncio.run(d._maybe_handle_ai_autoreply(message=_mk_message("@amo_bot websearch: Brasilien WM heute"), role=Role.ADMIN, bot_username="amo_bot", from_parsed_update=True))
+
+    assert "<tool>" not in sent[0]
+    assert "<query>" not in sent[0]
+    assert "| Team |" not in sent[0]
+    assert "| --- |" not in sent[0]
+    assert "Brasilien" in sent[0]
+    assert "Ergebnis: 2:1" in sent[0]
+
+
 def test_webtool_trigger_does_not_return_large_raw_result_to_chat(monkeypatch):
     monkeypatch.setattr("amo_bot.telegram.dispatcher.AIRouter.decide", lambda self, **kwargs: _allowing_router_decision())
     result = SimpleNamespace(
@@ -192,6 +242,23 @@ def test_webtool_trigger_does_not_return_large_raw_result_to_chat(monkeypatch):
     assert len(sent[0]) < 760
     assert "truncated" in sent[0]
     assert "END_MARKER_SHOULD_BE_OMITTED" not in sent[0]
+
+
+def test_sanitize_webtool_user_facing_text_converts_markdown_table_to_bullets():
+    text = sanitize_webtool_user_facing_text(
+        "<tool>web_search</tool>\n"
+        "<query>Brazil World Cup 2026 match result today June 15</query>\n"
+        "Kurzfassung:\n"
+        "| Team | Ergebnis |\n"
+        "| --- | --- |\n"
+        "| Brasilien | 2:1 |\n"
+    )
+
+    assert "<tool>" not in text
+    assert "<query>" not in text
+    assert "| Team |" not in text
+    assert "| --- |" not in text
+    assert "- Team: Brasilien; Ergebnis: 2:1" in text
 
 
 def test_auto_research_injects_strict_context_without_chain_for_weak_current_intent(monkeypatch):
@@ -227,6 +294,40 @@ def test_auto_research_injects_strict_context_without_chain_for_weak_current_int
     assert "Source hosts: a, b" in calls[0]
 
 
+def test_auto_research_final_response_strips_tool_traces_and_tables(monkeypatch):
+    monkeypatch.setattr("amo_bot.telegram.dispatcher.AIRouter.decide", lambda self, **kwargs: _allowing_router_decision())
+    result = SimpleNamespace(allowed=True, decision="allow", reason="search_completed", text="fresh facts", sources=("https://a", "https://b"), hosts=("a", "b"), error=None)
+    d, sent = _mk_dispatcher(result)
+
+    async def _ask(prompt: str) -> str:
+        return (
+            "<tool>web_search</tool>\n"
+            "<query>Brasilien WM 2026 heute Ergebnis 15. Juni</query>\n\n"
+            "| Team | Ergebnis |\n"
+            "| --- | --- |\n"
+            "| Brasilien | 2:1 |\n\n"
+            "Laut Quelle A ist das Ergebnis bestätigt."
+        )
+
+    d.ai_service.ask = _ask
+    asyncio.run(
+        d._maybe_handle_ai_autoreply(
+            message=_mk_message("@amo_bot Python decorators 2020", reply_to_is_bot=False, reply_to_user_is_bot=False, reply_to_username=""),
+            role=Role.ADMIN,
+            bot_username="amo_bot",
+            from_parsed_update=True,
+        )
+    )
+
+    assert len(d.webtool_dispatcher.calls) == 1
+    assert "<tool>" not in sent[0]
+    assert "<query>" not in sent[0]
+    assert "| Team |" not in sent[0]
+    assert "| --- |" not in sent[0]
+    assert "Team: Brasilien; Ergebnis: 2:1" in sent[0]
+    assert "Laut Quelle A" in sent[0]
+
+
 def test_auto_research_prompt_uses_bounded_web_summary(monkeypatch):
     monkeypatch.setattr("amo_bot.telegram.dispatcher.AIRouter.decide", lambda self, **kwargs: _allowing_router_decision())
     result = SimpleNamespace(
@@ -258,6 +359,44 @@ def test_auto_research_prompt_uses_bounded_web_summary(monkeypatch):
     assert sent[0] == "normal ai"
     assert calls and "truncated" in calls[0]
     assert "RAW_TAIL_SHOULD_NOT_SURVIVE" not in calls[0]
+
+
+def test_auto_research_german_locale_keeps_final_answer_instruction_german_with_english_evidence(monkeypatch):
+    monkeypatch.setattr("amo_bot.telegram.dispatcher.AIRouter.decide", lambda self, **kwargs: _allowing_router_decision())
+    result = SimpleNamespace(
+        allowed=True,
+        decision="allow",
+        reason="search_completed",
+        text="English source summary: Germany plays Denmark next in the current tournament table.",
+        sources=("https://sports.example/table",),
+        hosts=("sports.example",),
+        error=None,
+    )
+    d, sent = _mk_dispatcher(result)
+    calls = []
+
+    async def _ask(prompt: str) -> str:
+        calls.append(prompt)
+        return "Deutschland spielt laut Quelle als Nächstes gegen Dänemark."
+
+    d.ai_service.ask = _ask
+    asyncio.run(
+        d._maybe_handle_ai_autoreply(
+            message=_mk_message("@amo_bot Wie läuft die WM-Vorrunde aktuell?", reply_to_is_bot=False, reply_to_user_is_bot=False, reply_to_username=""),
+            role=Role.ADMIN,
+            bot_username="amo_bot",
+            from_parsed_update=True,
+        )
+    )
+
+    assert sent == ["Deutschland spielt laut Quelle als Nächstes gegen Dänemark."]
+    assert d.webtool_dispatcher.calls[0].locale == "de"
+    assert calls and "Ziel-Antwortsprache: Deutsch" in calls[0]
+    assert "Übersetze oder verändere keine Quellennamen" in calls[0]
+    assert "Teamnamen, Titel, Zahlen, Datumsangaben oder technischen Bezeichner" in calls[0]
+    assert "übernimm sie im Original, wenn sie aus der Quelle stammen" in calls[0]
+    assert "English source summary" in calls[0]
+    assert "sports.example" in calls[0]
 
 
 def test_auto_research_empty_result_injects_no_live_warning(monkeypatch):
@@ -342,6 +481,146 @@ def test_auto_research_sports_tournament_empty_result_fails_closed(monkeypatch):
     assert "Do NOT provide an estimated current value" in calls[0]
 
 
+def test_auto_research_world_cup_2026_group_result_uses_websearch_not_competition_fail_closed(monkeypatch):
+    monkeypatch.setattr("amo_bot.telegram.dispatcher.AIRouter.decide", lambda self, **kwargs: _allowing_router_decision())
+    result = SimpleNamespace(allowed=False, decision="deny", reason="empty_result", text="", sources=(), hosts=(), error=None)
+    d, sent = _mk_dispatcher(result)
+    calls = []
+
+    async def _ask(prompt: str) -> str:
+        calls.append(prompt)
+        return "normal ai"
+
+    d.ai_service.ask = _ask
+    asyncio.run(
+        d._maybe_handle_ai_autoreply(
+            message=_mk_message(
+                "@amo_bot Gegen wen hat Brasilien in der Vorrunde der WM 2026 schon gespielt und wie war das Ergebnis?",
+                reply_to_is_bot=False,
+                reply_to_user_is_bot=False,
+                reply_to_username="",
+            ),
+            role=Role.ADMIN,
+            bot_username="amo_bot",
+            from_parsed_update=True,
+        )
+    )
+
+    assert sent[0] == "normal ai"
+    assert [c.capability for c in d.webtool_dispatcher.calls][0] == "websearch"
+    assert all("sports_competition_not_identified" not in item for item in sent + calls)
+    assert calls and "AUTO-RESEARCH STATUS — WEB ATTEMPTED" in calls[0]
+
+
+def test_auto_research_sports_result_prompt_rejects_irrelevant_teams_and_history():
+    note = _format_auto_research_success_note(
+        capability="websearch",
+        text=(
+            "Brazil World Cup 2026 group stage result summary. "
+            "Also mentions Iran, Spain and historical World Cup 1998 background."
+        ),
+        hosts=("sports.example",),
+        locale="de",
+    )
+
+    assert "Sports result relevance" in note
+    assert "requested team, current competition/year, and match/result intent" in note
+    assert "Ignore unrelated teams, other competitions, and historical tournament background" in note
+    assert "If no opponent plus score is supported" in note
+
+
+def test_auto_research_sports_result_without_source_confirmation_fails_closed(monkeypatch):
+    monkeypatch.setattr("amo_bot.telegram.dispatcher.AIRouter.decide", lambda self, **kwargs: _allowing_router_decision())
+    search = SimpleNamespace(
+        allowed=True,
+        decision="allow",
+        reason="search_completed",
+        text="Brazil World Cup 2026 group stage page mentions Brazil but no opponent plus score.",
+        sources=(),
+        hosts=("sports.example",),
+        error=None,
+    )
+    d, sent = _mk_dispatcher(search)
+
+    asyncio.run(
+        d._maybe_handle_ai_autoreply(
+            message=_mk_message(
+                "@amo_bot Gegen wen hat Brasilien in der Vorrunde der WM 2026 schon gespielt und wie war das Ergebnis?",
+                reply_to_is_bot=False,
+                reply_to_user_is_bot=False,
+                reply_to_username="",
+            ),
+            role=Role.ADMIN,
+            bot_username="amo_bot",
+            from_parsed_update=True,
+        )
+    )
+
+    assert sent
+    assert "nicht belastbar bestätigen" in sent[0]
+    assert "Evidenzstatus: snippet_only_result" in sent[0]
+    assert "sports_competition_not_identified" not in sent[0]
+
+
+def test_auto_research_world_cup_2026_brazil_result_filters_irrelevant_chain_evidence(monkeypatch):
+    monkeypatch.setattr("amo_bot.telegram.dispatcher.AIRouter.decide", lambda self, **kwargs: _allowing_router_decision())
+    search = SimpleNamespace(
+        allowed=True,
+        decision="allow",
+        reason="search_completed",
+        text=(
+            "World Cup 2026 live: Iran has arrived. Brazil had a disappointing start and a draw. "
+            "Historical context: Brazil vs Morocco at the 1998 World Cup."
+        ),
+        sources=("https://sports.example/world-cup/live", "https://history.example/world-cup-1998"),
+        hosts=("sports.example", "history.example"),
+        error=None,
+    )
+    scrape1 = SimpleNamespace(
+        allowed=True,
+        decision="allow",
+        reason="scrape_completed",
+        text="Iran squad arrives for FIFA World Cup 2026 group stage; Spain training notes.",
+        sources=("https://sports.example/world-cup/live",),
+        hosts=("sports.example",),
+        error=None,
+    )
+    scrape2 = SimpleNamespace(
+        allowed=True,
+        decision="allow",
+        reason="scrape_completed",
+        text="Brazil beat Morocco 3-0 in the 1998 World Cup group stage historical archive.",
+        sources=("https://history.example/world-cup-1998",),
+        hosts=("history.example",),
+        error=None,
+    )
+    d, sent = _mk_sequence_dispatcher([search, scrape1, scrape2])
+
+    async def _ask(prompt: str) -> str:
+        raise AssertionError("irrelevant sports result evidence must fail closed before synthesis")
+
+    d.ai_service.ask = _ask
+    asyncio.run(
+        d._maybe_handle_ai_autoreply(
+            message=_mk_message(
+                "@amo_bot Gegen wen hat Brasilien in der Vorrunde der WM 2026 schon gespielt und wie war das Ergebnis?",
+                reply_to_is_bot=False,
+                reply_to_user_is_bot=False,
+                reply_to_username="",
+            ),
+            role=Role.ADMIN,
+            bot_username="amo_bot",
+            from_parsed_update=True,
+        )
+    )
+
+    assert sent
+    assert "nicht belastbar bestätigen" in sent[0]
+    assert "sports_result_opponent_score_not_confirmed" in sent[0]
+    assert "Iran" not in sent[0]
+    assert "1998" not in sent[0]
+
+
 def test_auto_research_empty_result_retries_once_with_stable_btc_query_and_chains(monkeypatch):
     monkeypatch.setattr("amo_bot.telegram.dispatcher.AIRouter.decide", lambda self, **kwargs: _allowing_router_decision())
     empty = SimpleNamespace(allowed=False, decision="deny", reason="empty_result", text="", sources=(), hosts=(), error=None)
@@ -412,6 +691,27 @@ def test_empty_result_retry_query_simplifies_generic_current_question():
     assert len(query) < 90
     assert "@amo_bot" not in query
     assert "such" not in query.lower()
+
+
+def test_sports_empty_result_retry_queries_expand_generic_variants_bounded():
+    queries = build_empty_result_retry_queries("Brasilien WM 2026 heute Ergebnis 15. Juni")
+
+    assert 2 <= len(queries) <= 3
+    joined = "\n".join(queries)
+    assert "Brazil" in joined
+    assert "world cup" in joined.lower()
+    assert "result" in joined.lower()
+    assert "fixture" in joined.lower()
+    assert "match" in joined.lower()
+    assert "schedule" in joined.lower()
+    assert len({query.casefold() for query in queries}) == len(queries)
+    assert all("site:" not in query for query in queries)
+
+
+def test_non_sports_empty_result_retry_queries_keep_single_retry():
+    queries = build_empty_result_retry_queries("aktueller BTC Kurs jetzt?")
+
+    assert queries == ("bitcoin kurs USD BTC",)
 
 
 def test_followup_query_strips_bot_answer_marker_and_stale_values_from_context():
@@ -555,6 +855,77 @@ def test_auto_research_empty_result_retry_only_once(monkeypatch):
         )
     )
     assert [c.capability for c in d.webtool_dispatcher.calls] == ["websearch", "websearch"]
+
+
+def test_auto_research_sports_empty_result_tries_bounded_quality_variants_and_sanitizes_final(monkeypatch):
+    monkeypatch.setattr("amo_bot.telegram.dispatcher.AIRouter.decide", lambda self, **kwargs: _allowing_router_decision())
+    empty = SimpleNamespace(allowed=False, decision="deny", reason="empty_result", text="", sources=(), hosts=(), error=None)
+    search = SimpleNamespace(
+        allowed=True,
+        decision="allow",
+        reason="search_completed",
+        text="Brazil World Cup 2026 result fixture summary from two current sports sources.",
+        sources=("https://sports-one.example/world-cup/brazil", "https://sports-two.example/world-cup/brazil"),
+        hosts=("sports-one.example", "sports-two.example"),
+        error=None,
+    )
+    scrape1 = SimpleNamespace(
+        allowed=True,
+        decision="allow",
+        reason="scrape_completed",
+        text="Brazil World Cup 2026 current fixture page confirms Brazil drew Switzerland 1-1.",
+        sources=("https://sports-one.example/world-cup/brazil",),
+        hosts=("sports-one.example",),
+        error=None,
+    )
+    scrape2 = SimpleNamespace(
+        allowed=True,
+        decision="allow",
+        reason="scrape_completed",
+        text="Second sports source confirms Brazil vs Switzerland 1:1 at the World Cup 2026.",
+        sources=("https://sports-two.example/world-cup/brazil",),
+        hosts=("sports-two.example",),
+        error=None,
+    )
+    d, sent = _mk_sequence_dispatcher([empty, empty, search, scrape1, scrape2])
+
+    async def _ask(prompt: str) -> str:
+        return (
+            "<tool>web_search</tool>\n"
+            "<query>Brazil World Cup 2026 match result today June 15</query>\n"
+            "| Team | Ergebnis |\n"
+            "| --- | --- |\n"
+            "| Brasilien | bestätigt |\n"
+        )
+
+    d.ai_service.ask = _ask
+    asyncio.run(
+        d._maybe_handle_ai_autoreply(
+            message=_mk_message(
+                "@amo_bot Brasilien WM 2026 heute Ergebnis 15. Juni",
+                reply_to_is_bot=False,
+                reply_to_user_is_bot=False,
+                reply_to_username="",
+            ),
+            role=Role.ADMIN,
+            bot_username="amo_bot",
+            from_parsed_update=True,
+        )
+    )
+
+    assert [c.capability for c in d.webtool_dispatcher.calls] == ["websearch", "websearch", "websearch", "webscraping", "webscraping"]
+    retry_queries = [c.query for c in d.webtool_dispatcher.calls if c.capability == "websearch"][1:]
+    assert len(retry_queries) == 2
+    joined = "\n".join(retry_queries)
+    assert "Brazil" in joined
+    assert "world cup" in joined.lower()
+    assert "fixture" in joined.lower()
+    assert "match" in joined.lower()
+    assert "schedule" in joined.lower()
+    assert "<tool>" not in sent[0]
+    assert "<query>" not in sent[0]
+    assert "| Team |" not in sent[0]
+    assert "Team: Brasilien; Ergebnis: bestätigt" in sent[0]
 
 
 def test_auto_research_current_rate_query_chains_static_scrape_into_prompt(monkeypatch):
@@ -809,6 +1180,143 @@ def test_research_chain_plan_uses_conflicting_source_observation():
     assert "source_observation_conflict" in plan.warning_codes
 
 
+def test_sports_source_chain_success_records_confirmed_observation(monkeypatch, tmp_path):
+    monkeypatch.setattr("amo_bot.telegram.dispatcher.AIRouter.decide", lambda self, **kwargs: _allowing_router_decision())
+    database_url = _db_url(tmp_path)
+    search = SimpleNamespace(
+        allowed=True,
+        decision="allow",
+        reason="search_completed",
+        text="WM Gruppen Tabelle heute live source summary with enough context.",
+        sources=("https://score-source.example/world-cup/table",),
+        hosts=("score-source.example",),
+        error=None,
+    )
+    followup = SimpleNamespace(
+        allowed=True,
+        decision="allow",
+        reason="search_completed",
+        text="WM Gruppen Tabelle heute live corroborating summary.",
+        sources=("https://score-source.example/world-cup/table",),
+        hosts=("score-source.example",),
+        error=None,
+    )
+    scrape = SimpleNamespace(
+        allowed=True,
+        decision="allow",
+        reason="scrape_completed",
+        text="WM Gruppen Tabelle heute: Team A hat drei Punkte und Team B hat einen Punkt.",
+        sources=("https://score-source.example/world-cup/table",),
+        hosts=("score-source.example",),
+        error=None,
+    )
+    d, _sent = _mk_sequence_dispatcher([search, followup, scrape])
+    d.database_url = database_url
+
+    asyncio.run(
+        d._maybe_handle_ai_autoreply(
+            message=_mk_message("@amo_bot WM Gruppen Tabelle heute"),
+            role=Role.ADMIN,
+            bot_username="amo_bot",
+            from_parsed_update=True,
+        )
+    )
+
+    with create_session_factory(database_url)() as session:
+        row = session.scalar(select(ResearchSourceObservation).where(ResearchSourceObservation.provider_name == "webresearch_source_chain"))
+
+    assert row is not None
+    assert [c.capability for c in d.webtool_dispatcher.calls] == ["websearch", "websearch", "webscraping"]
+    assert row.domain == "sports"
+    assert row.outcome == "confirmed"
+    payload = json.loads(row.metadata_json or "{}")
+    assert payload["source_hosts"] == ["score-source.example"]
+    stored = f"{row.warning_codes_json}\n{row.metadata_json}"
+    assert "https://" not in stored
+    assert "WM Gruppen Tabelle" not in stored
+
+
+def test_sports_source_chain_failure_records_inconclusive_observation(monkeypatch, tmp_path):
+    monkeypatch.setattr("amo_bot.telegram.dispatcher.AIRouter.decide", lambda self, **kwargs: _allowing_router_decision())
+    database_url = _db_url(tmp_path)
+    search = SimpleNamespace(
+        allowed=True,
+        decision="allow",
+        reason="search_completed",
+        text="WM Gruppen Tabelle heute live source summary with enough context.",
+        sources=("https://blocked-source.example/world-cup/table",),
+        hosts=("blocked-source.example",),
+        error=None,
+    )
+    followup_empty = SimpleNamespace(
+        allowed=False,
+        decision="deny",
+        reason="empty_result",
+        text="",
+        sources=(),
+        hosts=(),
+        error=None,
+    )
+    failed_scrape = SimpleNamespace(
+        allowed=False,
+        decision="deny",
+        reason="empty_result",
+        text="",
+        sources=(),
+        hosts=(),
+        error=None,
+    )
+    failed_browser = SimpleNamespace(
+        allowed=False,
+        decision="provider_unavailable",
+        reason="browser_provider_not_configured",
+        text="",
+        sources=(),
+        hosts=(),
+        error=None,
+    )
+    d, _sent = _mk_sequence_dispatcher([search, followup_empty, failed_scrape, failed_browser])
+    d.database_url = database_url
+
+    asyncio.run(
+        d._maybe_handle_ai_autoreply(
+            message=_mk_message("@amo_bot WM Gruppen Tabelle heute"),
+            role=Role.ADMIN,
+            bot_username="amo_bot",
+            from_parsed_update=True,
+        )
+    )
+
+    with create_session_factory(database_url)() as session:
+        row = session.scalar(select(ResearchSourceObservation).where(ResearchSourceObservation.provider_name == "webresearch_source_chain"))
+
+    assert row is not None
+    assert [c.capability for c in d.webtool_dispatcher.calls] == ["websearch", "websearch", "webscraping", "browser"]
+    assert row.domain == "sports"
+    assert row.outcome == "source_check_inconclusive"
+    assert "source_check_inconclusive" in json.loads(row.warning_codes_json or "[]")
+    payload = json.loads(row.metadata_json or "{}")
+    assert payload["source_hosts"] == ["blocked-source.example"]
+    assert payload["reason"] == "no_usable_extract"
+    stored = f"{row.warning_codes_json}\n{row.metadata_json}"
+    assert "https://" not in stored
+    assert "WM Gruppen Tabelle" not in stored
+
+
+def test_sports_chain_plan_uses_only_discovered_source_urls():
+    plan = build_research_chain_plan(
+        request_text="WM Gruppen Tabelle heute",
+        capability="websearch",
+        reason="classifier_current_data",
+        search_text="WM Gruppen Tabelle heute live",
+        source_hosts=("discovered-source.example",),
+        source_urls=("https://discovered-source.example/world-cup/table",),
+    )
+
+    assert [step.url for step in plan.steps] == ["https://discovered-source.example/world-cup/table"]
+    assert all("site:" not in step.url for step in plan.steps)
+
+
 def test_browser_fallback_decision_targets_js_placeholder_and_dynamic_pages():
     js_scrape = SimpleNamespace(
         allowed=True,
@@ -891,6 +1399,88 @@ def test_auto_research_static_empty_then_browser_fallback_succeeds(monkeypatch):
     assert [c.capability for c in d.webtool_dispatcher.calls] == ["websearch", "webscraping", "browser"]
     assert "- browser host=crypto.example" in calls[0]
     assert "Bitcoin BTC live market price" in calls[0]
+
+
+def test_auto_research_browser_fallback_tries_next_source_host_after_block(monkeypatch):
+    monkeypatch.setattr("amo_bot.telegram.dispatcher.AIRouter.decide", lambda self, **kwargs: _allowing_router_decision())
+    search = SimpleNamespace(
+        allowed=True,
+        decision="allow",
+        reason="search_completed",
+        text="WM Gruppen Tabelle heute live source summary with multiple source candidates.",
+        sources=(
+            "https://blocked-source.example/world-cup/table",
+            "https://working-source.example/world-cup/table",
+        ),
+        hosts=("blocked-source.example", "working-source.example"),
+        error=None,
+    )
+    failed_static_one = SimpleNamespace(
+        allowed=False,
+        decision="deny",
+        reason="http_error_403",
+        text="",
+        sources=(),
+        hosts=(),
+        error="HTTP error",
+    )
+    failed_browser_one = SimpleNamespace(
+        allowed=False,
+        decision="deny",
+        reason="http_error_403",
+        text="",
+        sources=(),
+        hosts=(),
+        error="HTTP error",
+    )
+    failed_static_two = SimpleNamespace(
+        allowed=True,
+        decision="allow",
+        reason="scrape_completed",
+        text="",
+        sources=("https://working-source.example/world-cup/table",),
+        hosts=("working-source.example",),
+        error=None,
+    )
+    browser_two = SimpleNamespace(
+        allowed=True,
+        decision="allow",
+        reason="browser_completed",
+        text="WM Gruppen Tabelle heute: Team A hat drei Punkte und Team B hat einen Punkt.",
+        sources=("https://working-source.example/world-cup/table",),
+        hosts=("working-source.example",),
+        error=None,
+    )
+    d, _sent = _mk_sequence_dispatcher([search, failed_static_one, failed_browser_one, failed_static_two, browser_two])
+    calls = []
+
+    async def _ask(prompt: str) -> str:
+        calls.append(prompt)
+        return "normal ai"
+
+    d.ai_service.ask = _ask
+    asyncio.run(
+        d._maybe_handle_ai_autoreply(
+            message=_mk_message("@amo_bot WM Gruppen Tabelle heute", reply_to_is_bot=False, reply_to_user_is_bot=False, reply_to_username=""),
+            role=Role.ADMIN,
+            bot_username="amo_bot",
+            from_parsed_update=True,
+        )
+    )
+
+    assert [c.capability for c in d.webtool_dispatcher.calls] == [
+        "websearch",
+        "webscraping",
+        "browser",
+        "webscraping",
+        "browser",
+    ]
+    assert [c.url for c in d.webtool_dispatcher.calls if c.capability == "browser"] == [
+        "https://blocked-source.example/world-cup/table",
+        "https://working-source.example/world-cup/table",
+    ]
+    assert "- browser host=working-source.example" in calls[0]
+    assert "blocked-source.example" not in calls[0].split("Checked source evidence:", 1)[-1]
 
 
 def test_auto_research_followup_extraction_failure_is_truthful(monkeypatch):

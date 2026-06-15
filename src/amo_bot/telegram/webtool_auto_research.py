@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from amo_bot.ai.current_data_classifier import classify_current_data
+from amo_bot.telegram import sports_query
 
 
 @dataclass(frozen=True, slots=True)
@@ -26,24 +27,6 @@ _CURRENT_KEYWORDS = (
     "changelog", "lage", "status", "live", "current", "right now",
 )
 
-_SPORTS_TOURNAMENT_RE = re.compile(
-    r"\b(?:"
-    r"wm|weltmeisterschaft|world\s+cup|em|europameisterschaft|euro|"
-    r"champions\s+league|europa\s+league|bundesliga|dfb\s*pokal|"
-    r"uefa|fifa|nba|nfl|nhl|mlb|formel\s*1|f1|"
-    r"deutschland|germany"
-    r")\b",
-    re.IGNORECASE,
-)
-_SPORTS_CURRENT_DETAIL_RE = re.compile(
-    r"\b(?:"
-    r"vorrunde|gruppenphase|gruppe|gruppen|spielplan|tabelle|ergebnis(?:se)?|"
-    r"result(?:s)?|fixture(?:s)?|standing(?:s)?|table|aufstellung(?:en)?|"
-    r"qualifikation|qualifying|qualifier|kader|gruppe(?:n)?spiel(?:e)?|"
-    r"spieltag|runde|halbfinale|finale"
-    r")\b",
-    re.IGNORECASE,
-)
 _SPORTS_CURRENT_INTENT_RE = re.compile(
     r"\b(?:"
     r"l(?:ä|ae)uft|stehen|steht|stand|spiel(?:t|en)?|wann|wer|gegen\s+wen|"
@@ -100,8 +83,8 @@ def decide_auto_research(text: str, *, now: datetime | None = None) -> AutoResea
     has_date = bool(_DATE_RE.search(raw))
     has_current_year = str(current_year) in raw
     has_sports_current_signal = bool(
-        _SPORTS_TOURNAMENT_RE.search(raw)
-        and _SPORTS_CURRENT_DETAIL_RE.search(raw)
+        sports_query.has_competition(raw)
+        and (sports_query.has_phase(raw) or sports_query.infer_need(raw) != "sport_context")
         and (_SPORTS_CURRENT_INTENT_RE.search(raw) or re.search(r"\b(?:wie|was|wann|wer|wo)\b", lowered))
     )
     has_market_current_signal = bool(

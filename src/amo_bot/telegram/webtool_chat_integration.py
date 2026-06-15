@@ -5,6 +5,7 @@ from dataclasses import dataclass
 
 from amo_bot.ai.webtool_dispatcher import WebtoolCapabilityRequest
 from amo_bot.auth.roles import Role
+from amo_bot.telegram import sports_query
 
 
 @dataclass(frozen=True, slots=True)
@@ -16,6 +17,7 @@ class WebtoolChatTrigger:
 
 _FOLLOWUP_QUERY_MAX_CHARS = 220
 _EMPTY_RESULT_RETRY_QUERY_MAX_CHARS = 150
+_EMPTY_RESULT_RETRY_MAX_QUERIES = 3
 _WEBTOOL_CHAT_RESULT_MAX_CHARS = 700
 _WEBTOOL_CONTEXT_RESULT_MAX_CHARS = 900
 
@@ -61,6 +63,33 @@ _PRICE_INTENT_RE = re.compile(
     r"\b(?:price|preis|kurs|rate|current|aktuell(?:e[nrms]?)?|jetzt|heute|live|usd|dollar)\b",
     re.IGNORECASE,
 )
+_SPORTS_DATE_FRAGMENT_RE = re.compile(
+    r"\b\d{1,2}\s*(?:jan(?:uar)?|feb(?:ruar)?|märz|maerz|mar(?:ch)?|apr(?:il)?|"
+    r"mai|may|jun(?:i|e)?|jul(?:i|y)?|aug(?:ust)?|sep(?:tember)?|okt(?:ober)?|"
+    r"oct(?:ober)?|nov(?:ember)?|dez(?:ember)?|dec(?:ember)?)\b",
+    re.IGNORECASE,
+)
+_TOOL_TRACE_TAG_NAMES = (
+    "tool",
+    "query",
+    "args",
+    "arguments",
+    "input",
+    "output",
+    "function",
+    "tool_call",
+    "tool_calls",
+    "search_query",
+)
+_TOOL_TRACE_BLOCK_RE = re.compile(
+    r"<(?P<tag>" + "|".join(_TOOL_TRACE_TAG_NAMES) + r")\b[^>]*>.*?</(?P=tag)>",
+    re.IGNORECASE | re.DOTALL,
+)
+_TOOL_TRACE_LINE_RE = re.compile(
+    r"^\s*</?(?:" + "|".join(_TOOL_TRACE_TAG_NAMES) + r")\b[^>]*>\s*$",
+    re.IGNORECASE,
+)
+_MARKDOWN_TABLE_SEPARATOR_RE = re.compile(r"^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$")
 _RETRY_KEEP_WORD_RE = re.compile(r"[0-9A-Za-zÄÖÜäöüß][0-9A-Za-zÄÖÜäöüß.+#-]{1,}")
 _RETRY_STOPWORDS = {
     "amo", "bot", "bitte", "such", "suche", "weiter", "reicht", "nicht", "wenig",
@@ -162,6 +191,61 @@ def build_empty_result_retry_query(text: str, *, max_len: int = _EMPTY_RESULT_RE
     return cleaned
 
 
+def build_empty_result_retry_queries(
+    text: str,
+    *,
+    max_len: int = _EMPTY_RESULT_RETRY_QUERY_MAX_CHARS,
+    max_queries: int = _EMPTY_RESULT_RETRY_MAX_QUERIES,
+) -> tuple[str, ...]:
+    """Build bounded empty-result retry queries, with richer generic sports variants."""
+    raw = (text or "").strip()
+    if not raw or max_queries < 1:
+        return ()
+    primary = build_empty_result_retry_query(raw, max_len=max_len)
+    if not sports_query.has_sports_signal(raw):
+        return (primary,) if primary else ()
+
+    candidates = _build_sports_empty_result_retry_queries(raw, primary=primary, max_len=max_len)
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        compact = _compact_followup_query(candidate, max_len=max_len).strip()
+        key = compact.casefold()
+        if not compact or key in seen:
+            continue
+        deduped.append(compact)
+        seen.add(key)
+        if len(deduped) >= max_queries:
+            break
+    return tuple(deduped)
+
+
+def _build_sports_empty_result_retry_queries(raw: str, *, primary: str, max_len: int) -> tuple[str, ...]:
+    cleaned = _clean_empty_result_retry_text(raw)
+    compact_cleaned = _compact_followup_query(cleaned, max_len=max_len)
+    english = _sports_query_to_english(compact_cleaned or primary)
+    date_fragment = _extract_sports_date_fragment(raw)
+    sports_terms = "result fixture match schedule"
+
+    candidates = [
+        primary,
+        f"{english} {sports_terms}",
+    ]
+    if date_fragment and date_fragment.casefold() not in english.casefold():
+        candidates.append(f"{english} {date_fragment} {sports_terms}")
+    candidates.append(f"{english} standings group result fixture")
+    return tuple(candidates)
+
+
+def _sports_query_to_english(text: str) -> str:
+    return sports_query.normalize_search_terms(text)
+
+
+def _extract_sports_date_fragment(text: str) -> str:
+    match = _SPORTS_DATE_FRAGMENT_RE.search(text or "")
+    return match.group(0).strip() if match else ""
+
+
 def is_web_research_followup_feedback(text: str) -> bool:
     """Detect bounded user feedback asking the bot to continue web research.
 
@@ -232,6 +316,7 @@ def build_webtool_request(
     chat_id: int,
     topic_id: int | None,
     locale: str,
+    evidence_domain: str = "",
 ) -> WebtoolCapabilityRequest:
     return WebtoolCapabilityRequest(
         capability=trigger.capability,
@@ -243,6 +328,7 @@ def build_webtool_request(
         url=trigger.url,
         locale=locale,
         max_results=5,
+        evidence_domain=evidence_domain,
     )
 
 
@@ -258,13 +344,80 @@ def format_webtool_quota_text(locale: str, role: Role) -> str:
     return f"Webtool-Limit für Rolle {role.value} erreicht."
 
 
+def sanitize_webtool_user_facing_text(text: str) -> str:
+    """Remove internal tool traces and Telegram-hostile tables from LLM/webtool text."""
+    without_trace_blocks = _TOOL_TRACE_BLOCK_RE.sub("", text or "")
+    lines = [
+        line
+        for line in without_trace_blocks.splitlines()
+        if not _TOOL_TRACE_LINE_RE.match(line)
+    ]
+    return _markdown_tables_to_bullets(lines).strip()
+
+
+def _markdown_tables_to_bullets(lines: list[str]) -> str:
+    output: list[str] = []
+    index = 0
+    while index < len(lines):
+        if _line_starts_markdown_table(lines, index):
+            table_lines: list[str] = []
+            while index < len(lines) and _is_markdown_table_line(lines[index]):
+                table_lines.append(lines[index])
+                index += 1
+            output.extend(_format_markdown_table_as_bullets(table_lines))
+            continue
+        output.append(lines[index])
+        index += 1
+    return "\n".join(output)
+
+
+def _line_starts_markdown_table(lines: list[str], index: int) -> bool:
+    return (
+        index + 1 < len(lines)
+        and _is_markdown_table_line(lines[index])
+        and _MARKDOWN_TABLE_SEPARATOR_RE.match(lines[index + 1]) is not None
+    )
+
+
+def _is_markdown_table_line(line: str) -> bool:
+    stripped = line.strip()
+    return stripped.count("|") >= 2
+
+
+def _split_markdown_table_row(line: str) -> list[str]:
+    stripped = line.strip().strip("|")
+    return [cell.strip() for cell in stripped.split("|")]
+
+
+def _format_markdown_table_as_bullets(table_lines: list[str]) -> list[str]:
+    if len(table_lines) < 2:
+        return table_lines
+    headers = _split_markdown_table_row(table_lines[0])
+    rows = [
+        _split_markdown_table_row(line)
+        for line in table_lines[2:]
+        if not _MARKDOWN_TABLE_SEPARATOR_RE.match(line)
+    ]
+    bullets: list[str] = []
+    for row in rows:
+        values = []
+        for index, cell in enumerate(row):
+            if not cell:
+                continue
+            header = headers[index] if index < len(headers) and headers[index] else ""
+            values.append(f"{header}: {cell}" if header else cell)
+        if values:
+            bullets.append("- " + "; ".join(values))
+    return bullets
+
+
 def compact_webtool_result_text(
     text: str,
     *,
     max_chars: int = _WEBTOOL_CONTEXT_RESULT_MAX_CHARS,
 ) -> str:
     """Return a bounded one-line webtool result for prompts or chat output."""
-    compact = " ".join((text or "").split())
+    compact = " ".join(sanitize_webtool_user_facing_text(text).split())
     if max_chars < 1:
         return ""
     if len(compact) <= max_chars:

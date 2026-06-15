@@ -11,15 +11,18 @@ from urllib.parse import parse_qs, urlparse
 from amo_bot.ai.research_extraction_quality import classify_extraction_quality, extraction_length_bucket
 from amo_bot.auth.roles import Role
 from amo_bot.core.logging import log_event
+from amo_bot.telegram import sports_query
 from amo_bot.telegram.update_parser import TelegramMessage
 from amo_bot.telegram.webtool_auto_research import decide_auto_research
 from amo_bot.telegram.webtool_chat_integration import (
     WebtoolChatTrigger,
+    build_empty_result_retry_queries,
     build_empty_result_retry_query,
     build_web_research_followup_query,
     build_webtool_request,
     compact_webtool_result_text,
     is_web_research_followup_feedback,
+    sanitize_webtool_user_facing_text,
 )
 from amo_bot.telegram.webtool_evidence import (
     DomainEvidenceResult,
@@ -46,7 +49,7 @@ _AUTO_RESEARCH_NO_RESULT_TEXT = {
 
 _AUTO_RESEARCH_CHAIN_MAX_URLS = 5
 _AUTO_RESEARCH_CHAIN_MAX_STATIC_SUCCESSES = 5
-_AUTO_RESEARCH_CHAIN_MAX_BROWSER_FALLBACKS = 1
+_AUTO_RESEARCH_CHAIN_MAX_BROWSER_FALLBACKS = 3
 _AUTO_RESEARCH_CHAIN_PER_PAGE_TEXT_CAP = 1500
 _AUTO_RESEARCH_CHAIN_FINAL_CAP = 1600
 _AUTO_RESEARCH_SEARCH_SUMMARY_CAP = 900
@@ -58,10 +61,7 @@ _AUTO_RESEARCH_CHAIN_FRESHNESS_RE = re.compile(
     r"current|aktuell(?:e[nrms]?)?|jetzt|heute|live|realtime|real-time|right\s+now|"
     r"derzeit|stand|status|neueste(?:n)?|latest|news|nachrichten|release|version|"
     r"update|verf(?:ü|ue)gbar(?:keit)?|availability|weather|wetter|traffic|verkehr|"
-    r"outage|st(?:ö|oe)rung|kurs|preis|price|rate|market|markt|exchange|fx|"
-    r"wm|weltmeisterschaft|world\s+cup|em|europameisterschaft|champions\s+league|"
-    r"bundesliga|vorrunde|gruppenphase|spielplan|tabelle|ergebnis(?:se)?|"
-    r"aufstellung(?:en)?|qualifikation"
+    r"outage|st(?:ö|oe)rung|kurs|preis|price|rate|market|markt|exchange|fx"
     r")\b",
     re.IGNORECASE,
 )
@@ -69,8 +69,7 @@ _AUTO_RESEARCH_CHAIN_STRONG_FRESHNESS_RE = re.compile(
     r"\b(?:"
     r"jetzt|heute|live|realtime|real-time|right\s+now|derzeit|neueste(?:n)?|latest|"
     r"news|nachrichten|release|version|update|verf(?:ü|ue)gbar(?:keit)?|availability|"
-    r"weather|wetter|traffic|verkehr|outage|st(?:ö|oe)rung|kurs|preis|price|rate|market|markt|"
-    r"vorrunde|gruppenphase|spielplan|tabelle|ergebnis(?:se)?|aufstellung(?:en)?|qualifikation"
+    r"weather|wetter|traffic|verkehr|outage|st(?:ö|oe)rung|kurs|preis|price|rate|market|markt"
     r")\b",
     re.IGNORECASE,
 )
@@ -161,6 +160,27 @@ class ResearchSourceQualityReader(Protocol):
         ...
 
 
+class ResearchSourceObservationWriter(Protocol):
+    def record_observation(
+        self,
+        *,
+        provider_name: str,
+        domain: str,
+        outcome: str,
+        confidence: float | None = None,
+        source_name: str | None = None,
+        source_hosts: tuple[str, ...] | None = None,
+        source_urls: tuple[str, ...] | None = None,
+        source_count: int | None = None,
+        warning_codes: tuple[str, ...] | None = None,
+        warning_count: int | None = None,
+        error_class: str | None = None,
+        timing_ms: int | None = None,
+        metadata: dict[str, object] | None = None,
+    ) -> Any:
+        ...
+
+
 class DbBackedResearchSourceQualityReader:
     """Read sanitized source-observation health without reading queries or full URLs."""
 
@@ -179,6 +199,19 @@ class DbBackedResearchSourceQualityReader:
             )
 
 
+class DbBackedResearchSourceObservationWriter:
+    """Write sanitized source-chain observations without persisting raw URLs or prompts."""
+
+    def __init__(self, *, session_factory) -> None:
+        self._session_factory = session_factory
+
+    def record_observation(self, **kwargs: Any) -> Any:
+        from amo_bot.db.repositories import ResearchSourceObservationRepository
+
+        with self._session_factory() as session:
+            return ResearchSourceObservationRepository(session).record_observation(**kwargs)
+
+
 class WebResearchOrchestrator:
     def __init__(
         self,
@@ -186,10 +219,12 @@ class WebResearchOrchestrator:
         webtool_dispatcher: Any,
         evidence_pipeline: WebEvidencePipeline | None = None,
         source_quality_reader: ResearchSourceQualityReader | None = None,
+        source_observation_writer: ResearchSourceObservationWriter | None = None,
     ) -> None:
         self._webtool_dispatcher = webtool_dispatcher
         self._evidence_pipeline = evidence_pipeline
         self._source_quality_reader = source_quality_reader
+        self._source_observation_writer = source_observation_writer
 
     def execute(self, request: WebResearchOrchestratorRequest) -> WebResearchOrchestratorResult:
         if self._webtool_dispatcher is None:
@@ -222,10 +257,11 @@ class WebResearchOrchestrator:
         domain_evidence = self._evaluate_domain_evidence(request)
         if domain_evidence is not None:
             if domain_evidence.confirmed:
-                return WebResearchOrchestratorResult(auto_note=format_domain_evidence_note(domain_evidence))
+                return WebResearchOrchestratorResult(auto_note=format_domain_evidence_note(domain_evidence, locale=request.locale))
             if (
                 domain_evidence.status != "needs_profiled_web_research"
                 and domain_evidence.domain in {"weather", "crypto", "stock", "sports"}
+                and not _should_continue_with_generic_websearch(domain_evidence)
             ):
                 return WebResearchOrchestratorResult(
                     user_response=format_domain_fail_closed_response(
@@ -234,6 +270,7 @@ class WebResearchOrchestrator:
                         warnings=domain_evidence.warnings,
                     )
                 )
+            decision_auto = _with_profiled_source_query(decision_auto, domain_evidence)
 
         tool_result = self._run_primary_search(request, decision_auto=decision_auto, is_followup_research=is_followup_research)
         retry_attempted = False
@@ -242,8 +279,13 @@ class WebResearchOrchestrator:
             and not (tool_result.allowed and (tool_result.text or "").strip())
             and (tool_result.reason or "") == "empty_result"
         ):
-            retry_query = build_empty_result_retry_query(request.normalized_text)
-            if retry_query and retry_query != (decision_auto.query or "").strip():
+            initial_query = (decision_auto.query or "").strip()
+            retry_queries = tuple(
+                query
+                for query in build_empty_result_retry_queries(request.normalized_text)
+                if query and query != initial_query
+            )
+            for retry_query in retry_queries:
                 retry_attempted = True
                 tool_result = self._run_retry_search(
                     request,
@@ -251,6 +293,8 @@ class WebResearchOrchestrator:
                     retry_query=retry_query,
                     is_followup_research=is_followup_research,
                 )
+                if tool_result.allowed and (tool_result.text or "").strip():
+                    break
 
         if not (tool_result.allowed and (tool_result.text or "").strip()):
             weather_response = _format_weather_no_result_response(
@@ -265,12 +309,14 @@ class WebResearchOrchestrator:
                     auto_note=_format_auto_research_retry_no_result_note(
                         capability=decision_auto.capability,
                         reason=tool_result.reason,
+                        locale=request.locale,
                     )
                 )
             return WebResearchOrchestratorResult(
                 auto_note=_format_auto_research_no_result_note(
                     capability=decision_auto.capability,
                     reason=tool_result.reason,
+                    locale=request.locale,
                 )
             )
 
@@ -303,23 +349,41 @@ class WebResearchOrchestrator:
                 decision_auto=decision_auto,
                 is_followup_research=is_followup_research,
             )
+            self._record_chain_source_observations(
+                request=request,
+                chain_urls=chain_urls,
+                chain_extracts=tuple(chain_extracts),
+            )
 
         if chain_extracts:
+            sports_result_response = _format_sports_result_unconfirmed_response(
+                request_text=request.normalized_text,
+                search_text=tool_result.text,
+                extracts=tuple(chain_extracts),
+                locale=request.locale,
+            )
+            if sports_result_response:
+                return WebResearchOrchestratorResult(user_response=sports_result_response)
+            sports_search_text, sports_extracts = _filter_sports_result_evidence(
+                request_text=request.normalized_text,
+                search_text=tool_result.text,
+                extracts=tuple(chain_extracts),
+            )
             news_corroboration_response = _format_news_corroboration_response(
                 request_text=request.normalized_text,
-                extracts=tuple(chain_extracts),
+                extracts=sports_extracts,
                 locale=request.locale,
             )
             if news_corroboration_response:
                 return WebResearchOrchestratorResult(user_response=news_corroboration_response)
             source_quality = _assess_chain_source_quality(
                 domain=classify_evidence_domain(request.normalized_text),
-                extracts=tuple(chain_extracts),
+                extracts=sports_extracts,
                 reader=self._source_quality_reader,
             )
             news_gate_response = _format_news_insufficient_sources_response(
                 request_text=request.normalized_text,
-                extract_hosts=tuple(host for _, host, _ in chain_extracts),
+                extract_hosts=tuple(host for _, host, _ in sports_extracts),
                 locale=request.locale,
                 source_quality=source_quality,
             )
@@ -327,10 +391,11 @@ class WebResearchOrchestrator:
                 return WebResearchOrchestratorResult(user_response=news_gate_response)
             auto_note = _format_auto_research_chained_success_note(
                 capability=decision_auto.capability,
-                search_text=tool_result.text,
+                search_text=sports_search_text,
                 search_hosts=tuple(tool_result.hosts or ()),
-                extracts=tuple(chain_extracts),
+                extracts=sports_extracts,
                 followup=is_followup_research,
+                locale=request.locale,
             )
         elif chain_urls:
             user_response = _format_weather_unconfirmed_response(
@@ -353,6 +418,7 @@ class WebResearchOrchestrator:
                 search_text=tool_result.text,
                 search_hosts=tuple(tool_result.hosts or ()),
                 followup=is_followup_research,
+                locale=request.locale,
             )
         else:
             domain_unconfirmed = _format_domain_chain_unconfirmed_response(
@@ -374,6 +440,7 @@ class WebResearchOrchestrator:
                 capability=decision_auto.capability,
                 text=tool_result.text,
                 hosts=tuple(tool_result.hosts or ()),
+                locale=request.locale,
             )
         return WebResearchOrchestratorResult(auto_note=auto_note)
 
@@ -415,6 +482,7 @@ class WebResearchOrchestrator:
                 chat_id=request.message.chat.id,
                 topic_id=request.message.message_thread_id,
                 locale=request.locale,
+                evidence_domain=plan.domain,
             )
             followup_result = self._webtool_dispatcher.execute(followup_request)
             self._log_result(
@@ -446,6 +514,7 @@ class WebResearchOrchestrator:
             chat_id=request.message.chat.id,
             topic_id=request.message.message_thread_id,
             locale=request.locale,
+            evidence_domain=domain,
         )
         result = self._webtool_dispatcher.execute(tool_request)
         if result.allowed and (result.text or "").strip() and result.sources:
@@ -508,6 +577,7 @@ class WebResearchOrchestrator:
             chat_id=request.message.chat.id,
             topic_id=request.message.message_thread_id,
             locale=request.locale,
+            evidence_domain=classify_evidence_domain(request.normalized_text),
         )
         result = self._webtool_dispatcher.execute(tool_request)
         self._log_result(
@@ -536,6 +606,7 @@ class WebResearchOrchestrator:
             chat_id=request.message.chat.id,
             topic_id=request.message.message_thread_id,
             locale=request.locale,
+            evidence_domain=classify_evidence_domain(request.normalized_text),
         )
         result = self._webtool_dispatcher.execute(retry_request)
         self._log_result(
@@ -678,8 +749,75 @@ class WebResearchOrchestrator:
             chat_id=request.message.chat.id,
             topic_id=request.message.message_thread_id,
             locale=request.locale,
+            evidence_domain=classify_evidence_domain(request.normalized_text),
         )
         return self._webtool_dispatcher.execute(tool_request)
+
+    def _record_chain_source_observations(
+        self,
+        *,
+        request: WebResearchOrchestratorRequest,
+        chain_urls: tuple[str, ...],
+        chain_extracts: tuple[tuple[str, str, str], ...],
+    ) -> None:
+        if self._source_observation_writer is None:
+            return
+        domain = classify_evidence_domain(request.normalized_text)
+        if domain == "generic":
+            return
+        if chain_extracts:
+            hosts = _normalize_source_hosts(
+                source_hosts=tuple(host for _, host, _ in chain_extracts),
+                source_urls=(),
+            )
+            outcome = "confirmed"
+            warnings: tuple[str, ...] = ()
+            metadata: dict[str, object] = {
+                "operation": "source_chain",
+                "status": "confirmed",
+            }
+            confidence = 0.8
+        elif chain_urls:
+            hosts = _normalize_source_hosts(source_hosts=(), source_urls=chain_urls)
+            outcome = "source_check_inconclusive"
+            warnings = ("source_check_inconclusive",)
+            metadata = {
+                "operation": "source_chain",
+                "status": "source_check_inconclusive",
+                "reason": "no_usable_extract",
+            }
+            confidence = 0.0
+        else:
+            return
+        if not hosts:
+            return
+        try:
+            self._source_observation_writer.record_observation(
+                provider_name="webresearch_source_chain",
+                source_name="source_chain",
+                domain=domain,
+                outcome=outcome,
+                confidence=confidence,
+                source_hosts=hosts,
+                source_urls=(),
+                source_count=len(hosts),
+                warning_codes=warnings,
+                warning_count=len(warnings),
+                metadata=metadata,
+            )
+        except Exception as exc:
+            log_event(
+                logger,
+                logging.WARNING,
+                event="research_source_chain_observation_write_failed",
+                component=_COMPONENT,
+                reason_code="observation_write_failed",
+                extra={
+                    "domain": domain,
+                    "host_count": len(hosts),
+                    "error_class": type(exc).__name__,
+                },
+            )
 
     def _log_result(
         self,
@@ -715,6 +853,51 @@ class WebResearchOrchestrator:
         )
 
 
+def _should_continue_with_generic_websearch(result: DomainEvidenceResult) -> bool:
+    """Allow sports fallback to configured websearch when no profiled source exists."""
+    if result.domain != "sports" or result.status == "needs_profiled_web_research":
+        return False
+    return any(
+        warning.startswith("sports_domain_profile_not_configured")
+        or warning.startswith("sports_domain_profile_no_usable_source:")
+        for warning in result.warnings
+    )
+
+
+def _with_profiled_source_query(decision_auto: Any, result: DomainEvidenceResult) -> Any:
+    if result.domain != "sports" or result.status != "needs_profiled_web_research":
+        return decision_auto
+    if getattr(decision_auto, "capability", "") != "websearch":
+        return decision_auto
+    hosts = _learned_source_hosts_from_warnings(result.warnings)
+    if not hosts:
+        return decision_auto
+    base_query = str(getattr(decision_auto, "query", "") or "").strip()
+    if not base_query:
+        return decision_auto
+    site_filter = " OR ".join(f"site:{host}" for host in hosts[:2])
+    query = f"{base_query} ({site_filter})"
+    return SimpleNamespace(
+        enabled=getattr(decision_auto, "enabled", True),
+        capability=getattr(decision_auto, "capability", "websearch"),
+        reason=getattr(decision_auto, "reason", ""),
+        query=re.sub(r"\s+", " ", query).strip()[:180].rstrip(),
+        url=getattr(decision_auto, "url", ""),
+    )
+
+
+def _learned_source_hosts_from_warnings(warnings: tuple[str, ...]) -> tuple[str, ...]:
+    hosts: list[str] = []
+    for warning in warnings:
+        if not warning.startswith("learned_sources:"):
+            continue
+        for raw_host in warning.split(":", 1)[1].split("|"):
+            host = _normalize_source_hosts(source_hosts=(raw_host,), source_urls=())
+            if host and host[0] not in hosts:
+                hosts.append(host[0])
+    return tuple(hosts[:3])
+
+
 def should_chain_auto_research(text: str, *, capability: str, reason: str | None = None) -> bool:
     """Return True for bounded follow-up extraction on current-data websearches."""
     if capability != "websearch":
@@ -726,10 +909,13 @@ def should_chain_auto_research(text: str, *, capability: str, reason: str | None
         return False
     if _AUTO_RESEARCH_CHAIN_EXPLICIT_CURRENT_PHRASE_RE.search(raw):
         return True
-    has_freshness = bool(_AUTO_RESEARCH_CHAIN_FRESHNESS_RE.search(raw))
+    has_sports_freshness = sports_query.has_sports_signal(raw)
+    has_freshness = bool(_AUTO_RESEARCH_CHAIN_FRESHNESS_RE.search(raw)) or has_sports_freshness
     if not has_freshness:
         return False
-    has_strong_freshness = bool(_AUTO_RESEARCH_CHAIN_STRONG_FRESHNESS_RE.search(raw))
+    has_strong_freshness = bool(_AUTO_RESEARCH_CHAIN_STRONG_FRESHNESS_RE.search(raw)) or (
+        sports_query.has_phase(raw) or sports_query.infer_need(raw) != "sport_context"
+    )
     if _AUTO_RESEARCH_CHAIN_TIMELESS_EDU_RE.search(raw) and not has_strong_freshness:
         return False
     return True
@@ -871,10 +1057,103 @@ def should_attempt_browser_fallback(
 
 def sanitize_auto_research_user_response(text: str) -> str:
     """Remove internal webtool pipeline terms from an auto-research answer."""
-    cleaned = text or ""
+    cleaned = sanitize_webtool_user_facing_text(text)
     for pattern, replacement in _AUTO_RESEARCH_TECHNICAL_RESPONSE_REPLACEMENTS:
         cleaned = pattern.sub(replacement, cleaned)
     return cleaned
+
+
+def _format_sports_result_unconfirmed_response(
+    *,
+    request_text: str,
+    search_text: str,
+    extracts: tuple[tuple[str, str, str], ...],
+    locale: str,
+) -> str:
+    if not _is_concrete_sports_result_question(request_text):
+        return ""
+    filtered_search, filtered_extracts = _filter_sports_result_evidence(
+        request_text=request_text,
+        search_text=search_text,
+        extracts=extracts,
+    )
+    evidence_text = "\n".join((filtered_search, *(text for _, _, text in filtered_extracts)))
+    if _sports_result_has_opponent_score(evidence_text, request_text=request_text):
+        return ""
+    return format_domain_fail_closed_response(
+        domain="sports",
+        locale=locale,
+        warnings=("sports_result_opponent_score_not_confirmed",),
+    )
+
+
+def _filter_sports_result_evidence(
+    *,
+    request_text: str,
+    search_text: str,
+    extracts: tuple[tuple[str, str, str], ...],
+) -> tuple[str, tuple[tuple[str, str, str], ...]]:
+    if not _is_concrete_sports_result_question(request_text):
+        return search_text, extracts
+    relevant_search = search_text if _sports_result_text_matches_scope(search_text, request_text=request_text) else ""
+    relevant_extracts = tuple(
+        (operation, host, text)
+        for operation, host, text in extracts
+        if _sports_result_text_matches_scope(text, request_text=request_text)
+    )
+    return relevant_search, relevant_extracts
+
+
+def _is_concrete_sports_result_question(text: str) -> bool:
+    terms = sports_query.query_terms(text)
+    return (
+        classify_evidence_domain(text) == "sports"
+        and terms.get("need") == "sport_result"
+        and bool(terms.get("competition"))
+        and bool(terms.get("year"))
+        and bool(sports_query.first_team(text))
+    )
+
+
+def _sports_result_text_matches_scope(text: str, *, request_text: str) -> bool:
+    raw = text or ""
+    if not raw.strip():
+        return False
+    team = sports_query.first_team(request_text)
+    if team and not _contains_sports_scope_token(raw, team):
+        return False
+    terms = sports_query.query_terms(request_text)
+    year = terms.get("year")
+    if year and str(year) not in raw:
+        return False
+    competition = terms.get("competition")
+    if competition and not _contains_sports_scope_token(raw, str(competition)):
+        return False
+    phase = terms.get("phase")
+    if phase and not _contains_sports_scope_token(raw, str(phase)):
+        return False
+    return True
+
+
+def _contains_sports_scope_token(text: str, token: str) -> bool:
+    normalized_text = sports_query.normalize_search_terms(text).casefold()
+    normalized_token = sports_query.normalize_search_terms(token).casefold()
+    return bool(normalized_token and normalized_token in normalized_text)
+
+
+def _sports_result_has_opponent_score(text: str, *, request_text: str) -> bool:
+    raw = text or ""
+    if not raw.strip() or not _sports_result_text_matches_scope(raw, request_text=request_text):
+        return False
+    score_re = r"\b\d{1,2}\s*(?:-|:|–|—)\s*\d{1,2}\b"
+    if not re.search(score_re, raw):
+        return False
+    if re.search(r"\b(?:against|vs\.?|versus|gegen|beat|beats|defeated|lost|drew|draw|unentschieden)\b", raw, re.IGNORECASE):
+        return True
+    team = re.escape(sports_query.first_team(request_text) or "")
+    if team and re.search(rf"\b{team}\b.{0,80}{score_re}.{0,80}\b[A-ZÄÖÜ][A-Za-zÄÖÜäöüß.-]{{2,}}\b", raw):
+        return True
+    return False
 
 
 def _format_domain_chain_unconfirmed_response(*, request_text: str, locale: str, reason: str) -> str:
@@ -1323,8 +1602,27 @@ def _chain_diagnostic_snapshot(
     }
 
 
+def _target_answer_language_instruction(locale: str) -> str:
+    if (locale or "").lower().startswith("en"):
+        return (
+            "Target answer language: English. Keep source names, team names, titles, "
+            "and technical identifiers in their original wording when appropriate."
+        )
+    return (
+        "Ziel-Antwortsprache: Deutsch. Übersetze oder verändere keine Quellennamen, "
+        "Teamnamen, Titel, Zahlen, Datumsangaben oder technischen Bezeichner; übernimm "
+        "sie im Original, wenn sie aus der Quelle stammen."
+    )
+
+
 def _format_auto_research_chained_success_note(
-    *, capability: str, search_text: str, search_hosts: tuple[str, ...], extracts: tuple[tuple[str, str, str], ...], followup: bool = False
+    *,
+    capability: str,
+    search_text: str,
+    search_hosts: tuple[str, ...],
+    extracts: tuple[tuple[str, str, str], ...],
+    followup: bool = False,
+    locale: str = "de",
 ) -> str:
     compact_search = compact_webtool_result_text(search_text, max_chars=_AUTO_RESEARCH_SEARCH_SUMMARY_CAP)
     host_text = ", ".join(search_hosts[:5])
@@ -1343,9 +1641,11 @@ def _format_auto_research_chained_success_note(
     )
     return (
         f"{heading} — STRICT INSTRUCTION:\n"
+        f"{_target_answer_language_instruction(locale)}\n"
         f"{context_line}A live {capability}/web tool result and checked source text are available in this turn. Treat this fresh web context as primary evidence for current facts.\n"
         "Do NOT claim or imply that the bot has no web tools, no live data capability, or cannot search the web.\n"
         "Use the supplied web result text and checked source evidence; mention source hosts when relevant. Summarize compactly and do not reproduce raw page/tool output. Do NOT override it with stale memory/priors.\n"
+        "Telegram formatting: use short paragraphs or bullet lists; do not use Markdown tables.\n"
         "User-facing wording: describe only the available web evidence and source certainty; do not expose retrieval pipeline details or diagnostic labels.\n"
         "Strict anti-hallucination: do NOT invent exact prices, rates, dates, levels, or news not supported by the supplied evidence. If exact values are absent, say the live evidence does not confirm the exact value.\n"
         f"Operation: {capability}\n"
@@ -1355,7 +1655,14 @@ def _format_auto_research_chained_success_note(
     )
 
 
-def _format_auto_research_chain_no_confirmation_note(*, capability: str, search_text: str, search_hosts: tuple[str, ...], followup: bool = False) -> str:
+def _format_auto_research_chain_no_confirmation_note(
+    *,
+    capability: str,
+    search_text: str,
+    search_hosts: tuple[str, ...],
+    followup: bool = False,
+    locale: str = "de",
+) -> str:
     compact_search = compact_webtool_result_text(search_text, max_chars=_AUTO_RESEARCH_SEARCH_SUMMARY_CAP)
     host_text = ", ".join(search_hosts[:5])
     heading = "FOLLOW-UP AUTO-RESEARCH STATUS" if followup else "AUTO-RESEARCH STATUS"
@@ -1365,9 +1672,11 @@ def _format_auto_research_chain_no_confirmation_note(*, capability: str, search_
     )
     return (
         f"{heading} — WEB SEARCH SUCCEEDED, SOURCE CHECK INCONCLUSIVE:\n"
+        f"{_target_answer_language_instruction(locale)}\n"
         f"{context_line}A live {capability} succeeded in this turn, but checking the linked source pages produced no additional usable confirmation.\n"
         "Be transparent: use the web result text only as limited live context, and if evidence remains insufficient, say clearly that the available web results could not fully confirm the requested information.\n"
         "Summarize compactly and do not reproduce raw page/tool output.\n"
+        "Telegram formatting: use short paragraphs or bullet lists; do not use Markdown tables.\n"
         "Do NOT say or imply that the bot has no web tools, no live data capability, or cannot search the web.\n"
         "User-facing wording: describe only the available web evidence and source certainty; do not expose retrieval pipeline details or diagnostic labels. For German answers, use natural wording like 'laut verfügbaren Web-Suchergebnissen' or 'eine zusätzliche Quellenbestätigung war diesmal nicht möglich'.\n"
         "Strict anti-hallucination: do NOT invent exact prices, rates, dates, levels, or news without reliable live confirmation from this turn.\n"
@@ -1377,14 +1686,18 @@ def _format_auto_research_chain_no_confirmation_note(*, capability: str, search_
     )
 
 
-def _format_auto_research_success_note(*, capability: str, text: str, hosts: tuple[str, ...]) -> str:
+def _format_auto_research_success_note(*, capability: str, text: str, hosts: tuple[str, ...], locale: str = "de") -> str:
     compact_text = compact_webtool_result_text(text, max_chars=_AUTO_RESEARCH_SEARCH_SUMMARY_CAP)
     host_text = ", ".join(hosts[:5])
+    relevance_instruction = _sports_result_relevance_instruction(compact_text)
     return (
         "AUTO-RESEARCH (LIVE WEB) — STRICT INSTRUCTION:\n"
+        f"{_target_answer_language_instruction(locale)}\n"
         f"A live {capability}/web tool result is available in this turn. Treat this fresh web context as primary evidence for current facts.\n"
         "Do NOT claim or imply that the bot has no web tools, no live data capability, or cannot search the web.\n"
         "Use the supplied web result text as primary evidence, cite or mention the source hosts when relevant, summarize compactly, do NOT reproduce raw tool output, and do NOT override it with stale memory/priors.\n"
+        f"{relevance_instruction}"
+        "Telegram formatting: use short paragraphs or bullet lists; do not use Markdown tables.\n"
         "User-facing wording: describe only the available web evidence and source certainty; do not expose retrieval pipeline details or diagnostic labels.\n"
         "Strict anti-hallucination: do NOT invent dates, prices, levels, or news not supported by the supplied live summary. "
         "If exact values are not in the supplied summary, state that the available live sources do not confirm that exact value; do not say no webtools.\n"
@@ -1395,30 +1708,46 @@ def _format_auto_research_success_note(*, capability: str, text: str, hosts: tup
     )
 
 
-def _format_auto_research_no_result_note(*, capability: str, reason: str | None) -> str:
+def _sports_result_relevance_instruction(search_text: str) -> str:
+    if classify_evidence_domain(search_text) != "sports":
+        return ""
+    if not sports_query.has_result_context(search_text):
+        return ""
+    return (
+        "Sports result relevance: for a concrete team/competition/year result question, use only evidence that supports the requested team, current competition/year, and match/result intent. "
+        "Ignore unrelated teams, other competitions, and historical tournament background. "
+        "If no opponent plus score is supported by the supplied evidence, fail closed instead of filling gaps.\n"
+    )
+
+
+def _format_auto_research_no_result_note(*, capability: str, reason: str | None, locale: str = "de") -> str:
     normalized_reason = (reason or "").strip() or "no_usable_result"
     reason_text = _AUTO_RESEARCH_NO_RESULT_TEXT.get(normalized_reason, "the attempt returned no usable live result")
     return (
         "AUTO-RESEARCH STATUS — WEB ATTEMPTED, NO USABLE RESULT:\n"
+        f"{_target_answer_language_instruction(locale)}\n"
         f"A live {capability} attempt was made in this turn, but {reason_text}. "
         f"Reason code: {normalized_reason}.\n"
         "Be transparent and precise: say the web search was attempted but this specific attempt produced no usable result, timed out, was limited, or the provider was unavailable. "
         "Do NOT say or imply that the bot has no web tools, no live data capability, or cannot search the web in general. "
+        "Telegram formatting: use short paragraphs or bullet lists; do not use Markdown tables. "
         "If useful in German, say: 'Die Websuche wurde versucht, lieferte aber diesmal keine verwertbaren Treffer/keine Bestätigung.'\n"
         "Strict anti-hallucination: do NOT invent current facts, dates, prices, levels, or news without reliable live confirmation from this turn. "
         "Memory and model priors are not acceptable substitutes for live evidence when current external data was required."
     )
 
 
-def _format_auto_research_retry_no_result_note(*, capability: str, reason: str | None) -> str:
+def _format_auto_research_retry_no_result_note(*, capability: str, reason: str | None, locale: str = "de") -> str:
     normalized_reason = (reason or "").strip() or "no_usable_result"
     reason_text = _AUTO_RESEARCH_NO_RESULT_TEXT.get(normalized_reason, "the retry returned no usable live result")
     return (
         "AUTO-RESEARCH STATUS — WEB ATTEMPTED, RETRY ALSO NO USABLE RESULT:\n"
+        f"{_target_answer_language_instruction(locale)}\n"
         f"A live {capability} attempt was made in this turn, then exactly one simplified retry from the current user message was also attempted, but {reason_text}. "
         f"Final reason code: {normalized_reason}.\n"
         "Be transparent and precise: say live websearch was attempted but did not return usable results after retry, so no current value/fact could be confirmed from live sources in this turn. "
         "Do NOT say or imply that the bot has no web tools, no live data capability, or cannot search the web in general. "
+        "Telegram formatting: use short paragraphs or bullet lists; do not use Markdown tables. "
         "If useful in German, say: 'Die Live-Websuche wurde versucht, lieferte aber auch nach einem vereinfachten Retry keine verwertbaren Treffer; ein aktueller Wert konnte nicht bestätigt werden.'\n"
         "Strict anti-hallucination: do NOT reuse old/stale prices, rates, dates, levels, news, or prior-answer context as an estimate. Do NOT provide an estimated current value when live confirmation is unavailable. "
         "Memory and model priors are not acceptable substitutes for live evidence when current external data was required."

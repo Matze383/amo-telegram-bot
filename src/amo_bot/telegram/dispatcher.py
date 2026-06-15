@@ -50,6 +50,7 @@ from amo_bot.telegram.webtool_chat_integration import (
     parse_webtool_chat_trigger,
 )
 from amo_bot.telegram.webtool_research_orchestrator import (
+    DbBackedResearchSourceObservationWriter,
     DbBackedResearchSourceQualityReader,
     WebResearchOrchestrator,
     WebResearchOrchestratorRequest,
@@ -1431,12 +1432,18 @@ class Dispatcher:
 
         auto_note = ""
         if trigger is None and self.webtool_dispatcher is not None:
+            research_session_factory = create_session_factory(self.database_url) if self.database_url is not None else None
             research_result = WebResearchOrchestrator(
                 webtool_dispatcher=self.webtool_dispatcher,
                 evidence_pipeline=self.web_evidence_pipeline,
                 source_quality_reader=(
-                    DbBackedResearchSourceQualityReader(session_factory=create_session_factory(self.database_url))
-                    if self.database_url is not None
+                    DbBackedResearchSourceQualityReader(session_factory=research_session_factory)
+                    if research_session_factory is not None
+                    else None
+                ),
+                source_observation_writer=(
+                    DbBackedResearchSourceObservationWriter(session_factory=research_session_factory)
+                    if research_session_factory is not None
                     else None
                 ),
             ).execute(
