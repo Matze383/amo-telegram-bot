@@ -129,6 +129,22 @@ isort src/ tests/
 - Mocking für externe APIs (Telegram, Ollama)
 - Keine Secrets in Testdaten
 
+### Agenten- und QA-Nachweise
+
+- Große lokale Logs und generierte Artefakte sind kein Rohmaterial für vollständige Agenten-Reads.
+- Lies oder kopiere keine vollständigen Dateien aus `logs/`, `.state/`, Datenbank-Dumps,
+  Migrationskopien, Diagnoseausgaben, Backups oder ähnlichen generierten Artefakten.
+- Für Logs nur begrenzte Nachweise verwenden: `tail`, gezieltes `rg`, Zeitfenster,
+  Fehlercodes, Counts, Dateigrößen und kurze relevante Treffer. `logs/bot.out` und andere
+  große Logs nicht vollständig lesen.
+- Datenbanken nur eng abfragen: konkrete Rows, Counts, Schemas oder Metadaten. Keine ganzen
+  Tabellen oder Datenbankinhalte in Agenten-/QA-Kontext dumpen.
+- `.state/` ist außerhalb des Agenten- und QA-Scopes, solange Matze/Main keine Cleanup- oder
+  Archivierungsaufgabe ausdrücklich freigibt. Bis dahin nur Metadaten wie `du`, begrenztes
+  `find`, Dateinamen, Größen und Zeitstempel prüfen.
+- Zukünftige Backend-/QA-Aufgaben sollen diesen Scope nennen: keine Rohlogs, keine vollständigen
+  generierten Artefakte, keine DB-Dumps; nur Metadaten oder relevante begrenzte Treffer.
+
 ### Dokumentation
 
 - Änderungen an Features → README/docs aktualisieren
@@ -301,6 +317,22 @@ isort src/ tests/
 - All PRs must pass `pytest -q`
 - Mock external APIs (Telegram, Ollama)
 - No secrets in test data
+
+### Agent and QA Evidence
+
+- Large local logs and generated artifacts are not raw material for full agent reads.
+- Do not read or copy complete files from `logs/`, `.state/`, database dumps, migration copies,
+  diagnostics, backups, or similar generated artifacts.
+- For logs, use bounded evidence only: `tail`, targeted `rg`, timestamps/time windows, error
+  codes, counts, file sizes, and short relevant matches. Do not read `logs/bot.out` or other
+  large logs in full.
+- Query databases narrowly: specific rows, counts, schemas, or metadata only. Do not dump whole
+  tables or database contents into agent/QA context.
+- `.state/` is outside agent and QA scope unless Matze/Main explicitly approves a cleanup or
+  archive task. Until then, inspect only metadata such as `du`, bounded `find`, filenames,
+  sizes, and timestamps.
+- Future Backend/QA tasks should state this scope: no raw logs, no complete generated artifacts,
+  no DB dumps; provide only metadata or relevant bounded matches.
 
 ### Documentation
 
