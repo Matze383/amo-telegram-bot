@@ -621,6 +621,71 @@ def test_auto_research_world_cup_2026_brazil_result_filters_irrelevant_chain_evi
     assert "1998" not in sent[0]
 
 
+def test_auto_research_world_cup_2026_brazil_result_rejects_partial_opponent_and_historical_score(monkeypatch):
+    monkeypatch.setattr("amo_bot.telegram.dispatcher.AIRouter.decide", lambda self, **kwargs: _allowing_router_decision())
+    search = SimpleNamespace(
+        allowed=True,
+        decision="allow",
+        reason="search_completed",
+        text=(
+            "Brazil World Cup 2026 group stage: Brazil had a stuttering start and a draw, "
+            "but no exact opponent or result is named."
+        ),
+        sources=("https://de.wikipedia.org/wiki/Fussball-Weltmeisterschaft_2026", "https://web.de/sport/wm-2026/live"),
+        hosts=("de.wikipedia.org", "web.de"),
+        error=None,
+    )
+    scrape1 = SimpleNamespace(
+        allowed=True,
+        decision="allow",
+        reason="scrape_completed",
+        text=(
+            "Brazil World Cup 2026 group stage Gruppe C lists Haiti as a group opponent. "
+            "Historical match: Brazil beat Haiti 7:1 at the Copa Centenario 2016."
+        ),
+        sources=("https://de.wikipedia.org/wiki/Fussball-Weltmeisterschaft_2026",),
+        hosts=("de.wikipedia.org",),
+        error=None,
+    )
+    scrape2 = SimpleNamespace(
+        allowed=True,
+        decision="allow",
+        reason="scrape_completed",
+        text=(
+            "Brazil World Cup 2026 group stage live blog says Brazil had a stuttering start "
+            "and a draw, without naming the exact opponent or score."
+        ),
+        sources=("https://web.de/sport/wm-2026/live",),
+        hosts=("web.de",),
+        error=None,
+    )
+    d, sent = _mk_sequence_dispatcher([search, scrape1, scrape2])
+
+    async def _ask(prompt: str) -> str:
+        raise AssertionError("partial sports result evidence must fail closed before synthesis")
+
+    d.ai_service.ask = _ask
+    asyncio.run(
+        d._maybe_handle_ai_autoreply(
+            message=_mk_message(
+                "@amo_bot Gegen wen hat Brasilien in der Vorrunde der WM 2026 schon gespielt und wie war das Ergebnis?",
+                reply_to_is_bot=False,
+                reply_to_user_is_bot=False,
+                reply_to_username="",
+            ),
+            role=Role.ADMIN,
+            bot_username="amo_bot",
+            from_parsed_update=True,
+        )
+    )
+
+    assert sent
+    assert "Ich finde kein belastbares Ergebnis" in sent[0]
+    assert "sports_result_opponent_score_not_confirmed" in sent[0]
+    assert "Haiti" not in sent[0]
+    assert "7:1" not in sent[0]
+
+
 def test_auto_research_empty_result_retries_once_with_stable_btc_query_and_chains(monkeypatch):
     monkeypatch.setattr("amo_bot.telegram.dispatcher.AIRouter.decide", lambda self, **kwargs: _allowing_router_decision())
     empty = SimpleNamespace(allowed=False, decision="deny", reason="empty_result", text="", sources=(), hosts=(), error=None)

@@ -378,6 +378,12 @@ def format_domain_evidence_note(result: DomainEvidenceResult, *, locale: str = "
 def format_domain_fail_closed_response(*, domain: str, locale: str, warnings: tuple[str, ...] = ()) -> str:
     reason = warnings[0] if warnings else "keine belastbare strukturierte Quelle verfügbar"
     if (locale or "").lower().startswith("en"):
+        if domain == "sports" and reason == "sports_result_opponent_score_not_confirmed":
+            return (
+                "I cannot reliably confirm a completed match result for the requested sports question. "
+                f"Evidence status: {reason}. I will not infer an opponent or score from snippets or partial source context.\n"
+                "Source/status: no confirmed source with opponent plus score in this attempt."
+            )
         labels = {
             "weather": "weather values or forecast",
             "crypto": "crypto price",
@@ -398,6 +404,13 @@ def format_domain_fail_closed_response(*, domain: str, locale: str, warnings: tu
         "sports": "Tabelle oder den Stand",
         "news": "aktuellen Nachrichten",
     }
+    if domain == "sports" and reason == "sports_result_opponent_score_not_confirmed":
+        return (
+            "Ich finde kein belastbares Ergebnis für ein bereits absolviertes Sportspiel zur Anfrage "
+            "und kann es gerade nicht belastbar bestätigen. "
+            f"Evidenzstatus: {reason}. Ich leite keinen Gegner oder Score aus Such-Snippets oder Teilkontext ab.\n"
+            "Quelle/Stand: keine bestätigte Quelle mit Gegner plus Score in diesem Versuch."
+        )
     label = labels.get(domain, "aktuellen Fakten")
     return (
         f"Ich kann {label} gerade nicht belastbar bestätigen. "

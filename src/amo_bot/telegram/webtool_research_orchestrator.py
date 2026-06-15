@@ -1146,14 +1146,38 @@ def _sports_result_has_opponent_score(text: str, *, request_text: str) -> bool:
     if not raw.strip() or not _sports_result_text_matches_scope(raw, request_text=request_text):
         return False
     score_re = r"\b\d{1,2}\s*(?:-|:|–|—)\s*\d{1,2}\b"
-    if not re.search(score_re, raw):
-        return False
-    if re.search(r"\b(?:against|vs\.?|versus|gegen|beat|beats|defeated|lost|drew|draw|unentschieden)\b", raw, re.IGNORECASE):
-        return True
-    team = re.escape(sports_query.first_team(request_text) or "")
-    if team and re.search(rf"\b{team}\b.{0,80}{score_re}.{0,80}\b[A-ZÄÖÜ][A-Za-zÄÖÜäöüß.-]{{2,}}\b", raw):
-        return True
+    for unit in _sports_result_evidence_units(raw):
+        if not _sports_result_unit_matches_scope(unit, request_text=request_text):
+            continue
+        for match in re.finditer(score_re, unit):
+            window = unit[max(0, match.start() - 120) : match.end() + 120]
+            if re.search(
+                r"\b(?:against|vs\.?|versus|gegen|beat|beats|defeated|lost|drew|draw|unentschieden)\b",
+                window,
+                re.IGNORECASE,
+            ):
+                return True
+            team = re.escape(sports_query.first_team(request_text) or "")
+            if team and re.search(rf"\b{team}\b.{0,80}{score_re}.{0,80}\b[A-ZÄÖÜ][A-Za-zÄÖÜäöüß.-]{{2,}}\b", window):
+                return True
     return False
+
+
+def _sports_result_evidence_units(text: str) -> tuple[str, ...]:
+    return tuple(unit.strip() for unit in re.split(r"(?<=[.!?])\s+|\n+", text or "") if unit.strip())
+
+
+def _sports_result_unit_matches_scope(unit: str, *, request_text: str) -> bool:
+    if not _contains_sports_scope_token(unit, sports_query.first_team(request_text) or ""):
+        return False
+    terms = sports_query.query_terms(request_text)
+    year = terms.get("year")
+    if year and str(year) not in unit:
+        return False
+    competition = terms.get("competition")
+    if competition and not _contains_sports_scope_token(unit, str(competition)):
+        return False
+    return True
 
 
 def _format_domain_chain_unconfirmed_response(*, request_text: str, locale: str, reason: str) -> str:
