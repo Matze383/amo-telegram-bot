@@ -773,7 +773,12 @@ def create_builtin_registry(
             )
 
         try:
-            return await ai_service.ask(ai_prompt)
+            try:
+                return await ai_service.ask(ai_prompt, task_type="answer_synthesis")
+            except TypeError as exc:
+                if "task_type" not in str(exc):
+                    raise
+                return await ai_service.ask(ai_prompt)
         except OllamaError:
             logger.exception("/ask failed: ollama runtime error user_id=%s chat_id=%s", ctx.user_id, ctx.chat_id)
             return _lang(ctx, "Sorry, ich kann gerade nicht antworten. Bitte versuche es später erneut.", "Sorry, I cannot answer right now. Please try again later.")

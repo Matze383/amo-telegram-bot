@@ -1469,7 +1469,12 @@ class Dispatcher:
         timing: dict[str, Any] = {}
         with duration_timer(timing):
             try:
-                response = await self.ai_service.ask(llm_prompt)
+                try:
+                    response = await self.ai_service.ask(llm_prompt, task_type="answer_synthesis")
+                except TypeError as exc:
+                    if "task_type" not in str(exc):
+                        raise
+                    response = await self.ai_service.ask(llm_prompt)
             except Exception:
                 logger.exception("ai_autoreply failed: user_id=%s chat_id=%s", message.from_user.id, message.chat.id)
                 if self.database_url is not None:

@@ -21,6 +21,7 @@ def _is_ollama_vision_model_allowed(model_name: str, allowed_models: tuple[str, 
 
 from amo_bot.ai.image_analyze_orchestrator import ImageAnalyzeProviderRequest, ImageAnalyzeProviderResult
 
+from amo_bot.ai.model_policy import AIModelPolicyConfig
 from amo_bot.ai.ollama import OllamaClient
 from amo_bot.ai.openai_provider import OpenAIProviderConfig, OpenAIRequestClient
 from amo_bot.ai.anthropic_provider import AnthropicProviderConfig, AnthropicRequestClient
@@ -42,7 +43,7 @@ from amo_bot.config.settings import Settings
 
 
 class AIProvider(Protocol):
-    async def ask(self, prompt: str) -> str: ...
+    async def ask(self, prompt: str, *, task_type: str | None = None) -> str: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,8 +56,8 @@ class OllamaProvider:
     def name(self) -> str:
         return "ollama"
 
-    async def ask(self, prompt: str) -> str:
-        return await self.service.ask(prompt)
+    async def ask(self, prompt: str, *, task_type: str | None = None) -> str:
+        return await self.service.ask(prompt, task_type=task_type)
 
     async def analyze_async(self, request: ImageAnalyzeProviderRequest) -> ImageAnalyzeProviderResult:
         if not _is_ollama_vision_model_allowed(self.model_name, self.vision_model_allowlist):
@@ -85,7 +86,8 @@ class OpenAIProvider:
     def client(self) -> OpenAIRequestClient:
         return OpenAIRequestClient(config=self.config)
 
-    async def ask(self, prompt: str) -> str:
+    async def ask(self, prompt: str, *, task_type: str | None = None) -> str:
+        _ = task_type
         return await self.client.ask(prompt)
 
 
@@ -97,7 +99,8 @@ class AnthropicProvider:
     def client(self) -> AnthropicRequestClient:
         return AnthropicRequestClient(config=self.config)
 
-    async def ask(self, prompt: str) -> str:
+    async def ask(self, prompt: str, *, task_type: str | None = None) -> str:
+        _ = task_type
         return await self.client.ask(prompt)
 
 
@@ -109,7 +112,8 @@ class GeminiProvider:
     def client(self) -> GeminiRequestClient:
         return GeminiRequestClient(config=self.config)
 
-    async def ask(self, prompt: str) -> str:
+    async def ask(self, prompt: str, *, task_type: str | None = None) -> str:
+        _ = task_type
         return await self.client.ask(prompt)
 
 
@@ -121,7 +125,8 @@ class OpenRouterProvider:
     def client(self) -> OpenRouterRequestClient:
         return OpenRouterRequestClient(config=self.config)
 
-    async def ask(self, prompt: str) -> str:
+    async def ask(self, prompt: str, *, task_type: str | None = None) -> str:
+        _ = task_type
         return await self.client.ask(prompt)
 
 
@@ -133,7 +138,8 @@ class GroqProvider:
     def client(self) -> GroqRequestClient:
         return GroqRequestClient(config=self.config)
 
-    async def ask(self, prompt: str) -> str:
+    async def ask(self, prompt: str, *, task_type: str | None = None) -> str:
+        _ = task_type
         return await self.client.ask(prompt)
 
 
@@ -145,7 +151,8 @@ class MistralProvider:
     def client(self) -> MistralRequestClient:
         return MistralRequestClient(config=self.config)
 
-    async def ask(self, prompt: str) -> str:
+    async def ask(self, prompt: str, *, task_type: str | None = None) -> str:
+        _ = task_type
         return await self.client.ask(prompt)
 
 
@@ -159,7 +166,8 @@ class XAIProvider:
     def client(self) -> XAIRequestClient:
         return XAIRequestClient(config=self.config)
 
-    async def ask(self, prompt: str) -> str:
+    async def ask(self, prompt: str, *, task_type: str | None = None) -> str:
+        _ = task_type
         return await self.client.ask(prompt)
 
 
@@ -171,7 +179,8 @@ class DeepSeekProvider:
     def client(self) -> DeepSeekRequestClient:
         return DeepSeekRequestClient(config=self.config)
 
-    async def ask(self, prompt: str) -> str:
+    async def ask(self, prompt: str, *, task_type: str | None = None) -> str:
+        _ = task_type
         return await self.client.ask(prompt)
 
 
@@ -183,7 +192,8 @@ class TogetherProvider:
     def client(self) -> TogetherRequestClient:
         return TogetherRequestClient(config=self.config)
 
-    async def ask(self, prompt: str) -> str:
+    async def ask(self, prompt: str, *, task_type: str | None = None) -> str:
+        _ = task_type
         return await self.client.ask(prompt)
 
 
@@ -195,7 +205,8 @@ class FireworksProvider:
     def client(self) -> FireworksRequestClient:
         return FireworksRequestClient(config=self.config)
 
-    async def ask(self, prompt: str) -> str:
+    async def ask(self, prompt: str, *, task_type: str | None = None) -> str:
+        _ = task_type
         return await self.client.ask(prompt)
 
 
@@ -207,7 +218,8 @@ class BedrockProvider:
     def client(self) -> BedrockRequestClient:
         return BedrockRequestClient(config=self.config)
 
-    async def ask(self, prompt: str) -> str:
+    async def ask(self, prompt: str, *, task_type: str | None = None) -> str:
+        _ = task_type
         return await self.client.ask(prompt)
 
 
@@ -219,7 +231,8 @@ class LiteLLMProvider:
     def client(self) -> LiteLLMRequestClient:
         return LiteLLMRequestClient(config=self.config)
 
-    async def ask(self, prompt: str) -> str:
+    async def ask(self, prompt: str, *, task_type: str | None = None) -> str:
+        _ = task_type
         return await self.client.ask(prompt)
 
 
@@ -231,7 +244,8 @@ class LMStudioProvider:
     def client(self) -> LMStudioRequestClient:
         return LMStudioRequestClient(config=self.config)
 
-    async def ask(self, prompt: str) -> str:
+    async def ask(self, prompt: str, *, task_type: str | None = None) -> str:
+        _ = task_type
         return await self.client.ask(prompt)
 
 
@@ -244,7 +258,8 @@ class VLLMProvider:
         return VLLMRequestClient(config=self.config)
 
 
-    async def ask(self, prompt: str) -> str:
+    async def ask(self, prompt: str, *, task_type: str | None = None) -> str:
+        _ = task_type
         return await self.client.ask(prompt)
 
 
@@ -256,11 +271,23 @@ class SGLangProvider:
     def client(self) -> SGLangRequestClient:
         return SGLangRequestClient(config=self.config)
 
-    async def ask(self, prompt: str) -> str:
+    async def ask(self, prompt: str, *, task_type: str | None = None) -> str:
+        _ = task_type
         return await self.client.ask(prompt)
 
 
 def _build_ollama_provider(settings: Settings) -> OllamaProvider:
+    policy = AIModelPolicyConfig(
+        enabled=settings.ollama_model_policy_enabled,
+        thinking_model=settings.ollama_thinking_model,
+        non_thinking_model=settings.ollama_non_thinking_model or (settings.ollama_fallback_model or ""),
+        prefer_thinking_task_types=_parse_model_allowlist(settings.ollama_thinking_task_types),
+        simple_prompt_max_chars=settings.ollama_simple_prompt_max_chars,
+        thinking_timeout_seconds=settings.ollama_thinking_timeout_seconds,
+        non_thinking_timeout_seconds=settings.ollama_non_thinking_timeout_seconds,
+        thinking_budget_max_prompt_chars=settings.ollama_thinking_budget_max_prompt_chars,
+        non_thinking_budget_max_prompt_chars=settings.ollama_non_thinking_budget_max_prompt_chars,
+    )
     return OllamaProvider(
         AIService(
             OllamaClient(
@@ -276,6 +303,7 @@ def _build_ollama_provider(settings: Settings) -> OllamaProvider:
             retry_on_transient_error=settings.ollama_retry_on_transient_error,
             retry_delay_seconds=settings.ollama_retry_delay_seconds,
             fallback_model=settings.ollama_fallback_model,
+            model_policy=policy,
         ),
         model_name=settings.ollama_model,
         vision_model_allowlist=_parse_model_allowlist(settings.image_analysis_ollama_vision_models),

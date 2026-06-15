@@ -270,6 +270,17 @@ OLLAMA_MAX_RESPONSE_CHARS=1500
 # OLLAMA_REQUEST_ENDPOINT=generate  # generate (default) or chat; invalid values fail startup validation
 # OLLAMA_STREAMING_MODE=off  # off (default), collect_only, live_edit (parsed gate only; no live Telegram streaming)
 
+# Optional: Ollama Model Policy (task-based model selection)
+# OLLAMA_MODEL_POLICY_ENABLED=false  # false (default), true
+# OLLAMA_THINKING_MODEL=             # Model for complex tasks (e.g., deepseek-r1:14b)
+# OLLAMA_NON_THINKING_MODEL=         # Model for simple tasks (e.g., qwen2.5-coder:14b)
+# OLLAMA_THINKING_TASK_TYPES=web_research,sports,news,answer_synthesis
+# OLLAMA_SIMPLE_PROMPT_MAX_CHARS=240
+# OLLAMA_THINKING_TIMEOUT_SECONDS=      # optional; default: OLLAMA_TIMEOUT_SECONDS
+# OLLAMA_NON_THINKING_TIMEOUT_SECONDS=  # optional; default: OLLAMA_TIMEOUT_SECONDS
+# OLLAMA_THINKING_BUDGET_MAX_PROMPT_CHARS=      # optional; default: OLLAMA_MAX_PROMPT_CHARS
+# OLLAMA_NON_THINKING_BUDGET_MAX_PROMPT_CHARS=  # optional; default: OLLAMA_MAX_PROMPT_CHARS
+
 # Optional: Database (defaults to SQLite)
 DATABASE_URL=sqlite:///./data/amo_bot.db
 

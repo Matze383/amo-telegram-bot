@@ -113,6 +113,18 @@ class Settings(BaseSettings):
     ollama_fallback_model: str | None = Field(default=None, alias="OLLAMA_FALLBACK_MODEL")
     ollama_request_endpoint: str = Field(default="generate", alias="OLLAMA_REQUEST_ENDPOINT")
     ollama_streaming_mode: str = Field(default="off", alias="OLLAMA_STREAMING_MODE")
+    ollama_model_policy_enabled: bool = Field(default=False, alias="OLLAMA_MODEL_POLICY_ENABLED")
+    ollama_thinking_model: str = Field(default="", alias="OLLAMA_THINKING_MODEL")
+    ollama_non_thinking_model: str = Field(default="", alias="OLLAMA_NON_THINKING_MODEL")
+    ollama_thinking_task_types: str = Field(
+        default="web_research,sports,news,answer_synthesis",
+        alias="OLLAMA_THINKING_TASK_TYPES",
+    )
+    ollama_simple_prompt_max_chars: int = Field(default=240, alias="OLLAMA_SIMPLE_PROMPT_MAX_CHARS", ge=1)
+    ollama_thinking_timeout_seconds: float | None = Field(default=None, alias="OLLAMA_THINKING_TIMEOUT_SECONDS", gt=0)
+    ollama_non_thinking_timeout_seconds: float | None = Field(default=None, alias="OLLAMA_NON_THINKING_TIMEOUT_SECONDS", gt=0)
+    ollama_thinking_budget_max_prompt_chars: int | None = Field(default=None, alias="OLLAMA_THINKING_BUDGET_MAX_PROMPT_CHARS", gt=0)
+    ollama_non_thinking_budget_max_prompt_chars: int | None = Field(default=None, alias="OLLAMA_NON_THINKING_BUDGET_MAX_PROMPT_CHARS", gt=0)
 
     image_analysis_ollama_vision_models: str = Field(
         default="llava,llama3.2-vision,qwen2.5vl",

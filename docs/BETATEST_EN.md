@@ -113,6 +113,19 @@ OLLAMA_TIMEOUT_SECONDS=20
 OLLAMA_MAX_PROMPT_CHARS=4000
 OLLAMA_MAX_PREDICT_TOKENS=512
 OLLAMA_MAX_RESPONSE_CHARS=1500
+# OLLAMA_REQUEST_ENDPOINT=generate  # generate (default) or chat
+# OLLAMA_STREAMING_MODE=off  # off (default), collect_only, live_edit
+
+# Optional: Ollama Model Policy (task-based model selection)
+# OLLAMA_MODEL_POLICY_ENABLED=false  # false (default), true
+# OLLAMA_THINKING_MODEL=             # Model for complex tasks (e.g., deepseek-r1:14b)
+# OLLAMA_NON_THINKING_MODEL=         # Model for simple tasks (e.g., qwen2.5-coder:14b)
+# OLLAMA_THINKING_TASK_TYPES=web_research,sports,news,answer_synthesis
+# OLLAMA_SIMPLE_PROMPT_MAX_CHARS=240
+# OLLAMA_THINKING_TIMEOUT_SECONDS=      # optional; default: OLLAMA_TIMEOUT_SECONDS
+# OLLAMA_NON_THINKING_TIMEOUT_SECONDS=  # optional; default: OLLAMA_TIMEOUT_SECONDS
+# OLLAMA_THINKING_BUDGET_MAX_PROMPT_CHARS=      # optional; default: OLLAMA_MAX_PROMPT_CHARS
+# OLLAMA_NON_THINKING_BUDGET_MAX_PROMPT_CHARS=  # optional; default: OLLAMA_MAX_PROMPT_CHARS
 
 # Database (default: SQLite; optional MariaDB/MySQL via mysql+pymysql://...)
 DATABASE_URL=sqlite:///./data/amo_bot.db
@@ -354,6 +367,20 @@ Start a private chat with your bot:
 # Check Ollama status
 curl http://127.0.0.1:11434/api/tags
 ```
+
+**Ollama Model Policy (optional):**
+When `OLLAMA_MODEL_POLICY_ENABLED=true`:
+- The bot automatically selects between Thinking and Non-Thinking models based on task
+- `OLLAMA_THINKING_MODEL`: For complex tasks (e.g., `deepseek-r1:14b`)
+- `OLLAMA_NON_THINKING_MODEL`: For simple tasks (e.g., `qwen2.5-coder:14b`)
+- `OLLAMA_THINKING_TASK_TYPES`: Comma-separated list of task types requiring Thinking
+- `OLLAMA_SIMPLE_PROMPT_MAX_CHARS`: Max characters for "simple" prompts (Non-Thinking)
+- Optional timeouts and prompt budgets for Thinking vs. Non-Thinking
+
+**Test – Model Policy:**
+- [ ] Short simple question (`/ask What is 2+2?`) uses Non-Thinking model
+- [ ] Complex research question (`/ask Explain quantum computing`) uses Thinking model
+- [ ] On transient timeout/error, fallback to the configured Non-Thinking/fallback model after retry
 
 **For Anthropic:**
 - Ensure `ANTHROPIC_API_KEY` is set in `.env`

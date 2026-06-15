@@ -113,6 +113,19 @@ OLLAMA_TIMEOUT_SECONDS=20
 OLLAMA_MAX_PROMPT_CHARS=4000
 OLLAMA_MAX_PREDICT_TOKENS=512
 OLLAMA_MAX_RESPONSE_CHARS=1500
+# OLLAMA_REQUEST_ENDPOINT=generate  # generate (Standard) oder chat
+# OLLAMA_STREAMING_MODE=off  # off (Standard), collect_only, live_edit
+
+# Optional: Ollama Model Policy (KI-Model-Auswahl nach Aufgabentyp)
+# OLLAMA_MODEL_POLICY_ENABLED=false  # false (Standard), true
+# OLLAMA_THINKING_MODEL=             # Modell für komplexe Aufgaben (z.B. deepseek-r1:14b)
+# OLLAMA_NON_THINKING_MODEL=         # Modell für einfache Aufgaben (z.B. qwen2.5-coder:14b)
+# OLLAMA_THINKING_TASK_TYPES=web_research,sports,news,answer_synthesis
+# OLLAMA_SIMPLE_PROMPT_MAX_CHARS=240
+# OLLAMA_THINKING_TIMEOUT_SECONDS=      # optional; Standard: OLLAMA_TIMEOUT_SECONDS
+# OLLAMA_NON_THINKING_TIMEOUT_SECONDS=  # optional; Standard: OLLAMA_TIMEOUT_SECONDS
+# OLLAMA_THINKING_BUDGET_MAX_PROMPT_CHARS=      # optional; Standard: OLLAMA_MAX_PROMPT_CHARS
+# OLLAMA_NON_THINKING_BUDGET_MAX_PROMPT_CHARS=  # optional; Standard: OLLAMA_MAX_PROMPT_CHARS
 
 # Datenbank (Standard: SQLite; optional MariaDB/MySQL via mysql+pymysql://...)
 DATABASE_URL=sqlite:///./data/amo_bot.db
@@ -354,6 +367,20 @@ Starte einen privaten Chat mit deinem Bot:
 # Prüfe Ollama-Status
 curl http://127.0.0.1:11434/api/tags
 ```
+
+**Ollama Model Policy (optional):**
+Wenn `OLLAMA_MODEL_POLICY_ENABLED=true`:
+- Der Bot wählt automatisch zwischen Thinking- und Non-Thinking-Modellen basierend auf der Aufgabe
+- `OLLAMA_THINKING_MODEL`: Für komplexe Aufgaben (z.B. `deepseek-r1:14b`)
+- `OLLAMA_NON_THINKING_MODEL`: Für einfache Aufgaben (z.B. `qwen2.5-coder:14b`)
+- `OLLAMA_THINKING_TASK_TYPES`: Komma-separierte Liste der Task-Typen, die Thinking erfordern
+- `OLLAMA_SIMPLE_PROMPT_MAX_CHARS`: Max. Zeichen für "einfache" Prompts (Non-Thinking)
+- Optionale Timeouts und Prompt-Budgets für Thinking vs. Non-Thinking
+
+**Test – Model Policy:**
+- [ ] Kurze einfache Frage (`/ask Was ist 2+2?`) verwendet Non-Thinking-Modell
+- [ ] Komplexe Forschungsfrage (`/ask Erkläre Quantencomputing`) verwendet Thinking-Modell
+- [ ] Bei transientem Timeout/Error erfolgt nach Retry ein Fallback auf das konfigurierte Non-Thinking-/Fallback-Modell
 
 **Für Anthropic:**
 - Stelle sicher, dass `ANTHROPIC_API_KEY` in `.env` gesetzt ist

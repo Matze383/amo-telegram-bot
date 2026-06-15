@@ -5,16 +5,36 @@ import logging
 
 import pytest
 
+from amo_bot.ai.model_policy import AIModelPolicyConfig
 from amo_bot.ai.ollama import OllamaError, OllamaHTTPStatusError
 from amo_bot.ai.service import AIService
 
 
 class _FakeClient:
-    def __init__(self, *, base_url: str = "http://ollama", model: str = "primary", timeout_seconds: float = 1.0, max_response_chars: int = 1000, outcomes: list[object] | None = None, stream_events: list[dict[str, object]] | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        base_url: str = "http://ollama",
+        model: str = "primary",
+        timeout_seconds: float = 1.0,
+        max_prompt_chars: int = 4000,
+        max_predict_tokens: int = 512,
+        max_response_chars: int = 1000,
+        request_endpoint: str = "generate",
+        streaming_mode: str = "off",
+        think: bool = False,
+        outcomes: list[object] | None = None,
+        stream_events: list[dict[str, object]] | None = None,
+    ) -> None:
         self.base_url = base_url
         self.model = model
         self.timeout_seconds = timeout_seconds
+        self.max_prompt_chars = max_prompt_chars
+        self.max_predict_tokens = max_predict_tokens
         self.max_response_chars = max_response_chars
+        self.request_endpoint = request_endpoint
+        self.streaming_mode = streaming_mode
+        self.think = think
         self._outcomes = list(outcomes or [])
         self.calls: list[str] = []
         self.last_stream_events = list(stream_events or [])
@@ -30,8 +50,21 @@ class _FakeClient:
 
 
 class _FallbackClient:
-    def __init__(self, *, response: object, stream_events: list[dict[str, object]] | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        response: object,
+        model: str = "fallback",
+        timeout_seconds: float = 1.0,
+        max_prompt_chars: int = 4000,
+        think: bool = False,
+        stream_events: list[dict[str, object]] | None = None,
+    ) -> None:
         self.response = response
+        self.model = model
+        self.timeout_seconds = timeout_seconds
+        self.max_prompt_chars = max_prompt_chars
+        self.think = think
         self.calls: list[str] = []
         self.last_stream_events = list(stream_events or [])
 
@@ -56,7 +89,12 @@ def test_primary_retry_fail_then_fallback_model_success(monkeypatch) -> None:
     client = _FakeClient(outcomes=[OllamaHTTPStatusError(503), OllamaHTTPStatusError(503)])
     fallback = _FallbackClient(response="fallback success")
 
-    def _mk_fallback(*, base_url: str, model: str, timeout_seconds: float, max_response_chars: int, request_endpoint: str):
+    def _mk_fallback(**kwargs):
+        base_url = kwargs["base_url"]
+        model = kwargs["model"]
+        timeout_seconds = kwargs["timeout_seconds"]
+        max_response_chars = kwargs["max_response_chars"]
+        request_endpoint = kwargs["request_endpoint"]
         assert base_url == "http://ollama"
         assert model == "kimi-k2.5:cloud"
         assert timeout_seconds == 1.0
@@ -83,8 +121,8 @@ def test_primary_retry_fail_then_fallback_model_success(monkeypatch) -> None:
 def test_primary_retry_and_fallback_fail_raises(monkeypatch) -> None:
     client = _FakeClient(outcomes=[OllamaHTTPStatusError(503), OllamaHTTPStatusError(503)])
 
-    def _mk_fallback(*, base_url: str, model: str, timeout_seconds: float, max_response_chars: int, request_endpoint: str):
-        assert request_endpoint == "generate"
+    def _mk_fallback(**kwargs):
+        assert kwargs["request_endpoint"] == "generate"
         return _FallbackClient(response=OllamaError("request timed out"))
 
     monkeypatch.setattr("amo_bot.ai.service.OllamaClient", _mk_fallback)
@@ -123,6 +161,93 @@ def test_logs_primary_success_metadata_only(caplog: pytest.LogCaptureFixture) ->
     assert all("hello world" not in msg for msg in messages)
 
 
+def test_policy_routes_answer_synthesis_to_thinking_model(monkeypatch, caplog: pytest.LogCaptureFixture) -> None:
+    routed_clients: list[_FallbackClient] = []
+
+    def _mk_client(**kwargs):
+        client = _FallbackClient(
+            response="thinking success",
+            model=kwargs["model"],
+            timeout_seconds=kwargs["timeout_seconds"],
+            max_prompt_chars=kwargs["max_prompt_chars"],
+            think=kwargs["think"],
+        )
+        routed_clients.append(client)
+        return client
+
+    monkeypatch.setattr("amo_bot.ai.service.OllamaClient", _mk_client)
+
+    service = AIService(
+        client=_FakeClient(model="qwen-default"),
+        retry_delay_seconds=0,
+        model_policy=AIModelPolicyConfig(
+            enabled=True,
+            thinking_model="kimi-thinking",
+            non_thinking_model="qwen-fast",
+            thinking_timeout_seconds=45.0,
+            thinking_budget_max_prompt_chars=8000,
+        ),
+    )
+
+    with caplog.at_level(logging.INFO, logger="amo_bot.ai.service"):
+        out = asyncio.run(service.ask("prompt content that must stay private", task_type="answer_synthesis"))
+
+    assert out == "thinking success"
+    assert len(routed_clients) == 1
+    routed = routed_clients[0]
+    assert routed.model == "kimi-thinking"
+    assert routed.think is True
+    assert routed.timeout_seconds == 45.0
+    assert routed.max_prompt_chars == 8000
+    messages = [rec.message for rec in caplog.records if rec.name == "amo_bot.ai.service"]
+    assert any(
+        "model=kimi-thinking" in msg
+        and "task_type=answer_synthesis" in msg
+        and "route_decision=thinking" in msg
+        and "think=True" in msg
+        for msg in messages
+    )
+    assert all("prompt content" not in msg for msg in messages)
+
+
+def test_policy_falls_back_to_non_thinking_model_after_transient_failures(monkeypatch) -> None:
+    thinking_client = _FakeClient(
+        model="kimi-thinking",
+        think=True,
+        outcomes=[OllamaHTTPStatusError(503), OllamaHTTPStatusError(503)],
+    )
+    fallback_client = _FallbackClient(response="fallback final", model="qwen-fast", think=False)
+    created: list[object] = []
+
+    def _mk_client(**kwargs):
+        if kwargs["model"] == "kimi-thinking":
+            created.append(thinking_client)
+            return thinking_client
+        assert kwargs["model"] == "qwen-fast"
+        assert kwargs["think"] is False
+        created.append(fallback_client)
+        return fallback_client
+
+    monkeypatch.setattr("amo_bot.ai.service.OllamaClient", _mk_client)
+
+    service = AIService(
+        client=_FakeClient(model="qwen-default"),
+        retry_delay_seconds=0,
+        model_policy=AIModelPolicyConfig(
+            enabled=True,
+            thinking_model="kimi-thinking",
+            non_thinking_model="qwen-fast",
+        ),
+    )
+
+    out = asyncio.run(service.ask("latest sports news", task_type="sports"))
+
+    assert out == "fallback final"
+    assert len(thinking_client.calls) == 2
+    assert len(fallback_client.calls) == 1
+    assert created == [thinking_client, fallback_client]
+
+
 def test_logs_retry_error_then_success_metadata_only(caplog: pytest.LogCaptureFixture) -> None:
     client = _FakeClient(model="qwen3", outcomes=[OllamaHTTPStatusError(503), "ok after retry"])
     service = AIService(client=client, retry_on_transient_error=True, retry_delay_seconds=0)
@@ -141,8 +266,8 @@ def test_logs_fallback_success_metadata_only(monkeypatch, caplog: pytest.LogCapt
     client = _FakeClient(model="qwen3", outcomes=[OllamaHTTPStatusError(503), OllamaHTTPStatusError(503)])
     fallback = _FallbackClient(response="fallback success")
 
-    def _mk_fallback(*, base_url: str, model: str, timeout_seconds: float, max_response_chars: int, request_endpoint: str):
-        assert request_endpoint == "generate"
+    def _mk_fallback(**kwargs):
+        assert kwargs["request_endpoint"] == "generate"
         return fallback
 
     monkeypatch.setattr("amo_bot.ai.service.OllamaClient", _mk_fallback)
@@ -178,8 +303,8 @@ def test_ai_service_collect_only_stream_contract_error_retries_then_fallback(mon
     client.request_endpoint = "chat"
     fallback = _FallbackClient(response="fallback final")
 
-    def _mk_fallback(*, base_url: str, model: str, timeout_seconds: float, max_response_chars: int, request_endpoint: str):
-        assert request_endpoint == "chat"
+    def _mk_fallback(**kwargs):
+        assert kwargs["request_endpoint"] == "chat"
         return fallback
 
     monkeypatch.setattr("amo_bot.ai.service.OllamaClient", _mk_fallback)
@@ -292,8 +417,8 @@ def test_stream_handoff_uses_fallback_events_with_terminal_convergence(monkeypat
         ],
     )
 
-    def _mk_fallback(*, base_url: str, model: str, timeout_seconds: float, max_response_chars: int, request_endpoint: str):
-        assert request_endpoint == "generate"
+    def _mk_fallback(**kwargs):
+        assert kwargs["request_endpoint"] == "generate"
         return fallback
 
     monkeypatch.setattr("amo_bot.ai.service.OllamaClient", _mk_fallback)
