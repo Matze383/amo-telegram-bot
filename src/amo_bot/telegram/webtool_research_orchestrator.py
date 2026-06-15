@@ -61,6 +61,26 @@ _SPORTS_RESULT_RELATION_RE = re.compile(
     r"\b(?:against|vs\.?|versus|gegen|beat|beats|defeated|lost|drew|draw|unentschieden)\b",
     re.IGNORECASE,
 )
+_SPORTS_RESULT_OPPONENT_STOPWORDS = frozenset(
+    {
+        "copa",
+        "cup",
+        "euro",
+        "fifa",
+        "group",
+        "historical",
+        "live",
+        "match",
+        "page",
+        "score",
+        "second",
+        "source",
+        "stage",
+        "summary",
+        "uefa",
+        "world",
+    }
+)
 _AUTO_RESEARCH_CHAIN_FRESHNESS_RE = re.compile(
     r"\b(?:"
     r"current|aktuell(?:e[nrms]?)?|jetzt|heute|live|realtime|real-time|right\s+now|"
@@ -152,6 +172,14 @@ class ResearchPlan:
     @property
     def should_followup_search(self) -> bool:
         return any(step.operation == "websearch" for step in self.steps)
+
+
+@dataclass(frozen=True, slots=True)
+class SportsResultEvidenceAssessment:
+    confirmed: bool
+    confidence: float
+    units: tuple[str, ...] = ()
+    warnings: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -963,10 +991,8 @@ def build_research_plan(
             warnings.append("source_observation_conflict")
         if source_quality.get("weak_hosts"):
             warnings.append("source_observation_weak")
-    if allow_sports_result_followup and _is_concrete_sports_result_question(request_text) and not _sports_result_has_opponent_score(
-        search_text,
-        request_text=request_text,
-    ):
+    sports_result_assessment = _assess_sports_result_evidence(search_text, request_text=request_text)
+    if allow_sports_result_followup and _is_concrete_sports_result_question(request_text) and not sports_result_assessment.confirmed:
         warnings.append("sports_result_opponent_score_missing")
 
     if not warnings:
@@ -1092,7 +1118,8 @@ def _format_sports_result_unconfirmed_response(
         extracts=extracts,
     )
     evidence_text = "\n".join((filtered_search, *(text for _, _, text in filtered_extracts)))
-    if _sports_result_has_opponent_score(evidence_text, request_text=request_text):
+    assessment = _assess_sports_result_evidence(evidence_text, request_text=request_text)
+    if assessment.confirmed:
         return ""
     return format_domain_fail_closed_response(
         domain="sports",
@@ -1160,24 +1187,42 @@ def _contains_sports_scope_token(text: str, token: str) -> bool:
 
 
 def _sports_result_has_opponent_score(text: str, *, request_text: str) -> bool:
+    return _assess_sports_result_evidence(text, request_text=request_text).confirmed
+
+
+def _assess_sports_result_evidence(text: str, *, request_text: str) -> SportsResultEvidenceAssessment:
     raw = text or ""
     if not raw.strip():
-        return False
+        return SportsResultEvidenceAssessment(False, 0.0, warnings=("empty_evidence",))
+    if not _is_concrete_sports_result_question(request_text):
+        return SportsResultEvidenceAssessment(False, 0.0, warnings=("not_concrete_sports_result_question",))
+    matched_units: list[str] = []
+    weak_units: list[str] = []
     for unit in _sports_result_evidence_units(raw):
         if not _sports_result_unit_matches_scope(unit, request_text=request_text):
             continue
         for match in _SPORTS_RESULT_SCORE_RE.finditer(unit):
             window = unit[max(0, match.start() - 120) : match.end() + 120]
-            if _SPORTS_RESULT_RELATION_RE.search(window):
-                return True
+            has_relation = bool(_SPORTS_RESULT_RELATION_RE.search(window))
+            has_opponent = _sports_result_window_has_opponent(window, request_text=request_text)
+            if has_relation and has_opponent:
+                matched_units.append(unit)
+                continue
             team = re.escape(sports_query.first_team(request_text) or "")
-            if team and re.search(
+            has_team_score_opponent_shape = bool(team and re.search(
                 rf"(?:\b{team}\b.{0,80}{_SPORTS_RESULT_SCORE_RE.pattern}.{0,80}\b[A-ZÄÖÜ][A-Za-zÄÖÜäöüß.-]{{2,}}\b|"
                 rf"\b[A-ZÄÖÜ][A-Za-zÄÖÜäöüß.-]{{2,}}\b.{0,80}{_SPORTS_RESULT_SCORE_RE.pattern}.{0,80}\b{team}\b)",
                 window,
-            ):
-                return True
-    return False
+            ))
+            if has_team_score_opponent_shape and has_opponent:
+                matched_units.append(unit)
+            else:
+                weak_units.append(unit)
+    if matched_units:
+        confidence = 0.92 if len(matched_units) > 1 else 0.82
+        return SportsResultEvidenceAssessment(True, confidence, units=tuple(matched_units))
+    warnings = ("sports_result_opponent_score_not_local",) if weak_units else ("sports_result_opponent_score_missing",)
+    return SportsResultEvidenceAssessment(False, 0.35 if weak_units else 0.0, units=tuple(weak_units), warnings=warnings)
 
 
 def _sports_result_evidence_units(text: str) -> tuple[str, ...]:
@@ -1195,6 +1240,22 @@ def _sports_result_unit_matches_scope(unit: str, *, request_text: str) -> bool:
     if competition and not _contains_sports_scope_token(unit, str(competition)):
         return False
     return True
+
+
+def _sports_result_window_has_opponent(window: str, *, request_text: str) -> bool:
+    requested_team = sports_query.first_team(request_text) or ""
+    for team in sports_query.matching_teams(window):
+        if team != requested_team:
+            return True
+    requested_parts = {part.casefold() for part in re.findall(r"[A-Za-zÄÖÜäöüß]+", requested_team)}
+    for candidate in re.findall(r"\b[A-ZÄÖÜ][A-Za-zÄÖÜäöüß.-]{2,}\b", window or ""):
+        normalized = candidate.strip(".-").casefold()
+        if not normalized or normalized in requested_parts or normalized in _SPORTS_RESULT_OPPONENT_STOPWORDS:
+            continue
+        if normalized.isdigit():
+            continue
+        return True
+    return False
 
 
 def _format_domain_chain_unconfirmed_response(*, request_text: str, locale: str, reason: str) -> str:

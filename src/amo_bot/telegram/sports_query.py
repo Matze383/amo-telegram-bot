@@ -175,6 +175,15 @@ def first_team(text: str) -> str | None:
     return _first_canonical(text or "", TEAM_NAME_ALIASES)
 
 
+def matching_teams(text: str) -> tuple[str, ...]:
+    raw = text or ""
+    teams: list[str] = []
+    for entry in TEAM_NAME_ALIASES:
+        if alias_pattern((entry,)).search(raw):
+            teams.append(entry.canonical)
+    return tuple(teams)
+
+
 def _replace_aliases(text: str, aliases: Iterable[SportsAlias]) -> str:
     value = text
     for entry in aliases:

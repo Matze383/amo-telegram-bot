@@ -808,6 +808,10 @@ def test_sport_query_registry_detects_canonical_team_names_for_any_registered_te
     assert sports_query.first_team("Lakers NBA result") == "Los Angeles Lakers"
 
 
+def test_sport_query_registry_returns_all_matching_teams():
+    assert sports_query.matching_teams("Germany vs France Euro 2024 result") == ("Germany", "France")
+
+
 def test_sport_profile_can_use_learned_reliable_source_observations(tmp_path):
     session_factory = _db(tmp_path)
     with session_factory() as session:

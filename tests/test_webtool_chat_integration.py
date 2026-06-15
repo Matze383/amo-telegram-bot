@@ -772,6 +772,134 @@ def test_auto_research_world_cup_2026_brazil_result_uses_followup_match_score(mo
     assert sent == ["Brasilien spielte bei der WM 2026 gegen Switzerland 1-1."]
 
 
+def test_auto_research_non_brazil_sports_result_rejects_dated_and_partial_evidence(monkeypatch):
+    monkeypatch.setattr("amo_bot.telegram.dispatcher.AIRouter.decide", lambda self, **kwargs: _allowing_router_decision())
+    search = SimpleNamespace(
+        allowed=True,
+        decision="allow",
+        reason="search_completed",
+        text="Germany Euro 2024 group stage says Germany drew 1-1, but the opponent is not named.",
+        sources=("https://sports.example/euro-2024/germany", "https://archive.example/world-cup-2014"),
+        hosts=("sports.example", "archive.example"),
+        error=None,
+    )
+    followup = SimpleNamespace(
+        allowed=True,
+        decision="allow",
+        reason="search_completed",
+        text="Germany Euro 2024 group stage result snippet repeats a 1-1 draw without naming the opponent.",
+        sources=(),
+        hosts=(),
+        error=None,
+    )
+    scrape1 = SimpleNamespace(
+        allowed=True,
+        decision="allow",
+        reason="scrape_completed",
+        text="Germany Euro 2024 group stage article says Germany drew 1-1, with no opponent named in this excerpt.",
+        sources=("https://sports.example/euro-2024/germany",),
+        hosts=("sports.example",),
+        error=None,
+    )
+    scrape2 = SimpleNamespace(
+        allowed=True,
+        decision="allow",
+        reason="scrape_completed",
+        text="Historical archive: Germany beat Argentina 1-0 at the World Cup 2014 final.",
+        sources=("https://archive.example/world-cup-2014",),
+        hosts=("archive.example",),
+        error=None,
+    )
+    d, sent = _mk_sequence_dispatcher([search, followup, scrape1, scrape2])
+
+    async def _ask(prompt: str) -> str:
+        raise AssertionError("partial non-Brazil sports result evidence must fail closed before synthesis")
+
+    d.ai_service.ask = _ask
+    asyncio.run(
+        d._maybe_handle_ai_autoreply(
+            message=_mk_message(
+                "@amo_bot Germany Euro 2024 group stage result?",
+                reply_to_is_bot=False,
+                reply_to_user_is_bot=False,
+                reply_to_username="",
+            ),
+            role=Role.ADMIN,
+            bot_username="amo_bot",
+            from_parsed_update=True,
+        )
+    )
+
+    assert sent
+    assert [c.capability for c in d.webtool_dispatcher.calls][:2] == ["websearch", "websearch"]
+    assert "Ich finde kein belastbares Ergebnis" in sent[0]
+    assert "Argentina" not in sent[0]
+    assert "1-0" not in sent[0]
+
+
+def test_auto_research_non_brazil_sports_result_uses_local_opponent_score_evidence(monkeypatch):
+    monkeypatch.setattr("amo_bot.telegram.dispatcher.AIRouter.decide", lambda self, **kwargs: _allowing_router_decision())
+    search = SimpleNamespace(
+        allowed=True,
+        decision="allow",
+        reason="search_completed",
+        text="Germany beat Scotland 5-1 at Euro 2024.",
+        sources=("https://scores.example/euro-2024/germany-scotland",),
+        hosts=("scores.example",),
+        error=None,
+    )
+    followup = SimpleNamespace(
+        allowed=True,
+        decision="allow",
+        reason="search_completed",
+        text="Second source confirms Germany beat Scotland 5-1 at Euro 2024.",
+        sources=("https://sports-two.example/euro-2024/germany-scotland",),
+        hosts=("sports-two.example",),
+        error=None,
+    )
+    scrape1 = SimpleNamespace(
+        allowed=True,
+        decision="allow",
+        reason="scrape_completed",
+        text="Germany beat Scotland 5-1 at Euro 2024 in the tournament opener, with the opponent and score confirmed.",
+        sources=("https://scores.example/euro-2024/germany-scotland",),
+        hosts=("scores.example",),
+        error=None,
+    )
+    scrape2 = SimpleNamespace(
+        allowed=True,
+        decision="allow",
+        reason="scrape_completed",
+        text="Second source confirms Germany beat Scotland 5-1 at Euro 2024, including the opponent and full-time score.",
+        sources=("https://sports-two.example/euro-2024/germany-scotland",),
+        hosts=("sports-two.example",),
+        error=None,
+    )
+    d, sent = _mk_sequence_dispatcher([search, followup, scrape1, scrape2])
+
+    async def _ask(prompt: str) -> str:
+        assert "Germany beat Scotland 5-1 at Euro 2024" in prompt
+        return "Germany beat Scotland 5-1 at Euro 2024."
+
+    d.ai_service.ask = _ask
+    asyncio.run(
+        d._maybe_handle_ai_autoreply(
+            message=_mk_message(
+                "@amo_bot Germany Euro 2024 result?",
+                reply_to_is_bot=False,
+                reply_to_user_is_bot=False,
+                reply_to_username="",
+            ),
+            role=Role.ADMIN,
+            bot_username="amo_bot",
+            from_parsed_update=True,
+        )
+    )
+
+    assert [c.capability for c in d.webtool_dispatcher.calls] == ["websearch", "websearch", "webscraping", "webscraping"]
+    assert sent == ["Germany beat Scotland 5-1 at Euro 2024."]
+
+
 def test_auto_research_empty_result_retries_once_with_stable_btc_query_and_chains(monkeypatch):
     monkeypatch.setattr("amo_bot.telegram.dispatcher.AIRouter.decide", lambda self, **kwargs: _allowing_router_decision())
     empty = SimpleNamespace(allowed=False, decision="deny", reason="empty_result", text="", sources=(), hosts=(), error=None)
