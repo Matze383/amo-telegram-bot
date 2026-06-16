@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from amo_bot.current_info.candidates import normalize_dedupe_and_rank_search_results
 from amo_bot.current_info.models import (
     CurrentInfoAnswer,
     CurrentInfoRequest,
@@ -188,9 +189,10 @@ class CurrentInfoService:
                     continue
                 seen_urls.add(item.url)
                 collected.append(item)
-                if len(collected) >= query_plan.max_results:
-                    return SearchProviderResponse(results=tuple(collected), metrics=tuple(metrics))
-        return SearchProviderResponse(results=tuple(collected), metrics=tuple(metrics))
+        return SearchProviderResponse(
+            results=normalize_dedupe_and_rank_search_results(tuple(collected), max_results=query_plan.max_results),
+            metrics=tuple(metrics),
+        )
 
     def _fetch_documents(
         self,

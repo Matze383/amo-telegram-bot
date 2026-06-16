@@ -154,7 +154,8 @@ def test_current_info_service_uses_fake_search_fetch_and_retrieval_ports():
     assert search_provider.calls == [_SearchCall(query="current status", locale="de", max_results=3)]
     assert fetch_provider.calls == [(result.url, "de")]
     assert retrieval_provider.calls[0][1] == (document,)
-    assert retrieval_provider.calls[0][2] == (result,)
+    assert retrieval_provider.calls[0][2][0].url == result.url
+    assert retrieval_provider.calls[0][2][0].metadata["canonical_url"] == result.url
 
 
 def test_current_info_service_uses_snippets_when_no_fetch_provider_is_configured():
@@ -174,6 +175,44 @@ def test_current_info_service_uses_snippets_when_no_fetch_provider_is_configured
     assert answer.evidence is not None
     assert answer.evidence.documents == ()
     assert answer.evidence.chunks[0].source_url == result.url
+
+
+def test_current_info_service_normalizes_ranks_and_dedupes_search_candidates():
+    tracked = SearchResult(
+        title="Tracked",
+        url="https://Example.com/news/?utm_source=test&id=1",
+        snippet="Tracked result",
+        provider="searxng",
+        rank=1,
+    )
+    duplicate = SearchResult(
+        title="Duplicate",
+        url="https://example.com/news?id=1&fbclid=abc",
+        snippet="Duplicate result",
+        provider="brave",
+        rank=1,
+    )
+    official = SearchResult(
+        title="Official",
+        url="https://example.gov/status",
+        snippet="Official result",
+        provider="brave",
+        rank=2,
+    )
+    search_provider = _FakeSearchProvider((tracked, duplicate, official))
+    service = CurrentInfoService(search_provider=search_provider)
+
+    answer = service.answer(CurrentInfoRequest(query="current info", max_results=3))
+
+    assert answer.status == "answered"
+    assert answer.search_bundle is not None
+    assert [result.url for result in answer.search_bundle.results] == [
+        "https://example.com/news?id=1",
+        "https://example.gov/status",
+    ]
+    assert answer.search_bundle.results[0].metadata["source_type"] == "News"
+    assert answer.search_bundle.results[1].metadata["source_type"] == "Official"
+    assert answer.sources == ("https://example.com/news?id=1", "https://example.gov/status")
 
 
 def test_current_info_service_fails_closed_without_search_provider():

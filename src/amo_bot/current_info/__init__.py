@@ -1,3 +1,15 @@
+from amo_bot.current_info.candidates import (
+    SOURCE_TYPE_COMMERCE,
+    SOURCE_TYPE_DOCS,
+    SOURCE_TYPE_FORUM,
+    SOURCE_TYPE_NEWS,
+    SOURCE_TYPE_OFFICIAL,
+    SOURCE_TYPE_SOCIAL,
+    SOURCE_TYPE_UNKNOWN,
+    canonicalize_url,
+    classify_source_type,
+    normalize_dedupe_and_rank_search_results,
+)
 from amo_bot.current_info.legacy_webtool import LegacyWebtoolCurrentInfoService
 from amo_bot.current_info.models import (
     CurrentInfoAnswer,
@@ -70,6 +82,16 @@ __all__ = [
     "SearxngSearchConfig",
     "SearxngSearchProvider",
     "SnippetRetrievalProvider",
+    "SOURCE_TYPE_COMMERCE",
+    "SOURCE_TYPE_DOCS",
+    "SOURCE_TYPE_FORUM",
+    "SOURCE_TYPE_NEWS",
+    "SOURCE_TYPE_OFFICIAL",
+    "SOURCE_TYPE_SOCIAL",
+    "SOURCE_TYPE_UNKNOWN",
     "TaskSpec",
     "build_search_broker_from_settings",
+    "canonicalize_url",
+    "classify_source_type",
+    "normalize_dedupe_and_rank_search_results",
 ]

@@ -9,6 +9,13 @@ import pytest
 from amo_bot.current_info import (
     BraveSearchConfig,
     BraveSearchProvider,
+    SOURCE_TYPE_COMMERCE,
+    SOURCE_TYPE_DOCS,
+    SOURCE_TYPE_FORUM,
+    SOURCE_TYPE_NEWS,
+    SOURCE_TYPE_OFFICIAL,
+    SOURCE_TYPE_SOCIAL,
+    SOURCE_TYPE_UNKNOWN,
     SearchBroker,
     SearchBrokerConfig,
     SearchProviderError,
@@ -18,6 +25,9 @@ from amo_bot.current_info import (
     SearchResult,
     SearxngSearchConfig,
     SearxngSearchProvider,
+    canonicalize_url,
+    classify_source_type,
+    normalize_dedupe_and_rank_search_results,
 )
 
 
@@ -128,6 +138,99 @@ def test_searxng_success_parses_results_and_metrics_without_real_network() -> No
         )
     ]
     assert factory.client_kwargs[0]["timeout"] == 1.5
+
+
+def test_canonicalize_url_removes_tracking_params_and_stabilizes_shape() -> None:
+    assert (
+        canonicalize_url("HTTPS://Example.COM:443/news/?utm_source=chat&b=2&a=1&fbclid=abc#section")
+        == "https://example.com/news?a=1&b=2"
+    )
+    assert canonicalize_url("https://example.com/?utm_campaign=x") == "https://example.com/"
+
+
+@pytest.mark.parametrize(
+    ("result", "source_type"),
+    [
+        (_result("https://www.reuters.com/world/latest"), SOURCE_TYPE_NEWS),
+        (_result("https://example.gov/alerts"), SOURCE_TYPE_OFFICIAL),
+        (_result("https://docs.python.org/3/library/datetime.html"), SOURCE_TYPE_DOCS),
+        (_result("https://x.com/example/status/1"), SOURCE_TYPE_SOCIAL),
+        (_result("https://www.reddit.com/r/python/comments/1"), SOURCE_TYPE_FORUM),
+        (_result("https://www.amazon.de/dp/example"), SOURCE_TYPE_COMMERCE),
+        (_result("https://example.com/about"), SOURCE_TYPE_UNKNOWN),
+    ],
+)
+def test_classify_source_type_uses_host_and_path(result: SearchResult, source_type: str) -> None:
+    assert classify_source_type(result) == source_type
+
+
+def test_normalize_dedupe_and_rank_search_results_across_providers() -> None:
+    duplicate_low_value = _result(
+        "https://Example.com/news?utm_source=searx&b=2&a=1",
+        provider="searxng",
+        rank=1,
+    )
+    duplicate_from_fallback = _result(
+        "https://example.com/news/?a=1&b=2&fbclid=abc",
+        provider="brave",
+        rank=1,
+    )
+    official = _result("https://example.gov/status", provider="brave", rank=2)
+    repeated_host = _result("https://example.com/other", provider="brave", rank=2)
+    fresh_news = SearchResult(
+        title="Fresh report",
+        url="https://news.example/article",
+        snippet="Latest news",
+        provider="searxng",
+        rank=3,
+        host="news.example",
+        date="2026-06-16",
+    )
+
+    results = normalize_dedupe_and_rank_search_results(
+        (duplicate_low_value, duplicate_from_fallback, repeated_host, official, fresh_news),
+        max_results=5,
+    )
+
+    assert [result.url for result in results] == [
+        "https://example.com/news?a=1&b=2",
+        "https://example.gov/status",
+        "https://news.example/article",
+        "https://example.com/other",
+    ]
+    assert results[0].metadata["source_type"] == SOURCE_TYPE_NEWS
+    assert results[1].metadata["source_type"] == SOURCE_TYPE_OFFICIAL
+    assert results[0].metadata["canonical_url"] == "https://example.com/news?a=1&b=2"
+
+
+def test_normalize_rank_uses_source_observation_metadata_without_network() -> None:
+    weak_observed = SearchResult(
+        title="Weak observed",
+        url="https://weak.example/news",
+        snippet="Latest news",
+        provider="searxng",
+        rank=1,
+        metadata={
+            "source_observation_outcome": "confirmed",
+            "source_observation_warning_codes": ("source_conflict",),
+            "source_observation_warning_count": 1,
+        },
+    )
+    confirmed_observed = SearchResult(
+        title="Confirmed observed",
+        url="https://confirmed.example/news",
+        snippet="Latest news",
+        provider="brave",
+        rank=1,
+        metadata={
+            "source_observation_outcome": "confirmed",
+            "source_observation_confidence": 0.9,
+        },
+    )
+
+    results = normalize_dedupe_and_rank_search_results((weak_observed, confirmed_observed), max_results=2)
+
+    assert [result.host for result in results] == ["confirmed.example", "weak.example"]
 
 
 def test_broker_does_not_call_brave_when_searxng_succeeds() -> None:
