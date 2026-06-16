@@ -357,7 +357,9 @@ def test_auto_research_prompt_uses_bounded_web_summary(monkeypatch):
     )
 
     assert sent[0] == "normal ai"
-    assert calls and "truncated" in calls[0]
+    assert calls and "Checked source evidence:" in calls[0]
+    assert "long-live-summary" in calls[0]
+    assert "Web result text:" not in calls[0]
     assert "RAW_TAIL_SHOULD_NOT_SURVIVE" not in calls[0]
 
 
@@ -946,7 +948,7 @@ def test_auto_research_empty_result_retries_once_with_stable_btc_query_and_chain
     assert [c.capability for c in d.webtool_dispatcher.calls] == ["websearch", "websearch", "webscraping"]
     assert d.webtool_dispatcher.calls[1].query == "bitcoin kurs USD BTC"
     assert "alter Preis" not in d.webtool_dispatcher.calls[1].query
-    assert "BTC live price summary" in calls[0]
+    assert "BTC live price summary" not in calls[0]
     assert "Bitcoin BTC live price page confirms" in calls[0]
 
 
@@ -1353,7 +1355,7 @@ def test_auto_research_weak_news_evidence_plans_followup_and_uses_second_source(
     assert sent == ["normal ai"]
     assert [c.capability for c in d.webtool_dispatcher.calls] == ["websearch", "websearch", "webscraping", "webscraping"]
     assert "multiple sources" in d.webtool_dispatcher.calls[1].query
-    assert "Python latest news corroborated by second source" in calls[0]
+    assert "Python latest news corroborated by second source" not in calls[0]
     assert "Second source confirms" in calls[0]
 
 
@@ -1801,9 +1803,9 @@ def test_auto_research_followup_extraction_failure_is_truthful(monkeypatch):
             from_parsed_update=True,
         )
     )
-    assert "WEB SEARCH SUCCEEDED, SOURCE CHECK INCONCLUSIVE" in calls[0]
-    assert "checking the linked source pages produced no additional usable confirmation" in calls[0]
-    assert "Do NOT say or imply that the bot has no web tools" in calls[0]
+    assert not calls
+    assert "nicht belastbar bestätigen" in _sent[0]
+    assert "Such-Snippets" in _sent[0]
 
 
 def test_auto_research_stock_search_hit_with_unusable_scrape_fails_closed(monkeypatch):
@@ -2045,9 +2047,9 @@ def test_user_feedback_followup_extraction_failure_prompt_is_truthful(monkeypatc
         )
     )
     assert [c.capability for c in d.webtool_dispatcher.calls] == ["websearch", "webscraping", "browser"]
-    assert "FOLLOW-UP AUTO-RESEARCH STATUS" in calls[0]
-    assert "WEB SEARCH SUCCEEDED, SOURCE CHECK INCONCLUSIVE" in calls[0]
-    assert "available web results could not fully confirm" in calls[0]
+    assert not calls
+    assert "nicht belastbar bestätigen" in _sent[0]
+    assert "Such-Snippets" in _sent[0]
 
 
 def test_auto_research_chain_caps_urls_browser_and_text(monkeypatch):

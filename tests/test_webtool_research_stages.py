@@ -40,6 +40,12 @@ def test_query_planner_contract_detects_current_sports_result_intent() -> None:
     assert stage.query
     assert stage.url == ""
     assert stage.is_followup_research is False
+    assert stage.strategy is not None
+    assert stage.strategy.domain == "sports"
+    assert stage.strategy.max_search_results == 5
+    assert stage.strategy.max_followup_searches == 1
+    assert stage.strategy.max_source_urls == 5
+    assert stage.strategy.requires_source_check is True
 
 
 def test_source_selection_contract_plans_sports_followup_for_partial_result_snippet() -> None:
@@ -66,6 +72,9 @@ def test_source_selection_contract_plans_sports_followup_for_partial_result_snip
     assert "sports_result_opponent_score_missing" in stage.plan.warning_codes
     assert stage.plan.should_followup_search is True
     assert stage.selected_urls == ("https://sports.example/euro-2024/germany",)
+    assert len(stage.selected_sources) == 1
+    assert stage.selected_sources[0].host == "sports.example"
+    assert stage.selected_sources[0].score > 0
 
 
 def test_evidence_validator_rejects_snippet_only_news_as_answer_evidence() -> None:
@@ -146,3 +155,42 @@ def test_evidence_validator_allows_checked_sports_source_evidence_for_synthesis(
     assert "Ziel-Antwortsprache: Deutsch" in synthesis.auto_note
     assert "Checked source evidence:" in synthesis.auto_note
     assert "Germany beat Scotland 5-1" in synthesis.auto_note
+
+
+def test_answer_synthesizer_omits_search_snippet_when_checked_evidence_exists() -> None:
+    search_stage = SearchExecutionStageOutput(
+        result=_search_result(
+            text="Snippet says Germany beat an unnamed opponent 5-1 at Euro 2024.",
+            sources=("https://scores.example/euro-2024/germany-scotland",),
+            hosts=("scores.example",),
+        ),
+        capability="websearch",
+        reason="sports_current_info_signal",
+    )
+    extraction_stage = build_extraction_browser_stage(
+        request_text="Germany Euro 2024 group stage result?",
+        capability="websearch",
+        reason="sports_current_info_signal",
+        search_text=search_stage.result.text,
+        source_hosts=search_stage.result.hosts,
+        source_urls=search_stage.result.sources,
+        extracts=(
+            (
+                "webscraping",
+                "scores.example",
+                "Germany beat Scotland 5-1 at Euro 2024 in the tournament opener.",
+            ),
+        ),
+    )
+
+    validation = validate_research_evidence(
+        request_text="Germany Euro 2024 group stage result?",
+        search_execution=search_stage,
+        extraction=extraction_stage,
+    )
+    synthesis = synthesize_research_answer(validation=validation, capability="websearch", locale="de")
+
+    assert "Checked source evidence:" in synthesis.auto_note
+    assert "Germany beat Scotland 5-1" in synthesis.auto_note
+    assert "Snippet says" not in synthesis.auto_note
+    assert "Web result text:" not in synthesis.auto_note

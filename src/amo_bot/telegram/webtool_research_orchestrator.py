@@ -175,6 +175,20 @@ class ResearchPlan:
 
 
 @dataclass(frozen=True, slots=True)
+class ResearchSearchStrategy:
+    """Typed query-planner boundary: what to run, why, and within which budget."""
+
+    domain: str
+    capability: str
+    query: str = ""
+    url: str = ""
+    max_search_results: int = 5
+    max_followup_searches: int = _AUTO_RESEARCH_PLAN_MAX_FOLLOWUP_SEARCHES
+    max_source_urls: int = _AUTO_RESEARCH_CHAIN_MAX_URLS
+    requires_source_check: bool = False
+
+
+@dataclass(frozen=True, slots=True)
 class QueryPlannerStageOutput:
     """Stage 1: normalized query intent and the first tool operation to attempt."""
 
@@ -185,6 +199,17 @@ class QueryPlannerStageOutput:
     query: str = ""
     url: str = ""
     is_followup_research: bool = False
+    strategy: ResearchSearchStrategy | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class SelectedResearchSource:
+    """Typed source-selection boundary with deterministic relevance metadata."""
+
+    url: str
+    host: str
+    score: float
+    reason: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -203,6 +228,7 @@ class SourceSelectionStageOutput:
 
     plan: ResearchPlan
     selected_urls: tuple[str, ...] = ()
+    selected_sources: tuple[SelectedResearchSource, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -497,14 +523,30 @@ class WebResearchOrchestrator:
             )
             if news_gate_response:
                 return WebResearchOrchestratorResult(user_response=news_gate_response)
-            auto_note = _format_auto_research_chained_success_note(
+            final_extraction_stage = build_extraction_browser_stage(
+                request_text=request.normalized_text,
                 capability=decision_auto.capability,
+                reason=decision_auto.reason,
                 search_text=sports_search_text,
-                search_hosts=tuple(tool_result.hosts or ()),
+                source_hosts=tuple(tool_result.hosts or ()),
+                source_urls=tuple(tool_result.sources or ()),
                 extracts=sports_extracts,
+                source_quality_reader=self._source_quality_reader,
+            )
+            validation_stage = validate_research_evidence(
+                request_text=request.normalized_text,
+                search_execution=search_stage,
+                extraction=final_extraction_stage,
+            )
+            synthesis_stage = synthesize_research_answer(
+                validation=validation_stage,
+                capability=decision_auto.capability,
                 followup=is_followup_research,
                 locale=request.locale,
             )
+            if synthesis_stage.user_response:
+                return WebResearchOrchestratorResult(user_response=synthesis_stage.user_response)
+            auto_note = synthesis_stage.auto_note
         elif chain_urls:
             user_response = _format_weather_unconfirmed_response(
                 request_text=request.normalized_text,
@@ -521,13 +563,20 @@ class WebResearchOrchestrator:
             )
             if domain_unconfirmed:
                 return WebResearchOrchestratorResult(user_response=domain_unconfirmed)
-            auto_note = _format_auto_research_chain_no_confirmation_note(
-                capability=decision_auto.capability,
-                search_text=tool_result.text,
-                search_hosts=tuple(tool_result.hosts or ()),
-                followup=is_followup_research,
-                locale=request.locale,
+            validation_stage = validate_research_evidence(
+                request_text=request.normalized_text,
+                search_execution=search_stage,
+                extraction=extraction_stage,
             )
+            synthesis_stage = synthesize_research_answer(
+                validation=validation_stage,
+                capability=decision_auto.capability,
+                locale=request.locale,
+                followup=is_followup_research,
+            )
+            if synthesis_stage.user_response:
+                return WebResearchOrchestratorResult(user_response=synthesis_stage.user_response)
+            auto_note = synthesis_stage.auto_note
         else:
             validation_stage = validate_research_evidence(
                 request_text=request.normalized_text,
@@ -1158,14 +1207,30 @@ def build_query_planner_stage(
                 url="",
             )
             is_followup_research = True
+    domain = classify_evidence_domain(request_text)
+    capability = str(getattr(decision_auto, "capability", "") or "")
+    reason = str(getattr(decision_auto, "reason", "") or "")
+    query = str(getattr(decision_auto, "query", "") or "")
+    url = str(getattr(decision_auto, "url", "") or "")
+    enabled = bool(decision_auto.enabled)
+    strategy = None
+    if enabled:
+        strategy = ResearchSearchStrategy(
+            domain=domain,
+            capability=capability,
+            query=query,
+            url=url,
+            requires_source_check=should_chain_auto_research(request_text, capability=capability, reason=reason),
+        )
     return QueryPlannerStageOutput(
-        enabled=bool(decision_auto.enabled),
-        domain=classify_evidence_domain(request_text),
-        capability=str(getattr(decision_auto, "capability", "") or ""),
-        reason=str(getattr(decision_auto, "reason", "") or ""),
-        query=str(getattr(decision_auto, "query", "") or ""),
-        url=str(getattr(decision_auto, "url", "") or ""),
+        enabled=enabled,
+        domain=domain,
+        capability=capability,
+        reason=reason,
+        query=query,
+        url=url,
         is_followup_research=is_followup_research,
+        strategy=strategy,
     )
 
 
@@ -1198,7 +1263,13 @@ def build_source_selection_stage(
         source_quality_reader=source_quality_reader,
     )
     selected_urls = tuple(step.url for step in chain_plan.steps if step.operation == "webscraping" and step.url)
-    return SourceSelectionStageOutput(plan=plan, selected_urls=selected_urls)
+    selected_sources = _score_selected_sources(
+        request_text=request_text,
+        urls=selected_urls,
+        domain=chain_plan.domain,
+        warnings=chain_plan.warning_codes,
+    )
+    return SourceSelectionStageOutput(plan=plan, selected_urls=selected_urls, selected_sources=selected_sources)
 
 
 def build_extraction_browser_stage(
@@ -1256,13 +1327,12 @@ def validate_research_evidence(
     else:
         status = "search_result_only"
 
-    current_fact_domain = domain in {"weather", "crypto", "stock", "sports", "news"}
     chain_required = should_chain_auto_research(
         request_text,
         capability=search_execution.capability,
         reason=search_execution.reason,
     )
-    if current_fact_domain and chain_required:
+    if chain_required:
         primary_warning = "snippet_only_result" if not (extraction and extraction.attempted_urls) else "source_check_inconclusive"
         warnings = [primary_warning, *(warning for warning in warnings if warning != primary_warning)]
         return EvidenceValidationStageOutput(
@@ -1875,6 +1945,46 @@ def _select_chain_urls(sources: tuple[str, ...] | list[str] | None, *, max_urls:
     return tuple(selected)
 
 
+def _score_selected_sources(
+    *,
+    request_text: str,
+    urls: tuple[str, ...],
+    domain: str,
+    warnings: tuple[str, ...],
+) -> tuple[SelectedResearchSource, ...]:
+    selected: list[SelectedResearchSource] = []
+    lowered_request = (request_text or "").casefold()
+    for url in urls:
+        host = _host_from_url(url)
+        lowered_url = url.casefold()
+        score = 0.55
+        reasons: list[str] = ["linked_search_source"]
+        if url.startswith("https://"):
+            score += 0.10
+            reasons.append("https")
+        if domain in {"stock", "sports"} and _url_has_dynamic_hint(url):
+            score += 0.10
+            reasons.append("dynamic_domain_hint")
+        if domain != "generic" and domain in lowered_url:
+            score += 0.08
+            reasons.append("domain_term_match")
+        if host and any(part and part in lowered_url for part in re.findall(r"[a-zäöüß0-9]{4,}", lowered_request)[:8]):
+            score += 0.07
+            reasons.append("query_term_overlap")
+        if "single_source_host" in warnings:
+            score -= 0.10
+            reasons.append("single_source_penalty")
+        selected.append(
+            SelectedResearchSource(
+                url=url,
+                host=host,
+                score=round(max(0.0, min(score, 1.0)), 2),
+                reason=":".join(reasons),
+            )
+        )
+    return tuple(selected)
+
+
 def _should_skip_chain_url(url: str) -> bool:
     try:
         parsed = urlparse(url)
@@ -1989,7 +2099,6 @@ def _format_auto_research_chained_success_note(
     followup: bool = False,
     locale: str = "de",
 ) -> str:
-    compact_search = compact_webtool_result_text(search_text, max_chars=_AUTO_RESEARCH_SEARCH_SUMMARY_CAP)
     host_text = ", ".join(search_hosts[:5])
     evidence_lines: list[str] = []
     for operation, host, text in extracts:
@@ -2007,14 +2116,13 @@ def _format_auto_research_chained_success_note(
     return (
         f"{heading} — STRICT INSTRUCTION:\n"
         f"{_target_answer_language_instruction(locale)}\n"
-        f"{context_line}A live {capability}/web tool result and checked source text are available in this turn. Treat this fresh web context as primary evidence for current facts.\n"
+        f"{context_line}A live {capability}/web tool result found candidate sources, and checked source text is available in this turn. Treat only the checked source evidence below as primary evidence for current facts.\n"
         "Do NOT claim or imply that the bot has no web tools, no live data capability, or cannot search the web.\n"
-        "Use the supplied web result text and checked source evidence; mention source hosts when relevant. Summarize compactly and do not reproduce raw page/tool output. Do NOT override it with stale memory/priors.\n"
+        "Use the checked source evidence; mention source hosts when relevant. The search-result snippet is discovery context only and must not be used as a factual source. Summarize compactly and do not reproduce raw page/tool output. Do NOT override it with stale memory/priors.\n"
         "Telegram formatting: use short paragraphs or bullet lists; do not use Markdown tables.\n"
         "User-facing wording: describe only the available web evidence and source certainty; do not expose retrieval pipeline details or diagnostic labels.\n"
         "Strict anti-hallucination: do NOT invent exact prices, rates, dates, levels, or news not supported by the supplied evidence. If exact values are absent, say the live evidence does not confirm the exact value.\n"
         f"Operation: {capability}\n"
-        f"Web result text: {compact_search}\n"
         f"Search source hosts: {host_text}\n"
         f"Checked source evidence:\n{evidence}"
     )
