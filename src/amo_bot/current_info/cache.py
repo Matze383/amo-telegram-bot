@@ -306,7 +306,12 @@ class CurrentInfoDocumentCacheRepository:
             metadata = _json_loads(row.metadata_json)
             metadata.update(
                 {
+                    "chunk_id": row.id,
+                    "chunk_hash": row.chunk_hash,
+                    "host": row.host,
+                    "language": row.language,
                     "source_type": row.source_type,
+                    "quality_score": row.quality_score,
                     "source_timestamp": _iso(row.source_timestamp or row.fetched_at),
                     "fetched_at": _iso(row.fetched_at),
                     "expires_at": _iso(row.expires_at),
@@ -537,7 +542,11 @@ def build_current_info_retrieval_provider_from_settings(
     if not bool(getattr(settings, "amo_vector_enabled", False)):
         return keyword_provider
 
-    from amo_bot.current_info.vector import (  # Local import keeps the keyword path lightweight.
+    from amo_bot.current_info.hybrid import (  # Local imports keep the keyword path lightweight.
+        EMPTY_RETRIEVAL_PROVIDER,
+        HybridCurrentInfoRetrievalProvider,
+    )
+    from amo_bot.current_info.vector import (
         VectorCurrentInfoRetrievalProvider,
         build_current_info_vector_components_from_settings,
     )
@@ -546,11 +555,15 @@ def build_current_info_retrieval_provider_from_settings(
     if components is None:
         return keyword_provider
     _indexer, vector_store, embedding_provider = components
-    return VectorCurrentInfoRetrievalProvider(
+    vector_provider = VectorCurrentInfoRetrievalProvider(
         session_factory=session_factory,
         vector_store=vector_store,
         embedding_provider=embedding_provider,
-        fallback_provider=keyword_provider,
+        fallback_provider=EMPTY_RETRIEVAL_PROVIDER,
+    )
+    return HybridCurrentInfoRetrievalProvider(
+        keyword_provider=keyword_provider,
+        vector_provider=vector_provider,
     )
 
 

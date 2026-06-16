@@ -286,8 +286,12 @@ class VectorCurrentInfoRetrievalProvider:
     ) -> tuple[EvidenceChunk, ...]:
         try:
             query_vector = self._embedding_provider.embed_texts((request.query,))[0]
-            vector_results = self._vector_store.search(vector=query_vector, limit=max(request.max_results, 1))
-            chunks = self._chunks_from_vector_results(vector_results, limit=max(request.max_results, 1))
+            vector_results = self._vector_store.search(vector=query_vector, limit=max(request.max_results, 1) * 3)
+            chunks = self._chunks_from_vector_results(
+                vector_results,
+                request=request,
+                limit=max(request.max_results, 1),
+            )
         except Exception as exc:
             logger.warning("current_info_vector_retrieval_failed: %s", exc.__class__.__name__)
             chunks = ()
@@ -299,6 +303,7 @@ class VectorCurrentInfoRetrievalProvider:
         self,
         vector_results: tuple[VectorSearchResult, ...],
         *,
+        request: CurrentInfoRequest,
         limit: int,
     ) -> tuple[EvidenceChunk, ...]:
         chunk_ids = tuple(dict.fromkeys(item.chunk_id for item in vector_results))
@@ -307,15 +312,19 @@ class VectorCurrentInfoRetrievalProvider:
         score_by_id = {item.chunk_id: item.score for item in vector_results}
         order_by_id = {chunk_id: index for index, chunk_id in enumerate(chunk_ids)}
         current = datetime.now(UTC)
+        filters = _metadata_filters(request)
         with self._session_factory() as session:
-            rows = list(
-                session.scalars(
-                    select(CurrentInfoDocumentChunk).where(
-                        CurrentInfoDocumentChunk.id.in_(chunk_ids),
-                        CurrentInfoDocumentChunk.expires_at > current,
-                    )
-                )
+            query = select(CurrentInfoDocumentChunk).where(
+                CurrentInfoDocumentChunk.id.in_(chunk_ids),
+                CurrentInfoDocumentChunk.expires_at > current,
             )
+            if source_types := filters.get("source_type"):
+                query = query.where(CurrentInfoDocumentChunk.source_type.in_(source_types))
+            if languages := filters.get("language"):
+                query = query.where(CurrentInfoDocumentChunk.language.in_(languages))
+            if hosts := filters.get("host"):
+                query = query.where(CurrentInfoDocumentChunk.host.in_(hosts))
+            rows = list(session.scalars(query))
         rows.sort(key=lambda row: order_by_id.get(int(row.id), len(order_by_id)))
         chunks: list[EvidenceChunk] = []
         for row in rows[: max(1, int(limit))]:
@@ -329,7 +338,11 @@ class VectorCurrentInfoRetrievalProvider:
                         "document_id": row.document_id,
                         "chunk_id": row.id,
                         "chunk_index": row.chunk_index,
+                        "chunk_hash": row.chunk_hash,
+                        "host": row.host,
+                        "language": row.language,
                         "source_type": row.source_type,
+                        "quality_score": row.quality_score,
                         "source_timestamp": _iso(row.source_timestamp or row.fetched_at),
                         "fetched_at": _iso(row.fetched_at),
                         "expires_at": _iso(row.expires_at),
@@ -388,6 +401,32 @@ def _coerce_vector(value: Any) -> tuple[float, ...]:
 
 def _point_id(*, document_id: int, chunk_index: int) -> str:
     return str(uuid.uuid5(uuid.NAMESPACE_URL, f"amo-current-info:{document_id}:{chunk_index}"))
+
+
+def _metadata_filters(request: CurrentInfoRequest) -> dict[str, tuple[str, ...]]:
+    metadata = dict(request.metadata or {})
+    filters = metadata.get("filters") if isinstance(metadata.get("filters"), dict) else metadata
+    normalized: dict[str, tuple[str, ...]] = {}
+    source_types = _filter_values(filters.get("source_type") or filters.get("source_types"))
+    if source_types:
+        normalized["source_type"] = tuple(item.title() for item in source_types)
+    languages = _filter_values(filters.get("language") or filters.get("languages"))
+    if languages:
+        normalized["language"] = tuple(languages)
+    hosts = _filter_values(filters.get("host") or filters.get("hosts"))
+    if hosts:
+        normalized["host"] = tuple(item.removeprefix("www.") for item in hosts)
+    return normalized
+
+
+def _filter_values(value: Any) -> tuple[str, ...]:
+    if value is None or value == "":
+        return ()
+    if isinstance(value, str):
+        return (value.strip().casefold(),) if value.strip() else ()
+    if isinstance(value, (list, tuple, set)):
+        return tuple(dict.fromkeys(str(item).strip().casefold() for item in value if str(item).strip()))
+    return (str(value).strip().casefold(),)
 
 
 def _iso(value: datetime | None) -> str:

@@ -37,6 +37,7 @@ from amo_bot.current_info.fetch import (
     build_document_fetcher_from_settings,
     extract_document,
 )
+from amo_bot.current_info.hybrid import HybridCurrentInfoRetrievalProvider
 from amo_bot.current_info.legacy_webtool import LegacyWebtoolCurrentInfoService
 from amo_bot.current_info.models import (
     CurrentInfoAnswer,
@@ -134,6 +135,7 @@ __all__ = [
     "EvidenceChunk",
     "EvidencePackage",
     "FetchedDocument",
+    "HybridCurrentInfoRetrievalProvider",
     "LegacyWebtoolCurrentInfoService",
     "OllamaEmbeddingProvider",
     "OpenAIEmbeddingProvider",
