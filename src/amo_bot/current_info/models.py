@@ -281,15 +281,55 @@ class EvidenceChunk:
 
 
 @dataclass(frozen=True, slots=True)
+class EvidencePackageSource:
+    url: str
+    title: str = ""
+    host: str = ""
+    source_type: str = "Unknown"
+    fetched: bool = False
+    fetched_at: str = ""
+    stale: bool = False
+
+    def to_dict(self) -> JsonDict:
+        return {
+            "url": self.url,
+            "title": self.title,
+            "host": self.host,
+            "source_type": self.source_type,
+            "fetched": self.fetched,
+            "fetched_at": self.fetched_at,
+            "stale": self.stale,
+        }
+
+    @classmethod
+    def from_dict(cls, payload: JsonDict) -> EvidencePackageSource:
+        return cls(
+            url=str(payload.get("url", "") or ""),
+            title=str(payload.get("title", "") or ""),
+            host=str(payload.get("host", "") or ""),
+            source_type=str(payload.get("source_type", "Unknown") or "Unknown"),
+            fetched=bool(payload.get("fetched", False)),
+            fetched_at=str(payload.get("fetched_at", "") or ""),
+            stale=bool(payload.get("stale", False)),
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class EvidencePackage:
     chunks: tuple[EvidenceChunk, ...] = ()
     documents: tuple[FetchedDocument, ...] = ()
+    sources: tuple[EvidencePackageSource, ...] = ()
+    freshness: str = "unknown"
+    confidence: float = 0.0
     warnings: tuple[str, ...] = ()
 
     def to_dict(self) -> JsonDict:
         return {
             "chunks": [item.to_dict() for item in self.chunks],
             "documents": [item.to_dict() for item in self.documents],
+            "sources": [item.to_dict() for item in self.sources],
+            "freshness": self.freshness,
+            "confidence": self.confidence,
             "warnings": list(self.warnings),
         }
 
@@ -298,6 +338,9 @@ class EvidencePackage:
         return cls(
             chunks=tuple(EvidenceChunk.from_dict(dict(item)) for item in payload.get("chunks") or ()),
             documents=tuple(FetchedDocument.from_dict(dict(item)) for item in payload.get("documents") or ()),
+            sources=tuple(EvidencePackageSource.from_dict(dict(item)) for item in payload.get("sources") or ()),
+            freshness=str(payload.get("freshness", "unknown") or "unknown"),
+            confidence=_coerce_confidence(payload.get("confidence"), default=0.0),
             warnings=_coerce_str_tuple(payload.get("warnings")),
         )
 
@@ -313,6 +356,7 @@ class CurrentInfoAnswer:
     evidence: EvidencePackage | None = None
     sources: tuple[str, ...] = ()
     warnings: tuple[str, ...] = ()
+    confidence: float = 0.0
     metadata: JsonDict = field(default_factory=dict)
 
     @property
@@ -323,6 +367,7 @@ class CurrentInfoAnswer:
         return {
             "status": self.status,
             "answer_text": self.answer_text,
+            "confidence": self.confidence,
             "request": self.request.to_dict() if self.request is not None else None,
             "task": self.task.to_dict() if self.task is not None else None,
             "query_plan": self.query_plan.to_dict() if self.query_plan is not None else None,
@@ -343,6 +388,7 @@ class CurrentInfoAnswer:
         return cls(
             status=str(payload.get("status", "")),
             answer_text=str(payload.get("answer_text", "") or ""),
+            confidence=_coerce_confidence(payload.get("confidence"), default=0.0),
             request=CurrentInfoRequest.from_dict(dict(request_payload)) if request_payload else None,
             task=TaskSpec.from_dict(dict(task_payload)) if task_payload else None,
             query_plan=QueryPlan.from_dict(dict(plan_payload)) if plan_payload else None,
@@ -392,6 +438,14 @@ def _coerce_float(value: Any, *, default: float) -> float:
         return float(value)
     except (TypeError, ValueError):
         return default
+
+
+def _coerce_confidence(value: Any, *, default: float) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return default
+    return max(0.0, min(parsed, 1.0))
 
 
 def _host_from_url(url: str) -> str:

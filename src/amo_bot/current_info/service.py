@@ -3,11 +3,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from amo_bot.current_info.candidates import normalize_dedupe_and_rank_search_results
+from amo_bot.current_info.evidence import assemble_evidence_package
 from amo_bot.current_info.models import (
     CurrentInfoAnswer,
     CurrentInfoRequest,
     EvidenceChunk,
-    EvidencePackage,
     FetchedDocument,
     QueryPlan,
     SearchBundle,
@@ -148,7 +148,13 @@ class CurrentInfoService:
             documents=documents,
             search_results=search_results,
         )
-        evidence = EvidencePackage(chunks=chunks, documents=documents)
+        evidence = assemble_evidence_package(
+            request=request,
+            task=task,
+            chunks=chunks,
+            documents=documents,
+            search_results=search_results,
+        )
         if not chunks:
             return CurrentInfoAnswer(
                 status="empty_evidence",
@@ -158,18 +164,34 @@ class CurrentInfoService:
                 search_bundle=search_bundle,
                 evidence=evidence,
                 sources=tuple(result.url for result in search_results if result.url),
-                warnings=("empty_evidence",),
+                warnings=evidence.warnings or ("empty_evidence",),
+                confidence=evidence.confidence,
+            )
+        if "snippet_only_evidence" in evidence.warnings:
+            return CurrentInfoAnswer(
+                status="unverified_evidence",
+                request=request,
+                task=task,
+                query_plan=query_plan,
+                search_bundle=search_bundle,
+                evidence=evidence,
+                sources=tuple(dict.fromkeys(chunk.source_url for chunk in chunks if chunk.source_url)),
+                warnings=evidence.warnings,
+                confidence=evidence.confidence,
+                metadata={"reason": "current_facts_need_fetched_sources"},
             )
 
         return CurrentInfoAnswer(
             status="answered",
             answer_text=_format_answer_text(chunks),
+            confidence=evidence.confidence,
             request=request,
             task=task,
             query_plan=query_plan,
             search_bundle=search_bundle,
             evidence=evidence,
             sources=tuple(dict.fromkeys(chunk.source_url for chunk in chunks if chunk.source_url)),
+            warnings=evidence.warnings,
         )
 
     def _run_search_plan(self, query_plan: QueryPlan, *, locale: str) -> SearchProviderResponse:

@@ -2,6 +2,46 @@
 
 ---
 
+## [Unreleased] – Current-Info Evidence Assembly (Issue #73)
+
+**Datum / Date:** 2026-06-16
+
+### 🇩🇪 Deutsch
+
+#### Übersicht
+Einführung von Evidence Assembly und Verification für Current-Info-Abfragen. Der Service liefert jetzt strukturierte Evidenz-Pakete mit Konfidenz, Warnungen und Qualitätsflags.
+
+#### Neu
+- **EvidencePackage:** Erweiterte Current-Info-Evidenz mit Chunks, Dokumenten, Quellen, Freshness, Konfidenz (0.0-1.0) und Warnungen.
+- **EvidencePackageSource:** Strukturierte Quellenangaben inklusive Host, Source-Type, Fetch-Status und Stale-Flag.
+- **Confidence Scoring:** Konservative Konfidenzbewertung basierend auf Fetch-Status, unabhängigen Hosts, Freshness und Konflikten.
+- **Warning System:** Explizite Warnungen bei Snippet-only-Evidenz, unfetched Chunks, veralteten Daten oder Quellenkonflikten.
+- **Quality Gates:** Snippets allein gelten nicht mehr als verifizierte Current-Info-Antwort; News/Evidenz wird konservativer bewertet.
+
+#### Technisch
+- Neue `current_info/evidence.py` für Evidence Assembly, angebunden an die bestehende Domain-Klassifizierung aus `webtool_evidence.py`.
+- `CurrentInfoAnswer` exportiert Konfidenz und Warnungen sichtbar für nachgelagerte Nutzung.
+- Tests decken Single-Source, zwei unabhängige Quellen, Konflikte, stale Quellen und Snippet-only-Rejection ab.
+
+### 🇬🇧 English
+
+#### Overview
+Introduction of evidence assembly and verification for current-info queries. The service now delivers structured evidence packages with confidence scores, warnings, and quality flags.
+
+#### New
+- **EvidencePackage:** Extended current-info evidence with chunks, documents, sources, freshness, confidence (0.0-1.0), and warnings.
+- **EvidencePackageSource:** Structured source references with host, source type, fetch status, and stale flag.
+- **Confidence Scoring:** Conservative confidence assessment based on fetch status, independent hosts, freshness, and conflicts.
+- **Warning System:** Explicit warnings for snippet-only evidence, unfetched chunks, stale data, or source conflicts.
+- **Quality Gates:** Snippets alone no longer count as verified current-info answers; news evidence is evaluated more conservatively.
+
+#### Technical
+- New `current_info/evidence.py` for evidence assembly, connected to the existing domain classifier from `webtool_evidence.py`.
+- `CurrentInfoAnswer` exposes confidence and warnings visibly for downstream usage.
+- Tests cover single-source, two independent sources, conflicts, stale sources, and snippet-only rejection.
+
+---
+
 ## [Unreleased] – Bounded Browser Provider
 
 **Datum / Date:** 2026-06-16

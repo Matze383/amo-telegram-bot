@@ -37,6 +37,7 @@ from amo_bot.current_info.fetch import (
     build_document_fetcher_from_settings,
     extract_document,
 )
+from amo_bot.current_info.evidence import assemble_evidence_package
 from amo_bot.current_info.hybrid import HybridCurrentInfoRetrievalProvider
 from amo_bot.current_info.legacy_webtool import LegacyWebtoolCurrentInfoService
 from amo_bot.current_info.models import (
@@ -44,6 +45,7 @@ from amo_bot.current_info.models import (
     CurrentInfoRequest,
     EvidenceChunk,
     EvidencePackage,
+    EvidencePackageSource,
     FetchedDocument,
     QueryPlan,
     SearchBundle,
@@ -134,6 +136,7 @@ __all__ = [
     "EmbeddingProvider",
     "EvidenceChunk",
     "EvidencePackage",
+    "EvidencePackageSource",
     "FetchedDocument",
     "HybridCurrentInfoRetrievalProvider",
     "LegacyWebtoolCurrentInfoService",
@@ -192,6 +195,7 @@ __all__ = [
     "brave_profile_params",
     "brave_ui_lang",
     "build_document_fetcher_from_settings",
+    "assemble_evidence_package",
     "build_cached_fetch_provider_from_settings",
     "build_current_info_cache_config_from_settings",
     "build_current_info_retrieval_provider_from_settings",

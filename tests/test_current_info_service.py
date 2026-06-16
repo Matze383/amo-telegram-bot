@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 
 from amo_bot.current_info import (
     CurrentInfoAnswer,
@@ -8,6 +9,7 @@ from amo_bot.current_info import (
     CurrentInfoService,
     EvidenceChunk,
     EvidencePackage,
+    EvidencePackageSource,
     FetchedDocument,
     QueryPlan,
     SearchBundle,
@@ -117,6 +119,29 @@ def test_current_info_models_roundtrip_dict_serialization():
     assert restored.evidence.documents[0].status_code == 200
 
 
+def test_current_info_evidence_package_exposes_sources_freshness_confidence_and_warnings():
+    package = EvidencePackage(
+        sources=(
+            EvidencePackageSource(
+                url="https://example.com/status",
+                title="Status",
+                host="example.com",
+                source_type="Official",
+                fetched=True,
+                fetched_at="2026-06-16T10:00:00+00:00",
+            ),
+        ),
+        freshness="fresh",
+        confidence=0.72,
+        warnings=("single_source",),
+    )
+
+    restored = EvidencePackage.from_dict(package.to_dict())
+
+    assert restored == package
+    assert restored.sources[0].fetched is True
+
+
 def test_current_info_service_uses_fake_search_fetch_and_retrieval_ports():
     result = SearchResult(
         title="Status page",
@@ -150,7 +175,12 @@ def test_current_info_service_uses_fake_search_fetch_and_retrieval_ports():
 
     assert answer.status == "answered"
     assert answer.answer_text == "Current status is green."
+    assert answer.confidence == 0.72
     assert answer.sources == (result.url,)
+    assert answer.warnings == ()
+    assert answer.evidence is not None
+    assert answer.evidence.freshness == "fetched_unknown_age"
+    assert answer.evidence.sources[0].fetched is True
     assert search_provider.calls == [_SearchCall(query="current status", locale="de", max_results=3)]
     assert fetch_provider.calls == [(result.url, "de")]
     assert retrieval_provider.calls[0][1] == (document,)
@@ -158,7 +188,7 @@ def test_current_info_service_uses_fake_search_fetch_and_retrieval_ports():
     assert retrieval_provider.calls[0][2][0].metadata["canonical_url"] == result.url
 
 
-def test_current_info_service_uses_snippets_when_no_fetch_provider_is_configured():
+def test_current_info_service_rejects_snippet_only_evidence_for_current_facts():
     result = SearchResult(
         title="Search result",
         url="https://example.com/search-only",
@@ -170,11 +200,138 @@ def test_current_info_service_uses_snippets_when_no_fetch_provider_is_configured
 
     answer = service.answer(CurrentInfoRequest(query="current info"))
 
-    assert answer.status == "answered"
-    assert answer.answer_text == "Search snippets can support tests."
+    assert answer.status == "unverified_evidence"
+    assert answer.answer_text == ""
+    assert answer.confidence == 0.0
     assert answer.evidence is not None
     assert answer.evidence.documents == ()
+    assert answer.evidence.freshness == "snippet_only"
     assert answer.evidence.chunks[0].source_url == result.url
+    assert answer.warnings == ("snippet_only_evidence",)
+
+
+def test_current_info_service_rejects_chunks_without_fetched_source_even_when_other_docs_fetched():
+    fetched = SearchResult(
+        title="Fetched",
+        url="https://example.com/fetched",
+        provider="fake_search",
+        rank=1,
+    )
+    snippet_only = SearchResult(
+        title="Snippet only",
+        url="https://example.net/snippet",
+        snippet="Unfetched snippet claim.",
+        provider="fake_search",
+        rank=2,
+    )
+    chunk = EvidenceChunk(
+        text="Unfetched snippet claim.",
+        source_url=snippet_only.url,
+        source_title=snippet_only.title,
+    )
+    service = CurrentInfoService(
+        search_provider=_FakeSearchProvider((fetched, snippet_only)),
+        fetch_provider=_FakeFetchProvider(
+            {fetched.url: FetchedDocument(url=fetched.url, title=fetched.title, text="Fetched background.")}
+        ),
+        retrieval_provider=_FakeRetrievalProvider((chunk,)),
+    )
+
+    answer = service.answer(CurrentInfoRequest(query="current info", max_results=2))
+
+    assert answer.status == "unverified_evidence"
+    assert answer.confidence == 0.0
+    assert answer.warnings == ("snippet_only_evidence", "unfetched_chunk_evidence")
+
+
+def test_current_info_service_rewards_two_independent_news_sources_that_agree():
+    first = SearchResult(title="News A", url="https://news-a.example/article", snippet="", provider="fake", rank=1)
+    second = SearchResult(title="News B", url="https://news-b.example/article", snippet="", provider="fake", rank=2)
+    documents = {
+        first.url: FetchedDocument(url=first.url, title=first.title, text="Release version 2.0 is available."),
+        second.url: FetchedDocument(url=second.url, title=second.title, text="Release version 2.0 is available."),
+    }
+    chunks = (
+        EvidenceChunk(
+            text="Release version 2.0 is available.",
+            source_url=first.url,
+            source_title=first.title,
+            metadata={"claim_key": "release", "claim_value": "2.0"},
+        ),
+        EvidenceChunk(
+            text="Release version 2.0 is available.",
+            source_url=second.url,
+            source_title=second.title,
+            metadata={"claim_key": "release", "claim_value": "2.0"},
+        ),
+    )
+    service = CurrentInfoService(
+        search_provider=_FakeSearchProvider((first, second)),
+        fetch_provider=_FakeFetchProvider(documents),
+        retrieval_provider=_FakeRetrievalProvider(chunks),
+    )
+
+    answer = service.answer(CurrentInfoRequest(query="latest AMO news", domain_hint="news", max_results=2))
+
+    assert answer.status == "answered"
+    assert answer.confidence == 0.9
+    assert answer.warnings == ()
+    assert answer.evidence is not None
+    assert {source.host for source in answer.evidence.sources if source.fetched} == {"news-a.example", "news-b.example"}
+
+
+def test_current_info_service_warns_for_conflicting_sources_instead_of_overconfidence():
+    first = SearchResult(title="Source A", url="https://a.example/status", provider="fake", rank=1)
+    second = SearchResult(title="Source B", url="https://b.example/status", provider="fake", rank=2)
+    chunks = (
+        EvidenceChunk(
+            text="The status is green.",
+            source_url=first.url,
+            metadata={"claim_key": "status", "claim_value": "green"},
+        ),
+        EvidenceChunk(
+            text="The status is red.",
+            source_url=second.url,
+            metadata={"claim_key": "status", "claim_value": "red"},
+        ),
+    )
+    service = CurrentInfoService(
+        search_provider=_FakeSearchProvider((first, second)),
+        fetch_provider=_FakeFetchProvider(
+            {
+                first.url: FetchedDocument(url=first.url, text="The status is green."),
+                second.url: FetchedDocument(url=second.url, text="The status is red."),
+            }
+        ),
+        retrieval_provider=_FakeRetrievalProvider(chunks),
+    )
+
+    answer = service.answer(CurrentInfoRequest(query="current status", max_results=2))
+
+    assert answer.status == "answered"
+    assert "source_conflict" in answer.warnings
+    assert answer.confidence == 0.45
+
+
+def test_current_info_service_lowers_confidence_for_stale_source():
+    fetched_at = (datetime.now(UTC) - timedelta(days=10)).replace(microsecond=0).isoformat()
+    result = SearchResult(title="Old status", url="https://example.com/old", provider="fake", rank=1)
+    document = FetchedDocument(url=result.url, title=result.title, text="Old current status.", fetched_at=fetched_at)
+    chunk = EvidenceChunk(text="Old current status.", source_url=result.url, source_title=result.title)
+    service = CurrentInfoService(
+        search_provider=_FakeSearchProvider((result,)),
+        fetch_provider=_FakeFetchProvider({result.url: document}),
+        retrieval_provider=_FakeRetrievalProvider((chunk,)),
+    )
+
+    answer = service.answer(CurrentInfoRequest(query="current status"))
+
+    assert answer.status == "answered"
+    assert answer.confidence == 0.55
+    assert answer.warnings == ("stale_source",)
+    assert answer.evidence is not None
+    assert answer.evidence.freshness == "stale"
+    assert answer.evidence.sources[0].stale is True
 
 
 def test_current_info_service_normalizes_ranks_and_dedupes_search_candidates():
@@ -204,7 +361,7 @@ def test_current_info_service_normalizes_ranks_and_dedupes_search_candidates():
 
     answer = service.answer(CurrentInfoRequest(query="current info", max_results=3))
 
-    assert answer.status == "answered"
+    assert answer.status == "unverified_evidence"
     assert answer.search_bundle is not None
     assert [result.url for result in answer.search_bundle.results] == [
         "https://example.com/news?id=1",
@@ -213,6 +370,7 @@ def test_current_info_service_normalizes_ranks_and_dedupes_search_candidates():
     assert answer.search_bundle.results[0].metadata["source_type"] == "News"
     assert answer.search_bundle.results[1].metadata["source_type"] == "Official"
     assert answer.sources == ("https://example.com/news?id=1", "https://example.gov/status")
+    assert answer.warnings == ("snippet_only_evidence", "needs_independent_source")
 
 
 def test_current_info_service_fails_closed_without_search_provider():
