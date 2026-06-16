@@ -10,6 +10,7 @@ import pytest
 from amo_bot.current_info import (
     BraveSearchConfig,
     BraveSearchProvider,
+    ProviderProfileCapabilities,
     SOURCE_TYPE_COMMERCE,
     SOURCE_TYPE_DOCS,
     SOURCE_TYPE_FORUM,
@@ -23,6 +24,7 @@ from amo_bot.current_info import (
     SearchProviderError,
     SearchProviderMetric,
     SearchProviderResponse,
+    SearchProfileConfigError,
     SearchProviderTimeout,
     SearchResult,
     SearxngSearchConfig,
@@ -30,6 +32,10 @@ from amo_bot.current_info import (
     build_search_broker_from_settings,
     canonicalize_url,
     classify_source_type,
+    default_search_profile_config,
+    load_search_profile_config,
+    load_search_profile_config_file,
+    map_search_profile,
     normalize_dedupe_and_rank_search_results,
     select_search_profile,
 )
@@ -185,6 +191,129 @@ def test_select_search_profile_detects_query_intent_without_provider_details(
     assert profile.safesearch == "moderate"
 
 
+def test_profile_loading_defaults_preserve_current_provider_defaults_without_network() -> None:
+    defaults = default_search_profile_config()
+    assert defaults.profiles[SearchIntent.NEWS_CURRENT].content_types == ("news", "web")
+    assert defaults.profiles[SearchIntent.LOCAL_REGION].freshness == "week"
+
+    searxng_factory = _FakeHttpClientFactory([httpx.Response(200, json={"results": []})])
+    searxng = SearxngSearchProvider(
+        SearxngSearchConfig(base_url="https://searx.example"),
+        http_client_factory=searxng_factory,
+    )
+    searxng.search(query="plain background query", locale="en", max_results=1)
+
+    assert searxng_factory.get_calls[0][1] == {
+        "q": "plain background query",
+        "format": "json",
+        "language": "en-us",
+        "safesearch": 1,
+        "categories": "general",
+    }
+
+    brave_factory = _FakeHttpClientFactory([httpx.Response(200, json={"web": {"results": []}})])
+    brave = BraveSearchProvider(
+        BraveSearchConfig(api_key="test-key"),
+        http_client_factory=brave_factory,
+    )
+    brave.search(query="plain background query", locale="en", max_results=1)
+
+    assert brave_factory.get_calls[0][1] == {
+        "q": "plain background query",
+        "count": 1,
+        "search_lang": "en",
+        "ui_lang": "en-US",
+        "country": "US",
+        "safesearch": "moderate",
+        "result_filter": "web",
+    }
+
+
+def test_profile_loading_from_dict_and_file_overrides_intent_rules_without_network(tmp_path: Any) -> None:
+    dict_config = load_search_profile_config(
+        {
+            "profiles": {
+                "news/current": {
+                    "content_types": ["web"],
+                    "freshness": "year",
+                }
+            }
+        }
+    )
+    assert dict_config.profiles[SearchIntent.NEWS_CURRENT].content_types == ("web",)
+    assert dict_config.profiles[SearchIntent.NEWS_CURRENT].freshness == "year"
+
+    profile_file = tmp_path / "search-profiles.yml"
+    profile_file.write_text(
+        """
+profiles:
+  local/region:
+    content_types:
+      - web
+      - news
+    freshness: month
+""",
+        encoding="utf-8",
+    )
+    file_config = load_search_profile_config_file(profile_file)
+    assert file_config.profiles[SearchIntent.LOCAL_REGION].content_types == ("web", "news")
+    assert file_config.profiles[SearchIntent.LOCAL_REGION].freshness == "month"
+
+    factory = _FakeHttpClientFactory([httpx.Response(200, json={"results": []})])
+    provider = SearxngSearchProvider(
+        SearxngSearchConfig(base_url="https://searx.example", profile_config=dict_config),
+        http_client_factory=factory,
+    )
+
+    provider.search(query="latest AMO news today", locale="en-US", max_results=1)
+
+    assert factory.get_calls[0][1] == {
+        "q": "latest AMO news today",
+        "format": "json",
+        "language": "en-us",
+        "safesearch": 1,
+        "categories": "general",
+        "time_range": "year",
+    }
+
+
+def test_invalid_profile_config_fails_closed_before_network_without_real_network(tmp_path: Any) -> None:
+    with pytest.raises(SearchProfileConfigError) as exc_info:
+        load_search_profile_config({"profiles": {"news/current": {"content_types": ["web"], "freshness": "decade"}}})
+    assert exc_info.value.reason_code == "invalid_search_profile_freshness"
+
+    profile_file = tmp_path / "invalid-search-profiles.yml"
+    profile_file.write_text(
+        """
+profiles:
+  news/current:
+    content_types:
+      - web
+    freshness: decade
+""",
+        encoding="utf-8",
+    )
+    factory = _FakeHttpClientFactory([httpx.Response(200, json={"results": []})])
+
+    broker = build_search_broker_from_settings(
+        SimpleNamespace(
+            amo_searxng_url="https://searx.example",
+            amo_search_max_results=5,
+            amo_searxng_timeout_seconds=1.0,
+            amo_brave_search_api_key="",
+            amo_search_fallback_provider="",
+            amo_search_min_host_diversity=0,
+            amo_search_safesearch="moderate",
+            amo_search_region="",
+            amo_search_profiles_file=str(profile_file),
+        ),
+        http_client_factory=factory,
+    )
+
+    assert broker is None
+    assert factory.get_calls == []
+
+
 def test_searxng_profile_mapping_for_docs_and_config_policy_without_real_network() -> None:
     factory = _FakeHttpClientFactory([httpx.Response(200, json={"results": []})])
     provider = SearxngSearchProvider(
@@ -239,6 +368,41 @@ def test_searxng_profile_mapping_for_local_region_uses_supported_time_range_with
     ]
 
 
+@pytest.mark.parametrize(
+    ("config", "reason_code"),
+    [
+        (SearxngSearchConfig(base_url="https://searx.example", categories="general,unsupported"), "invalid_provider_profile_categories"),
+        (SearxngSearchConfig(base_url="https://searx.example", time_range="hour"), "invalid_provider_profile_time_range"),
+        (SearxngSearchConfig(base_url="https://searx.example", safesearch="family"), "invalid_provider_profile_safesearch"),
+    ],
+)
+def test_searxng_rejects_bad_provider_profile_values_without_network(
+    config: SearxngSearchConfig,
+    reason_code: str,
+) -> None:
+    factory = _FakeHttpClientFactory([httpx.Response(200, json={"results": []})])
+    provider = SearxngSearchProvider(config, http_client_factory=factory)
+
+    with pytest.raises(SearchProfileConfigError) as exc_info:
+        provider.search(query="latest status", locale="en-US", max_results=1)
+
+    assert exc_info.value.reason_code == reason_code
+    assert exc_info.value.provider in {"profile", "searxng"}
+    assert factory.get_calls == []
+
+
+def test_searxng_accepts_issue_listed_year_time_range_without_real_network() -> None:
+    factory = _FakeHttpClientFactory([httpx.Response(200, json={"results": []})])
+    provider = SearxngSearchProvider(
+        SearxngSearchConfig(base_url="https://searx.example", time_range="year"),
+        http_client_factory=factory,
+    )
+
+    provider.search(query="latest status", locale="en-US", max_results=1)
+
+    assert factory.get_calls[0][1]["time_range"] == "year"
+
+
 def test_build_search_broker_wires_common_profile_policy_from_settings_without_provider_leak() -> None:
     factory = _FakeHttpClientFactory([httpx.Response(200, json={"results": []})])
     broker = build_search_broker_from_settings(
@@ -251,6 +415,7 @@ def test_build_search_broker_wires_common_profile_policy_from_settings_without_p
             amo_search_min_host_diversity=0,
             amo_search_safesearch="strict",
             amo_search_region="GB",
+            amo_search_profiles_file="",
         ),
         http_client_factory=factory,
     )
@@ -558,6 +723,43 @@ def test_brave_provider_parses_news_items_returned_by_profile_filter_without_rea
     assert response.results[0].date == "2 hours ago"
 
 
+@pytest.mark.parametrize("freshness", ["pm", "py"])
+def test_brave_accepts_issue_listed_month_and_year_freshness_without_real_network(freshness: str) -> None:
+    factory = _FakeHttpClientFactory([httpx.Response(200, json={"web": {"results": []}})])
+    provider = BraveSearchProvider(
+        BraveSearchConfig(api_key="test-key", freshness=freshness),
+        http_client_factory=factory,
+    )
+
+    provider.search(query="latest status", locale="en-US", max_results=1)
+
+    assert factory.get_calls[0][1]["freshness"] == freshness
+
+
+@pytest.mark.parametrize(
+    ("config", "reason_code"),
+    [
+        (BraveSearchConfig(api_key="test-key", country="DEU"), "invalid_provider_profile_country"),
+        (BraveSearchConfig(api_key="test-key", freshness="month"), "invalid_provider_profile_freshness"),
+        (BraveSearchConfig(api_key="test-key", result_filter="web,unknown"), "invalid_provider_profile_result_filter"),
+        (BraveSearchConfig(api_key="test-key", safesearch="high"), "invalid_provider_profile_safesearch"),
+    ],
+)
+def test_brave_rejects_bad_provider_profile_values_without_network(
+    config: BraveSearchConfig,
+    reason_code: str,
+) -> None:
+    factory = _FakeHttpClientFactory([httpx.Response(200, json={"web": {"results": []}})])
+    provider = BraveSearchProvider(config, http_client_factory=factory)
+
+    with pytest.raises(SearchProfileConfigError) as exc_info:
+        provider.search(query="latest status", locale="en-US", max_results=1)
+
+    assert exc_info.value.reason_code == reason_code
+    assert exc_info.value.provider in {"profile", "brave"}
+    assert factory.get_calls == []
+
+
 def test_brave_profile_mapping_for_local_region_and_config_policy_without_real_network() -> None:
     factory = _FakeHttpClientFactory([httpx.Response(200, json={"web": {"results": []}})])
     provider = BraveSearchProvider(
@@ -589,3 +791,35 @@ def test_brave_profile_mapping_for_local_region_and_config_policy_without_real_n
             },
         )
     ]
+
+
+def test_search_profile_mapping_supports_future_provider_capability_fixture() -> None:
+    config = load_search_profile_config(
+        {
+            "profiles": {
+                "broad web": {
+                    "content_types": ["web", "thread", "future_vertical"],
+                    "freshness": "",
+                }
+            }
+        }
+    )
+    profile = select_search_profile(query="compare broad web sources and reddit reviews", locale="en-US", config=config)
+    capabilities = ProviderProfileCapabilities(
+        provider="fixture",
+        content_types=frozenset({"page", "thread", "future"}),
+        freshness_values=frozenset({""}),
+        safesearch_values=frozenset({"moderate"}),
+        content_type_mapping={"web": "page", "thread": "thread", "future_vertical": "future"},
+        freshness_mapping={"": ""},
+        safesearch_mapping={"moderate": "medium"},
+    )
+
+    mapped = map_search_profile(profile, capabilities)
+
+    assert mapped.language == "en"
+    assert mapped.locale == "en-us"
+    assert mapped.region == "US"
+    assert mapped.content_types == ("page", "thread", "future")
+    assert mapped.freshness == ""
+    assert mapped.safesearch == "medium"

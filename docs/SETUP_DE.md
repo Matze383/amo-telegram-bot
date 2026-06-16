@@ -550,6 +550,7 @@ AMO_WEBSEARCH_SEARXNG_CATEGORIES=general,news
 
 Der Bot nutzt einen SearchBroker für aktuelle Informationen (News, Wetter, Sport, Aktien). Dieser verwendet SearXNG als primäre Quelle mit optionaler Brave Search als Fallback.
 Safesearch- und Region-Einstellungen steuern das SearXNG/Brave-Suchprofil-Parameter-Mapping; sie machen Brave nicht zum primären Anbieter.
+Optionale Profildateien steuern die generische Intent-Ebene vor dem Provider-Mapping. Ungültige Dateien werden abgelehnt und die Current-Info-Suche wird deaktiviert, statt unsichere Provider-Parameter zu senden.
 Für die Extraktion von Ergebnis-Seiten bevorzugt der Dokument-Fetcher Crawlee und fällt auf httpx zurück. Er folgt nur begrenzten Redirects, begrenzt die Antwortgröße, blockiert private/interne Ziele und akzeptiert HTML/XHTML/Plain-Text-Antworten.
 
 ### Voraussetzungen
@@ -571,6 +572,7 @@ Für die Extraktion von Ergebnis-Seiten bevorzugt der Dokument-Fetcher Crawlee u
 | `AMO_SEARCH_MIN_HOST_DIVERSITY` | `3` | Minimale Anzahl verschiedener Hosts (Spam-Vermeidung) |
 | `AMO_SEARCH_SAFESEARCH` | `moderate` | Safesearch-Profil: `off`, `moderate` oder `strict` |
 | `AMO_SEARCH_REGION` | *(leer)* | Optionaler 2-Buchstaben-Ländercode für Suchprofil-Mapping |
+| `AMO_SEARCH_PROFILES_FILE` | *(leer)* | Optionale YAML/JSON-Profildatei für `default`, `news/current`, `docs/official`, `local/region` und `broad web` |
 | `AMO_DOCUMENT_FETCH_TIMEOUT_SECONDS` | `5` | Timeout für das Abrufen gefolgter Ergebnis-Dokumente (Sekunden) |
 | `AMO_DOCUMENT_FETCH_MAX_BYTES` | `1000000` | Maximale Body-Größe eines abgerufenen Dokuments in Bytes |
 | `AMO_DOCUMENT_FETCH_MAX_REDIRECTS` | `3` | Maximale Anzahl Redirects beim Abrufen eines Dokuments |
@@ -586,6 +588,7 @@ AMO_SEARXNG_TIMEOUT_SECONDS=30
 AMO_SEARCH_MIN_HOST_DIVERSITY=3
 AMO_SEARCH_SAFESEARCH=moderate
 AMO_SEARCH_REGION=
+AMO_SEARCH_PROFILES_FILE=
 AMO_DOCUMENT_FETCH_TIMEOUT_SECONDS=5
 AMO_DOCUMENT_FETCH_MAX_BYTES=1000000
 AMO_DOCUMENT_FETCH_MAX_REDIRECTS=3
@@ -605,9 +608,31 @@ AMO_BRAVE_SEARCH_TIMEOUT_SECONDS=30
 AMO_SEARCH_MIN_HOST_DIVERSITY=3
 AMO_SEARCH_SAFESEARCH=moderate
 AMO_SEARCH_REGION=
+AMO_SEARCH_PROFILES_FILE=
 ```
 
 > **Hinweis:** Wenn `AMO_SEARXNG_URL` nicht gesetzt ist, verwendet Current-Info automatisch den Fallback (sofern konfiguriert). Ohne SearXNG und ohne Fallback ist die Current-Info-Suche deaktiviert.
+
+### Suchprofil-Tuning
+
+Profile sind provider-neutral. Jeder Intent definiert `content_types` und optional Freshness (`day`, `week`, `month`, `year` oder leer). SearXNG mappt diese Werte auf `categories`, `time_range` (`day`, `month`, `year`) und Safesearch. Brave mappt sie auf `result_filter`, `freshness` (`pd`, `pw`, `pm`, `py`) und Safesearch. Brave Custom-Date-Ranges sind nicht integriert.
+
+```yaml
+profiles:
+  news/current:
+    content_types:
+      - news
+      - web
+    freshness: day
+  local/region:
+    content_types:
+      - web
+      - news
+      - locations
+    freshness: week
+```
+
+Code-seitige Safety-Gates validieren Profilstruktur, Safesearch, Länder-/Regionscodes, Provider-Kategorien/Filter, Freshness-Werte und HTTP(S)-Endpoints, bevor eine Netzwerkanfrage ausgeführt wird.
 
 ---
 

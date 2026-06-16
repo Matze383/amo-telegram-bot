@@ -145,6 +145,7 @@ class Settings(BaseSettings):
     amo_search_min_host_diversity: int = Field(default=0, alias="AMO_SEARCH_MIN_HOST_DIVERSITY", ge=0, le=10)
     amo_search_safesearch: str = Field(default="moderate", alias="AMO_SEARCH_SAFESEARCH")
     amo_search_region: str = Field(default="", alias="AMO_SEARCH_REGION")
+    amo_search_profiles_file: str = Field(default="", alias="AMO_SEARCH_PROFILES_FILE")
     amo_document_fetch_timeout_seconds: float = Field(default=5.0, alias="AMO_DOCUMENT_FETCH_TIMEOUT_SECONDS", gt=0, le=30)
     amo_document_fetch_max_bytes: int = Field(default=1_000_000, alias="AMO_DOCUMENT_FETCH_MAX_BYTES", ge=1024, le=5_000_000)
     amo_document_fetch_max_redirects: int = Field(default=3, alias="AMO_DOCUMENT_FETCH_MAX_REDIRECTS", ge=0, le=10)
@@ -464,6 +465,7 @@ class Settings(BaseSettings):
         if search_region and not re.fullmatch(r"[A-Z]{2}", search_region):
             raise ValueError("AMO_SEARCH_REGION must be empty or a 2-letter country code")
         self.amo_search_region = search_region
+        self.amo_search_profiles_file = self.amo_search_profiles_file.strip()
 
         # Validate dreaming window: start must be before end (in the same timezone).
         try:
