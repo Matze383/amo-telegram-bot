@@ -998,9 +998,42 @@ The bot supports sending images via Telegram with policy/role/topic gates.
 
 ### Auto Web Research (Search→Scrape Chain)
 
-Enhanced automatic web research for current/freshness-relevant questions (market/rate/price, news, releases, status, weather, traffic, outages, versions, updates, etc.). Starts with configured SearXNG websearch. For freshness-critical intents only, it can follow up with bounded static page extraction from top URLs and Chromium/browser fallback for max one URL if static extraction is empty/unusable. No new user/admin commands, no new config required. Behavior is bounded/transparent. Timeless/general educational questions do not trigger it. If extraction cannot confirm exact current values, the bot states web search succeeded but follow-up extraction did not confirm the exact value.
+Enhanced automatic web research for current/freshness-relevant questions (market/rate/price, news, releases, status, weather, traffic, outages, versions, updates, etc.). Starts with configured SearXNG websearch. For freshness-critical intents only, it can follow up with bounded static page extraction from top URLs and Chromium/browser fallback for max one URL if static extraction is empty/unusable. **Manual browser trigger:** `browser: <http-or-https-url>` or `webbrowser: <http-or-https-url>` in chat triggers a direct browser fetch (e.g., `browser: https://example.com` or `browser: http://example.com`). No new user/admin commands, no new config required. Browser output is bounded structured evidence (URL, title, UTC timestamp, HTTP status, capped text snippets), not a raw page dump. The browser provider is security-guarded and capped by page, time, snippet, and output limits; only `http://` and `https://` URLs are allowed, credentials and localhost/private/internal IP targets are blocked, and form submissions are not performed. Telemetry records browser success, HTTP error, timeout, and failure outcomes. Timeless/general educational questions do not trigger it. If extraction cannot confirm exact current values, the bot states web search succeeded but follow-up extraction did not confirm the exact value.
 
 **Feedback-driven follow-up search:** User feedback can trigger another bounded research round when the prior answer is perceived as insufficient (e.g., "search more", "other sources", "open/check the sources", "that's not enough", "more sources", "such weiter", "andere Quellen"). The follow-up remains bounded (SearXNG first, static extraction capped, max one browser fallback) and transparent: if still unconfirmed, the bot says so. Context from the previous bot answer/reply may be used for the follow-up search query; raw query/context is not logged but is sent to the configured websearch provider.
+
+---
+
+### Manual Browser Commands
+
+For targeted browser requests, direct triggers can be used in chat:
+
+**Format:** `browser: <url>` or `webbrowser: <url>`
+**Example:** `browser: https://example.com`
+
+**Requirements:**
+- Only HTTP/HTTPS URLs allowed
+- Supports both `http://` and `https://`
+
+**Browser Output:**
+- URL, page title, UTC timestamp, HTTP status
+- Capped text snippets (maximum length limited)
+- No full page content
+
+**Security Restrictions:**
+- No credentials/authentication
+- No private/local IPs (localhost, 127.0.0.1, internal networks)
+- No DNS resolution to private IPs
+- Blocks non-GET/HEAD/OPTIONS methods
+- Form submits suppressed
+
+**Limits:**
+- Max 1 URL per request
+- Time budget per request limited
+- Output capped for fast responses
+- No unlimited page depth
+
+**Usage:** Manual browser commands are suitable for current, dynamic sources (e.g., current prices, status pages, availability) when normal web search is insufficient.
 
 ### Webtool Quotas (Issue #48)
 

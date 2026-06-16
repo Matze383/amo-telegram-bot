@@ -301,7 +301,7 @@ def parse_webtool_chat_trigger(text: str) -> WebtoolChatTrigger | None:
     m_browser = _WEBBROWSER_PREFIX_RE.match(raw)
     if m_browser:
         payload = m_browser.group(1).strip()
-        if payload and payload.startswith("https://"):
+        if payload and (payload.startswith("http://") or payload.startswith("https://")):
             return WebtoolChatTrigger(capability="browser", query="", url=payload)
         return None
 

@@ -9,7 +9,7 @@ This release brings significant improvements to web research reliability, databa
 ### New
 
 - **Auto Web Research/Reliability:** Clearer distinction between successful websearch and actually verifiable current values; fail-closed behavior when web results are unavailable.
-- **Bounded Web Extraction:** Automatic web research limited to configured limits (SearXNG → static extraction → optional browser fallback).
+- **Bounded Web Extraction:** Automatic web research limited to configured limits (SearXNG → static extraction → optional browser fallback). Browser evidence is structured and capped (URL, title, UTC timestamp, HTTP status, text snippets), accepts only guarded `http://`/`https://` URLs, blocks credentials/local/private/internal targets, performs no form submissions, and records success, HTTP error, timeout, and failure telemetry.
 - **Feedback-Driven Follow-up Research:** Users can trigger another research round with phrases like "search more", "other sources", "open/check the sources".
 - **Broader Web Research Triggers:** More intent types trigger automatic web research (sports results, current external facts, generic current-data classification).
 - **Retry on Empty:** One-time retry when auto websearch returns empty.

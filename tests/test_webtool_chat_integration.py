@@ -32,6 +32,7 @@ from amo_bot.telegram.webtool_chat_integration import (
     build_empty_result_retry_query,
     build_web_research_followup_query,
     build_webtool_request,
+    parse_webtool_chat_trigger,
     sanitize_webtool_user_facing_text,
 )
 
@@ -170,6 +171,16 @@ def test_webtool_request_defaults_to_five_search_results():
     )
 
     assert request.max_results == 5
+
+
+def test_browser_trigger_accepts_http_and_https_urls():
+    http_trigger = parse_webtool_chat_trigger("browser: http://example.com/live")
+    https_trigger = parse_webtool_chat_trigger("webbrowser: https://example.com/live")
+    non_url_trigger = parse_webtool_chat_trigger("browser: example.com/live")
+
+    assert http_trigger == WebtoolChatTrigger(capability="browser", query="", url="http://example.com/live")
+    assert https_trigger == WebtoolChatTrigger(capability="browser", query="", url="https://example.com/live")
+    assert non_url_trigger is None
 
 
 def test_quota_denied_no_provider_call_and_user_gets_limit_text(monkeypatch):

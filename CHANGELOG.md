@@ -2,6 +2,48 @@
 
 ---
 
+## [Unreleased] – Bounded Browser Provider
+
+**Datum / Date:** 2026-06-16
+
+### 🇩🇪 Deutsch
+
+#### Übersicht
+Einführung eines begrenzten Browser-Providers für dynamische/aktuelle Quellen mit verbessertem Output-Format, Sicherheitsbeschränkungen und manuellem Chat-Trigger.
+
+#### Neu
+- **Bounded Browser Evidence:** Browser-Ausgabe enthält URL, Seitentitel, UTC-Timestamp, HTTP-Status und gecappte Text-Snippets (keine vollständigen Seiteninhalte).
+- **Per-Request Limits:** Maximale Seitenanzahl, Zeitbudget pro Request, begrenzte Snippet-Anzahl/Länge und Output-Cap.
+- **Protokoll-Beschränkungen:** Nur HTTP/HTTPS erlaubt; Credentials blockiert; localhost/private/internal IPs blockiert; DNS-Auflösung zu privaten IPs blockiert.
+- **Route Guard:** Blockiert private/internal Subrequests und nicht-GET/HEAD/OPTIONS-Methoden; unterdrückt Formular-Submits.
+- **Browser-Telemetry:** Erfasst Erfolg, HTTP-Fehler, Timeouts und Failures.
+- **Manueller Chat-Trigger:** `browser: <url>` oder `webbrowser: <url>` im Chat löst direkten Browser-Fetch aus (unterstützt http:// und https://).
+
+#### Sicherheit & Privacy
+- Keine Credentials oder Authentifizierung möglich.
+- Keine privaten/lokalen Netzwerkadressen erreichbar.
+- Metadata-only Logging (keine Queries, keine vollständigen URLs).
+
+### 🇬🇧 English
+
+#### Overview
+Introduction of a bounded browser provider for dynamic/current sources with improved output format, security restrictions, and manual chat trigger.
+
+#### New
+- **Bounded Browser Evidence:** Browser output includes URL, page title, UTC timestamp, HTTP status, and capped text snippets (no full page content).
+- **Per-Request Limits:** Max pages, time budget per request, limited snippet count/length, and output cap.
+- **Protocol Restrictions:** HTTP/HTTPS only; credentials blocked; localhost/private/internal IPs blocked; DNS resolution to private IPs blocked.
+- **Route Guard:** Blocks private/internal subrequests and non-GET/HEAD/OPTIONS methods; suppresses form submits.
+- **Browser Telemetry:** Captures success, HTTP errors, timeouts, and failures.
+- **Manual Chat Trigger:** `browser: <url>` or `webbrowser: <url>` in chat triggers direct browser fetch (supports http:// and https://).
+
+#### Security & Privacy
+- No credentials or authentication possible.
+- No private/local network addresses reachable.
+- Metadata-only logging (no queries, no full URLs).
+
+---
+
 ## [Unreleased] – Entfernung Human-User-Consent / Removal of Human User Consent
 
 **Datum / Date:** 2026-06-12

@@ -998,9 +998,42 @@ Der Bot unterstützt das Senden von Bildern über Telegram mit Policy/Role/Topic
 
 ### Auto Web Research (Search→Scrape Chain)
 
-Verbesserte automatische Web-Recherche für aktuelle/zeitnahe Fragen (Markt/Kurs/Preis, News, Releases, Status, Wetter, Verkehr, Ausfälle, Versionen, Updates, etc.). Startet mit konfiguriertem SearXNG-Websearch. Bei Fragen zu aktuellen Werten kann optional die Top-URL per statischer Seitenextraktion angefragt werden; falls diese leer/unbrauchbar ist, erfolgt maximal ein Chromium/Browser-Fallback für eine URL. Keine neuen User/Admin-Commands, keine neue Config erforderlich. Verhalten ist bounded/transparent. Zeitlose/allgemeine Bildungsfragen lösen sie nicht aus. Bei nicht bestätigbaren Werten antwortet der Bot wahrheitsgemäß, dass die Websuche erfolgreich war, die Extraktion aber keine exakten aktuellen Werte bestätigen konnte.
+Verbesserte automatische Web-Recherche für aktuelle/zeitnahe Fragen (Markt/Kurs/Preis, News, Releases, Status, Wetter, Verkehr, Ausfälle, Versionen, Updates, etc.). Startet mit konfiguriertem SearXNG-Websearch. Bei Fragen zu aktuellen Werten kann optional die Top-URL per statischer Seitenextraktion angefragt werden; falls diese leer/unbrauchbar ist, erfolgt maximal ein Chromium/Browser-Fallback für eine URL. **Manueller Browser-Trigger:** `browser: <http-oder-https-url>` oder `webbrowser: <http-oder-https-url>` im Chat löst direkt einen gezielten Browser-Fetch aus (z. B. `browser: https://example.com` oder `browser: http://example.com`). Keine neuen User/Admin-Commands, keine neue Config erforderlich. Browser-Output ist begrenzte strukturierte Evidence (URL, Titel, UTC-Zeitstempel, HTTP-Status, gecappte Text-Snippets), kein roher Seiten-Dump. Der Browser-Provider ist sicherheitsgeschützt und durch Limits für Seiten, Laufzeit, Snippets und Ausgabegröße begrenzt; erlaubt sind nur `http://` und `https://`, Credentials sowie localhost/private/interne IP-Ziele werden blockiert, und Formular-Submits werden nicht ausgeführt. Telemetrie erfasst Browser-Erfolg, HTTP-Fehler, Timeout und Failure-Ergebnisse. Zeitlose/allgemeine Bildungsfragen lösen sie nicht aus. Bei nicht bestätigbaren Werten antwortet der Bot wahrheitsgemäß, dass die Websuche erfolgreich war, die Extraktion aber keine exakten aktuellen Werte bestätigen konnte.
 
 **Feedback-gesteuerte Follow-up-Recherche:** Nutzer-Feedback kann eine weitere begrenzte Recherche-Runde auslösen, wenn die vorherige Antwort als unzureichend empfunden wird (z.B. "such weiter", "andere Quellen", "öffne/prüfe die Quellen", "das reicht nicht", "search more", "more sources"). Die Follow-up-Recherche bleibt begrenzt (SearXNG zuerst, statische Extraktion gecappt, maximal ein Browser-Fallback) und transparent: Falls weiterhin keine Bestätigung möglich ist, teilt der Bot dies mit. Für die Follow-up-Suche kann Kontext aus der vorherigen Bot-Antwort/Reply verwendet werden; die Rohanfrage wird nicht geloggt, aber an den konfigurierten Websearch-Provider übermittelt.
+
+---
+
+### Manuelle Browser-Kommandos
+
+Für gezielte Browser-Abfragen können direkte Trigger im Chat verwendet werden:
+
+**Format:** `browser: <url>` oder `webbrowser: <url>`
+**Beispiel:** `browser: https://example.com`
+
+**Anforderungen:**
+- Nur HTTP/HTTPS-URLs erlaubt
+- Unterstützt sowohl `http://` als auch `https://`
+
+**Browser-Ausgabe:**
+- URL, Seitentitel, UTC-Timestamp, HTTP-Status
+- Gecappte Text-Snippets (maximale Länge begrenzt)
+- Keine vollständigen Seiteninhalte
+
+**Sicherheitsbeschränkungen:**
+- Keine Credentials/Authentifizierung
+- Keine privaten/lokalen IPs (localhost, 127.0.0.1, interne Netzwerke)
+- Keine DNS-Auflösung zu privaten IPs
+- Blockiert nicht-GET/HEAD/OPTIONS-Methoden
+- Formular-Submits unterdrückt
+
+**Limits:**
+- Max 1 URL pro Anfrage
+- Zeitbudget pro Request begrenzt
+- Output gecappt für schnelle Antworten
+- Keine unbegrenzte Seitentiefe
+
+**Verwendung:** Manuelle Browser-Kommandos eignen sich für aktuelle, dynamische Quellen (z.B. aktuelle Preise, Status-Seiten, Verfügbarkeiten), wenn normale Websuche nicht ausreicht.
 
 ### Webtool-Quotas (Issue #48)
 

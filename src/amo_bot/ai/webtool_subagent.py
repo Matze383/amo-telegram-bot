@@ -482,6 +482,18 @@ class WebtoolSubagentService:
             result = self._browser_provider.render(url=request.url, timeout_seconds=self._scrape_timeout)
             status_code = int(result.get("status_code", 0) or 0)
             if not (200 <= status_code < 300):
+                log_event(
+                    logger,
+                    logging.WARNING,
+                    event="webtool_browser_usage",
+                    component=_COMPONENT,
+                    reason_code="browser_http_error",
+                    extra={
+                        "operation": WebtoolOperationType.BROWSER,
+                        "status_code": status_code,
+                        "timing_ms": metadata.get("timing_ms", 0),
+                    },
+                )
                 return WebtoolSubagentResult(
                     allowed=False,
                     decision="deny",
@@ -490,22 +502,62 @@ class WebtoolSubagentService:
                     metadata=metadata,
                     error=f"HTTP error: {status_code}",
                 )
-            sanitized = self._sanitize_scrape_result(result)
+            sanitized = self._sanitize_browser_result(result)
+            if not sanitized.text.strip():
+                log_event(
+                    logger,
+                    logging.WARNING,
+                    event="webtool_browser_usage",
+                    component=_COMPONENT,
+                    reason_code="browser_no_evidence",
+                    extra={"operation": WebtoolOperationType.BROWSER, "timing_ms": metadata.get("timing_ms", 0)},
+                )
+                return WebtoolSubagentResult(
+                    allowed=False,
+                    decision="deny",
+                    reason="browser_no_evidence",
+                    sanitized=self._empty_result(),
+                    metadata=metadata,
+                    error="Browser returned no structured evidence",
+                )
             self._add_extraction_quality_metadata(metadata, sanitized.text)
+            metadata.update(
+                {
+                    "source_count": len(sanitized.sources),
+                    "browser_page_count": int(result.get("page_count") or len(sanitized.sources)),
+                    "browser_max_pages": int(result.get("max_pages") or 0),
+                }
+            )
+            log_event(
+                logger,
+                logging.INFO,
+                event="webtool_browser_usage",
+                component=_COMPONENT,
+                reason_code="browser_completed",
+                extra={
+                    "operation": WebtoolOperationType.BROWSER,
+                    "source_count": len(sanitized.sources),
+                    "browser_page_count": metadata.get("browser_page_count", 0),
+                    "timing_ms": metadata.get("timing_ms", 0),
+                },
+            )
             return WebtoolSubagentResult(
                 allowed=True,
                 decision="allow",
                 reason="browser_completed",
-                sanitized=WebtoolSanitizedResult(
-                    text=sanitized.text,
-                    sources=sanitized.sources,
-                    hosts=sanitized.hosts,
-                    result_type="browser_text",
-                ),
+                sanitized=sanitized,
                 metadata=metadata,
                 error=None,
             )
         except TimeoutError:
+            log_event(
+                logger,
+                logging.WARNING,
+                event="webtool_browser_usage",
+                component=_COMPONENT,
+                reason_code="browser_timeout",
+                extra={"operation": WebtoolOperationType.BROWSER, "timing_ms": metadata.get("timing_ms", 0)},
+            )
             return WebtoolSubagentResult(
                 allowed=False,
                 decision="deny",
@@ -515,6 +567,18 @@ class WebtoolSubagentService:
                 error="Browser operation timed out",
             )
         except Exception as exc:
+            log_event(
+                logger,
+                logging.WARNING,
+                event="webtool_browser_usage",
+                component=_COMPONENT,
+                reason_code="browser_failed",
+                extra={
+                    "operation": WebtoolOperationType.BROWSER,
+                    "error_class": type(exc).__name__,
+                    "timing_ms": metadata.get("timing_ms", 0),
+                },
+            )
             return WebtoolSubagentResult(
                 allowed=False,
                 decision="deny",
@@ -665,6 +729,51 @@ class WebtoolSubagentService:
             sources=sources,
             hosts=hosts,
             result_type="webscraping_text",
+        )
+
+    def _sanitize_browser_result(self, result: dict[str, object]) -> WebtoolSanitizedResult:
+        """Sanitize browser evidence: URL/title/timestamp/snippets only."""
+        evidence_items = tuple(result.get("evidence", ()) or ())
+        texts: list[str] = []
+        sources: list[str] = []
+        hosts: list[str] = []
+
+        for index, item in enumerate(evidence_items[:5], 1):
+            if not isinstance(item, dict):
+                continue
+            url = str(item.get("url") or "").strip()
+            title = self._sanitize_text(str(item.get("title") or ""))
+            timestamp = self._sanitize_text(str(item.get("timestamp") or ""))
+            snippets = tuple(item.get("snippets", ()) or ())[:5]
+
+            host = self._extract_host(url)
+            if host and host not in hosts:
+                hosts.append(host)
+            if url:
+                sources.append(url)
+
+            heading = f"{index}. {title or url} ({timestamp})".strip()
+            page_lines = [heading]
+            for snippet in snippets:
+                cleaned = self._sanitize_text(str(snippet))
+                if cleaned:
+                    page_lines.append(f"- {cleaned[: self._MAX_SNIPPET_CHARS].rstrip()}")
+            if len(page_lines) > 1:
+                texts.append("\n".join(page_lines))
+
+        if not texts:
+            return WebtoolSanitizedResult(
+                text="",
+                sources=tuple(sources),
+                hosts=tuple(hosts),
+                result_type="browser_evidence",
+            )
+
+        return WebtoolSanitizedResult(
+            text=self._cap_result_text("\n".join(texts)),
+            sources=tuple(sources),
+            hosts=tuple(hosts),
+            result_type="browser_evidence",
         )
 
     def _cap_result_text(self, text: str) -> str:

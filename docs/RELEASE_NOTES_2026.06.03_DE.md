@@ -9,7 +9,7 @@ Dieses Release bringt erhebliche Verbesserungen bei der Web-Recherche-Zuverläss
 ### Neu
 
 - **Auto-Web-Research/Zuverlässigkeit:** Klarere Unterscheidung zwischen erfolgreicher Websuche und tatsächlich verifizierbaren aktuellen Werten; Fail-Closed-Verhalten bei nicht verfügbaren Web-Ergebnissen.
-- **Bounded Web-Extraktion:** Automatische Web-Recherche begrenzt auf konfigurierte Limits (SearXNG → statische Extraktion → optionaler Browser-Fallback).
+- **Bounded Web-Extraktion:** Automatische Web-Recherche begrenzt auf konfigurierte Limits (SearXNG → statische Extraktion → optionaler Browser-Fallback). Browser-Evidence ist strukturiert und gecappt (URL, Titel, UTC-Zeitstempel, HTTP-Status, Text-Snippets), akzeptiert nur geschützte `http://`/`https://`-URLs, blockiert Credentials/lokale/private/interne Ziele, führt keine Formular-Submits aus und erfasst Telemetrie für Erfolg, HTTP-Fehler, Timeout und Failure.
 - **Feedback-gesteuerte Follow-up-Recherche:** Nutzer können mit Phrasen wie "such weiter", "andere Quellen", "öffne/prüfe die Quellen" eine weitere Recherche-Runde auslösen.
 - **Erweiterte Web-Research-Trigger:** Mehr Intent-Typen lösen automatische Web-Recherche aus (Sport-Ergebnisse, aktuelle externe Fakten, generische Aktualitäts-Klassifizierung).
 - **Retry bei leeren Ergebnissen:** Einmaliger Retry bei leerer Auto-Websearch.

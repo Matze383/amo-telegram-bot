@@ -1,15 +1,17 @@
 from __future__ import annotations
 
+import base64
 import ipaddress
 import os
 import re
+import shutil
 import socket
+import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from html import unescape
 from typing import Any
 from urllib.parse import parse_qs, urlparse
-import base64
-import shutil
 
 import httpx
 
@@ -589,15 +591,23 @@ def _load_playwright_deps() -> _PlaywrightDeps | None:
 
 class RealBrowserProviderAdapter:
     _DEFAULT_MAX_OUTPUT_CHARS = 4000
+    _DEFAULT_MAX_PAGES = 3
+    _DEFAULT_TIME_BUDGET_SECONDS = 10.0
+    _MAX_SNIPPETS_PER_PAGE = 5
+    _MAX_SNIPPET_CHARS = 500
     _DISALLOWED_SCHEMES = {"file", "data", "javascript", "chrome", "about", "blob", "ftp", "ws", "wss"}
 
     def __init__(
         self,
         *,
         max_output_chars: int = _DEFAULT_MAX_OUTPUT_CHARS,
+        max_pages: int = _DEFAULT_MAX_PAGES,
+        time_budget_seconds: float = _DEFAULT_TIME_BUDGET_SECONDS,
         deps: _PlaywrightDeps | None = None,
     ) -> None:
         self._max_output_chars = min(max(int(max_output_chars), 200), 8000)
+        self._max_pages = min(max(int(max_pages), 1), 5)
+        self._time_budget_seconds = min(max(float(time_budget_seconds), 0.5), 30.0)
         self._deps = deps if deps is not None else _load_playwright_deps()
 
     @property
@@ -605,38 +615,84 @@ class RealBrowserProviderAdapter:
         return self._deps is not None
 
     def render(self, *, url: str, timeout_seconds: float) -> dict[str, object]:
-        parsed = _validate_browser_target_url(url)
+        result = self.render_pages(urls=(url,), timeout_seconds=timeout_seconds)
+        evidence = tuple(result.get("evidence", ()) or ())
+        if not evidence:
+            raise RuntimeError("Browser render returned no evidence")
+        first = evidence[0]
+        return {
+            "url": str(first.get("url") or url),
+            "status_code": int(first.get("status_code") or result.get("status_code") or 0),
+            "headers": {},
+            "title": str(first.get("title") or ""),
+            "timestamp": str(first.get("timestamp") or ""),
+            "snippets": tuple(str(item) for item in first.get("snippets", ()) or ()),
+            "evidence": evidence,
+            "text": str(result.get("text") or ""),
+            "page_count": int(result.get("page_count") or len(evidence)),
+            "max_pages": self._max_pages,
+        }
+
+    def render_pages(self, *, urls: tuple[str, ...] | list[str], timeout_seconds: float) -> dict[str, object]:
+        bounded_urls = tuple(urls[: self._max_pages])
+        if not bounded_urls:
+            raise ValueError("No browser URLs provided")
+        parsed_urls = tuple(_validate_browser_target_url(url) for url in bounded_urls)
         deps = self._deps
         if deps is None:
             raise RuntimeError("Browser provider unavailable")
-
-        timeout_ms = max(200, int(timeout_seconds * 1000))
+        time_budget = min(max(float(timeout_seconds), 0.2), self._time_budget_seconds)
+        deadline = time.monotonic() + time_budget
 
         launch_kwargs: dict[str, Any] = {"headless": True}
         executable_path = _detect_system_chromium_executable()
         if executable_path:
             launch_kwargs["executable_path"] = executable_path
 
+        evidence: list[dict[str, object]] = []
         try:
             with deps.sync_playwright() as p:
                 browser = p.chromium.launch(**launch_kwargs)
                 try:
                     context = browser.new_context(ignore_https_errors=False)
                     try:
-                        page = context.new_page()
-                        response = page.goto(parsed.geturl(), wait_until="domcontentloaded", timeout=timeout_ms)
-                        body_text = page.locator("body").inner_text(timeout=timeout_ms)
-                        status_code = response.status if response is not None else 200
-                        return {
-                            "url": parsed.geturl(),
-                            "status_code": int(status_code),
-                            "headers": {},
-                            "text": body_text[: self._max_output_chars],
-                        }
+                        for parsed in parsed_urls:
+                            remaining_seconds = deadline - time.monotonic()
+                            if remaining_seconds <= 0:
+                                if not evidence:
+                                    raise TimeoutError("Browser render timed out")
+                                break
+                            page = context.new_page()
+                            _install_bounded_browser_routes(page)
+                            timeout_ms = max(200, int(remaining_seconds * 1000))
+                            response = page.goto(parsed.geturl(), wait_until="domcontentloaded", timeout=timeout_ms)
+                            body_text = page.locator("body").inner_text(timeout=timeout_ms)
+                            title = str(page.title() or "") if hasattr(page, "title") else ""
+                            status_code = response.status if response is not None else 200
+                            evidence.append(
+                                {
+                                    "url": parsed.geturl(),
+                                    "title": _bound_text(title, 200),
+                                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                                    "status_code": int(status_code),
+                                    "snippets": _extract_browser_snippets(body_text),
+                                }
+                            )
                     finally:
                         context.close()
                 finally:
                     browser.close()
+            text = _format_browser_evidence_text(tuple(evidence), max_output_chars=self._max_output_chars)
+            status_code = int(evidence[0].get("status_code") or 0) if evidence else 0
+            return {
+                "url": str(evidence[0].get("url") or parsed_urls[0].geturl()) if evidence else parsed_urls[0].geturl(),
+                "status_code": status_code,
+                "headers": {},
+                "evidence": tuple(evidence),
+                "text": text,
+                "page_count": len(evidence),
+                "max_pages": self._max_pages,
+            }
         except deps.timeout_error_cls as exc:
             raise TimeoutError("Browser render timed out") from exc
         except TimeoutError:
@@ -651,10 +707,12 @@ def _validate_browser_target_url(url: str):
     parsed = urlparse((url or "").strip())
     if parsed.scheme.lower() in RealBrowserProviderAdapter._DISALLOWED_SCHEMES:
         raise ValueError("URL scheme not allowed")
-    if parsed.scheme.lower() != "https":
-        raise ValueError("Only HTTPS URLs are allowed")
+    if parsed.scheme.lower() not in {"http", "https"}:
+        raise ValueError("Only HTTP(S) URLs are allowed")
     if not parsed.hostname:
         raise ValueError("Invalid host")
+    if parsed.username or parsed.password:
+        raise ValueError("URL credentials are not allowed")
 
     host = parsed.hostname.strip().lower().rstrip(".")
     if host in {"localhost", "localhost.localdomain"}:
@@ -662,14 +720,16 @@ def _validate_browser_target_url(url: str):
 
     try:
         ip = ipaddress.ip_address(host)
+    except ValueError:
+        ip = None
+    if ip is not None:
         if _is_private_or_internal_ip(ip):
             raise ValueError("Host not allowed")
         return parsed
-    except ValueError:
-        pass
 
     try:
-        infos = socket.getaddrinfo(host, parsed.port or 443, proto=socket.IPPROTO_TCP)
+        default_port = 443 if parsed.scheme.lower() == "https" else 80
+        infos = socket.getaddrinfo(host, parsed.port or default_port, proto=socket.IPPROTO_TCP)
     except OSError as exc:
         raise RuntimeError("Host resolution failed") from exc
 
@@ -691,6 +751,68 @@ def _validate_browser_target_url(url: str):
         raise RuntimeError("Host resolution failed")
 
     return parsed
+
+
+def _install_bounded_browser_routes(page: Any) -> None:
+    if hasattr(page, "add_init_script"):
+        page.add_init_script(
+            """
+            document.addEventListener('submit', (event) => {
+              event.preventDefault();
+              event.stopImmediatePropagation();
+            }, true);
+            """
+        )
+
+    if not hasattr(page, "route"):
+        return
+
+    def _handler(route: Any, request: Any) -> None:
+        method = str(getattr(request, "method", "GET") or "GET").upper()
+        request_url = str(getattr(request, "url", "") or "")
+        try:
+            _validate_browser_target_url(request_url)
+        except Exception:
+            route.abort()
+            return
+        if method not in {"GET", "HEAD", "OPTIONS"}:
+            route.abort()
+            return
+        route.continue_()
+
+    page.route("**/*", _handler)
+
+
+def _extract_browser_snippets(text: str) -> tuple[str, ...]:
+    normalized = " ".join((text or "").split()).strip()
+    if not normalized:
+        return ()
+    candidates = re.split(r"(?<=[.!?])\s+", normalized)
+    snippets: list[str] = []
+    for candidate in candidates:
+        snippet = _bound_text(candidate, RealBrowserProviderAdapter._MAX_SNIPPET_CHARS)
+        if not snippet:
+            continue
+        snippets.append(snippet)
+        if len(snippets) >= RealBrowserProviderAdapter._MAX_SNIPPETS_PER_PAGE:
+            break
+    if snippets:
+        return tuple(snippets)
+    return (_bound_text(normalized, RealBrowserProviderAdapter._MAX_SNIPPET_CHARS),)
+
+
+def _format_browser_evidence_text(evidence: tuple[dict[str, object], ...], *, max_output_chars: int) -> str:
+    lines: list[str] = []
+    for index, item in enumerate(evidence, 1):
+        title = str(item.get("title") or "").strip()
+        url = str(item.get("url") or "").strip()
+        timestamp = str(item.get("timestamp") or "").strip()
+        lines.append(f"{index}. {title or url} ({timestamp})")
+        for snippet in tuple(item.get("snippets", ()) or ())[
+            : RealBrowserProviderAdapter._MAX_SNIPPETS_PER_PAGE
+        ]:
+            lines.append(f"- {str(snippet)}")
+    return _bound_text("\n".join(lines), max_output_chars)
 
 
 def _detect_system_chromium_executable() -> str | None:
