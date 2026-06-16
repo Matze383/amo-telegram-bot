@@ -550,6 +550,7 @@ AMO_WEBSEARCH_SEARXNG_CATEGORIES=general,news
 
 The bot uses a SearchBroker for current information (news, weather, sports, stocks). It uses SearXNG as the primary source with optional Brave Search as fallback.
 Safesearch and region settings tune the SearXNG/Brave search-profile parameter mapping; they do not make Brave the primary provider.
+For result-page extraction, the document fetcher prefers Crawlee and falls back to httpx. It follows only bounded redirects, caps response size, blocks private/internal targets, and accepts HTML/XHTML/plain-text responses.
 
 ### Prerequisites
 
@@ -570,6 +571,10 @@ Safesearch and region settings tune the SearXNG/Brave search-profile parameter m
 | `AMO_SEARCH_MIN_HOST_DIVERSITY` | `3` | Minimum number of distinct hosts (spam avoidance) |
 | `AMO_SEARCH_SAFESEARCH` | `moderate` | Safesearch profile: `off`, `moderate`, or `strict` |
 | `AMO_SEARCH_REGION` | *(empty)* | Optional 2-letter country code for search profile mapping |
+| `AMO_DOCUMENT_FETCH_TIMEOUT_SECONDS` | `5` | Timeout for fetching followed result documents (seconds) |
+| `AMO_DOCUMENT_FETCH_MAX_BYTES` | `1000000` | Maximum fetched document body size in bytes |
+| `AMO_DOCUMENT_FETCH_MAX_REDIRECTS` | `3` | Maximum redirects while fetching a document |
+| `AMO_DOCUMENT_FETCH_PREFER_CRAWLEE` | `true` | Prefer Crawlee for document fetching with httpx fallback |
 
 ### Example Configuration (SearXNG only)
 
@@ -581,6 +586,10 @@ AMO_SEARXNG_TIMEOUT_SECONDS=30
 AMO_SEARCH_MIN_HOST_DIVERSITY=3
 AMO_SEARCH_SAFESEARCH=moderate
 AMO_SEARCH_REGION=
+AMO_DOCUMENT_FETCH_TIMEOUT_SECONDS=5
+AMO_DOCUMENT_FETCH_MAX_BYTES=1000000
+AMO_DOCUMENT_FETCH_MAX_REDIRECTS=3
+AMO_DOCUMENT_FETCH_PREFER_CRAWLEE=true
 ```
 
 ### Example Configuration (SearXNG + Brave Fallback)

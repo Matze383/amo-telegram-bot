@@ -145,6 +145,10 @@ class Settings(BaseSettings):
     amo_search_min_host_diversity: int = Field(default=0, alias="AMO_SEARCH_MIN_HOST_DIVERSITY", ge=0, le=10)
     amo_search_safesearch: str = Field(default="moderate", alias="AMO_SEARCH_SAFESEARCH")
     amo_search_region: str = Field(default="", alias="AMO_SEARCH_REGION")
+    amo_document_fetch_timeout_seconds: float = Field(default=5.0, alias="AMO_DOCUMENT_FETCH_TIMEOUT_SECONDS", gt=0, le=30)
+    amo_document_fetch_max_bytes: int = Field(default=1_000_000, alias="AMO_DOCUMENT_FETCH_MAX_BYTES", ge=1024, le=5_000_000)
+    amo_document_fetch_max_redirects: int = Field(default=3, alias="AMO_DOCUMENT_FETCH_MAX_REDIRECTS", ge=0, le=10)
+    amo_document_fetch_prefer_crawlee: bool = Field(default=True, alias="AMO_DOCUMENT_FETCH_PREFER_CRAWLEE")
 
     webui_host: str = Field(default="127.0.0.1", alias="WEBUI_HOST")
     webui_port: int = Field(default=8080, alias="WEBUI_PORT")

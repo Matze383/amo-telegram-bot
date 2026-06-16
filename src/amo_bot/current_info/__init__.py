@@ -10,6 +10,17 @@ from amo_bot.current_info.candidates import (
     classify_source_type,
     normalize_dedupe_and_rank_search_results,
 )
+from amo_bot.current_info.fetch import (
+    CrawleeDocumentFetcher,
+    CurrentInfoFetchBlocked,
+    CurrentInfoFetchError,
+    CurrentInfoFetchInvalidMime,
+    CurrentInfoFetchTimeout,
+    CurrentInfoFetchTooLarge,
+    DocumentFetchConfig,
+    build_document_fetcher_from_settings,
+    extract_document,
+)
 from amo_bot.current_info.legacy_webtool import LegacyWebtoolCurrentInfoService
 from amo_bot.current_info.models import (
     CurrentInfoAnswer,
@@ -56,7 +67,13 @@ from amo_bot.current_info.search import (
 
 __all__ = [
     "CurrentInfoAnswer",
+    "CrawleeDocumentFetcher",
     "CurrentInfoFetchProvider",
+    "CurrentInfoFetchBlocked",
+    "CurrentInfoFetchError",
+    "CurrentInfoFetchInvalidMime",
+    "CurrentInfoFetchTimeout",
+    "CurrentInfoFetchTooLarge",
     "CurrentInfoQueryPlanner",
     "CurrentInfoRequest",
     "CurrentInfoRetrievalProvider",
@@ -65,6 +82,7 @@ __all__ = [
     "CurrentInfoTaskPlanner",
     "DefaultCurrentInfoQueryPlanner",
     "DefaultCurrentInfoTaskPlanner",
+    "DocumentFetchConfig",
     "EvidenceChunk",
     "EvidencePackage",
     "FetchedDocument",
@@ -95,9 +113,11 @@ __all__ = [
     "SOURCE_TYPE_SOCIAL",
     "SOURCE_TYPE_UNKNOWN",
     "TaskSpec",
+    "build_document_fetcher_from_settings",
     "build_search_broker_from_settings",
     "canonicalize_url",
     "classify_source_type",
+    "extract_document",
     "normalize_dedupe_and_rank_search_results",
     "select_search_profile",
 ]
