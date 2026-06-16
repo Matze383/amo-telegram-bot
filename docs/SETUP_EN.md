@@ -549,6 +549,7 @@ AMO_WEBSEARCH_SEARXNG_CATEGORIES=general,news
 ## Current-Info Search / SearchBroker (optional)
 
 The bot uses a SearchBroker for current information (news, weather, sports, stocks). It uses SearXNG as the primary source with optional Brave Search as fallback.
+Safesearch and region settings tune the SearXNG/Brave search-profile parameter mapping; they do not make Brave the primary provider.
 
 ### Prerequisites
 
@@ -567,6 +568,8 @@ The bot uses a SearchBroker for current information (news, weather, sports, stoc
 | `AMO_SEARXNG_TIMEOUT_SECONDS` | `30` | Timeout for SearXNG requests (seconds) |
 | `AMO_BRAVE_SEARCH_TIMEOUT_SECONDS` | `30` | Timeout for Brave Search requests (seconds) |
 | `AMO_SEARCH_MIN_HOST_DIVERSITY` | `3` | Minimum number of distinct hosts (spam avoidance) |
+| `AMO_SEARCH_SAFESEARCH` | `moderate` | Safesearch profile: `off`, `moderate`, or `strict` |
+| `AMO_SEARCH_REGION` | *(empty)* | Optional 2-letter country code for search profile mapping |
 
 ### Example Configuration (SearXNG only)
 
@@ -576,6 +579,8 @@ AMO_SEARXNG_URL=http://localhost:8080
 AMO_SEARCH_MAX_RESULTS=10
 AMO_SEARXNG_TIMEOUT_SECONDS=30
 AMO_SEARCH_MIN_HOST_DIVERSITY=3
+AMO_SEARCH_SAFESEARCH=moderate
+AMO_SEARCH_REGION=
 ```
 
 ### Example Configuration (SearXNG + Brave Fallback)
@@ -589,6 +594,8 @@ AMO_SEARCH_MAX_RESULTS=10
 AMO_SEARXNG_TIMEOUT_SECONDS=30
 AMO_BRAVE_SEARCH_TIMEOUT_SECONDS=30
 AMO_SEARCH_MIN_HOST_DIVERSITY=3
+AMO_SEARCH_SAFESEARCH=moderate
+AMO_SEARCH_REGION=
 ```
 
 > **Note:** If `AMO_SEARXNG_URL` is not set, Current-Info automatically uses the fallback (if configured). Without SearXNG and without fallback, Current-Info search is disabled.

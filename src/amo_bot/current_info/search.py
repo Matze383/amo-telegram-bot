@@ -4,6 +4,7 @@ import logging
 import re
 import time
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import Any, Protocol
 from urllib.parse import urlparse
 
@@ -34,6 +35,25 @@ class SearchProviderInvalidResponse(SearchProviderError):
     error_class = "invalid_response"
 
 
+class SearchIntent(StrEnum):
+    DEFAULT = "default"
+    NEWS_CURRENT = "news/current"
+    DOCS_OFFICIAL = "docs/official"
+    LOCAL_REGION = "local/region"
+    BROAD_WEB = "broad web"
+
+
+@dataclass(frozen=True, slots=True)
+class SearchProfile:
+    intent: SearchIntent
+    locale: str
+    language: str
+    region: str
+    content_types: tuple[str, ...] = ()
+    freshness: str = ""
+    safesearch: str = "moderate"
+
+
 @dataclass(frozen=True, slots=True)
 class SearxngSearchConfig:
     base_url: str
@@ -41,6 +61,9 @@ class SearxngSearchConfig:
     max_results: int = 5
     language: str | None = None
     categories: str | None = None
+    time_range: str | None = None
+    safesearch: str = "moderate"
+    region: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,6 +74,10 @@ class BraveSearchConfig:
     max_results: int = 5
     country: str | None = None
     search_lang: str | None = None
+    ui_lang: str | None = None
+    freshness: str | None = None
+    safesearch: str = "moderate"
+    result_filter: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -87,13 +114,24 @@ class SearxngSearchProvider:
         return SearchProviderResponse(results=tuple(results), metrics=(metric,))
 
     def _search(self, *, query: str, locale: str, limit: int) -> tuple[SearchResult, ...]:
+        profile = select_search_profile(
+            query=query,
+            locale=locale,
+            safesearch=self._config.safesearch,
+            region=self._config.region,
+        )
         params: dict[str, str | int] = {
             "q": query,
             "format": "json",
-            "language": self._config.language or _normalize_locale(locale),
+            "language": self._config.language or profile.locale,
+            "safesearch": _searxng_safesearch(profile.safesearch),
         }
-        if self._config.categories:
-            params["categories"] = self._config.categories
+        categories = self._config.categories or ",".join(_searxng_categories(profile))
+        if categories:
+            params["categories"] = categories
+        time_range = self._config.time_range or _searxng_time_range(profile)
+        if time_range:
+            params["time_range"] = time_range
 
         endpoint = f"{self._base_url}/search"
         with self._http_client_factory(
@@ -160,12 +198,26 @@ class BraveSearchProvider:
         return SearchProviderResponse(results=tuple(results), metrics=(metric,))
 
     def _search(self, *, query: str, locale: str, limit: int) -> tuple[SearchResult, ...]:
+        profile = select_search_profile(query=query, locale=locale, safesearch=self._config.safesearch)
         params: dict[str, str | int] = {"q": query, "count": limit}
-        search_lang = self._config.search_lang or _brave_search_lang(locale)
+        search_lang = self._config.search_lang or profile.language
         if search_lang:
             params["search_lang"] = search_lang
-        if self._config.country:
-            params["country"] = self._config.country
+        ui_lang = self._config.ui_lang or _brave_ui_lang(profile.locale)
+        if ui_lang:
+            params["ui_lang"] = ui_lang
+        country = self._config.country or profile.region
+        if country:
+            params["country"] = country
+        safesearch = _brave_safesearch(profile.safesearch)
+        if safesearch:
+            params["safesearch"] = safesearch
+        freshness = self._config.freshness or _brave_freshness(profile)
+        if freshness:
+            params["freshness"] = freshness
+        result_filter = self._config.result_filter or ",".join(_brave_result_filter(profile))
+        if result_filter:
+            params["result_filter"] = result_filter
 
         with self._http_client_factory(
             timeout=self._config.timeout_seconds,
@@ -187,12 +239,11 @@ class BraveSearchProvider:
         web = payload.get("web")
         if not isinstance(web, dict):
             raise SearchProviderInvalidResponse("brave response missing web object")
-        items = web.get("results")
-        if not isinstance(items, list):
+        if not isinstance(web.get("results"), list):
             raise SearchProviderInvalidResponse("brave response missing results list")
 
         results: list[SearchResult] = []
-        for item in items:
+        for item in _brave_result_items(payload):
             if not isinstance(item, dict):
                 continue
             result = _result_from_mapping(
@@ -340,6 +391,8 @@ def build_search_broker_from_settings(settings: Any, *, http_client_factory: Any
             base_url=searxng_url,
             timeout_seconds=float(getattr(settings, "amo_searxng_timeout_seconds", 3.0)),
             max_results=max_results,
+            safesearch=str(getattr(settings, "amo_search_safesearch", "moderate") or "moderate"),
+            region=str(getattr(settings, "amo_search_region", "") or ""),
         ),
         http_client_factory=http_client_factory,
     )
@@ -352,6 +405,8 @@ def build_search_broker_from_settings(settings: Any, *, http_client_factory: Any
                 api_key=brave_key,
                 timeout_seconds=float(getattr(settings, "amo_brave_search_timeout_seconds", 3.0)),
                 max_results=max_results,
+                country=str(getattr(settings, "amo_search_region", "") or "") or None,
+                safesearch=str(getattr(settings, "amo_search_safesearch", "moderate") or "moderate"),
             ),
             http_client_factory=http_client_factory,
         )
@@ -366,6 +421,82 @@ def build_search_broker_from_settings(settings: Any, *, http_client_factory: Any
     )
 
 
+def select_search_profile(
+    *,
+    query: str,
+    locale: str,
+    safesearch: str = "moderate",
+    region: str | None = None,
+) -> SearchProfile:
+    normalized_locale = _normalize_locale(locale)
+    normalized_query = " ".join((query or "").casefold().split())
+    intent = _detect_search_intent(normalized_query)
+    country = _normalize_country(region) or _country_from_locale(normalized_locale)
+    language = normalized_locale.split("-", 1)[0]
+    content_types: tuple[str, ...] = ("web",)
+    freshness = ""
+
+    if intent == SearchIntent.NEWS_CURRENT:
+        content_types = ("news", "web")
+        freshness = "day"
+    elif intent == SearchIntent.DOCS_OFFICIAL:
+        content_types = ("web", "faq")
+    elif intent == SearchIntent.LOCAL_REGION:
+        content_types = ("web", "news", "locations")
+        freshness = "week"
+    elif intent == SearchIntent.BROAD_WEB:
+        content_types = ("web", "discussions", "faq", "news")
+
+    return SearchProfile(
+        intent=intent,
+        locale=normalized_locale,
+        language=language,
+        region=country,
+        content_types=content_types,
+        freshness=freshness,
+        safesearch=_normalize_safesearch(safesearch),
+    )
+
+
+def _detect_search_intent(query: str) -> SearchIntent:
+    if _DOCS_OFFICIAL_RE.search(query):
+        return SearchIntent.DOCS_OFFICIAL
+    if _LOCAL_REGION_RE.search(query):
+        return SearchIntent.LOCAL_REGION
+    if _NEWS_CURRENT_RE.search(query):
+        return SearchIntent.NEWS_CURRENT
+    if _BROAD_WEB_RE.search(query):
+        return SearchIntent.BROAD_WEB
+    return SearchIntent.DEFAULT
+
+
+_NEWS_CURRENT_RE = re.compile(
+    r"\b("
+    r"aktuell(?:e|er|en|es)?|heute|jetzt|gerade|neu(?:e|er|en|es)?|nachrichten|meldung(?:en)?|"
+    r"latest|current|currently|today|now|breaking|news|recent|update|updates|release|status"
+    r")\b"
+)
+_DOCS_OFFICIAL_RE = re.compile(
+    r"\b("
+    r"official|offiziell(?:e|er|en|es)?|docs?|documentation|dokumentation|manual|handbuch|"
+    r"api\s+reference|reference|spec|specification|changelog|release\s+notes"
+    r")\b"
+)
+_LOCAL_REGION_RE = re.compile(
+    r"\b("
+    r"near\s+me|nearby|local|regional|region|city|stadt|umgebung|in\s+der\s+naehe|in\s+der\s+nähe|"
+    r"berlin|hamburg|munich|muenchen|münchen|cologne|koeln|köln|germany|deutschland|"
+    r"traffic|verkehr|weather|wetter|opening\s+hours|oeffnungszeiten|öffnungszeiten"
+    r")\b"
+)
+_BROAD_WEB_RE = re.compile(
+    r"\b("
+    r"web|internet|sources?|quellen|overview|ueberblick|überblick|compare|vergleich|"
+    r"reviews?|erfahrungen|forums?|forum|reddit|discussion|diskussion"
+    r")\b"
+)
+
+
 def _json_payload(response: httpx.Response, *, provider: str) -> dict[str, Any]:
     try:
         payload = response.json()
@@ -374,6 +505,19 @@ def _json_payload(response: httpx.Response, *, provider: str) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise SearchProviderInvalidResponse(f"{provider} response is not an object")
     return payload
+
+
+def _brave_result_items(payload: dict[str, Any]) -> tuple[dict[str, Any], ...]:
+    items: list[dict[str, Any]] = []
+    for key in ("web", "news"):
+        container = payload.get(key)
+        if not isinstance(container, dict):
+            continue
+        results = container.get("results")
+        if not isinstance(results, list):
+            continue
+        items.extend(item for item in results if isinstance(item, dict))
+    return tuple(items)
 
 
 def _result_from_mapping(
@@ -481,9 +625,71 @@ def _normalize_locale(locale: str) -> str:
     return "en-us"
 
 
-def _brave_search_lang(locale: str) -> str:
+def _brave_ui_lang(locale: str) -> str:
     normalized = _normalize_locale(locale)
-    return normalized.split("-", 1)[0]
+    parts = normalized.split("-", 1)
+    if len(parts) == 2:
+        return f"{parts[0]}-{parts[1].upper()}"
+    return normalized
+
+
+def _country_from_locale(locale: str) -> str:
+    normalized = _normalize_locale(locale)
+    parts = normalized.split("-", 1)
+    if len(parts) == 2 and re.fullmatch(r"[a-z]{2}", parts[1]):
+        return parts[1].upper()
+    return {"de": "DE", "en": "US"}.get(parts[0], "")
+
+
+def _normalize_country(value: str | None) -> str:
+    candidate = (value or "").strip().upper()
+    if re.fullmatch(r"[A-Z]{2}", candidate):
+        return candidate
+    return ""
+
+
+def _normalize_safesearch(value: str) -> str:
+    normalized = (value or "moderate").strip().casefold()
+    if normalized in {"off", "0", "none", "false"}:
+        return "off"
+    if normalized in {"strict", "2", "high", "true"}:
+        return "strict"
+    return "moderate"
+
+
+def _searxng_safesearch(value: str) -> int:
+    return {"off": 0, "moderate": 1, "strict": 2}[_normalize_safesearch(value)]
+
+
+def _brave_safesearch(value: str) -> str:
+    return _normalize_safesearch(value)
+
+
+def _searxng_categories(profile: SearchProfile) -> tuple[str, ...]:
+    if "news" in profile.content_types:
+        return ("news", "general")
+    return ("general",)
+
+
+def _searxng_time_range(profile: SearchProfile) -> str:
+    if profile.intent == SearchIntent.NEWS_CURRENT:
+        return "day"
+    if profile.intent == SearchIntent.LOCAL_REGION:
+        return "month"
+    return ""
+
+
+def _brave_freshness(profile: SearchProfile) -> str:
+    if profile.intent == SearchIntent.NEWS_CURRENT:
+        return "pd"
+    if profile.intent == SearchIntent.LOCAL_REGION:
+        return "pw"
+    return ""
+
+
+def _brave_result_filter(profile: SearchProfile) -> tuple[str, ...]:
+    supported = {"discussions", "faq", "infobox", "locations", "news", "query", "summarizer", "videos", "web"}
+    return tuple(content_type for content_type in profile.content_types if content_type in supported)
 
 
 def _default_user_agent() -> str:

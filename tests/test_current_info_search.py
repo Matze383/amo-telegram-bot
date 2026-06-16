@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from types import SimpleNamespace
 from typing import Any
 
 import httpx
@@ -18,6 +19,7 @@ from amo_bot.current_info import (
     SOURCE_TYPE_UNKNOWN,
     SearchBroker,
     SearchBrokerConfig,
+    SearchIntent,
     SearchProviderError,
     SearchProviderMetric,
     SearchProviderResponse,
@@ -25,9 +27,11 @@ from amo_bot.current_info import (
     SearchResult,
     SearxngSearchConfig,
     SearxngSearchProvider,
+    build_search_broker_from_settings,
     canonicalize_url,
     classify_source_type,
     normalize_dedupe_and_rank_search_results,
+    select_search_profile,
 )
 
 
@@ -134,10 +138,139 @@ def test_searxng_success_parses_results_and_metrics_without_real_network() -> No
     assert factory.get_calls == [
         (
             "https://searx.example/search",
-            {"q": "latest status", "format": "json", "language": "de-de"},
+            {
+                "q": "latest status",
+                "format": "json",
+                "language": "de-de",
+                "safesearch": 1,
+                "categories": "news,general",
+                "time_range": "day",
+            },
         )
     ]
     assert factory.client_kwargs[0]["timeout"] == 1.5
+
+
+@pytest.mark.parametrize(
+    ("query", "locale", "intent", "content_types", "freshness", "region"),
+    [
+        ("plain background query", "en", SearchIntent.DEFAULT, ("web",), "", "US"),
+        ("latest AMO news today", "de", SearchIntent.NEWS_CURRENT, ("news", "web"), "day", "DE"),
+        ("official Python docs datetime", "en-GB", SearchIntent.DOCS_OFFICIAL, ("web", "faq"), "", "GB"),
+        ("weather in Berlin now", "de-DE", SearchIntent.LOCAL_REGION, ("web", "news", "locations"), "week", "DE"),
+        (
+            "compare broad web sources and reddit reviews",
+            "en-US",
+            SearchIntent.BROAD_WEB,
+            ("web", "discussions", "faq", "news"),
+            "",
+            "US",
+        ),
+    ],
+)
+def test_select_search_profile_detects_query_intent_without_provider_details(
+    query: str,
+    locale: str,
+    intent: SearchIntent,
+    content_types: tuple[str, ...],
+    freshness: str,
+    region: str,
+) -> None:
+    profile = select_search_profile(query=query, locale=locale)
+
+    assert profile.intent == intent
+    assert profile.content_types == content_types
+    assert profile.freshness == freshness
+    assert profile.region == region
+    assert profile.safesearch == "moderate"
+
+
+def test_searxng_profile_mapping_for_docs_and_config_policy_without_real_network() -> None:
+    factory = _FakeHttpClientFactory([httpx.Response(200, json={"results": []})])
+    provider = SearxngSearchProvider(
+        SearxngSearchConfig(
+            base_url="https://searx.example",
+            timeout_seconds=1.0,
+            max_results=5,
+            language="de-de",
+            categories="general",
+            safesearch="strict",
+        ),
+        http_client_factory=factory,
+    )
+
+    provider.search(query="official api reference", locale="en-US", max_results=3)
+
+    assert factory.get_calls == [
+        (
+            "https://searx.example/search",
+            {
+                "q": "official api reference",
+                "format": "json",
+                "language": "de-de",
+                "safesearch": 2,
+                "categories": "general",
+            },
+        )
+    ]
+
+
+def test_searxng_profile_mapping_for_local_region_uses_supported_time_range_without_real_network() -> None:
+    factory = _FakeHttpClientFactory([httpx.Response(200, json={"results": []})])
+    provider = SearxngSearchProvider(
+        SearxngSearchConfig(base_url="https://searx.example", timeout_seconds=1.0, max_results=5),
+        http_client_factory=factory,
+    )
+
+    provider.search(query="weather in Berlin now", locale="de-DE", max_results=2)
+
+    assert factory.get_calls == [
+        (
+            "https://searx.example/search",
+            {
+                "q": "weather in Berlin now",
+                "format": "json",
+                "language": "de-de",
+                "safesearch": 1,
+                "categories": "news,general",
+                "time_range": "month",
+            },
+        )
+    ]
+
+
+def test_build_search_broker_wires_common_profile_policy_from_settings_without_provider_leak() -> None:
+    factory = _FakeHttpClientFactory([httpx.Response(200, json={"results": []})])
+    broker = build_search_broker_from_settings(
+        SimpleNamespace(
+            amo_searxng_url="https://searx.example",
+            amo_search_max_results=5,
+            amo_searxng_timeout_seconds=1.0,
+            amo_brave_search_api_key="",
+            amo_search_fallback_provider="",
+            amo_search_min_host_diversity=0,
+            amo_search_safesearch="strict",
+            amo_search_region="GB",
+        ),
+        http_client_factory=factory,
+    )
+
+    assert broker is not None
+    broker.search(query="latest status", locale="de-DE", max_results=1)
+
+    assert factory.get_calls == [
+        (
+            "https://searx.example/search",
+            {
+                "q": "latest status",
+                "format": "json",
+                "language": "de-de",
+                "safesearch": 2,
+                "categories": "news,general",
+                "time_range": "day",
+            },
+        )
+    ]
 
 
 def test_canonicalize_url_removes_tracking_params_and_stabilizes_shape() -> None:
@@ -370,7 +503,16 @@ def test_brave_provider_success_and_failure_use_injected_client_only() -> None:
     assert success_factory.get_calls == [
         (
             "https://api.search.brave.com/res/v1/web/search",
-            {"q": "latest", "count": 1, "search_lang": "de"},
+            {
+                "q": "latest",
+                "count": 1,
+                "search_lang": "de",
+                "ui_lang": "de-DE",
+                "country": "DE",
+                "safesearch": "moderate",
+                "freshness": "pd",
+                "result_filter": "news,web",
+            },
         )
     ]
     assert success_factory.client_kwargs[0]["headers"]["X-Subscription-Token"] == "test-key"
@@ -382,3 +524,68 @@ def test_brave_provider_success_and_failure_use_injected_client_only() -> None:
     )
     with pytest.raises(SearchProviderError):
         failing_provider.search(query="latest", locale="en", max_results=1)
+
+
+def test_brave_provider_parses_news_items_returned_by_profile_filter_without_real_network() -> None:
+    factory = _FakeHttpClientFactory(
+        [
+            httpx.Response(
+                200,
+                json={
+                    "web": {"results": []},
+                    "news": {
+                        "results": [
+                            {
+                                "title": "News one",
+                                "url": "https://news-result.example/a",
+                                "description": "News snippet",
+                                "age": "2 hours ago",
+                            }
+                        ]
+                    },
+                },
+            )
+        ]
+    )
+    provider = BraveSearchProvider(
+        BraveSearchConfig(api_key="test-key", timeout_seconds=2.0, max_results=5),
+        http_client_factory=factory,
+    )
+
+    response = provider.search(query="latest", locale="en-US", max_results=1)
+
+    assert [result.title for result in response.results] == ["News one"]
+    assert response.results[0].date == "2 hours ago"
+
+
+def test_brave_profile_mapping_for_local_region_and_config_policy_without_real_network() -> None:
+    factory = _FakeHttpClientFactory([httpx.Response(200, json={"web": {"results": []}})])
+    provider = BraveSearchProvider(
+        BraveSearchConfig(
+            api_key="test-key",
+            timeout_seconds=2.0,
+            max_results=5,
+            country="DE",
+            ui_lang="de-DE",
+            safesearch="strict",
+        ),
+        http_client_factory=factory,
+    )
+
+    provider.search(query="weather in Berlin now", locale="en-US", max_results=2)
+
+    assert factory.get_calls == [
+        (
+            "https://api.search.brave.com/res/v1/web/search",
+            {
+                "q": "weather in Berlin now",
+                "count": 2,
+                "search_lang": "en",
+                "ui_lang": "de-DE",
+                "country": "DE",
+                "safesearch": "strict",
+                "freshness": "pw",
+                "result_filter": "web,news,locations",
+            },
+        )
+    ]

@@ -42,6 +42,8 @@ from amo_bot.current_info.search import (
     BraveSearchProvider,
     SearchBroker,
     SearchBrokerConfig,
+    SearchIntent,
+    SearchProfile,
     SearchProvider,
     SearchProviderError,
     SearchProviderInvalidResponse,
@@ -49,6 +51,7 @@ from amo_bot.current_info.search import (
     SearxngSearchConfig,
     SearxngSearchProvider,
     build_search_broker_from_settings,
+    select_search_profile,
 )
 
 __all__ = [
@@ -72,6 +75,8 @@ __all__ = [
     "SearchBroker",
     "SearchBrokerConfig",
     "SearchBundle",
+    "SearchIntent",
+    "SearchProfile",
     "SearchProvider",
     "SearchProviderError",
     "SearchProviderInvalidResponse",
@@ -94,4 +99,5 @@ __all__ = [
     "canonicalize_url",
     "classify_source_type",
     "normalize_dedupe_and_rank_search_results",
+    "select_search_profile",
 ]

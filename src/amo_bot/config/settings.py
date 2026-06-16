@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 from datetime import datetime
 
 from dotenv import load_dotenv
@@ -142,6 +143,8 @@ class Settings(BaseSettings):
     amo_searxng_timeout_seconds: float = Field(default=3.0, alias="AMO_SEARXNG_TIMEOUT_SECONDS", gt=0, le=30)
     amo_brave_search_timeout_seconds: float = Field(default=3.0, alias="AMO_BRAVE_SEARCH_TIMEOUT_SECONDS", gt=0, le=30)
     amo_search_min_host_diversity: int = Field(default=0, alias="AMO_SEARCH_MIN_HOST_DIVERSITY", ge=0, le=10)
+    amo_search_safesearch: str = Field(default="moderate", alias="AMO_SEARCH_SAFESEARCH")
+    amo_search_region: str = Field(default="", alias="AMO_SEARCH_REGION")
 
     webui_host: str = Field(default="127.0.0.1", alias="WEBUI_HOST")
     webui_port: int = Field(default=8080, alias="WEBUI_PORT")
@@ -449,6 +452,14 @@ class Settings(BaseSettings):
         self.amo_searxng_url = self.amo_searxng_url.strip().rstrip("/")
         brave_search_api_key = (self.amo_brave_search_api_key or "").strip()
         self.amo_brave_search_api_key = brave_search_api_key or None
+        search_safesearch = self.amo_search_safesearch.strip().casefold()
+        if search_safesearch not in {"off", "moderate", "strict"}:
+            raise ValueError("AMO_SEARCH_SAFESEARCH must be one of: off, moderate, strict")
+        self.amo_search_safesearch = search_safesearch
+        search_region = self.amo_search_region.strip().upper()
+        if search_region and not re.fullmatch(r"[A-Z]{2}", search_region):
+            raise ValueError("AMO_SEARCH_REGION must be empty or a 2-letter country code")
+        self.amo_search_region = search_region
 
         # Validate dreaming window: start must be before end (in the same timezone).
         try:
