@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta, timezone
@@ -19,7 +20,8 @@ from amo_bot.current_info.candidates import (
     canonicalize_url,
 )
 from amo_bot.current_info.models import CurrentInfoRequest, EvidenceChunk, FetchedDocument, SearchResult
-from amo_bot.current_info.ports import CurrentInfoFetchProvider
+from amo_bot.current_info.ports import CurrentInfoFetchProvider, CurrentInfoRetrievalProvider
+from amo_bot.current_info.vector import CurrentInfoVectorIndexer
 from amo_bot.db.models import (
     CurrentInfoDocument,
     CurrentInfoDocumentChunk,
@@ -27,6 +29,7 @@ from amo_bot.db.models import (
     CurrentInfoQueryRun,
 )
 
+logger = logging.getLogger(__name__)
 
 CACHE_STATUS_FRESH_HIT = "fresh_hit"
 CACHE_STATUS_EXPIRED_HIT = "expired_hit"
@@ -69,10 +72,12 @@ class CachedCurrentInfoFetchProvider:
         session_factory: sessionmaker[Session],
         fetch_provider: CurrentInfoFetchProvider,
         config: CurrentInfoCacheConfig | None = None,
+        vector_indexer: CurrentInfoVectorIndexer | None = None,
     ) -> None:
         self._session_factory = session_factory
         self._fetch_provider = fetch_provider
         self._config = config or CurrentInfoCacheConfig()
+        self._vector_indexer = vector_indexer
 
     def fetch(self, *, url: str, locale: str) -> FetchedDocument | None:
         with self._session_factory() as session:
@@ -119,6 +124,11 @@ class CachedCurrentInfoFetchProvider:
                 return lookup.document if lookup.status == CACHE_STATUS_EXPIRED_HIT else None
 
             stored = repo.store_document(document, language=locale)
+            if self._vector_indexer is not None:
+                try:
+                    self._vector_indexer.upsert_chunks(tuple(stored.chunks))
+                except Exception as exc:
+                    logger.warning("current_info_vector_upsert_failed: %s", exc.__class__.__name__)
             repo.record_fetch_run(
                 requested_url=url,
                 canonical_url=document.url,
@@ -130,9 +140,16 @@ class CachedCurrentInfoFetchProvider:
 
 
 class CurrentInfoDocumentCacheRepository:
-    def __init__(self, session: Session, *, config: CurrentInfoCacheConfig | None = None) -> None:
+    def __init__(
+        self,
+        session: Session,
+        *,
+        config: CurrentInfoCacheConfig | None = None,
+        vector_indexer: CurrentInfoVectorIndexer | None = None,
+    ) -> None:
         self._session = session
         self._config = config or CurrentInfoCacheConfig()
+        self._vector_indexer = vector_indexer
 
     def get_by_url(self, url: str, *, now: datetime | None = None) -> CurrentInfoCacheLookup:
         current = now or _utcnow()
@@ -237,6 +254,11 @@ class CurrentInfoDocumentCacheRepository:
                 )
             )
         self._session.flush()
+        if self._vector_indexer is not None:
+            try:
+                self._vector_indexer.upsert_chunks(tuple(row.chunks))
+            except Exception as exc:
+                logger.warning("current_info_vector_upsert_failed: %s", exc.__class__.__name__)
         return row
 
     def retrieve_chunks(
@@ -374,6 +396,11 @@ class CurrentInfoDocumentCacheRepository:
             return 0
         self._session.execute(delete(CurrentInfoDocumentChunk).where(CurrentInfoDocumentChunk.document_id.in_(unique_ids)))
         self._session.execute(delete(CurrentInfoDocument).where(CurrentInfoDocument.id.in_(unique_ids)))
+        if self._vector_indexer is not None:
+            try:
+                self._vector_indexer.delete_document_ids(tuple(int(item) for item in unique_ids))
+            except Exception as exc:
+                logger.warning("current_info_vector_prune_failed: %s", exc.__class__.__name__)
         return len(unique_ids)
 
     def ttl_for_source_type(self, source_type: str) -> timedelta:
@@ -488,11 +515,42 @@ def build_cached_fetch_provider_from_settings(
     *,
     session_factory: sessionmaker[Session],
     fetch_provider: CurrentInfoFetchProvider,
+    vector_indexer: CurrentInfoVectorIndexer | None = None,
 ) -> CachedCurrentInfoFetchProvider:
     return CachedCurrentInfoFetchProvider(
         session_factory=session_factory,
         fetch_provider=fetch_provider,
         config=build_current_info_cache_config_from_settings(settings),
+        vector_indexer=vector_indexer,
+    )
+
+
+def build_current_info_retrieval_provider_from_settings(
+    settings: Any,
+    *,
+    session_factory: sessionmaker[Session],
+) -> CurrentInfoRetrievalProvider:
+    keyword_provider = DbCurrentInfoRetrievalProvider(
+        session_factory=session_factory,
+        config=build_current_info_cache_config_from_settings(settings),
+    )
+    if not bool(getattr(settings, "amo_vector_enabled", False)):
+        return keyword_provider
+
+    from amo_bot.current_info.vector import (  # Local import keeps the keyword path lightweight.
+        VectorCurrentInfoRetrievalProvider,
+        build_current_info_vector_components_from_settings,
+    )
+
+    components = build_current_info_vector_components_from_settings(settings)
+    if components is None:
+        return keyword_provider
+    _indexer, vector_store, embedding_provider = components
+    return VectorCurrentInfoRetrievalProvider(
+        session_factory=session_factory,
+        vector_store=vector_store,
+        embedding_provider=embedding_provider,
+        fallback_provider=keyword_provider,
     )
 
 

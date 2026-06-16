@@ -585,8 +585,17 @@ Für die Extraktion von Ergebnis-Seiten bevorzugt der Dokument-Fetcher Crawlee u
 | `AMO_CURRENT_INFO_CACHE_RETENTION_DAYS` | `30` | Retention-Fenster für alte/abgelaufene Cache-Dokumente |
 | `AMO_CURRENT_INFO_CACHE_MAX_CHUNK_CHARS` | `1200` | Maximale Textlänge pro Keyword-Retrieval-Chunk |
 | `AMO_CURRENT_INFO_CACHE_MAX_CHUNKS_PER_DOCUMENT` | `12` | Maximale Retrieval-Chunks pro Dokument |
+| `AMO_VECTOR_ENABLED` | `false` | Optionale semantische Suche für Current-Info-Dokumentchunks aktivieren |
+| `AMO_VECTOR_PROVIDER` | `qdrant` | Vector-DB-Provider; aktuell `qdrant` |
+| `AMO_VECTOR_URL` | *(leer)* | Qdrant-Basis-URL; `QDRANT_URL` wird als Alias akzeptiert |
+| `AMO_VECTOR_API_KEY` | *(leer)* | Optionaler Qdrant-API-Key; `QDRANT_API_KEY` wird als Alias akzeptiert. Nur in Env/Secrets speichern, nie in Code oder Doku |
+| `AMO_VECTOR_COLLECTION` | `current_info_chunks` | Qdrant-Collection für Current-Info-Chunk-Vektoren |
+| `AMO_VECTOR_EMBEDDING_PROVIDER` | `ollama` | Embedding-Provider für Chunk-/Query-Vektoren: `ollama` oder `openai` |
+| `AMO_VECTOR_EMBEDDING_MODEL` | `nomic-embed-text` | Embedding-Modell für Current-Info-Vektoren |
+| `AMO_VECTOR_TIMEOUT_SECONDS` | `3` | Timeout für Vector-DB- und Embedding-Anfragen |
 
 Die Current-Info-Cache-Tabellen werden über das bestehende SQLAlchemy-/MariaDB-Datenbanksetup erstellt. Query-Metriken speichern nur einen SHA-256-Hash der Anfrage, nicht den privaten Rohtext.
+Bei aktivierter semantischer Suche bleibt MariaDB die Source of Truth für Dokumente, Metadaten, Cache-TTLs und Pruning. Qdrant speichert nur Vektoren plus Chunk-/Dokument-Pointer und Quellenmetadaten; private Nutzerfragen werden nicht als Vektoren gespeichert.
 
 ### Beispiel-Konfiguration (nur SearXNG)
 

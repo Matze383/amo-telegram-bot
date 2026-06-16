@@ -5,7 +5,7 @@ import re
 from datetime import datetime
 
 from dotenv import load_dotenv
-from pydantic import Field, model_validator
+from pydantic import AliasChoices, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -158,6 +158,17 @@ class Settings(BaseSettings):
     amo_current_info_cache_retention_days: int = Field(default=30, alias="AMO_CURRENT_INFO_CACHE_RETENTION_DAYS", ge=1, le=365)
     amo_current_info_cache_max_chunk_chars: int = Field(default=1200, alias="AMO_CURRENT_INFO_CACHE_MAX_CHUNK_CHARS", ge=200, le=4000)
     amo_current_info_cache_max_chunks_per_document: int = Field(default=12, alias="AMO_CURRENT_INFO_CACHE_MAX_CHUNKS_PER_DOCUMENT", ge=1, le=100)
+    amo_vector_enabled: bool = Field(default=False, alias="AMO_VECTOR_ENABLED")
+    amo_vector_provider: str = Field(default="qdrant", alias="AMO_VECTOR_PROVIDER")
+    amo_vector_url: str = Field(default="", validation_alias=AliasChoices("AMO_VECTOR_URL", "QDRANT_URL"))
+    amo_vector_api_key: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("AMO_VECTOR_API_KEY", "QDRANT_API_KEY"),
+    )
+    amo_vector_collection: str = Field(default="current_info_chunks", alias="AMO_VECTOR_COLLECTION")
+    amo_vector_timeout_seconds: float = Field(default=3.0, alias="AMO_VECTOR_TIMEOUT_SECONDS", gt=0, le=30)
+    amo_vector_embedding_provider: str = Field(default="ollama", alias="AMO_VECTOR_EMBEDDING_PROVIDER")
+    amo_vector_embedding_model: str = Field(default="nomic-embed-text", alias="AMO_VECTOR_EMBEDDING_MODEL")
 
     webui_host: str = Field(default="127.0.0.1", alias="WEBUI_HOST")
     webui_port: int = Field(default=8080, alias="WEBUI_PORT")
@@ -474,6 +485,24 @@ class Settings(BaseSettings):
             raise ValueError("AMO_SEARCH_REGION must be empty or a 2-letter country code")
         self.amo_search_region = search_region
         self.amo_search_profiles_file = self.amo_search_profiles_file.strip()
+
+        vector_provider = self.amo_vector_provider.strip().casefold()
+        if vector_provider not in {"qdrant"}:
+            raise ValueError("AMO_VECTOR_PROVIDER must be qdrant")
+        self.amo_vector_provider = vector_provider
+        self.amo_vector_url = self.amo_vector_url.strip().rstrip("/")
+        vector_api_key = (self.amo_vector_api_key or "").strip()
+        self.amo_vector_api_key = vector_api_key or None
+        self.amo_vector_collection = self.amo_vector_collection.strip() or "current_info_chunks"
+        embedding_provider = self.amo_vector_embedding_provider.strip().casefold()
+        if embedding_provider not in {"ollama", "openai"}:
+            raise ValueError("AMO_VECTOR_EMBEDDING_PROVIDER must be one of: ollama, openai")
+        self.amo_vector_embedding_provider = embedding_provider
+        self.amo_vector_embedding_model = self.amo_vector_embedding_model.strip()
+        if self.amo_vector_enabled and not self.amo_vector_url:
+            raise ValueError("AMO_VECTOR_URL (or QDRANT_URL) is required when AMO_VECTOR_ENABLED=true")
+        if self.amo_vector_enabled and not self.amo_vector_embedding_model:
+            raise ValueError("AMO_VECTOR_EMBEDDING_MODEL is required when AMO_VECTOR_ENABLED=true")
 
         # Validate dreaming window: start must be before end (in the same timezone).
         try:

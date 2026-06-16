@@ -585,8 +585,17 @@ For result-page extraction, the document fetcher prefers Crawlee and falls back 
 | `AMO_CURRENT_INFO_CACHE_RETENTION_DAYS` | `30` | Retention window for old/expired cache documents |
 | `AMO_CURRENT_INFO_CACHE_MAX_CHUNK_CHARS` | `1200` | Maximum text length per keyword-retrieval chunk |
 | `AMO_CURRENT_INFO_CACHE_MAX_CHUNKS_PER_DOCUMENT` | `12` | Maximum retrieval chunks stored per document |
+| `AMO_VECTOR_ENABLED` | `false` | Enable optional semantic retrieval for Current-Info document chunks |
+| `AMO_VECTOR_PROVIDER` | `qdrant` | Vector database provider; currently `qdrant` |
+| `AMO_VECTOR_URL` | *(empty)* | Qdrant base URL; `QDRANT_URL` is accepted as an alias |
+| `AMO_VECTOR_API_KEY` | *(empty)* | Optional Qdrant API key; `QDRANT_API_KEY` is accepted as an alias. Store only in env/secrets, never in code or docs |
+| `AMO_VECTOR_COLLECTION` | `current_info_chunks` | Qdrant collection for Current-Info chunk vectors |
+| `AMO_VECTOR_EMBEDDING_PROVIDER` | `ollama` | Embedding provider for chunk/query vectors: `ollama` or `openai` |
+| `AMO_VECTOR_EMBEDDING_MODEL` | `nomic-embed-text` | Embedding model used for Current-Info vectors |
+| `AMO_VECTOR_TIMEOUT_SECONDS` | `3` | Timeout for vector DB and embedding requests |
 
 Current-Info cache tables are created through the existing SQLAlchemy/MariaDB database setup. Query metrics store only a SHA-256 query hash, not the raw private user query text.
+When semantic retrieval is enabled, MariaDB remains the source of truth for documents, metadata, cache TTLs, and pruning. Qdrant stores vectors plus chunk/document pointers and source metadata only; private user questions are not stored as vectors.
 
 ### Example Configuration (SearXNG only)
 
