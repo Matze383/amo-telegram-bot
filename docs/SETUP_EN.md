@@ -577,6 +577,16 @@ For result-page extraction, the document fetcher prefers Crawlee and falls back 
 | `AMO_DOCUMENT_FETCH_MAX_BYTES` | `1000000` | Maximum fetched document body size in bytes |
 | `AMO_DOCUMENT_FETCH_MAX_REDIRECTS` | `3` | Maximum redirects while fetching a document |
 | `AMO_DOCUMENT_FETCH_PREFER_CRAWLEE` | `true` | Prefer Crawlee for document fetching with httpx fallback |
+| `AMO_CURRENT_INFO_CACHE_REALTIME_TTL_SECONDS` | `900` | TTL for realtime/news cache entries |
+| `AMO_CURRENT_INFO_CACHE_DOCS_TTL_SECONDS` | `604800` | TTL for docs/official cache entries |
+| `AMO_CURRENT_INFO_CACHE_GENERAL_TTL_SECONDS` | `86400` | TTL for general cache entries |
+| `AMO_CURRENT_INFO_CACHE_UNKNOWN_TTL_SECONDS` | `3600` | Conservative TTL for unknown source types |
+| `AMO_CURRENT_INFO_CACHE_MAX_DOCUMENTS` | `5000` | Maximum retained Current-Info documents before pruning oldest entries |
+| `AMO_CURRENT_INFO_CACHE_RETENTION_DAYS` | `30` | Retention window for old/expired cache documents |
+| `AMO_CURRENT_INFO_CACHE_MAX_CHUNK_CHARS` | `1200` | Maximum text length per keyword-retrieval chunk |
+| `AMO_CURRENT_INFO_CACHE_MAX_CHUNKS_PER_DOCUMENT` | `12` | Maximum retrieval chunks stored per document |
+
+Current-Info cache tables are created through the existing SQLAlchemy/MariaDB database setup. Query metrics store only a SHA-256 query hash, not the raw private user query text.
 
 ### Example Configuration (SearXNG only)
 

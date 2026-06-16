@@ -478,6 +478,112 @@ class RetrievableMemory(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
 
 
+class CurrentInfoDocument(Base):
+    __tablename__ = "current_info_documents"
+    __table_args__ = (
+        UniqueConstraint("canonical_url_hash", "content_hash", name="uq_current_info_documents_url_content"),
+        Index("ix_current_info_documents_url_hash", "canonical_url_hash"),
+        Index("ix_current_info_documents_content_hash", "content_hash"),
+        Index("ix_current_info_documents_host_source", "host", "source_type"),
+        Index("ix_current_info_documents_freshness", "expires_at", "last_seen_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    canonical_url: Mapped[str] = mapped_column(String(2048), nullable=False)
+    canonical_url_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    source_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
+    host: Mapped[str] = mapped_column(String(255), nullable=False, default="", server_default="")
+    title: Mapped[str] = mapped_column(String(512), nullable=False, default="", server_default="")
+    language: Mapped[str] = mapped_column(String(16), nullable=False, default="", server_default="")
+    source_type: Mapped[str] = mapped_column(String(32), nullable=False, default="Unknown", server_default="Unknown")
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    text_excerpt: Mapped[str] = mapped_column(Text, nullable=False)
+    quality_score: Mapped[float] = mapped_column(Float, nullable=False, default=0.0, server_default="0")
+    status_code: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    provider: Mapped[str] = mapped_column(String(64), nullable=False, default="", server_default="")
+    metadata_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}", server_default="{}")
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    modified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+    chunks: Mapped[list["CurrentInfoDocumentChunk"]] = relationship(
+        back_populates="document",
+        cascade="all, delete-orphan",
+    )
+
+
+class CurrentInfoDocumentChunk(Base):
+    __tablename__ = "current_info_document_chunks"
+    __table_args__ = (
+        UniqueConstraint("document_id", "chunk_index", name="uq_current_info_document_chunks_doc_index"),
+        Index("ix_current_info_document_chunks_url_hash", "canonical_url_hash"),
+        Index("ix_current_info_document_chunks_host_source", "host", "source_type"),
+        Index("ix_current_info_document_chunks_expires_at", "expires_at"),
+        Index("ix_current_info_document_chunks_hash", "chunk_hash"),
+        Index("ix_current_info_document_chunks_search_text", "title", "text_excerpt", mysql_prefix="FULLTEXT"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    document_id: Mapped[int] = mapped_column(ForeignKey("current_info_documents.id"), nullable=False)
+    chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    canonical_url: Mapped[str] = mapped_column(String(2048), nullable=False)
+    canonical_url_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    host: Mapped[str] = mapped_column(String(255), nullable=False, default="", server_default="")
+    title: Mapped[str] = mapped_column(String(512), nullable=False, default="", server_default="")
+    language: Mapped[str] = mapped_column(String(16), nullable=False, default="", server_default="")
+    source_type: Mapped[str] = mapped_column(String(32), nullable=False, default="Unknown", server_default="Unknown")
+    text_excerpt: Mapped[str] = mapped_column(Text, nullable=False)
+    chunk_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    quality_score: Mapped[float] = mapped_column(Float, nullable=False, default=0.0, server_default="0")
+    metadata_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}", server_default="{}")
+    source_timestamp: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    document: Mapped[CurrentInfoDocument] = relationship(back_populates="chunks")
+
+
+class CurrentInfoFetchRun(Base):
+    __tablename__ = "current_info_fetch_runs"
+    __table_args__ = (
+        Index("ix_current_info_fetch_runs_url_hash", "canonical_url_hash"),
+        Index("ix_current_info_fetch_runs_cache_status", "cache_status", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    requested_url: Mapped[str] = mapped_column(String(2048), nullable=False)
+    canonical_url: Mapped[str] = mapped_column(String(2048), nullable=False, default="", server_default="")
+    canonical_url_hash: Mapped[str] = mapped_column(String(64), nullable=False, default="", server_default="")
+    source_type: Mapped[str] = mapped_column(String(32), nullable=False, default="Unknown", server_default="Unknown")
+    cache_status: Mapped[str] = mapped_column(String(32), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="ok", server_default="ok")
+    document_id: Mapped[int | None] = mapped_column(ForeignKey("current_info_documents.id"), nullable=True)
+    error_class: Mapped[str] = mapped_column(String(128), nullable=False, default="", server_default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class CurrentInfoQueryRun(Base):
+    __tablename__ = "current_info_query_runs"
+    __table_args__ = (
+        Index("ix_current_info_query_runs_query_hash", "query_hash"),
+        Index("ix_current_info_query_runs_created_at", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    query_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    locale: Mapped[str] = mapped_column(String(16), nullable=False, default="", server_default="")
+    domain_hint: Mapped[str] = mapped_column(String(64), nullable=False, default="", server_default="")
+    result_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    cache_hit_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    metadata_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}", server_default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
 class UserMemoryProfile(Base):
     __tablename__ = "user_memory_profiles"
     __table_args__ = (

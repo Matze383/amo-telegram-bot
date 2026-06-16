@@ -577,6 +577,16 @@ Für die Extraktion von Ergebnis-Seiten bevorzugt der Dokument-Fetcher Crawlee u
 | `AMO_DOCUMENT_FETCH_MAX_BYTES` | `1000000` | Maximale Body-Größe eines abgerufenen Dokuments in Bytes |
 | `AMO_DOCUMENT_FETCH_MAX_REDIRECTS` | `3` | Maximale Anzahl Redirects beim Abrufen eines Dokuments |
 | `AMO_DOCUMENT_FETCH_PREFER_CRAWLEE` | `true` | Crawlee für Dokument-Fetches bevorzugen, mit httpx-Fallback |
+| `AMO_CURRENT_INFO_CACHE_REALTIME_TTL_SECONDS` | `900` | TTL für Realtime-/News-Cache-Einträge |
+| `AMO_CURRENT_INFO_CACHE_DOCS_TTL_SECONDS` | `604800` | TTL für Docs-/Official-Cache-Einträge |
+| `AMO_CURRENT_INFO_CACHE_GENERAL_TTL_SECONDS` | `86400` | TTL für allgemeine Cache-Einträge |
+| `AMO_CURRENT_INFO_CACHE_UNKNOWN_TTL_SECONDS` | `3600` | Konservative TTL für unbekannte Quellentypen |
+| `AMO_CURRENT_INFO_CACHE_MAX_DOCUMENTS` | `5000` | Maximal gespeicherte Current-Info-Dokumente vor Pruning der ältesten Einträge |
+| `AMO_CURRENT_INFO_CACHE_RETENTION_DAYS` | `30` | Retention-Fenster für alte/abgelaufene Cache-Dokumente |
+| `AMO_CURRENT_INFO_CACHE_MAX_CHUNK_CHARS` | `1200` | Maximale Textlänge pro Keyword-Retrieval-Chunk |
+| `AMO_CURRENT_INFO_CACHE_MAX_CHUNKS_PER_DOCUMENT` | `12` | Maximale Retrieval-Chunks pro Dokument |
+
+Die Current-Info-Cache-Tabellen werden über das bestehende SQLAlchemy-/MariaDB-Datenbanksetup erstellt. Query-Metriken speichern nur einen SHA-256-Hash der Anfrage, nicht den privaten Rohtext.
 
 ### Beispiel-Konfiguration (nur SearXNG)
 
