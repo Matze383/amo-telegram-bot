@@ -546,6 +546,55 @@ AMO_WEBSEARCH_SEARXNG_CATEGORIES=general,news
 
 ---
 
+## Current-Info Search / SearchBroker (optional)
+
+Der Bot nutzt einen SearchBroker für aktuelle Informationen (News, Wetter, Sport, Aktien). Dieser verwendet SearXNG als primäre Quelle mit optionaler Brave Search als Fallback.
+
+### Voraussetzungen
+
+- Eine laufende [SearXNG](https://github.com/searxng/searxng)-Instanz (selbst gehostet oder öffentlich), **ODER**
+- Ein [Brave Search API Key](https://brave.com/search/api/) (als Fallback)
+- Netzwerkzugriff vom Bot zur SearXNG-Instanz
+
+### Konfiguration
+
+| Variable | Standard | Beschreibung |
+|----------|----------|--------------|
+| `AMO_SEARXNG_URL` | *(leer)* | Basis-URL der SearXNG-Instanz für Current-Info (z.B. `http://localhost:8080`) |
+| `AMO_BRAVE_SEARCH_API_KEY` | *(leer)* | Brave Search API Key für Fallback |
+| `AMO_SEARCH_FALLBACK_PROVIDER` | *(leer)* | Fallback bei SearXNG-Fehler: `brave` oder leer zum Deaktivieren |
+| `AMO_SEARCH_MAX_RESULTS` | `10` | Maximale Anzahl Suchergebnisse |
+| `AMO_SEARXNG_TIMEOUT_SECONDS` | `30` | Timeout für SearXNG-Anfragen (Sekunden) |
+| `AMO_BRAVE_SEARCH_TIMEOUT_SECONDS` | `30` | Timeout für Brave Search-Anfragen (Sekunden) |
+| `AMO_SEARCH_MIN_HOST_DIVERSITY` | `3` | Minimale Anzahl verschiedener Hosts (Spam-Vermeidung) |
+
+### Beispiel-Konfiguration (nur SearXNG)
+
+```ini
+# Current-Info Search — nur SearXNG
+AMO_SEARXNG_URL=http://localhost:8080
+AMO_SEARCH_MAX_RESULTS=10
+AMO_SEARXNG_TIMEOUT_SECONDS=30
+AMO_SEARCH_MIN_HOST_DIVERSITY=3
+```
+
+### Beispiel-Konfiguration (SearXNG + Brave Fallback)
+
+```ini
+# Current-Info Search — SearXNG mit Brave Fallback
+AMO_SEARXNG_URL=http://localhost:8080
+AMO_BRAVE_SEARCH_API_KEY=your_brave_api_key_here
+AMO_SEARCH_FALLBACK_PROVIDER=brave
+AMO_SEARCH_MAX_RESULTS=10
+AMO_SEARXNG_TIMEOUT_SECONDS=30
+AMO_BRAVE_SEARCH_TIMEOUT_SECONDS=30
+AMO_SEARCH_MIN_HOST_DIVERSITY=3
+```
+
+> **Hinweis:** Wenn `AMO_SEARXNG_URL` nicht gesetzt ist, verwendet Current-Info automatisch den Fallback (sofern konfiguriert). Ohne SearXNG und ohne Fallback ist die Current-Info-Suche deaktiviert.
+
+---
+
 ## Security Headers
 
 Die WebUI setzt folgende HTTP-Security-Header:

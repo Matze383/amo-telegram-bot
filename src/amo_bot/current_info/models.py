@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any
+from urllib.parse import urlparse
 
 
 JsonDict = dict[str, Any]
@@ -110,6 +111,8 @@ class SearchResult:
     snippet: str = ""
     provider: str = ""
     rank: int = 0
+    host: str = ""
+    date: str = ""
     metadata: JsonDict = field(default_factory=dict)
 
     def to_dict(self) -> JsonDict:
@@ -119,18 +122,74 @@ class SearchResult:
             "snippet": self.snippet,
             "provider": self.provider,
             "rank": self.rank,
+            "host": self.host,
+            "date": self.date,
             "metadata": dict(self.metadata),
         }
 
     @classmethod
     def from_dict(cls, payload: JsonDict) -> SearchResult:
+        url = str(payload.get("url", ""))
+        host_value = payload.get("host")
         return cls(
             title=str(payload.get("title", "")),
-            url=str(payload.get("url", "")),
+            url=url,
             snippet=str(payload.get("snippet", "") or ""),
             provider=str(payload.get("provider", "") or ""),
             rank=_coerce_non_negative_int(payload.get("rank"), default=0),
+            host=str(host_value) if host_value is not None else _host_from_url(url),
+            date=str(payload.get("date", "") or ""),
             metadata=dict(payload.get("metadata") or {}),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class SearchProviderMetric:
+    provider: str
+    latency_ms: float = 0.0
+    hit_count: int = 0
+    error_class: str = ""
+    fallback_reason: str = ""
+    host_diversity: int = 0
+
+    def to_dict(self) -> JsonDict:
+        return {
+            "provider": self.provider,
+            "latency_ms": round(self.latency_ms, 3),
+            "hit_count": self.hit_count,
+            "error_class": self.error_class,
+            "fallback_reason": self.fallback_reason,
+            "host_diversity": self.host_diversity,
+        }
+
+    @classmethod
+    def from_dict(cls, payload: JsonDict) -> SearchProviderMetric:
+        return cls(
+            provider=str(payload.get("provider", "") or ""),
+            latency_ms=_coerce_float(payload.get("latency_ms"), default=0.0),
+            hit_count=_coerce_non_negative_int(payload.get("hit_count"), default=0),
+            error_class=str(payload.get("error_class", "") or ""),
+            fallback_reason=str(payload.get("fallback_reason", "") or ""),
+            host_diversity=_coerce_non_negative_int(payload.get("host_diversity"), default=0),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class SearchProviderResponse:
+    results: tuple[SearchResult, ...] = ()
+    metrics: tuple[SearchProviderMetric, ...] = ()
+
+    def to_dict(self) -> JsonDict:
+        return {
+            "results": [item.to_dict() for item in self.results],
+            "metrics": [item.to_dict() for item in self.metrics],
+        }
+
+    @classmethod
+    def from_dict(cls, payload: JsonDict) -> SearchProviderResponse:
+        return cls(
+            results=tuple(SearchResult.from_dict(dict(item)) for item in payload.get("results") or ()),
+            metrics=tuple(SearchProviderMetric.from_dict(dict(item)) for item in payload.get("metrics") or ()),
         )
 
 
@@ -139,12 +198,14 @@ class SearchBundle:
     query_plan: QueryPlan
     results: tuple[SearchResult, ...] = ()
     warnings: tuple[str, ...] = ()
+    metrics: tuple[SearchProviderMetric, ...] = ()
 
     def to_dict(self) -> JsonDict:
         return {
             "query_plan": self.query_plan.to_dict(),
             "results": [item.to_dict() for item in self.results],
             "warnings": list(self.warnings),
+            "metrics": [item.to_dict() for item in self.metrics],
         }
 
     @classmethod
@@ -153,6 +214,7 @@ class SearchBundle:
             query_plan=QueryPlan.from_dict(dict(payload.get("query_plan") or {})),
             results=tuple(SearchResult.from_dict(dict(item)) for item in payload.get("results") or ()),
             warnings=_coerce_str_tuple(payload.get("warnings")),
+            metrics=tuple(SearchProviderMetric.from_dict(dict(item)) for item in payload.get("metrics") or ()),
         )
 
 
@@ -330,3 +392,8 @@ def _coerce_float(value: Any, *, default: float) -> float:
         return float(value)
     except (TypeError, ValueError):
         return default
+
+
+def _host_from_url(url: str) -> str:
+    parsed = urlparse(url)
+    return (parsed.hostname or "").lower().rstrip(".")

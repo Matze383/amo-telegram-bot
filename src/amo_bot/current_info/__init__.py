@@ -7,6 +7,8 @@ from amo_bot.current_info.models import (
     FetchedDocument,
     QueryPlan,
     SearchBundle,
+    SearchProviderMetric,
+    SearchProviderResponse,
     SearchResult,
     TaskSpec,
 )
@@ -22,6 +24,19 @@ from amo_bot.current_info.service import (
     DefaultCurrentInfoQueryPlanner,
     DefaultCurrentInfoTaskPlanner,
     SnippetRetrievalProvider,
+)
+from amo_bot.current_info.search import (
+    BraveSearchConfig,
+    BraveSearchProvider,
+    SearchBroker,
+    SearchBrokerConfig,
+    SearchProvider,
+    SearchProviderError,
+    SearchProviderInvalidResponse,
+    SearchProviderTimeout,
+    SearxngSearchConfig,
+    SearxngSearchProvider,
+    build_search_broker_from_settings,
 )
 
 __all__ = [
@@ -40,8 +55,21 @@ __all__ = [
     "FetchedDocument",
     "LegacyWebtoolCurrentInfoService",
     "QueryPlan",
+    "BraveSearchConfig",
+    "BraveSearchProvider",
+    "SearchBroker",
+    "SearchBrokerConfig",
     "SearchBundle",
+    "SearchProvider",
+    "SearchProviderError",
+    "SearchProviderInvalidResponse",
+    "SearchProviderMetric",
+    "SearchProviderResponse",
+    "SearchProviderTimeout",
     "SearchResult",
+    "SearxngSearchConfig",
+    "SearxngSearchProvider",
     "SnippetRetrievalProvider",
     "TaskSpec",
+    "build_search_broker_from_settings",
 ]

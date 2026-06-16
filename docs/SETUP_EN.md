@@ -546,6 +546,55 @@ AMO_WEBSEARCH_SEARXNG_CATEGORIES=general,news
 
 ---
 
+## Current-Info Search / SearchBroker (optional)
+
+The bot uses a SearchBroker for current information (news, weather, sports, stocks). It uses SearXNG as the primary source with optional Brave Search as fallback.
+
+### Prerequisites
+
+- A running [SearXNG](https://github.com/searxng/searxng) instance (self-hosted or public), **OR**
+- A [Brave Search API Key](https://brave.com/search/api/) (as fallback)
+- Network access from the bot to the SearXNG instance
+
+### Configuration
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `AMO_SEARXNG_URL` | *(empty)* | Base URL of your SearXNG instance for Current-Info (e.g., `http://localhost:8080`) |
+| `AMO_BRAVE_SEARCH_API_KEY` | *(empty)* | Brave Search API key for fallback |
+| `AMO_SEARCH_FALLBACK_PROVIDER` | *(empty)* | Fallback when SearXNG fails: `brave` or empty to disable |
+| `AMO_SEARCH_MAX_RESULTS` | `10` | Maximum number of search results |
+| `AMO_SEARXNG_TIMEOUT_SECONDS` | `30` | Timeout for SearXNG requests (seconds) |
+| `AMO_BRAVE_SEARCH_TIMEOUT_SECONDS` | `30` | Timeout for Brave Search requests (seconds) |
+| `AMO_SEARCH_MIN_HOST_DIVERSITY` | `3` | Minimum number of distinct hosts (spam avoidance) |
+
+### Example Configuration (SearXNG only)
+
+```ini
+# Current-Info Search — SearXNG only
+AMO_SEARXNG_URL=http://localhost:8080
+AMO_SEARCH_MAX_RESULTS=10
+AMO_SEARXNG_TIMEOUT_SECONDS=30
+AMO_SEARCH_MIN_HOST_DIVERSITY=3
+```
+
+### Example Configuration (SearXNG + Brave Fallback)
+
+```ini
+# Current-Info Search — SearXNG with Brave fallback
+AMO_SEARXNG_URL=http://localhost:8080
+AMO_BRAVE_SEARCH_API_KEY=your_brave_api_key_here
+AMO_SEARCH_FALLBACK_PROVIDER=brave
+AMO_SEARCH_MAX_RESULTS=10
+AMO_SEARXNG_TIMEOUT_SECONDS=30
+AMO_BRAVE_SEARCH_TIMEOUT_SECONDS=30
+AMO_SEARCH_MIN_HOST_DIVERSITY=3
+```
+
+> **Note:** If `AMO_SEARXNG_URL` is not set, Current-Info automatically uses the fallback (if configured). Without SearXNG and without fallback, Current-Info search is disabled.
+
+---
+
 ## Security Headers
 
 The WebUI sets the following HTTP security headers:

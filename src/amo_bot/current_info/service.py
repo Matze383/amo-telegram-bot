@@ -10,6 +10,8 @@ from amo_bot.current_info.models import (
     FetchedDocument,
     QueryPlan,
     SearchBundle,
+    SearchProviderMetric,
+    SearchProviderResponse,
     SearchResult,
     TaskSpec,
 )
@@ -126,8 +128,9 @@ class CurrentInfoService:
                 warnings=("search_provider_not_configured",),
             )
 
-        search_results = self._run_search_plan(query_plan, locale=task.locale)
-        search_bundle = SearchBundle(query_plan=query_plan, results=search_results)
+        search_response = self._run_search_plan(query_plan, locale=task.locale)
+        search_results = search_response.results
+        search_bundle = SearchBundle(query_plan=query_plan, results=search_results, metrics=search_response.metrics)
         if not search_results:
             return CurrentInfoAnswer(
                 status="empty_result",
@@ -168,19 +171,26 @@ class CurrentInfoService:
             sources=tuple(dict.fromkeys(chunk.source_url for chunk in chunks if chunk.source_url)),
         )
 
-    def _run_search_plan(self, query_plan: QueryPlan, *, locale: str) -> tuple[SearchResult, ...]:
+    def _run_search_plan(self, query_plan: QueryPlan, *, locale: str) -> SearchProviderResponse:
         assert self._search_provider is not None
         collected: list[SearchResult] = []
+        metrics: list[SearchProviderMetric] = []
         seen_urls: set[str] = set()
         for query in query_plan.queries:
-            for item in self._search_provider.search(query=query, locale=locale, max_results=query_plan.max_results):
+            provider_response = self._search_provider.search(query=query, locale=locale, max_results=query_plan.max_results)
+            if isinstance(provider_response, SearchProviderResponse):
+                results = provider_response.results
+                metrics.extend(provider_response.metrics)
+            else:
+                results = tuple(provider_response)
+            for item in results:
                 if item.url in seen_urls:
                     continue
                 seen_urls.add(item.url)
                 collected.append(item)
                 if len(collected) >= query_plan.max_results:
-                    return tuple(collected)
-        return tuple(collected)
+                    return SearchProviderResponse(results=tuple(collected), metrics=tuple(metrics))
+        return SearchProviderResponse(results=tuple(collected), metrics=tuple(metrics))
 
     def _fetch_documents(
         self,

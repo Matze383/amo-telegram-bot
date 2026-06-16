@@ -135,6 +135,14 @@ class Settings(BaseSettings):
     amo_plugin_dir: str = Field(default="./plugins", alias="AMO_PLUGIN_DIR")
     plugin_command_sandbox_enabled: bool = Field(default=False, alias="PLUGIN_COMMAND_SANDBOX_ENABLED")
 
+    amo_searxng_url: str = Field(default="", alias="AMO_SEARXNG_URL")
+    amo_brave_search_api_key: str | None = Field(default=None, alias="AMO_BRAVE_SEARCH_API_KEY")
+    amo_search_fallback_provider: str = Field(default="", alias="AMO_SEARCH_FALLBACK_PROVIDER")
+    amo_search_max_results: int = Field(default=5, alias="AMO_SEARCH_MAX_RESULTS", ge=1, le=10)
+    amo_searxng_timeout_seconds: float = Field(default=3.0, alias="AMO_SEARXNG_TIMEOUT_SECONDS", gt=0, le=30)
+    amo_brave_search_timeout_seconds: float = Field(default=3.0, alias="AMO_BRAVE_SEARCH_TIMEOUT_SECONDS", gt=0, le=30)
+    amo_search_min_host_diversity: int = Field(default=0, alias="AMO_SEARCH_MIN_HOST_DIVERSITY", ge=0, le=10)
+
     webui_host: str = Field(default="127.0.0.1", alias="WEBUI_HOST")
     webui_port: int = Field(default=8080, alias="WEBUI_PORT")
     webui_password: str = Field(alias="WEBUI_PASSWORD")
@@ -432,6 +440,15 @@ class Settings(BaseSettings):
         if streaming_mode not in {"off", "collect_only", "live_edit"}:
             raise ValueError("OLLAMA_STREAMING_MODE must be one of: off, collect_only, live_edit")
         self.ollama_streaming_mode = streaming_mode
+
+        search_fallback_provider = self.amo_search_fallback_provider.strip().casefold()
+        if search_fallback_provider not in {"", "brave"}:
+            raise ValueError("AMO_SEARCH_FALLBACK_PROVIDER must be empty or brave")
+        self.amo_search_fallback_provider = search_fallback_provider
+
+        self.amo_searxng_url = self.amo_searxng_url.strip().rstrip("/")
+        brave_search_api_key = (self.amo_brave_search_api_key or "").strip()
+        self.amo_brave_search_api_key = brave_search_api_key or None
 
         # Validate dreaming window: start must be before end (in the same timezone).
         try:

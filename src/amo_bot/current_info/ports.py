@@ -7,6 +7,7 @@ from amo_bot.current_info.models import (
     EvidenceChunk,
     FetchedDocument,
     QueryPlan,
+    SearchProviderResponse,
     SearchResult,
     TaskSpec,
 )
@@ -23,7 +24,7 @@ class CurrentInfoQueryPlanner(Protocol):
 
 
 class CurrentInfoSearchProvider(Protocol):
-    def search(self, *, query: str, locale: str, max_results: int) -> tuple[SearchResult, ...]:
+    def search(self, *, query: str, locale: str, max_results: int) -> tuple[SearchResult, ...] | SearchProviderResponse:
         ...
 
 
