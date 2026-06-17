@@ -11,6 +11,7 @@ from amo_bot.db.init_db import init_db
 from amo_bot.db.models import AuditEvent, Plugin
 from amo_bot.db.repositories import PluginRepository
 from amo_bot.plugins.loader import PluginLoader
+from amo_bot.plugins.sandbox.worker import _RecordingHostAPI
 from amo_bot.plugins.sandbox.types import SandboxErrorCode, SandboxRequest, SandboxResponse, SandboxRunnerError
 from amo_bot.plugins.worker_runtime import WorkerPluginManager
 
@@ -98,6 +99,17 @@ async def handle_worker(context, host_api):
         events = [row.event_type for row in session.scalars(select(AuditEvent)).all()]
     assert "plugin_worker_start" in events
     assert "plugin_worker_stop" in events
+
+
+def test_worker_host_api_splits_long_send_message_without_truncating() -> None:
+    host_api = _RecordingHostAPI(permissions={"send_message"}, max_ops=3, max_text_len=4000)
+    text = "x" * 4200
+
+    asyncio.run(host_api.send_message(123, text, message_thread_id=456))
+
+    assert [len(op["text"]) for op in host_api.ops] == [4000, 200]
+    assert "".join(str(op["text"]) for op in host_api.ops) == text
+    assert {op["message_thread_id"] for op in host_api.ops} == {456}
 
 
 async def _wait_for_state(manager: WorkerPluginManager, plugin_name: str, expected_state: str) -> None:

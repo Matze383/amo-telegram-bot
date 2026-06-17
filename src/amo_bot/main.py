@@ -2,18 +2,22 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import threading
 from argparse import ArgumentParser
+
+from dotenv import load_dotenv
 
 from amo_bot.ai.providers import build_ai_provider
 from amo_bot.config.settings import get_settings
 from amo_bot.core.logging import setup_logging, log_event
 from amo_bot.db.base import create_session_factory
 from amo_bot.db.init_db import init_db
+from amo_bot.db.repositories import ResearchSourceObservationRepository, TopicAgentMemoryRepository, UserRoleRepository
 from amo_bot.plugins.command_runtime import PluginCommandExecutor
-from amo_bot.db.repositories import TopicAgentMemoryRepository, UserRoleRepository
 from amo_bot.plugins.loader import PluginLoader
 from amo_bot.plugins.scheduled_runtime import ScheduledPluginExecutor
+from amo_bot.process_control import pid_file, stop_running_bot
 from amo_bot.telegram.client import TelegramClient
 from amo_bot.telegram.commands import create_builtin_registry
 from amo_bot.telegram.chat_topic_persistence import ChatTopicPersistenceService
@@ -26,12 +30,45 @@ from amo_bot.webui.flask_app import create_flask_app
 from amo_bot.ai.dreaming_runtime import DreamingRuntime
 from amo_bot.ai.daily_memory_runtime import DailyMemoryRuntime
 from amo_bot.ai.webtool_dispatcher import WebtoolCapabilityDispatcher
-from amo_bot.ai.webtool_provider_adapter import RealBrowserProviderAdapter, RealWebsearchProviderAdapter
+from amo_bot.ai.webtool_provider_adapter import RealBrowserProviderAdapter, RealWebscrapeProviderAdapter, RealWebsearchProviderAdapter
 from amo_bot.ai.webtool_subagent import create_webtool_subagent_service
+from amo_bot.current_info import (
+    CurrentInfoService,
+    build_cached_fetch_provider_from_settings,
+    build_current_info_retrieval_provider_from_settings,
+    build_document_fetcher_from_settings,
+    build_search_broker_from_settings,
+)
 from amo_bot.db.repositories import WebToolRoleQuotaRepository
+from amo_bot.telegram.webtool_evidence import (
+    BinanceTickerEvidenceProvider,
+    CoinGeckoEvidenceProvider,
+    DbBackedProviderHealthRegistry,
+    OpenMeteoEvidenceProvider,
+    ResilientCryptoEvidenceProvider,
+    ResilientWeatherEvidenceProvider,
+    WebEvidencePipeline,
+    WttrInEvidenceProvider,
+    build_evidence_candidates_from_db,
+)
 
 
 logger = logging.getLogger(__name__)
+
+
+def _configured_pid_file_for_stop(override_pid_file: str | None) -> str:
+    if override_pid_file:
+        return override_pid_file
+
+    override_from_env_file = os.getenv("AMO_ENV_OVERRIDE", "1").lower() not in {
+        "0",
+        "false",
+        "no",
+        "off",
+    }
+    dotenv_path = os.getenv("DOTENV_PATH", ".env")
+    load_dotenv(dotenv_path=dotenv_path, override=override_from_env_file)
+    return os.getenv("BOT_PID_FILE", ".state/amo_bot.pid")
 
 
 async def _run_polling_with_runtimes(
@@ -64,17 +101,93 @@ async def _run_polling_with_runtimes(
         await dreaming_runtime.stop()
 
 
+class SessionBoundWebtoolCapabilityDispatcher:
+    """Create quota repo per execute call while reusing provider health in-process."""
+
+    def __init__(self, *, session_factory) -> None:
+        self._session_factory = session_factory
+        self._provider_health = DbBackedProviderHealthRegistry(session_factory=session_factory)
+        self._weather_evidence_provider = None
+        self._crypto_evidence_provider = None
+
+    def _ensure_evidence_providers(self) -> None:
+        if self._weather_evidence_provider is not None and self._crypto_evidence_provider is not None:
+            return
+        weather_candidates = build_evidence_candidates_from_db(
+            session_factory=self._session_factory,
+            domain="weather",
+            providers={
+                "open_meteo_weather": OpenMeteoEvidenceProvider(),
+                "wttr_in_weather": WttrInEvidenceProvider(),
+            },
+        )
+        crypto_candidates = build_evidence_candidates_from_db(
+            session_factory=self._session_factory,
+            domain="crypto",
+            providers={
+                "coingecko_crypto": CoinGeckoEvidenceProvider(),
+                "binance_crypto": BinanceTickerEvidenceProvider(),
+            },
+        )
+        self._weather_evidence_provider = ResilientWeatherEvidenceProvider(
+            weather_candidates,
+            health=self._provider_health,
+        )
+        self._crypto_evidence_provider = ResilientCryptoEvidenceProvider(
+            crypto_candidates,
+            health=self._provider_health,
+        )
+
+    def execute(self, request):
+        self._ensure_evidence_providers()
+        with self._session_factory() as session:
+            quota_repo = WebToolRoleQuotaRepository(session)
+            browser_provider = None
+            candidate = RealBrowserProviderAdapter()
+            if candidate.available:
+                browser_provider = candidate
+            search_provider = RealWebsearchProviderAdapter(quota_limiter=quota_repo)
+            scrape_provider = RealWebscrapeProviderAdapter()
+            service = create_webtool_subagent_service(
+                quota_repo=quota_repo,
+                search_provider=search_provider,
+                scrape_provider=scrape_provider,
+                browser_provider=browser_provider,
+                weather_evidence_provider=self._weather_evidence_provider,
+                crypto_evidence_provider=self._crypto_evidence_provider,
+                observation_writer=ResearchSourceObservationRepository(session),
+            )
+            dispatcher = WebtoolCapabilityDispatcher(quota_repo=quota_repo, service=service)
+            return dispatcher.execute(request)
+
+
 def _build_parser() -> ArgumentParser:
     parser = ArgumentParser(prog="python -m amo_bot.main")
     parser.add_argument("--webui", action="store_true", help="Start Flask WebUI only")
     parser.add_argument("--serve", action="store_true", help="Start WebUI and Telegram polling together")
+    parser.add_argument("--pid-file", help="Override BOT_PID_FILE for this invocation")
+    parser.add_argument(
+        "--stop",
+        "--stop-running",
+        dest="stop_running",
+        action="store_true",
+        help="Send SIGTERM to the running AMO bot process recorded in the PID file",
+    )
     return parser
 
 
 def run(argv: list[str] | None = None) -> None:
     args = _build_parser().parse_args([] if argv is None else argv)
 
+    if args.stop_running:
+        configured_pid_file = _configured_pid_file_for_stop(args.pid_file)
+        result = stop_running_bot(configured_pid_file)
+        print(result.message)
+        raise SystemExit(0 if result.ok else 1)
+
     settings = get_settings()
+    configured_pid_file = args.pid_file or getattr(settings, "bot_pid_file", _configured_pid_file_for_stop(None))
+
     setup_logging()
     init_db(settings.database_url)
 
@@ -253,29 +366,25 @@ def run(argv: list[str] | None = None) -> None:
         bot_username=settings.bot_username,
     )
 
-    class _SessionBoundWebtoolCapabilityDispatcher:
-        """Create quota repo + capability dispatcher per execute call using fresh DB session."""
-
-        def __init__(self, *, session_factory) -> None:
-            self._session_factory = session_factory
-
-        def execute(self, request):
-            with self._session_factory() as session:
-                quota_repo = WebToolRoleQuotaRepository(session)
-                browser_provider = None
-                candidate = RealBrowserProviderAdapter()
-                if candidate.available:
-                    browser_provider = candidate
-                search_provider = RealWebsearchProviderAdapter(quota_limiter=quota_repo)
-                service = create_webtool_subagent_service(
-                    quota_repo=quota_repo,
-                    search_provider=search_provider,
-                    browser_provider=browser_provider,
-                )
-                dispatcher = WebtoolCapabilityDispatcher(quota_repo=quota_repo, service=service)
-                return dispatcher.execute(request)
-
-    webtool_dispatcher = _SessionBoundWebtoolCapabilityDispatcher(session_factory=session_factory)
+    webtool_dispatcher = SessionBoundWebtoolCapabilityDispatcher(session_factory=session_factory)
+    web_evidence_pipeline = WebEvidencePipeline(session_factory=session_factory)
+    current_info_service = None
+    if settings.amo_current_info_enabled:
+        current_info_search_provider = build_search_broker_from_settings(settings)
+        if current_info_search_provider is not None:
+            current_info_fetch_provider = build_cached_fetch_provider_from_settings(
+                settings,
+                session_factory=session_factory,
+                fetch_provider=build_document_fetcher_from_settings(settings),
+            )
+            current_info_service = CurrentInfoService(
+                search_provider=current_info_search_provider,
+                fetch_provider=current_info_fetch_provider,
+                retrieval_provider=build_current_info_retrieval_provider_from_settings(
+                    settings,
+                    session_factory=session_factory,
+                ),
+            )
 
     dispatcher = Dispatcher(
         command_registry=command_registry,
@@ -291,6 +400,12 @@ def run(argv: list[str] | None = None) -> None:
         ai_service=ai_service,
         owner_notifier=owner_notifier,
         webtool_dispatcher=webtool_dispatcher,
+        web_evidence_pipeline=web_evidence_pipeline,
+        current_info_service=current_info_service,
+        current_info_enabled=settings.amo_current_info_enabled,
+        current_info_timeout_seconds=settings.amo_current_info_timeout_seconds,
+        current_info_max_results=settings.amo_current_info_max_results,
+        current_info_max_documents=settings.amo_current_info_max_documents,
         prompt_timezone=settings.dreaming_timezone,
     )
 
@@ -324,37 +439,59 @@ def run(argv: list[str] | None = None) -> None:
         max_scopes_per_run=settings.memory_daily_max_scopes_per_run,
     )
 
-    if args.webui:
-        app = create_flask_app(settings=settings)
+    with pid_file(configured_pid_file):
+        if args.webui:
+            app = create_flask_app(settings=settings)
+            log_event(
+                logger, logging.INFO,
+                event="bot.start",
+                component="main",
+                extra={"mode": "webui_only", "host": settings.webui_host, "port": settings.webui_port},
+            )
+            app.run(host=settings.webui_host, port=settings.webui_port)
+            return
+
+        if args.serve:
+            app = create_flask_app(settings=settings)
+
+            webui_thread = threading.Thread(
+                target=app.run,
+                kwargs={
+                    "host": settings.webui_host,
+                    "port": settings.webui_port,
+                    "use_reloader": False,
+                },
+                daemon=True,
+                name="flask-webui",
+            )
+            webui_thread.start()
+
+            log_event(
+                logger, logging.INFO,
+                event="bot.start",
+                component="main",
+                extra={"mode": "webui_plus_polling", "webui_host": settings.webui_host, "webui_port": settings.webui_port},
+            )
+            asyncio.run(
+                _run_polling_with_runtimes(
+                    dreaming_runtime=dreaming_runtime,
+                    daily_runtime=daily_runtime,
+                    tg=tg,
+                    offset_store=offset_store,
+                    timeout_seconds=settings.poll_timeout_seconds,
+                    limit=settings.poll_limit,
+                    retry_max_seconds=settings.poll_retry_max_seconds,
+                    dispatcher=dispatcher,
+                    scheduled_tick=scheduled_plugin_executor.run_due_once,
+                )
+            )
+            return
+
         log_event(
             logger, logging.INFO,
             event="bot.start",
             component="main",
-            extra={"mode": "webui_only", "host": settings.webui_host, "port": settings.webui_port},
-        )
-        app.run(host=settings.webui_host, port=settings.webui_port)
-        return
-
-    if args.serve:
-        app = create_flask_app(settings=settings)
-
-        webui_thread = threading.Thread(
-            target=app.run,
-            kwargs={
-                "host": settings.webui_host,
-                "port": settings.webui_port,
-                "use_reloader": False,
-            },
-            daemon=True,
-            name="flask-webui",
-        )
-        webui_thread.start()
-
-        log_event(
-            logger, logging.INFO,
-            event="bot.start",
-            component="main",
-            extra={"mode": "webui_plus_polling", "webui_host": settings.webui_host, "webui_port": settings.webui_port},
+            extra={"mode": "polling_only"},
         )
         asyncio.run(
             _run_polling_with_runtimes(
@@ -369,27 +506,6 @@ def run(argv: list[str] | None = None) -> None:
                 scheduled_tick=scheduled_plugin_executor.run_due_once,
             )
         )
-        return
-
-    log_event(
-        logger, logging.INFO,
-        event="bot.start",
-        component="main",
-        extra={"mode": "polling_only"},
-    )
-    asyncio.run(
-        _run_polling_with_runtimes(
-            dreaming_runtime=dreaming_runtime,
-            daily_runtime=daily_runtime,
-            tg=tg,
-            offset_store=offset_store,
-            timeout_seconds=settings.poll_timeout_seconds,
-            limit=settings.poll_limit,
-            retry_max_seconds=settings.poll_retry_max_seconds,
-            dispatcher=dispatcher,
-            scheduled_tick=scheduled_plugin_executor.run_due_once,
-        )
-    )
 
 
 if __name__ == "__main__":

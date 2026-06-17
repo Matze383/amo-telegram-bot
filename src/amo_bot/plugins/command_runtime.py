@@ -81,6 +81,12 @@ class PluginCapabilityError(RuntimeError):
     pass
 
 
+class PluginSandboxCommandError(RuntimeError):
+    def __init__(self, message: str, error_code: str):
+        super().__init__(message)
+        self.sandbox_error_code = error_code
+
+
 class PluginHostAPI:
     def __init__(
         self,
@@ -106,7 +112,7 @@ class PluginHostAPI:
         text_clean = (text or "").strip()
         if not text_clean:
             raise ValueError("text must not be empty")
-        return await self._send_message(chat_id, text_clean[:4000])
+        return await self._send_message(chat_id, text_clean)
 
     async def reply(self, chat_id: int, message_id: int, text: str | dict[str, Any]) -> object:
         self._require_permission("send_message", "reply")
@@ -125,7 +131,7 @@ class PluginHostAPI:
         text_clean = (text_payload or "").strip()
         if not text_clean:
             raise ValueError("text must not be empty")
-        return await self._reply(chat_id, message_id, text_clean[:4000], None)
+        return await self._reply(chat_id, message_id, text_clean, None)
 
     async def answer_callback_query(self, callback_query_id: str, text: str | None = None) -> object:
         self._require_permission("send_message", "answer_callback_query")
@@ -814,9 +820,7 @@ class PluginCommandExecutor:
                 )
             else:
                 command_error = CommandError(code="runtime_error", message="command execution failed")
-            sandbox_exc = RuntimeError(command_error.message)
-            sandbox_exc.__dict__["sandbox_error_code"] = command_error.code
-            raise sandbox_exc
+            raise PluginSandboxCommandError(command_error.message, command_error.code)
 
         for op_payload in response.get("ops", []):
             op = CommandOp.from_dict(op_payload, max_text_len=request.limits.max_text_len)

@@ -18,7 +18,6 @@ from amo_bot.db.base import create_session_factory
 from amo_bot.db.init_db import init_db
 from amo_bot.db.models import GROUP_CHAT_TYPES, AuditEvent, TelegramChat, User
 from amo_bot.consent import CONSENT_ACCEPTED, CONSENT_DECLINED, CONSENT_PENDING, CONSENT_UNREACHABLE, ConsentService
-from amo_bot.consent.prompt_service import ConsentPromptService
 from amo_bot.db.repositories import (
     ChatScopedRoleRepository,
     PromptContextDocRepository,
@@ -354,7 +353,7 @@ def create_builtin_registry(
         with session_factory() as session:
             user = session.query(User).filter(User.telegram_user_id == ctx.user_id).one_or_none()
             if user is None:
-                user = UserRoleRepository(session).upsert_discovered_user(
+                UserRoleRepository(session).upsert_discovered_user(
                     telegram_user_id=ctx.user_id,
                     username=None,
                     first_name=None,
@@ -362,28 +361,7 @@ def create_builtin_registry(
                 )
                 session.commit()
 
-            status = ConsentService().get_status(user)
-            if status == CONSENT_UNREACHABLE:
-                user.consent_status = CONSENT_PENDING
-                session.commit()
-                status = CONSENT_PENDING
-
-        if status == CONSENT_PENDING:
-            return {
-                "text": ConsentPromptService.build_prompt_text(ctx.locale),
-                "reply_markup": ConsentPromptService.build_prompt_markup(ctx.locale),
-            }
-
-        if status == CONSENT_ACCEPTED:
-            return t_text("consent.start.accepted", ctx.locale)
-
-        if status == CONSENT_DECLINED:
-            return t_text("consent.start.declined", ctx.locale)
-
-        return {
-            "text": ConsentPromptService.build_prompt_text(ctx.locale),
-            "reply_markup": ConsentPromptService.build_prompt_markup(ctx.locale),
-        }
+        return t_text("consent.start.accepted", ctx.locale)
 
     async def role_handler(ctx: CommandContext) -> str:
         return t_text("role.current", ctx.locale, role=ctx.role.value)
@@ -795,7 +773,12 @@ def create_builtin_registry(
             )
 
         try:
-            return await ai_service.ask(ai_prompt)
+            try:
+                return await ai_service.ask(ai_prompt, task_type="answer_synthesis")
+            except TypeError as exc:
+                if "task_type" not in str(exc):
+                    raise
+                return await ai_service.ask(ai_prompt)
         except OllamaError:
             logger.exception("/ask failed: ollama runtime error user_id=%s chat_id=%s", ctx.user_id, ctx.chat_id)
             return _lang(ctx, "Sorry, ich kann gerade nicht antworten. Bitte versuche es später erneut.", "Sorry, I cannot answer right now. Please try again later.")

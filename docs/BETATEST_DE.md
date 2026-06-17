@@ -113,6 +113,19 @@ OLLAMA_TIMEOUT_SECONDS=20
 OLLAMA_MAX_PROMPT_CHARS=4000
 OLLAMA_MAX_PREDICT_TOKENS=512
 OLLAMA_MAX_RESPONSE_CHARS=1500
+# OLLAMA_REQUEST_ENDPOINT=generate  # generate (Standard) oder chat
+# OLLAMA_STREAMING_MODE=off  # off (Standard), collect_only, live_edit
+
+# Optional: Ollama Model Policy (KI-Model-Auswahl nach Aufgabentyp)
+# OLLAMA_MODEL_POLICY_ENABLED=false  # false (Standard), true
+# OLLAMA_THINKING_MODEL=             # Modell für komplexe Aufgaben (z.B. deepseek-r1:14b)
+# OLLAMA_NON_THINKING_MODEL=         # Modell für einfache Aufgaben (z.B. qwen2.5-coder:14b)
+# OLLAMA_THINKING_TASK_TYPES=web_research,sports,news,answer_synthesis
+# OLLAMA_SIMPLE_PROMPT_MAX_CHARS=240
+# OLLAMA_THINKING_TIMEOUT_SECONDS=      # optional; Standard: OLLAMA_TIMEOUT_SECONDS
+# OLLAMA_NON_THINKING_TIMEOUT_SECONDS=  # optional; Standard: OLLAMA_TIMEOUT_SECONDS
+# OLLAMA_THINKING_BUDGET_MAX_PROMPT_CHARS=      # optional; Standard: OLLAMA_MAX_PROMPT_CHARS
+# OLLAMA_NON_THINKING_BUDGET_MAX_PROMPT_CHARS=  # optional; Standard: OLLAMA_MAX_PROMPT_CHARS
 
 # Datenbank (Standard: SQLite; optional MariaDB/MySQL via mysql+pymysql://...)
 DATABASE_URL=sqlite:///./data/amo_bot.db
@@ -143,8 +156,11 @@ POLL_RETRY_MAX_SECONDS=30
 OFFSET_STATE_FILE=.state/offset.json
 
 # SearXNG Websearch (optional – für Websearch-Feature)
-# SEARXNG_BASE_URL=https://your-searxng-instance.com  # Primäre Konfiguration
-# AMO_WEBSEARCH_SEARXNG_BASE_URL=https://fallback.com  # Fallback (optional)
+# AMO_WEBSEARCH_SEARXNG_BASE_URL=https://your-searxng-instance.com
+# AMO_WEBSEARCH_SEARXNG_TIMEOUT_SECONDS=30
+# AMO_WEBSEARCH_MAX_RESULTS=10
+# AMO_WEBSEARCH_SEARXNG_LANGUAGE=de-DE
+# AMO_WEBSEARCH_SEARXNG_CATEGORIES=general
 # Hinweis: Nur HTTPS-URLs für öffentliche Endpunkte erlaubt. HTTP nur für Loopback/Private.
 ```
 
@@ -271,25 +287,11 @@ Starte einen privaten Chat mit deinem Bot:
 - Sende: `/help`
 - Erwartet: Liste der verfügbaren Commands (abhängig von deiner Rolle)
 
-**Test 3: /consent**
-- Sende: `/consent`
-- Erwartet: Zeigt deinen aktuellen Consent-Status und verfügbare Commands
-  - **Privater Chat**: Vollständiger Status und Details werden angezeigt
-  - **Gruppen**: Nur Datenschutzhinweis (keine Statusdetails in Gruppen aus Datenschutzgründen)
-
-**Test 4: /accept**
-- Sende: `/accept`
-- Erwartet: Bestätigung, dass Consent akzeptiert wurde
-- Hinweis: Falls du zuvor abgelehnt hast, kannst du später mit `/accept` erneut zustimmen
-
-**Test 5: /decline**
-- Sende: `/decline`
-- Erwartet: Bestätigung, dass Consent abgelehnt wurde
-- Hinweis: Du kannst später mit `/accept` erneut zustimmen, falls du deine Meinung änderst
-
-**Test 6: /role**
+**Test 3: /role**
 - Sende: `/role`
 - Erwartet: Deine aktuelle Rolle (z.B. "owner")
+
+> **Hinweis zur Nutzung:** Human-User können den Bot automatisch nutzen. Kein Consent-Dialog erforderlich. Rollen (owner/admin/vip/normal/ignore) steuern weiterhin Berechtigungen. Bot-to-Bot-Kommunikation erfordert weiterhin explizite Freigabe.
 
 ---
 
@@ -365,6 +367,20 @@ Starte einen privaten Chat mit deinem Bot:
 # Prüfe Ollama-Status
 curl http://127.0.0.1:11434/api/tags
 ```
+
+**Ollama Model Policy (optional):**
+Wenn `OLLAMA_MODEL_POLICY_ENABLED=true`:
+- Der Bot wählt automatisch zwischen Thinking- und Non-Thinking-Modellen basierend auf der Aufgabe
+- `OLLAMA_THINKING_MODEL`: Für komplexe Aufgaben (z.B. `deepseek-r1:14b`)
+- `OLLAMA_NON_THINKING_MODEL`: Für einfache Aufgaben (z.B. `qwen2.5-coder:14b`)
+- `OLLAMA_THINKING_TASK_TYPES`: Komma-separierte Liste der Task-Typen, die Thinking erfordern
+- `OLLAMA_SIMPLE_PROMPT_MAX_CHARS`: Max. Zeichen für "einfache" Prompts (Non-Thinking)
+- Optionale Timeouts und Prompt-Budgets für Thinking vs. Non-Thinking
+
+**Test – Model Policy:**
+- [ ] Kurze einfache Frage (`/ask Was ist 2+2?`) verwendet Non-Thinking-Modell
+- [ ] Komplexe Forschungsfrage (`/ask Erkläre Quantencomputing`) verwendet Thinking-Modell
+- [ ] Bei transientem Timeout/Error erfolgt nach Retry ein Fallback auf das konfigurierte Non-Thinking-/Fallback-Modell
 
 **Für Anthropic:**
 - Stelle sicher, dass `ANTHROPIC_API_KEY` in `.env` gesetzt ist
@@ -443,13 +459,12 @@ Der Bot kann bei Erwähnung oder als Antwort in **aktiven Scopes** (Themen oder 
 
 **Voraussetzungen:**
 - Nutzer muss Rolle `vip`, `admin` oder `owner` haben
-- Nutzer muss Consent akzeptiert haben (`/accept`)
 - Der Scope (Thema oder privater Chat) muss KI-aktiviert konfiguriert sein
 - Der KI-Service muss konfiguriert sein (Ollama, OpenAI, Anthropic, Google, OpenRouter, Groq, Mistral, xAI oder DeepSeek)
 
 **Audit-Events:**
 - `ai_autoreply_sent` — Antwort erfolgreich gesendet
-- `ai_autoreply_denied` — Blockiert (Rolle oder Consent)
+- `ai_autoreply_denied` — Blockiert (Rolle oder andere Einschränkung)
 - `ai_autoreply_error` — Fehler beim KI-Service
 
 **Hinweis:** Dies ist separate vom `/ask`-Kommando. Auto-Antwort wird implizit durch Erwähnungen/Antworten ausgelöst; `/ask` ist ein explizites Kommando.
@@ -608,92 +623,7 @@ Wenn `WEBUI_PUBLIC_MODE=true`, blockiert das HTTP-Request-Gate den Zugriff auf g
 - Globale manuelle Memories sind in v1 deaktiviert. Sensibel wirkende Tokens/Secrets/System-Prompt-Inhalte und Texte über 1000 Zeichen werden abgelehnt.
 - Normale Nachrichten wie `remember: ...` werden in v1 nicht automatisch übernommen.
 
-### Consent Commands (Block 1)
-
-Der Bot enthält nun ein Consent-Management über Telegram-Commands.
-
-**Test-Schritte:**
-
-1. **`/consent` im privaten Chat testen:**
-   - Sende: `/consent`
-   - Erwartet: Zeigt aktuellen Consent-Status, Details und verfügbare Commands
-
-2. **`/accept` testen:**
-   - Sende: `/accept`
-   - Erwartet: Bestätigung, dass Consent akzeptiert wurde
-
-3. **`/decline` testen:**
-   - Sende: `/decline`
-   - Erwartet: Bestätigung, dass Consent abgelehnt wurde
-
-4. **`/consent` nach Ablehnung testen:**
-   - Sende: `/consent`
-   - Erwartet: Zeigt abgelehnten Status und erinnert daran, dass du jederzeit mit `/accept` erneut zustimmen kannst
-
-5. **Erneutes Annehmen testen:**
-   - Sende: `/accept` (nach vorheriger Ablehnung)
-   - Erwartet: Consent erneut erfolgreich akzeptiert
-
-6. **`/consent` in Gruppen testen:**
-   - Sende: `/consent` in einer Gruppe, in der der Bot vorhanden ist
-   - Erwartet: Nur Datenschutzhinweis — keine Consent-Statusdetails in Gruppen aus Datenschutzgründen
-
-**Checkliste:**
-- [ ] `/consent` im privaten Chat zeigt vollständigen Status
-- [ ] `/accept` bestätigt Consent akzeptiert
-- [ ] `/decline` bestätigt Consent abgelehnt
-- [ ] `/consent` zeigt abgelehnten Status korrekt
-- [ ] `/accept` funktioniert nach vorheriger Ablehnung
-- [ ] `/consent` in Gruppen zeigt nur Datenschutzhinweis (keine Details)
-
----
-
-### Automatischer privater Consent-DM-Prompt (Block 2)
-
-Der Bot sendet automatisch einen privaten Consent-Hinweis an Nutzer mit dem Status "pending" (noch nicht akzeptiert oder abgelehnt).
-
-**Funktionsweise:**
-- Wenn ein pending User in einer Gruppe gesehen wird, sendet der Bot automatisch eine private DM mit Consent-Hinweis
-- Die DM enthält **Inline-Buttons** (✅ Akzeptieren / ❌ Ablehnen) für schnelle Zustimmung, plus Fallback-Commands: `/accept`, `/decline`, `/consent`
-- **One-Shot-Policy:** Genau 1 automatische DM pro User — wird nur gesendet wenn `consent_prompt_count == 0`. Nach erfolgreicher Zustellung wird `prompt_count` auf 1 gesetzt, keine weiteren automatischen DMs.
-- **Unerreichbare User:** Wenn der Bot kein privates Gespräch starten kann (User hat den Bot nicht gestartet), wird der User als `unreachable` markiert und erhält keine Prompts. Der User muss den Bot privat starten und `/accept` (oder den Akzeptieren-Button) nutzen, um zu consenten.
-
-**Test-Schritte:**
-
-1. **Automatischen Prompt testen:**
-   - Einen neuen User zu einer Gruppe hinzufügen, in der der Bot ist
-   - User sollte genau eine private DM vom Bot mit dem Consent-Hinweis erhalten
-
-2. **One-Shot-Policy testen:**
-   - Nach Erhalt des ersten (und einzigen) automatischen Prompts erhält der User keine weiteren automatischen DMs
-   - Der `consent_prompt_count` wird nach erfolgreicher Zustellung auf 1 gesetzt
-
-3. **Unerreichbar-Handling testen:**
-   - Wenn der User noch keinen privaten Chat mit dem Bot gestartet hat, kann die DM nicht zugestellt werden
-   - User wird im System als `unreachable` markiert
-   - Um erreichbar zu werden und zu consenten, muss der User den Bot zuerst privat starten und `/accept` nutzen
-
-**Checkliste:**
-- [ ] Pending-User erhalten genau einen automatischen DM-Prompt beim ersten Erscheinen in Gruppen
-- [ ] DM enthält **Inline-Buttons** (Akzeptieren/Ablehnen) und `/accept`, `/decline`, `/consent` Fallback-Commands
-- [ ] Inline-Buttons funktionieren: Akzeptieren-Button setzt Consent auf akzeptiert, Ablehnen-Button setzt Consent auf abgelehnt
-- [ ] Fallback-Commands bleiben nutzbar neben Buttons
-- [ ] One-Shot-Policy eingehalten: nur 1 automatischer Prompt pro User (bei `consent_prompt_count == 0`)
-- [ ] Keine automatischen Retries nach erfolgreicher Zustellung oder Fehler
-- [ ] Unerreichbare User werden entsprechend markiert und müssen den Bot privat starten, um zu consenten
-- [ ] Runtime-Gate blockiert normale Nutzung für `pending`/`declined`/`unreachable` User
-- [ ] Erlaubte Commands funktionieren trotz Gate: `/accept`, `/decline`, `/consent`, `/start`
-- [ ] `accepted` User können alle Commands normal nutzen
-- [ ] Owner-Bypass funktioniert für Consent (Owner kann den Bot immer nutzen)
-- [ ] Globale `ignore`-Rolle bleibt blockierend unabhängig vom Consent
-
-**Runtime Consent Gate:** Das Runtime-Gate ist **jetzt aktiv**. Nutzer mit Status `pending`, `declined` oder `unreachable` können normale Bot-Funktionen nicht nutzen, bis sie `/accept` senden.
-
-**Erlaubte Commands trotz Gate:** `/accept`, `/decline`, `/consent`, `/start` — diese funktionieren immer.
-
-**Verhalten in Gruppen:** In Gruppen wird nur ein datenschonender Hinweis gezeigt. Keine Statusdetails werden preisgegeben.
-
-**Private Block-Nachricht:** Blockierte User im privaten Chat werden aufgefordert, `/accept` oder `/consent` zu nutzen. Für `unreachable` User: Bot zuerst privat starten, dann `/accept`.
+> **Hinweis zur Nutzung:** Human-User können den Bot automatisch nutzen. Kein Consent-Dialog erforderlich. Rollen (owner/admin/vip/normal/ignore) steuern weiterhin Berechtigungen. Bot-to-Bot-Kommunikation erfordert weiterhin explizite Freigabe (siehe Abschnitt "Bot-zu-Bot-Freigabe").
 
 ---
 
@@ -864,7 +794,7 @@ Das Bildanalyse-Coreplugin bietet eine sichere, default-off Bildanalyse für KI 
 
 **Voraussetzungen:**
 - `vip`, `admin` oder `owner` Rolle (`ignore` ist immer blockiert)
-- Consent erteilt (`/accept`)
+- Topic/Quota-Gates beachten
 
 **Rollenbasierte Limits (IMG-B8):**
 | Rolle | Limit |
@@ -956,8 +886,8 @@ Der Bot unterstützt das Senden von Bildern über Telegram mit Policy/Role/Topic
 
 **Voraussetzungen:**
 - `vip`, `admin` oder `owner` Rolle
-- Consent erteilt (`/accept`)
 - Bildsendung für das Topic aktiviert
+- Quota-Limits beachten
 
 **Policy-Gates:**
 - Dieselben Rollenprüfungen wie bei Textnachrichten (`send_message`-Capability)
@@ -1068,9 +998,42 @@ Der Bot unterstützt das Senden von Bildern über Telegram mit Policy/Role/Topic
 
 ### Auto Web Research (Search→Scrape Chain)
 
-Verbesserte automatische Web-Recherche für aktuelle/zeitnahe Fragen (Markt/Kurs/Preis, News, Releases, Status, Wetter, Verkehr, Ausfälle, Versionen, Updates, etc.). Startet mit konfiguriertem SearXNG-Websearch. Bei Fragen zu aktuellen Werten kann optional die Top-URL per statischer Seitenextraktion angefragt werden; falls diese leer/unbrauchbar ist, erfolgt maximal ein Chromium/Browser-Fallback für eine URL. Keine neuen User/Admin-Commands, keine neue Config erforderlich. Verhalten ist bounded/transparent. Zeitlose/allgemeine Bildungsfragen lösen sie nicht aus. Bei nicht bestätigbaren Werten antwortet der Bot wahrheitsgemäß, dass die Websuche erfolgreich war, die Extraktion aber keine exakten aktuellen Werte bestätigen konnte.
+Verbesserte automatische Web-Recherche für aktuelle/zeitnahe Fragen (Markt/Kurs/Preis, News, Releases, Status, Wetter, Verkehr, Ausfälle, Versionen, Updates, etc.). Startet mit konfiguriertem SearXNG-Websearch. Bei Fragen zu aktuellen Werten kann optional eine begrenzte Dokument-Extraktion aus Top-URLs via Crawlee mit httpx-Fallback erfolgen; falls diese leer/unbrauchbar ist, erfolgt maximal ein Chromium/Browser-Fallback für eine URL. **Manueller Browser-Trigger:** `browser: <http-oder-https-url>` oder `webbrowser: <http-oder-https-url>` im Chat löst direkt einen gezielten Browser-Fetch aus (z. B. `browser: https://example.com` oder `browser: http://example.com`). Keine neuen User/Admin-Commands erforderlich; optionale `AMO_DOCUMENT_FETCH_*`-Settings steuern Dokument-Timeout, maximale Bytes, Redirect-Limit und Crawlee-Präferenz. Browser-Output ist begrenzte strukturierte Evidence (URL, Titel, UTC-Zeitstempel, HTTP-Status, gecappte Text-Snippets), kein roher Seiten-Dump. Browser- und Dokument-Provider sind sicherheitsgeschützt und durch Limits für Seiten, Laufzeit, Snippets, Ausgabegröße, Dokumentgröße, MIME-Type und Redirects begrenzt; erlaubt sind nur `http://` und `https://`, Credentials sowie localhost/private/interne IP-Ziele werden blockiert, und Formular-Submits werden nicht ausgeführt. Telemetrie erfasst Browser-Erfolg, HTTP-Fehler, Timeout und Failure-Ergebnisse. Zeitlose/allgemeine Bildungsfragen lösen sie nicht aus. Bei nicht bestätigbaren Werten antwortet der Bot wahrheitsgemäß, dass die Websuche erfolgreich war, die Extraktion aber keine exakten aktuellen Werte bestätigen konnte.
 
 **Feedback-gesteuerte Follow-up-Recherche:** Nutzer-Feedback kann eine weitere begrenzte Recherche-Runde auslösen, wenn die vorherige Antwort als unzureichend empfunden wird (z.B. "such weiter", "andere Quellen", "öffne/prüfe die Quellen", "das reicht nicht", "search more", "more sources"). Die Follow-up-Recherche bleibt begrenzt (SearXNG zuerst, statische Extraktion gecappt, maximal ein Browser-Fallback) und transparent: Falls weiterhin keine Bestätigung möglich ist, teilt der Bot dies mit. Für die Follow-up-Suche kann Kontext aus der vorherigen Bot-Antwort/Reply verwendet werden; die Rohanfrage wird nicht geloggt, aber an den konfigurierten Websearch-Provider übermittelt.
+
+---
+
+### Manuelle Browser-Kommandos
+
+Für gezielte Browser-Abfragen können direkte Trigger im Chat verwendet werden:
+
+**Format:** `browser: <url>` oder `webbrowser: <url>`
+**Beispiel:** `browser: https://example.com`
+
+**Anforderungen:**
+- Nur HTTP/HTTPS-URLs erlaubt
+- Unterstützt sowohl `http://` als auch `https://`
+
+**Browser-Ausgabe:**
+- URL, Seitentitel, UTC-Timestamp, HTTP-Status
+- Gecappte Text-Snippets (maximale Länge begrenzt)
+- Keine vollständigen Seiteninhalte
+
+**Sicherheitsbeschränkungen:**
+- Keine Credentials/Authentifizierung
+- Keine privaten/lokalen IPs (localhost, 127.0.0.1, interne Netzwerke)
+- Keine DNS-Auflösung zu privaten IPs
+- Blockiert nicht-GET/HEAD/OPTIONS-Methoden
+- Formular-Submits unterdrückt
+
+**Limits:**
+- Max 1 URL pro Anfrage
+- Zeitbudget pro Request begrenzt
+- Output gecappt für schnelle Antworten
+- Keine unbegrenzte Seitentiefe
+
+**Verwendung:** Manuelle Browser-Kommandos eignen sich für aktuelle, dynamische Quellen (z.B. aktuelle Preise, Status-Seiten, Verfügbarkeiten), wenn normale Websuche nicht ausreicht.
 
 ### Webtool-Quotas (Issue #48)
 
@@ -1270,9 +1233,6 @@ Nutze diese Checkliste für deinen Test:
 - [ ] WebUI startet ohne Fehler
 - [ ] Privater Chat /ping: OK
 - [ ] Privater Chat /help: OK
-- [ ] Privater Chat /consent: OK
-- [ ] Privater Chat /accept: OK
-- [ ] Privater Chat /decline: OK
 - [ ] Privater Chat /role: OK
 - [ ] Gruppen-Test /ping: OK
 - [ ] Gruppen-Test /help: OK
@@ -1303,7 +1263,7 @@ Nutze diese Checkliste für deinen Test:
 - [ ] IMG-B3 Größenlimit (oversize-Handling): OK / Nicht getestet
 - [ ] IMG-B4 Bildsendung via Telegram-API: OK / Nicht getestet
 - [ ] IMG-B4 Topic-sichere Bildsendung (message_thread_id): OK / Nicht getestet
-- [ ] IMG-B4 Deny-Verhalten (Rolle/Consent/Topic-Gates): OK / Nicht getestet
+- [ ] IMG-B4 Deny-Verhalten (Rolle/Topic/Quota-Gates): OK / Nicht getestet
 - [ ] IMG-B5 WebUI Bildanalyse pro Topic (inherit/enabled/disabled): OK / Nicht getestet
 - [ ] IMG-B7 WebUI Image Analysis Role Quotas (/users Seite, disabled/unlimited/limited): OK / Nicht getestet
 - [ ] Security Headers vorhanden (Browser-Dev-Tools prüfen): OK

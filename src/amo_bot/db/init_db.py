@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 from sqlalchemy import inspect, select, text
 
 from amo_bot.db.base import Base, create_session_factory
@@ -8,6 +10,7 @@ from amo_bot.db.models import (
     DbRole,
     ImageAnalyzeRoleQuota,
     PrivateChatPolicy,
+    ResearchProvider,
     UpdateOffset,
     WebToolRoleQuota,
 )
@@ -719,5 +722,29 @@ def init_db(database_url: str) -> None:
                 row.daily_limit = None
 
             row.mode = normalized_mode
+
+        try:
+            from amo_bot.telegram.webtool_evidence import PROVIDER_REGISTRY
+        except Exception:
+            PROVIDER_REGISTRY = {}
+
+        for definition in PROVIDER_REGISTRY.values():
+            row = session.scalar(
+                select(ResearchProvider).where(ResearchProvider.provider_name == definition.name)
+            )
+            if row is None:
+                session.add(
+                    ResearchProvider(
+                        provider_name=definition.name,
+                        source_name=definition.source_name,
+                        domain=definition.domain,
+                        enabled=definition.enabled_by_default,
+                        default_priority=definition.default_priority,
+                        fallback_allowed=definition.fallback_allowed,
+                        min_confidence=definition.min_confidence,
+                        max_age_seconds=definition.max_age_seconds,
+                        metadata_json=json.dumps({"seed": "webtool_evidence_registry"}, sort_keys=True),
+                    )
+                )
 
         session.commit()

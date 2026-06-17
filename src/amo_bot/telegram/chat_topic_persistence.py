@@ -7,29 +7,10 @@ import re
 from sqlalchemy.orm import sessionmaker
 
 from amo_bot.ai.memory_c2_service import MemoryC2Service, MemoryScope
-from amo_bot.consent.prompt_service import ConsentPromptService
 from amo_bot.db.models import GROUP_CHAT_TYPES, AuditEvent
 from amo_bot.db.repositories import ChatSeenUserRepository, ChatTopicRepository, TopicAgentMemoryRepository, UserMemoryProfileRepository, UserRoleRepository
 from amo_bot.telegram.owner_notify import OwnerNotifier
 from amo_bot.telegram.update_parser import TelegramMessage, TelegramUser
-
-
-GROUP_CONSENT_TEXTS: dict[str, str] = {
-    "welcome.with_mention": (
-        "Willkommen {mention} in {group_label}. "
-        "Ich bin der KI-Bot der Gruppe. "
-        "Damit du mich nutzen kannst und ich mit dir interagieren kann, "
-        "musst du den Nutzungsbedingungen zustimmen."
-    ),
-    "welcome.no_mention": (
-        "Willkommen in {group_label}. "
-        "Ich bin der KI-Bot der Gruppe. "
-        "Damit du mich nutzen kannst und ich mit dir interagieren kann, "
-        "musst du den Nutzungsbedingungen zustimmen."
-    ),
-    "group_label.fallback": "der Gruppe",
-    "button.open_policy_private": "Policy privat öffnen",
-}
 
 
 logger = logging.getLogger(__name__)
@@ -94,7 +75,6 @@ class ChatTopicPersistenceService:
     ) -> None:
         self._session_factory = session_factory
         self._send_private_message = send_private_message
-        self._consent_prompt_service = ConsentPromptService()
         self._owner_notifier = owner_notifier
         self._send_group_markup = send_group_markup
         self._send_group_text = send_group_text
@@ -203,43 +183,6 @@ class ChatTopicPersistenceService:
 
             if existing_user is None and self._owner_notifier is not None:
                 await self._owner_notifier.notify_new_user_discovered(user=user, message=message)
-
-            if self._send_private_message is not None:
-                prompt_result = await self._consent_prompt_service.maybe_prompt_user(
-                    user=user,
-                    send_private_message=self._send_private_message,
-                )
-                if prompt_result == "prompted" and existing_user is None and self._owner_notifier is not None:
-                    await self._owner_notifier.notify_consent_prompt_sent(user=user, message=message)
-                if prompt_result == "unreachable":
-                    if self._owner_notifier is not None:
-                        await self._owner_notifier.notify_consent_unreachable(user=user, reason="private_dm_unreachable")
-                    if (
-                        existing_user is None
-                        and (self._send_group_markup is not None or self._send_group_text is not None)
-                        and message.chat.type in GROUP_CHAT_TYPES
-                    ):
-                        try:
-                            text = self._build_group_unreachable_text(message=message)
-                            markup = self._build_group_unreachable_markup()
-                            if markup is not None and self._send_group_markup is not None:
-                                await self._send_group_markup(
-                                    message.chat.id,
-                                    text,
-                                    markup,
-                                    message.message_thread_id,
-                                )
-                            elif self._send_group_text is not None:
-                                await self._send_group_text(
-                                    message.chat.id,
-                                    text,
-                                    message.message_thread_id,
-                                )
-                            if self._owner_notifier is not None:
-                                await self._owner_notifier.notify_consent_group_fallback_sent(user=user, message=message)
-                        except Exception:
-                            # Fallback message send failure must not break persistence/consent state updates.
-                            logger.exception("group consent fallback send failed: chat_id=%s user_id=%s", message.chat.id, message.from_user.id)
 
             session.commit()
 
@@ -371,38 +314,3 @@ class ChatTopicPersistenceService:
                 skip_existing=True,
             )
             session.commit()
-
-    def _build_group_unreachable_text(self, *, message: TelegramMessage) -> str:
-        mention = self._render_user_mention(message=message)
-        group_label = self._render_group_label(message=message)
-        if mention:
-            return GROUP_CONSENT_TEXTS["welcome.with_mention"].format(
-                mention=mention,
-                group_label=group_label,
-            )
-        return GROUP_CONSENT_TEXTS["welcome.no_mention"].format(group_label=group_label)
-
-    def _render_user_mention(self, *, message: TelegramMessage) -> str:
-        if message.from_user.username:
-            return f"@{message.from_user.username}"
-        return ""
-
-    def _render_group_label(self, *, message: TelegramMessage) -> str:
-        if message.chat.title:
-            return message.chat.title
-        return GROUP_CONSENT_TEXTS["group_label.fallback"]
-
-    def _build_group_unreachable_markup(self) -> dict[str, object] | None:
-        bot_username = (self._bot_username or "").strip().lstrip("@")
-        if not bot_username:
-            return None
-        return {
-            "inline_keyboard": [
-                [
-                    {
-                        "text": GROUP_CONSENT_TEXTS["button.open_policy_private"],
-                        "url": f"https://t.me/{bot_username}?start=consent",
-                    }
-                ]
-            ]
-        }

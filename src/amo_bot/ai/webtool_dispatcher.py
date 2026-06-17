@@ -53,6 +53,7 @@ class WebtoolCapabilityRequest:
         url: For webscraping: the target URL.
         locale: Optional locale for websearch (default "en").
         max_results: Optional max results for websearch (default 5).
+        evidence_domain: Optional classified research domain for metadata-only learning.
     """
     capability: str
     user_id: int
@@ -63,6 +64,7 @@ class WebtoolCapabilityRequest:
     url: str = ""
     locale: str = "en"
     max_results: int = 5
+    evidence_domain: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -100,6 +102,10 @@ def _map_operation_type(capability: str) -> str:
         return WebtoolOperationType.WEBSCRAPING
     if normalized == "browser":
         return WebtoolOperationType.BROWSER
+    if normalized in {"weather_evidence", "weather"}:
+        return WebtoolOperationType.WEATHER_EVIDENCE
+    if normalized in {"crypto_evidence", "crypto"}:
+        return WebtoolOperationType.CRYPTO_EVIDENCE
     return normalized
 
 
@@ -185,6 +191,7 @@ class WebtoolCapabilityDispatcher:
             url=request.url,
             locale=request.locale,
             max_results=request.max_results,
+            evidence_domain=request.evidence_domain,
         )
 
         # Execute via service (which checks quota and sanitizes results)

@@ -2,6 +2,356 @@
 
 ---
 
+## [Unreleased] – Current-Info Eval Harness (Issue #75)
+
+**Datum / Date:** 2026-06-17
+
+### 🇩🇪 Deutsch
+
+#### Übersicht
+Einführung eines deterministischen Eval-Harness für Current-Info-Antwortqualität. Ermöglicht reproduzierbare Tests für Suchanfragen mit lokalen Fixtures und Live-Providern.
+
+#### Neu
+- **Eval CLI:** `python -m amo_bot.current_info.eval <fixture>` zum Ausführen von Eval-Fällen.
+- **Ausgabeformate:** Stabile `--json` und `--jsonl` Ausgabe für Integrationen.
+- **Trennung local/live:** Fixtures unterstützen `local_only`-Modus für deterministische Tests.
+- **Testabdeckung:** Unit-Tests und Beispiel-Fixtures in `tests/fixtures/current_info_eval_cases.json`.
+
+#### Verwendung
+```bash
+# Einzelnes Fixture ausführen
+python -m amo_bot.current_info.eval tests/fixtures/current_info_eval_cases.json
+
+# Als JSONL für Pipeline-Integration
+python -m amo_bot.current_info.eval tests/fixtures/current_info_eval_cases.json --jsonl
+
+# Nur lokale Provider verwenden
+python -m amo_bot.current_info.eval tests/fixtures/current_info_eval_cases.json --local-only
+```
+
+### 🇬🇧 English
+
+#### Overview
+Introduction of a deterministic eval harness for current-info answer quality. Enables reproducible testing of search queries with local fixtures and live providers.
+
+#### New
+- **Eval CLI:** `python -m amo_bot.current_info.eval <fixture>` for running eval cases.
+- **Output formats:** Stable `--json` and `--jsonl` output for integrations.
+- **Local/live separation:** Fixtures support `local_only` mode for deterministic testing.
+- **Test coverage:** Unit tests and sample fixtures in `tests/fixtures/current_info_eval_cases.json`.
+
+#### Usage
+```bash
+# Run single fixture
+python -m amo_bot.current_info.eval tests/fixtures/current_info_eval_cases.json
+
+# As JSONL for pipeline integration
+python -m amo_bot.current_info.eval tests/fixtures/current_info_eval_cases.json --jsonl
+
+# Use local providers only
+python -m amo_bot.current_info.eval tests/fixtures/current_info_eval_cases.json --local-only
+```
+
+---
+
+## [Unreleased] – Current-Info Telegram Bot Integration (Issue #74)
+
+**Datum / Date:** 2026-06-17
+
+### 🇩🇪 Deutsch
+
+#### Übersicht
+Integration von Current-Info Antwort-Synthese in den Telegram Bot. Current-Info wird vor dem Legacy-Webtool als automatische Antwort verwendet, wenn aktuelle Informationen benötigt werden.
+
+#### Neu
+- **AMO_CURRENT_INFO_ENABLED:** Feature-Gate zum Aktivieren/Deaktivieren der Current-Info-Integration.
+- **Service-Konstruktion:** Current-Info-Service wird in `main.py` konditional bei aktiviertem Feature-Gate erstellt.
+- **Dispatcher Autoreply:** Current-Info-Autoreply wird vor dem Legacy-AI-Autoreply ausgeführt; Fallback bei Timeout oder Fehler.
+- **Locale-Aware Formatierung:** "Quellen:" (DE) oder "Sources:" (EN) basierend auf User-Locale.
+- **Timeout-Handling:** Konfigurierbares Timeout mit Fallback zu Legacy-AI bei Überschreitung.
+
+#### Technisch
+- Neue Dispatcher-Parameter: `current_info_enabled`, `current_info_timeout_seconds`, `current_info_max_results`, `current_info_max_documents`.
+- `_try_current_info_autoreply()` prüft auf Research-Bedarf und führt Current-Info-Query durch.
+- `_format_current_info_telegram_answer()` formatiert Antwort mit lokalisierten Quellen.
+- Alle Tests passieren.
+
+### 🇬🇧 English
+
+#### Overview
+Integration of Current-Info answer synthesis into the Telegram bot. Current-Info is used as an automatic reply before the legacy webtool when current information is needed.
+
+#### New
+- **AMO_CURRENT_INFO_ENABLED:** Feature gate to enable/disable Current-Info integration.
+- **Service Construction:** Current-Info service is conditionally built in `main.py` when feature gate is enabled.
+- **Dispatcher Autoreply:** Current-Info autoreply runs before legacy AI autoreply; fallback on timeout or error.
+- **Locale-Aware Formatting:** "Quellen:" (DE) or "Sources:" (EN) based on user locale.
+- **Timeout Handling:** Configurable timeout with fallback to legacy AI on exceedance.
+
+#### Technical
+- New dispatcher parameters: `current_info_enabled`, `current_info_timeout_seconds`, `current_info_max_results`, `current_info_max_documents`.
+- `_try_current_info_autoreply()` checks for research need and performs Current-Info query.
+- `_format_current_info_telegram_answer()` formats response with localized sources.
+- All tests passing.
+
+---
+
+## [Unreleased] – Current-Info Evidence Assembly (Issue #73)
+
+**Datum / Date:** 2026-06-16
+
+### 🇩🇪 Deutsch
+
+#### Übersicht
+Einführung von Evidence Assembly und Verification für Current-Info-Abfragen. Der Service liefert jetzt strukturierte Evidenz-Pakete mit Konfidenz, Warnungen und Qualitätsflags.
+
+#### Neu
+- **EvidencePackage:** Erweiterte Current-Info-Evidenz mit Chunks, Dokumenten, Quellen, Freshness, Konfidenz (0.0-1.0) und Warnungen.
+- **EvidencePackageSource:** Strukturierte Quellenangaben inklusive Host, Source-Type, Fetch-Status und Stale-Flag.
+- **Confidence Scoring:** Konservative Konfidenzbewertung basierend auf Fetch-Status, unabhängigen Hosts, Freshness und Konflikten.
+- **Warning System:** Explizite Warnungen bei Snippet-only-Evidenz, unfetched Chunks, veralteten Daten oder Quellenkonflikten.
+- **Quality Gates:** Snippets allein gelten nicht mehr als verifizierte Current-Info-Antwort; News/Evidenz wird konservativer bewertet.
+
+#### Technisch
+- Neue `current_info/evidence.py` für Evidence Assembly, angebunden an die bestehende Domain-Klassifizierung aus `webtool_evidence.py`.
+- `CurrentInfoAnswer` exportiert Konfidenz und Warnungen sichtbar für nachgelagerte Nutzung.
+- Tests decken Single-Source, zwei unabhängige Quellen, Konflikte, stale Quellen und Snippet-only-Rejection ab.
+
+### 🇬🇧 English
+
+#### Overview
+Introduction of evidence assembly and verification for current-info queries. The service now delivers structured evidence packages with confidence scores, warnings, and quality flags.
+
+#### New
+- **EvidencePackage:** Extended current-info evidence with chunks, documents, sources, freshness, confidence (0.0-1.0), and warnings.
+- **EvidencePackageSource:** Structured source references with host, source type, fetch status, and stale flag.
+- **Confidence Scoring:** Conservative confidence assessment based on fetch status, independent hosts, freshness, and conflicts.
+- **Warning System:** Explicit warnings for snippet-only evidence, unfetched chunks, stale data, or source conflicts.
+- **Quality Gates:** Snippets alone no longer count as verified current-info answers; news evidence is evaluated more conservatively.
+
+#### Technical
+- New `current_info/evidence.py` for evidence assembly, connected to the existing domain classifier from `webtool_evidence.py`.
+- `CurrentInfoAnswer` exposes confidence and warnings visibly for downstream usage.
+- Tests cover single-source, two independent sources, conflicts, stale sources, and snippet-only rejection.
+
+---
+
+## [Unreleased] – Bounded Browser Provider
+
+**Datum / Date:** 2026-06-16
+
+### 🇩🇪 Deutsch
+
+#### Übersicht
+Einführung eines begrenzten Browser-Providers für dynamische/aktuelle Quellen mit verbessertem Output-Format, Sicherheitsbeschränkungen und manuellem Chat-Trigger.
+
+#### Neu
+- **Bounded Browser Evidence:** Browser-Ausgabe enthält URL, Seitentitel, UTC-Timestamp, HTTP-Status und gecappte Text-Snippets (keine vollständigen Seiteninhalte).
+- **Per-Request Limits:** Maximale Seitenanzahl, Zeitbudget pro Request, begrenzte Snippet-Anzahl/Länge und Output-Cap.
+- **Protokoll-Beschränkungen:** Nur HTTP/HTTPS erlaubt; Credentials blockiert; localhost/private/internal IPs blockiert; DNS-Auflösung zu privaten IPs blockiert.
+- **Route Guard:** Blockiert private/internal Subrequests und nicht-GET/HEAD/OPTIONS-Methoden; unterdrückt Formular-Submits.
+- **Browser-Telemetry:** Erfasst Erfolg, HTTP-Fehler, Timeouts und Failures.
+- **Manueller Chat-Trigger:** `browser: <url>` oder `webbrowser: <url>` im Chat löst direkten Browser-Fetch aus (unterstützt http:// und https://).
+
+#### Sicherheit & Privacy
+- Keine Credentials oder Authentifizierung möglich.
+- Keine privaten/lokalen Netzwerkadressen erreichbar.
+- Metadata-only Logging (keine Queries, keine vollständigen URLs).
+
+### 🇬🇧 English
+
+#### Overview
+Introduction of a bounded browser provider for dynamic/current sources with improved output format, security restrictions, and manual chat trigger.
+
+#### New
+- **Bounded Browser Evidence:** Browser output includes URL, page title, UTC timestamp, HTTP status, and capped text snippets (no full page content).
+- **Per-Request Limits:** Max pages, time budget per request, limited snippet count/length, and output cap.
+- **Protocol Restrictions:** HTTP/HTTPS only; credentials blocked; localhost/private/internal IPs blocked; DNS resolution to private IPs blocked.
+- **Route Guard:** Blocks private/internal subrequests and non-GET/HEAD/OPTIONS methods; suppresses form submits.
+- **Browser Telemetry:** Captures success, HTTP errors, timeouts, and failures.
+- **Manual Chat Trigger:** `browser: <url>` or `webbrowser: <url>` in chat triggers direct browser fetch (supports http:// and https://).
+
+#### Security & Privacy
+- No credentials or authentication possible.
+- No private/local network addresses reachable.
+- Metadata-only logging (no queries, no full URLs).
+
+---
+
+## [Unreleased] – Entfernung Human-User-Consent / Removal of Human User Consent
+
+**Datum / Date:** 2026-06-12
+
+### 🇩🇪 Deutsch
+
+#### Übersicht
+Entfernung des expliziten Consent-Dialogs für menschliche Nutzer. Neue Human-User können den Bot automatisch nutzen.
+
+#### Geändert
+- **Consent-Pflicht entfernt:** Menschliche Nutzer benötigen keinen expliziten Consent-Dialog (`/accept`, `/consent`) mehr.
+- **Automatische Nutzung:** Human-User sind direkt nach dem ersten Kontakt nutzbar (Rolle `normal` als Default).
+- **Rollen-System bleibt:** Owner/Admin/VIP/Normal/Ignore-Rechte weiterhin aktiv.
+- **Bot-to-Bot unverändert:** Bot-to-Bot-Kommunikation erfordert weiterhin explizite Freigabe via Consent-Commands.
+
+#### Technisch
+- Keine `pending`/`declined`/`unreachable`-Runtime-Blocks mehr für Human-User.
+- Commands `/accept`, `/decline`, `/consent` weiterhin verfügbar für Bot-to-Bot-Freigabe.
+
+### 🇬🇧 English
+
+#### Overview
+Removal of explicit consent dialog for human users. New human users can now use the bot automatically.
+
+#### Changed
+- **Consent requirement removed:** Human users no longer need an explicit consent dialog (`/accept`, `/consent`).
+- **Automatic usage:** Human users are usable immediately after first contact (role `normal` as default).
+- **Role system remains:** Owner/Admin/VIP/Normal/Ignore permissions remain active.
+- **Bot-to-bot unchanged:** Bot-to-bot communication still requires explicit approval via consent commands.
+
+#### Technical
+- No more `pending`/`declined`/`unreachable` runtime blocks for human users.
+- Commands `/accept`, `/decline`, `/consent` remain available for bot-to-bot approval.
+
+---
+
+## [Unreleased] – Search Planner & Auto Follow-up Research
+
+**Datum / Date:** 2026-06-11
+
+### 🇩🇪 Deutsch
+
+#### Übersicht
+Automatische Follow-up-Recherche mit geplantem Search-Planner: Erkennung schwacher initialer Evidenz und gezielte Verbesserung durch maximal einen Follow-up-Websearch.
+
+#### Neu
+- **ResearchPlan / SearchPlanStep:** Strukturierte Planung von Follow-up-Suchen in `webtool_research_orchestrator.py`.
+- **Schwache Evidenz-Erkennung:** Auto-Research erkennt einseitige News, geringe Source-Host-Coverage oder schwache/konfliktbehaftete `source_observations`.
+- **Geplanter Follow-up:** Höchstens ein geplanter `websearch` als Follow-up bei unzureichender initialer Evidenz.
+- **Ergebnis-Merging:** Brauchbare Follow-up-Ergebnisse werden mit initialen Ergebnissen gemerged und durch die bestehende Search->Scrape Chain weiterverarbeitet.
+- **Fail-Closed:** Bei weiterhin unzureichender Evidenz nach Follow-up: sicheres Fail-Closed-Verhalten.
+- **Eval Harness:** Erweiterte Test-Infrastruktur für Search-Planner-Validierung.
+
+#### Technisch / Privacy
+- **Logging:** Metadata-only (keine raw Queries, keine vollen URLs).
+- Keine neuen Commands.
+- Keine neue Config erforderlich.
+
+### 🇬🇧 English
+
+#### Overview
+Automatic follow-up research with planned search planner: detection of weak initial evidence and targeted improvement through at most one follow-up websearch.
+
+#### New
+- **ResearchPlan / SearchPlanStep:** Structured planning of follow-up searches in `webtool_research_orchestrator.py`.
+- **Weak Evidence Detection:** Auto-research detects one-sided news, low source-host coverage, or weak/conflicting `source_observations`.
+- **Planned Follow-up:** At most one planned `websearch` as follow-up when initial evidence is insufficient.
+- **Result Merging:** Viable follow-up results are merged with initial results and processed through the existing Search->Scrape Chain.
+- **Fail-Closed:** Safe fail-closed behavior when evidence remains insufficient after follow-up.
+- **Eval Harness:** Extended test infrastructure for search planner validation.
+
+#### Technical / Privacy
+- **Logging:** Metadata-only (no raw queries, no full URLs).
+- No new commands.
+- No new config required.
+
+---
+
+## [Unreleased] – Web Research Provider Registry & Health Monitoring
+
+**Datum / Date:** 2026-06-11
+
+### 🇩🇪 Deutsch
+
+#### Übersicht
+Erweiterte Webtool-Infrastruktur mit Provider-Registry, Health-Monitoring und Quality-Gates für zuverlässigere Datenquellen.
+
+#### Neu
+- **Source/Provider Registry:** Zentrale Registry für Weather- und Crypto-Provider mit definierten Default-Kandidaten.
+- **DB-Source-Auswahl:** Provider-Auswahl nutzt `research_providers` plus Health/Freshness/Observations stärker für zuverlässigere Quellen.
+- **Kein Legacy-Fallback:** Explicit leere DB-Candidates fallen nicht mehr auf Legacy-Defaults zurück.
+- **Disabled-Provider-Schutz:** Disabled Provider bleiben dauerhaft disabled (keine automatische Reaktivierung).
+- **Source-Quality/Corroboration Gate:** News/Chain-Extracts erkennen Konflikte und zu schwache Quellen konservativer (Fail-Closed bei Unsicherheit).
+- **Weather-Provider:** Open-Meteo (primär) + wttr.in (Fallback) für Wetterabfragen.
+- **Crypto-Provider:** CoinGecko (primär) + Binance public ticker (Fallback), eng begrenzt auf BTC/ETH in USD/USDT; unbekannte Assets oder EUR-Paare führen zu Fail-Closed.
+- **Health-Monitoring (DB-gestützt):** Provider-Health wird in der Datenbank persistiert (`research_provider_health`) und über Neustarts hinweg nutzbar.
+- **Research-Tabellen:** Neue DB-Tabellen für zukünftige Research-Einheit: `research_providers`, `research_source_observations`, `research_eval_cases`.
+- **Stock/Sports:** Bleiben fail-closed ohne strukturierte Provider (keine unsicheren Annahmen).
+- **Quota/Audit:** Metadata-only Persistenz für Audit-Zwecke (keine raw Queries/URLs/Secrets).
+- **Source Observations:** Webtool success/fail-closed/error sowie Role-/Quota-Denials erzeugen automatisch persistente Source-Observations in `research_source_observations`.
+- **Eval Cases:** Negatives Research-/Source-Feedback erzeugt automatisch sanitisierte Eval-Cases in `research_eval_cases`.
+- **Eval Harness/Tests:** Test-Infrastruktur für stored sanitized Eval-Cases (Validierung von Source-Quality-Gates).
+- **Privacy-Gate:** Alle Observations/Eval-Cases speichern ausschließlich Metadata (keine raw Queries, keine vollständigen URLs, keine Tokens/Secrets/Bearer-artigen Werte; `source_hosts` nur Hostnamen).
+
+#### Technisch
+- **DB-Persistenz:** Provider-Health über Neustarts nutzbar; atomare Counter-Updates mit Race-Recovery bei first-create.
+- **Privacy:** Keine raw Queries/URLs/Secrets in Health-Daten – nur Metadata.
+- Keine neue Config erforderlich (bestehende `AMO_WEBSEARCH_SEARXNG_BASE_URL` bzw. Legacy-Alias `SEARXNG_BASE_URL` bleibt primärer Websearch-Provider).
+- Keine neuen Commands.
+- Fail-Closed-Verhalten bei nicht verifizierbaren Live-Daten.
+
+#### Maintenance / Datenbank-Migration
+Für bestehende Datenbanken können die Research-Tabellen gezielt über CLI erstellt werden:
+
+```bash
+# Dry-run: zeigt vorhandene/fehlende Tabellen
+python -m amo_bot.db.research_tables --database-url "$DATABASE_URL" --dry-run
+
+# Apply: erstellt fehlende Tabellen (Backup vorher empfohlen)
+python -m amo_bot.db.research_tables --database-url "$DATABASE_URL"
+```
+
+**Hinweise:**
+- Das Kommando erstellt **nur** die vier Research-Tabellen (`research_providers`, `research_provider_health`, `research_source_observations`, `research_eval_cases`).
+- Es berührt **keine** anderen Tabellen (kein `init_db`, kein Seeding).
+- **Sicherheit:** Die URL im Kommandozeilen-Argument kann in der Prozessliste sichtbar sein (ps/top). Secrets werden im Code nicht geloggt.
+
+### 🇬🇧 English
+
+#### Overview
+Enhanced web tool infrastructure with provider registry, health monitoring, and quality gates for more reliable data sources.
+
+#### New
+- **Source/Provider Registry:** Central registry for Weather and Crypto providers with defined default candidates.
+- **DB-Source Selection:** Provider selection leverages `research_providers` plus Health/Freshness/Observations more strongly for more reliable sources.
+- **No Legacy Fallback:** Explicit empty DB candidates no longer fall back to Legacy defaults.
+- **Disabled-Provider Protection:** Disabled providers remain permanently disabled (no automatic reactivation).
+- **Source-Quality/Corroboration Gate:** News/Chain-extracts detect conflicts and overly weak sources more conservatively (fail-closed on uncertainty).
+- **Weather Providers:** Open-Meteo (primary) + wttr.in (fallback) for weather queries.
+- **Crypto Providers:** CoinGecko (primary) + Binance public ticker (fallback), strictly limited to BTC/ETH in USD/USDT; unknown assets or EUR pairs result in fail-closed behavior.
+- **Health Monitoring (DB-backed):** Provider health persisted to database (`research_provider_health`) and survives restarts.
+- **Research Tables:** New DB tables for future research unit: `research_providers`, `research_source_observations`, `research_eval_cases`.
+- **Stock/Sports:** Remain fail-closed without structured providers (no unsafe assumptions).
+- **Quota/Audit:** Metadata-only persistence for audit purposes (no raw queries/URLs/secrets).
+- **Source Observations:** Webtool success/fail-closed/error as well as role/quota denials automatically generate persistent source observations in `research_source_observations`.
+- **Eval Cases:** Negative research/source feedback automatically generates sanitized eval cases in `research_eval_cases`.
+- **Eval Harness/Tests:** Test infrastructure for stored sanitized eval cases (validation of source-quality gates).
+- **Privacy Gate:** All observations/eval cases store metadata only (no raw queries, no full URLs, no tokens/secrets/bearer-like values; `source_hosts` contains hostnames only).
+
+#### Technical
+- **DB Persistence:** Provider health survives restarts; atomic counter updates with race recovery on first-create.
+- **Privacy:** No raw queries/URLs/secrets in health data – metadata only.
+- No new config required (existing `AMO_WEBSEARCH_SEARXNG_BASE_URL` or legacy alias `SEARXNG_BASE_URL` remains primary websearch provider).
+- No new commands.
+- Fail-closed behavior for unverifiable live data.
+
+#### Maintenance / Database Migration
+For existing databases, the research tables can be created specifically via CLI:
+
+```bash
+# Dry-run: shows existing/missing tables
+python -m amo_bot.db.research_tables --database-url "$DATABASE_URL" --dry-run
+
+# Apply: creates missing tables (backup recommended beforehand)
+python -m amo_bot.db.research_tables --database-url "$DATABASE_URL"
+```
+
+**Notes:**
+- This command creates **only** the four research tables (`research_providers`, `research_provider_health`, `research_source_observations`, `research_eval_cases`).
+- It does **not** touch any other tables (no `init_db`, no seeding).
+- **Security:** The URL in the command-line argument may be visible in the process list (ps/top). Secrets are not logged in code.
+
+---
+
 ## [Unreleased] – Auto Web Research Feedback Follow-up (v3)
 
 **Datum / Date:** 2026-06-01
@@ -44,7 +394,7 @@ Verbesserte automatische Web-Recherche für aktuelle/zeitnahe Fragen (Markt/Kurs
 #### Neu
 - **Search→Scrape Chain:** Automatische Folge von Websuche → statische Extraktion → optionaler Browser-Fallback (max. eine URL).
 - **Bounded/Transparent:** Verhalten ist begrenzt (max. eine URL bei static-extraction-miss) und transparent (keine Behauptungen über fehlende Tools).
-- **Keine neue Config:** Funktioniert mit bestehender SearXNG-Konfiguration (`SEARXNG_BASE_URL`).
+- **Keine neue Config:** Funktioniert mit bestehender SearXNG-Konfiguration (`AMO_WEBSEARCH_SEARXNG_BASE_URL` oder Legacy-Alias `SEARXNG_BASE_URL`).
 - **Keine neuen Commands:** Vollständig automatisch bei entsprechenden Intents (Fragen zu aktuellen Werten).
 
 #### Verhalten
@@ -67,7 +417,7 @@ Enhanced automatic web research for current/freshness-relevant questions (market
 #### New
 - **Search→Scrape Chain:** Automatic sequence of web search → static extraction → optional browser fallback (max one URL).
 - **Bounded/Transparent:** Behavior is bounded (max one URL on static-extraction-miss) and transparent (no claims about missing tools).
-- **No new config:** Works with existing SearXNG configuration (`SEARXNG_BASE_URL`).
+- **No new config:** Works with existing SearXNG configuration (`AMO_WEBSEARCH_SEARXNG_BASE_URL` or legacy alias `SEARXNG_BASE_URL`).
 - **No new commands:** Fully automatic for relevant intents (current value questions).
 
 #### Behavior
@@ -199,7 +549,7 @@ Wochenend-Release mit Korrekturen für Bildanalyse-Verhalten in privaten Chats u
 - **Fail-Closed für unbrauchbare Antworten:** Generische Ablehnungs-/Policy-Antworten des Providers werden als Fehler behandelt und auf eine wahrheitsgemäße "Nicht verfügbar"-Nachricht abgebildet.
 
 #### Websearch/SearXNG
-- **Konfiguration:** Websearch nutzt primär `SEARXNG_BASE_URL`, mit Fallback auf `AMO_WEBSEARCH_SEARXNG_BASE_URL`.
+- **Konfiguration:** Websearch nutzt primär `AMO_WEBSEARCH_SEARXNG_BASE_URL` (Legacy-Alias: `SEARXNG_BASE_URL`).
 - **Fail-closed:** Ohne konfigurierten SearXNG-Endpoint wird keine öffentliche Fallback-Suche verwendet; stattdessen wird leer/abgelehnt zurückgegeben. Wenn SearXNG konfiguriert ist, wird ausschließlich SearXNG verwendet – auch bei leeren/fehlerhaften Ergebnissen.
 - **URL-Sicherheit:** Öffentliche HTTP-URLs werden abgelehnt; HTTPS-URLs sind erlaubt. HTTP nur für Loopback/Private/Interne Netzwerke.
 - **Browser-Provider-Abhängigkeit:** Playwright-Runtime-Abhängigkeit und System-Chromium-Fallback, falls relevant.
@@ -217,7 +567,7 @@ Weekend release with fixes for image analysis behavior in private chats and webs
 - **Fail-Closed for Unusable Responses:** Generic refusal/policy responses from the provider are treated as failures and mapped to a truthful "unavailable" message.
 
 #### Websearch/SearXNG
-- **Configuration:** Websearch uses configured SearXNG JSON endpoint via `SEARXNG_BASE_URL` primary, with fallback to `AMO_WEBSEARCH_SEARXNG_BASE_URL`.
+- **Configuration:** Websearch uses configured SearXNG JSON endpoint via `AMO_WEBSEARCH_SEARXNG_BASE_URL` (legacy alias: `SEARXNG_BASE_URL`).
 - **Fail-Closed:** If no SearXNG endpoint is configured, no public fallback search is used; returns empty/denied instead. If SearXNG is configured, it is SearXNG-only, even when empty/error.
 - **URL Safety:** Public HTTP is rejected; HTTPS public is allowed; HTTP only for loopback/private/internal networks.
 - **Browser Provider Dependency:** Playwright runtime dependency and system Chromium fallback if relevant.
@@ -1005,13 +1355,13 @@ This is the first public release candidate of the AMO Telegram Bot. The software
 
 #### What's New
 
-- **Core Bot:** Fully implemented with role-based permission system (Owner, Admin, VIP, Normal, Ignore), consent management, and basic commands
+- **Core Bot:** Fully implemented with role-based permission system (Owner, Admin, VIP, Normal, Ignore) and basic commands. Note: Legacy consent management for human users has been removed (human users are now auto-approved; bot-to-bot communication remains consent-gated)
 - **Plugin System:** Manifest-based plugin loader with discovery, validation, registry, and activation (I1-I6 complete)
 - **WebUI:** Local Flask interface for management and configuration
 - **AI Integration:** `/ask` command, auto-replies, and memory system (Daily + Long Memory) via Ollama
 - **Topic Agent System:** Configurable per-topic AI behavior with memory curation (KI-A to KI-F4 complete)
 - **Core Plugins:** Policy-controlled AI capabilities for RSS feeds, web search, web scraping, API integration, context window builder, memory management, SQL read-only access (templates/views), and self-improvement proposals (CP-I1 and CP-Z1 complete)
-- **Image Analysis Coreplugin:** Secure image analysis interface (IMG-B4..IMG-B7) — default-off, stub implementation with policy/consent checks
+- **Image Analysis Coreplugin:** Secure image analysis interface (IMG-B4..IMG-B7) — default-off, stub implementation with policy/role checks (human users auto-approved; bot-to-bot remains consent-gated)
 - **Documentation:** Bilingual README, setup guides, and beta test instructions
 
 #### Known Limitations

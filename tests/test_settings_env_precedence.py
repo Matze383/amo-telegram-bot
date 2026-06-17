@@ -119,6 +119,8 @@ def test_ollama_retry_and_fallback_env_values_are_parsed(monkeypatch, tmp_path) 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("DOTENV_PATH", str(env_file))
     monkeypatch.delenv("AMO_ENV_OVERRIDE", raising=False)
+    monkeypatch.delenv("WEBUI_LOGIN_DELAY_BASE_SECONDS", raising=False)
+    monkeypatch.delenv("WEBUI_LOGIN_DELAY_MAX_SECONDS", raising=False)
 
     settings = get_settings()
 
@@ -210,6 +212,39 @@ def test_plugin_command_sandbox_enabled_defaults_false_and_can_be_enabled(monkey
     monkeypatch.setenv("PLUGIN_COMMAND_SANDBOX_ENABLED", "true")
     settings_enabled = get_settings()
     assert settings_enabled.plugin_command_sandbox_enabled is True
+
+
+def test_vector_qdrant_env_aliases_are_parsed_without_secret_leak(monkeypatch, tmp_path) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "\n".join(
+            [
+                "BOT_TOKEN=token-from-dotenv",
+                "WEBUI_PASSWORD=pw-from-dotenv",
+                "WEBUI_SECRET_KEY=dotenv-secret-key-0123456789-abcdefghij",
+                "AMO_VECTOR_ENABLED=true",
+                "AMO_VECTOR_PROVIDER=qdrant",
+                "QDRANT_URL=http://qdrant.local:6333/",
+                "QDRANT_API_KEY=super-secret-qdrant-key",
+                "AMO_VECTOR_EMBEDDING_MODEL=nomic-embed-text",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("DOTENV_PATH", str(env_file))
+    monkeypatch.delenv("AMO_ENV_OVERRIDE", raising=False)
+    monkeypatch.delenv("WEBUI_LOGIN_DELAY_BASE_SECONDS", raising=False)
+    monkeypatch.delenv("WEBUI_LOGIN_DELAY_MAX_SECONDS", raising=False)
+
+    settings = get_settings()
+
+    assert settings.amo_vector_enabled is True
+    assert settings.amo_vector_provider == "qdrant"
+    assert settings.amo_vector_url == "http://qdrant.local:6333"
+    assert settings.amo_vector_api_key == "super-secret-qdrant-key"
 
 
 def test_no_secret_values_are_exposed_in_validation_error(monkeypatch, tmp_path) -> None:

@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from amo_bot.ai import CapabilityDecisionResult, RSSFetchRequest, RSSHTTPResponse, execute_rss_fetch
+from amo_bot.telegram.outbound_text import split_telegram_message_text
 
 
 def _load_sandbox_types():
@@ -123,10 +124,11 @@ class _RecordingHostAPI:
         text_clean = (text or "").strip()
         if not text_clean:
             raise ValueError("text must not be empty")
-        op: dict[str, object] = {"op": "send_message", "chat_id": chat_id, "text": text_clean[: self._max_text_len]}
-        if message_thread_id is not None:
-            op["message_thread_id"] = message_thread_id
-        self._append(op)
+        for chunk in split_telegram_message_text(text_clean, limit=self._max_text_len):
+            op: dict[str, object] = {"op": "send_message", "chat_id": chat_id, "text": chunk}
+            if message_thread_id is not None:
+                op["message_thread_id"] = message_thread_id
+            self._append(op)
         return {"ok": True}
 
     async def reply(self, chat_id: int, message_id: int, text: str) -> dict[str, object]:
@@ -136,9 +138,10 @@ class _RecordingHostAPI:
         text_clean = (text or "").strip()
         if not text_clean:
             raise ValueError("text must not be empty")
-        self._append(
-            {"op": "reply", "chat_id": chat_id, "message_id": message_id, "text": text_clean[: self._max_text_len]}
-        )
+        chunks = split_telegram_message_text(text_clean, limit=self._max_text_len)
+        self._append({"op": "reply", "chat_id": chat_id, "message_id": message_id, "text": chunks[0]})
+        for chunk in chunks[1:]:
+            self._append({"op": "send_message", "chat_id": chat_id, "text": chunk})
         return {"ok": True}
 
     async def rss_fetch(self, rss_url: str) -> dict[str, object]:

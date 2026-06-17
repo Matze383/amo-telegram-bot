@@ -227,3 +227,44 @@ def test_dispatcher_learning_text_and_reaction_do_not_log_raw_content(tmp_path, 
     log_text = "\n".join(record.getMessage() for record in caplog.records)
     assert raw_phrase not in log_text
     assert "example.org" not in log_text
+
+
+def test_dispatcher_learning_negative_source_feedback_creates_sanitized_eval_case(tmp_path) -> None:
+    db_path = tmp_path / "learning_eval.sqlite"
+    database_url = f"sqlite:///{db_path}"
+    init_db(database_url)
+
+    async def fake_send(chat_id: int, text: str, message_thread_id: int | None = None) -> object:
+        return {"ok": True}
+
+    dispatcher = Dispatcher(
+        command_registry=create_builtin_registry(database_url=database_url),
+        role_resolver=InMemoryRoleResolver({42: Role.NORMAL}),
+        send_text=fake_send,
+        bot_username="BotName",
+        database_url=database_url,
+    )
+    asyncio.run(
+        dispatcher.handle_raw_update(
+            {
+                "update_id": 3,
+                "message": {
+                    "message_id": 11,
+                    "from": {"id": 42, "is_bot": False, "first_name": "A"},
+                    "chat": {"id": -100, "type": "supergroup"},
+                    "message_thread_id": 7,
+                    "text": "Quelle https://bad.example/path ist schlecht, das war falsch.",
+                },
+            }
+        )
+    )
+
+    with create_engine(database_url).connect() as connection:
+        row = connection.exec_driver_sql(
+            "SELECT domain, sanitized_prompt, expected_metadata_json FROM research_eval_cases"
+        ).one()
+
+    assert row[0] == "source_quality"
+    stored = f"{row[1]}\n{row[2]}"
+    assert "bad.example/path" not in stored
+    assert "https://bad.example" not in stored

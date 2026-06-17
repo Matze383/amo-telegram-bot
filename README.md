@@ -34,9 +34,9 @@ AMO ist ein erweiterbarer Telegram-Bot für Gruppen und private Chats. Er bietet
 |---------|--------------|
 | 🤖 **Modularer Aufbau** | Plugin-System für eigene Erweiterungen |
 | 🔐 **Rollen-System** | Owner, Admin, VIP, Normal, Ignore — gruppenspezifisch und berechtigungsbasiert |
-| ✅ **Consent-Management** | Nutzer müssen explizit zustimmen, bevor der Bot aktiv wird |
+| ✅ **Rollenbasierte Rechte** | Automatische Nutzung für Human-User, Rollen (owner/admin/vip/normal/ignore) steuern Berechtigungen. Bot-to-Bot-Kommunikation erfordert explizite Freigabe |
 | 🌐 **WebUI** | Lokale Flask-Oberfläche für Verwaltung und Konfiguration |
-| 🤖 **KI-Integration** | Optionales `/ask`-Kommando mit gescopten Sessions, `/new` und `/reset` für Session-Management, Auto-Antworten via Ollama, OpenAI, Anthropic, Google, OpenRouter, Groq, Mistral, xAI, DeepSeek, Together AI, Fireworks AI, LiteLLM, LM Studio, vLLM oder SGLang |
+| 🤖 **KI-Integration** | Optionales `/ask`-Kommando mit gescopten Sessions, `/new` und `/reset` für Session-Management, Auto-Antworten via Ollama, OpenAI, Anthropic, Google, OpenRouter, Groq, Mistral, xAI, DeepSeek, Together AI, Fireworks AI, Amazon Bedrock, LiteLLM, LM Studio, vLLM oder SGLang |
 | 🧠 **Memory-System** | Tägliche Langzeitgedächtnis-Kuratierung mit Datenschutz-Defaults; **Neu:** Scoped Memory mit C2-Review-Service für verbesserte Datenschutzkontrolle; **Neu:** Scoped User Profile Memory mit Scope-Isolation (keine Cross-Scope-Leaks, nur aktuelle Teilnehmer) |
 | 🖼️ **Bildanalyse & -sendung** | Image-Analysis-Interface (IMG) mit send_photo/send_document Wrappern; WebUI pro-Topic Bilderkennungs-Toggle (inherit/enabled/disabled); WebUI Rollen-Quotas für Bildanalyse (IMG-B7); Runtime Quota-Enforcement mit Rolling-24h-Fenster (IMG-B8); **Neu:** Follow-up Bildanalyse für Kontext-Fortführung |
 | 🔍 **Webtool-Quotas** | Rollenbasierte Nutzungsquotas für Websearch/Webscraping über `/webtoolquota` und WebUI; Metadata-only Audit-Logging (keine Queries/URLs/Prompts) |
@@ -93,7 +93,7 @@ python main.py
 - Python 3.12+
 - Windows, macOS oder Linux
 - Telegram Bot Token von [@BotFather](https://t.me/BotFather)
-- Optional: Lokale [Ollama](https://ollama.com/)-Instanz, OpenAI API-Key, Anthropic API-Key, Google/Gemini API-Key, OpenRouter API-Key, [Groq](https://groq.com/) API-Key, Mistral API-Key, xAI API-Key, DeepSeek API-Key, Together API-Key, Fireworks API-Key, LM Studio, vLLM oder SGLang für KI-Funktionen
+- Optional: Lokale [Ollama](https://ollama.com/)-Instanz, OpenAI API-Key, Anthropic API-Key, Google/Gemini API-Key, OpenRouter API-Key, [Groq](https://groq.com/) API-Key, Mistral API-Key, xAI API-Key, DeepSeek API-Key, Together API-Key, Fireworks API-Key, AWS-Credentials für Amazon Bedrock, LM Studio, vLLM oder SGLang für KI-Funktionen
 
 ### Dokumentation
 
@@ -133,9 +133,9 @@ AMO is an extensible Telegram bot for groups and private chats. It provides a ro
 |---------|-------------|
 | 🤖 **Modular Design** | Plugin system for custom extensions |
 | 🔐 **Role System** | Owner, Admin, VIP, Normal, Ignore — group-scoped and permission-based |
-| ✅ **Consent Management** | Users must explicitly opt-in before the bot becomes active |
+| ✅ **Role-based Permissions** | Automatic usage for human users; roles (owner/admin/vip/normal/ignore) control permissions. Bot-to-bot communication requires explicit approval |
 | 🌐 **WebUI** | Local Flask interface for management and configuration |
-| 🤖 **AI Integration** | Optional `/ask` command with scoped sessions, `/new` and `/reset` for session management, auto-replies via Ollama, OpenAI, Anthropic, Google, OpenRouter, Groq, Mistral, xAI, DeepSeek, Together AI, Fireworks AI, LiteLLM, LM Studio, vLLM, or SGLang |
+| 🤖 **AI Integration** | Optional `/ask` command with scoped sessions, `/new` and `/reset` for session management, auto-replies via Ollama, OpenAI, Anthropic, Google, OpenRouter, Groq, Mistral, xAI, DeepSeek, Together AI, Fireworks AI, Amazon Bedrock, LiteLLM, LM Studio, vLLM, or SGLang |
 | 🧠 **Memory System** | Daily long-term memory curation with privacy-first defaults; **New:** Scoped memory with C2 review service for enhanced privacy control; **New:** Scoped user profile memory with scope isolation (no cross-scope leaks, current participants only) |
 | 🖼️ **Image Analysis & Sending** | Image Analysis interface (IMG) with send_photo/send_document wrappers; WebUI per-topic image recognition toggle (inherit/enabled/disabled); WebUI role quotas for image analysis (IMG-B7); Runtime quota enforcement with rolling 24h window (IMG-B8); **New:** Follow-up image analysis for context continuation |
 | 🔍 **Webtool Quotas** | Role-based usage quotas for websearch/webscraping via `/webtoolquota` and WebUI; metadata-only audit logging (no queries/URLs/prompts) |
@@ -192,7 +192,7 @@ python main.py
 - Python 3.12+
 - Windows, macOS or Linux
 - Telegram Bot Token from [@BotFather](https://t.me/BotFather)
-- Optional: Local [Ollama](https://ollama.com/) instance, OpenAI API key, Anthropic API key, Google/Gemini API key, OpenRouter API key, [Groq](https://groq.com/) API key, Mistral API key, xAI API key, DeepSeek API key, Together API key, Fireworks API key, LM Studio, vLLM, or SGLang for AI features
+- Optional: Local [Ollama](https://ollama.com/) instance, OpenAI API key, Anthropic API key, Google/Gemini API key, OpenRouter API key, [Groq](https://groq.com/) API key, Mistral API key, xAI API key, DeepSeek API key, Together API key, Fireworks API key, AWS credentials for Amazon Bedrock, LM Studio, vLLM, or SGLang for AI features
 
 ### Documentation
 

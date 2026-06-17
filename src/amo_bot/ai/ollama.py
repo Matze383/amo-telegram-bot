@@ -53,6 +53,7 @@ class OllamaClient:
     max_response_chars: int = 1500
     request_endpoint: str = "generate"
     streaming_mode: Literal["off", "collect_only", "live_edit"] = "off"
+    think: bool = False
     stream_phase: Literal["primary", "retry", "fallback"] = "primary"
     last_stream_events: list[dict[str, Any]] | None = None
 
@@ -83,7 +84,7 @@ class OllamaClient:
                 "model": self.model,
                 "messages": [message],
                 "stream": stream_enabled,
-                "think": False,
+                "think": self.think,
                 "options": {"num_predict": self.max_predict_tokens},
             }
             endpoint_path = "/api/chat"
@@ -92,7 +93,7 @@ class OllamaClient:
                 "model": self.model,
                 "prompt": request_prompt,
                 "stream": False,
-                "think": False,
+                "think": self.think,
                 "options": {"num_predict": self.max_predict_tokens},
             }
             if images_b64:

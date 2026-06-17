@@ -9,6 +9,8 @@ import mimetypes
 
 import httpx
 
+from amo_bot.telegram.outbound_text import split_telegram_message_text
+
 _COMPONENT = "telegram.api"
 
 
@@ -126,16 +128,25 @@ class TelegramClient:
         reply_to_message_id: int | None = None,
         message_thread_id: int | None = None,
         reply_markup: dict[str, Any] | None = None,
+        parse_mode: str | None = None,
     ) -> dict[str, Any]:
-        payload: dict[str, Any] = {"chat_id": chat_id, "text": text[:4000]}
-        if reply_to_message_id is not None:
-            payload["reply_to_message_id"] = reply_to_message_id
-        if message_thread_id is not None:
-            payload["message_thread_id"] = message_thread_id
-        if reply_markup is not None:
-            payload["reply_markup"] = reply_markup
-        result = await self._call("sendMessage", payload)
-        return result if isinstance(result, dict) else {}
+        chunks = split_telegram_message_text(text, parse_mode=parse_mode)
+        first_result: dict[str, Any] | None = None
+        for index, chunk in enumerate(chunks):
+            payload: dict[str, Any] = {"chat_id": chat_id, "text": chunk}
+            if parse_mode is not None:
+                payload["parse_mode"] = parse_mode
+            if message_thread_id is not None:
+                payload["message_thread_id"] = message_thread_id
+            if index == 0:
+                if reply_to_message_id is not None:
+                    payload["reply_to_message_id"] = reply_to_message_id
+                if reply_markup is not None:
+                    payload["reply_markup"] = reply_markup
+            result = await self._call("sendMessage", payload)
+            if first_result is None:
+                first_result = result if isinstance(result, dict) else {}
+        return first_result or {}
 
     async def send_photo(
         self,

@@ -8,7 +8,6 @@ import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any, Awaitable, Callable, Protocol
-from urllib.parse import urlparse
 
 from amo_bot.ai.current_time_context import DEFAULT_AI_PROMPT_TIMEZONE
 from amo_bot.ai.learning_feedback import LearningFeedbackScope, LearningFeedbackService
@@ -25,11 +24,13 @@ from amo_bot.core.logging import (
     set_request_id,
     get_request_id,
 )
+from amo_bot.current_info.models import CurrentInfoAnswer, CurrentInfoRequest
 from amo_bot.db.base import create_session_factory
 from amo_bot.db.repositories import (
     BotPeerRepository,
     PrivateChatPolicyRepository,
     PromptContextDocRepository,
+    ResearchEvalCaseRepository,
     RetrievableMemoryRepository,
     TopicAgentMemoryRepository,
     TopicRecentMessageRecord,
@@ -39,19 +40,24 @@ from amo_bot.db.models import AuditEvent, User
 from amo_bot.plugins.command_runtime import CommandActor, CommandInvocation, PluginCommandExecutor
 from amo_bot.telegram.commands import CommandContext, CommandRegistry, RestartRequest, RoleResolver, resolve_locale, t_text
 from amo_bot.telegram.live_edit_adapter import DisabledTelegramLiveEditAdapter, TelegramLiveEditAdapter
+from amo_bot.telegram.outbound_text import split_telegram_message_text
 from amo_bot.telegram.owner_notify import OwnerNotifier
 from amo_bot.telegram.update_parser import TelegramMessage, TelegramReactionEvent, parse_update
-from amo_bot.telegram.webtool_auto_research import decide_auto_research
 from amo_bot.telegram.webtool_chat_integration import (
-    WebtoolChatTrigger,
-    build_empty_result_retry_query,
-    build_web_research_followup_query,
     build_webtool_request,
     format_webtool_fail_text,
     format_webtool_quota_text,
     format_webtool_success_text,
-    is_web_research_followup_feedback,
     parse_webtool_chat_trigger,
+)
+from amo_bot.telegram.webtool_auto_research import decide_auto_research
+from amo_bot.telegram.webtool_evidence import classify_evidence_domain
+from amo_bot.telegram.webtool_research_orchestrator import (
+    DbBackedResearchSourceObservationWriter,
+    DbBackedResearchSourceQualityReader,
+    WebResearchOrchestrator,
+    WebResearchOrchestratorRequest,
+    sanitize_auto_research_user_response,
 )
 
 
@@ -60,6 +66,8 @@ _COMPONENT = "telegram.dispatcher"
 AUTOREPLY_ALLOWED_ROLES: set[Role] = {Role.OWNER, Role.ADMIN, Role.VIP}
 BOT_PEER_V1_ALLOWED_COMMANDS: set[str] = {"help", "ping"}
 RESTART_ACK_TIMEOUT_SECONDS = 3.0
+CURRENT_INFO_SYNTHESIS_MAX_EVIDENCE_CHARS = 4500
+CURRENT_INFO_SYNTHESIS_MAX_SOURCE_COUNT = 5
 
 
 def _terminate_current_process() -> None:
@@ -70,288 +78,6 @@ AI_AUTOREPLY_ERROR_FALLBACK_TEXT = {
     "de": "Ich konnte gerade keine KI-Antwort erzeugen. Bitte versuch es gleich nochmal.",
     "en": "I couldn't generate an AI reply right now. Please try again in a moment.",
 }
-
-_AUTO_RESEARCH_NO_RESULT_TEXT = {
-    "quota_exceeded": "the attempt was limited by quota/policy",
-    "provider_timeout": "the provider timed out",
-    "provider_error": "the provider returned an error",
-    "provider_unavailable": "the provider was unavailable",
-    "search_provider_not_configured": "the provider was unavailable",
-    "empty_result": "the search returned no usable hits",
-}
-
-_AUTO_RESEARCH_CHAIN_MAX_URLS = 5
-_AUTO_RESEARCH_CHAIN_MAX_STATIC_SUCCESSES = 5
-_AUTO_RESEARCH_CHAIN_MAX_BROWSER_FALLBACKS = 1
-_AUTO_RESEARCH_CHAIN_PER_PAGE_TEXT_CAP = 1500
-_AUTO_RESEARCH_CHAIN_FINAL_CAP = 1600
-_AUTO_RESEARCH_CHAIN_MIN_EXTRACT_CHARS = 40
-
-_AUTO_RESEARCH_CHAIN_FRESHNESS_RE = re.compile(
-    r"\b(?:"
-    r"current|aktuell(?:e[nrms]?)?|jetzt|heute|live|realtime|real-time|right\s+now|"
-    r"derzeit|stand|status|neueste(?:n)?|latest|news|nachrichten|release|version|"
-    r"update|verf(?:ü|ue)gbar(?:keit)?|availability|weather|wetter|traffic|verkehr|"
-    r"outage|st(?:ö|oe)rung|kurs|preis|price|rate|market|markt|exchange|fx|"
-    r"wm|weltmeisterschaft|world\s+cup|em|europameisterschaft|champions\s+league|"
-    r"bundesliga|vorrunde|gruppenphase|spielplan|tabelle|ergebnis(?:se)?|"
-    r"aufstellung(?:en)?|qualifikation"
-    r")\b",
-    re.IGNORECASE,
-)
-_AUTO_RESEARCH_CHAIN_STRONG_FRESHNESS_RE = re.compile(
-    r"\b(?:"
-    r"jetzt|heute|live|realtime|real-time|right\s+now|derzeit|neueste(?:n)?|latest|"
-    r"news|nachrichten|release|version|update|verf(?:ü|ue)gbar(?:keit)?|availability|"
-    r"weather|wetter|traffic|verkehr|outage|st(?:ö|oe)rung|kurs|preis|price|rate|market|markt|"
-    r"vorrunde|gruppenphase|spielplan|tabelle|ergebnis(?:se)?|aufstellung(?:en)?|qualifikation"
-    r")\b",
-    re.IGNORECASE,
-)
-_AUTO_RESEARCH_CHAIN_EXPLICIT_CURRENT_PHRASE_RE = re.compile(
-    r"(?:"
-    r"was\s+gibt\s+es\s+(?:heute\s+)?neues\s+zu|"
-    r"aktueller?\s+stand\s+(?:zu|von)?|"
-    r"current\s+status\s+(?:of|for)|"
-    r"latest\s+\S+|"
-    r"neueste(?:n)?\s+\S+"
-    r")",
-    re.IGNORECASE,
-)
-_AUTO_RESEARCH_CHAIN_TIMELESS_EDU_RE = re.compile(
-    r"\b(?:erkl(?:ä|ae)re|explain|what\s+is|was\s+ist|how\s+does|wie\s+funktioniert|tutorial|grundlagen|basics)\b",
-    re.IGNORECASE,
-)
-
-
-def should_chain_auto_research(text: str, *, capability: str, reason: str | None = None) -> bool:
-    """Return True for bounded follow-up extraction on current-data websearches.
-
-    The chain is still limited to websearch-triggered auto research, but it is no
-    longer market-only: explicit freshness/currentness intents may follow search
-    with bounded static extraction and at most one browser fallback. Explicit
-    user-feedback follow-ups may also chain once so the bot can check
-    more/different sources after a thin prior answer.
-    """
-    if capability != "websearch":
-        return False
-    if reason == "user_feedback_followup":
-        return True
-    raw = text or ""
-    if not raw.strip():
-        return False
-    if _AUTO_RESEARCH_CHAIN_EXPLICIT_CURRENT_PHRASE_RE.search(raw):
-        return True
-    has_freshness = bool(_AUTO_RESEARCH_CHAIN_FRESHNESS_RE.search(raw))
-    if not has_freshness:
-        return False
-    has_strong_freshness = bool(_AUTO_RESEARCH_CHAIN_STRONG_FRESHNESS_RE.search(raw))
-    if _AUTO_RESEARCH_CHAIN_TIMELESS_EDU_RE.search(raw) and not has_strong_freshness:
-        return False
-    return True
-
-
-def _host_from_url(url: str) -> str:
-    try:
-        return (urlparse(url).hostname or "").lower()
-    except Exception:
-        return ""
-
-
-def _select_chain_urls(sources: tuple[str, ...] | list[str] | None, *, max_urls: int = _AUTO_RESEARCH_CHAIN_MAX_URLS) -> tuple[str, ...]:
-    selected: list[str] = []
-    seen_hosts: set[str] = set()
-    for source in sources or ():
-        raw = (source or "").strip()
-        if not raw.startswith(("http://", "https://")):
-            continue
-        host = _host_from_url(raw)
-        dedupe_key = host or raw
-        if dedupe_key in seen_hosts:
-            continue
-        selected.append(raw)
-        seen_hosts.add(dedupe_key)
-        if len(selected) >= max_urls:
-            break
-    return tuple(selected)
-
-
-def _compact_chain_text(text: str, *, cap: int = _AUTO_RESEARCH_CHAIN_PER_PAGE_TEXT_CAP) -> str:
-    compact = " ".join((text or "").split())
-    if len(compact) > cap:
-        compact = compact[:cap].rstrip() + " …"
-    return compact
-
-
-
-
-def _content_length_bucket(length: int) -> str:
-    if length <= 0:
-        return "zero"
-    if length < _AUTO_RESEARCH_CHAIN_MIN_EXTRACT_CHARS:
-        return "short"
-    if length < 500:
-        return "usable_small"
-    if length < 1500:
-        return "usable_medium"
-    return "usable_large"
-
-
-def _chain_failure_reason(result: Any, text_len: int) -> str:
-    if result is None:
-        return "missing_result"
-    if not getattr(result, "allowed", False):
-        reason = (getattr(result, "reason", "") or "denied").strip()
-        if "timeout" in reason:
-            return "timeout"
-        if reason.startswith("http_error"):
-            return "http_error"
-        if "provider" in reason and "unavailable" in reason:
-            return "provider_unavailable"
-        if reason == "empty_result":
-            return "empty_result"
-        return reason[:64] or "denied"
-    if text_len <= 0:
-        return "empty_text"
-    if text_len < _AUTO_RESEARCH_CHAIN_MIN_EXTRACT_CHARS:
-        return "too_short"
-    return "usable"
-
-
-def _chain_diagnostic_snapshot(
-    *,
-    search_hosts: tuple[str, ...],
-    chain_urls: tuple[str, ...],
-    static_attempts: int,
-    browser_attempts: int,
-    chain_extracts: list[tuple[str, str, str]],
-    reason_buckets: dict[str, int],
-    content_length_buckets: dict[str, int],
-    timeout_count: int,
-    error_class_buckets: dict[str, int],
-) -> dict[str, Any]:
-    """Build metadata-only diagnostics for auto-research extraction chains.
-
-    Do not include URLs, queries, extracted contents, prompts, or private context.
-    """
-    selected_hosts = {_host_from_url(url) for url in chain_urls}
-    selected_hosts.discard("")
-    extraction_hosts = {host for _, host, _ in chain_extracts if host}
-    return {
-        "url_count": len(chain_urls),
-        "attempted_url_count": len(chain_urls),
-        "search_host_count": len(tuple(search_hosts or ())),
-        "selected_url_host_count": len(selected_hosts),
-        "extraction_host_count": len(extraction_hosts),
-        "host_count": len(extraction_hosts),  # Backward-compatible alias; prefer extraction_host_count.
-        "static_attempt_count": static_attempts,
-        "browser_attempt_count": browser_attempts,
-        "browser_fallback_count": browser_attempts,
-        "extract_count": len(chain_extracts),
-        "skipped_url_count": max(0, len(chain_urls) - static_attempts),
-        "failed_attempt_count": max(0, static_attempts + browser_attempts - len(chain_extracts)),
-        "timeout_count": timeout_count,
-        "reason_buckets": dict(sorted(reason_buckets.items())),
-        "content_length_buckets": dict(sorted(content_length_buckets.items())),
-        "error_class_buckets": dict(sorted(error_class_buckets.items())),
-    }
-
-def _format_auto_research_chained_success_note(
-    *, capability: str, search_text: str, search_hosts: tuple[str, ...], extracts: tuple[tuple[str, str, str], ...], followup: bool = False
-) -> str:
-    compact_search = " ".join(search_text.split())[:700]
-    host_text = ", ".join(search_hosts[:5])
-    evidence_lines: list[str] = []
-    for operation, host, text in extracts:
-        snippet = _compact_chain_text(text, cap=500)
-        if snippet:
-            evidence_lines.append(f"- {operation} host={host or 'unknown'}: {snippet}")
-    evidence = "\n".join(evidence_lines)
-    if len(evidence) > _AUTO_RESEARCH_CHAIN_FINAL_CAP:
-        evidence = evidence[:_AUTO_RESEARCH_CHAIN_FINAL_CAP].rstrip() + " …"
-    heading = "FOLLOW-UP AUTO-RESEARCH (LIVE WEB + PAGE EXTRACTION)" if followup else "AUTO-RESEARCH (LIVE WEB + PAGE EXTRACTION)"
-    context_line = (
-        "This is a bounded follow-up because user feedback requested more/different sources after a prior web/AI answer. "
-        if followup else ""
-    )
-    return (
-        f"{heading} — STRICT INSTRUCTION:\n"
-        f"{context_line}A live {capability}/web tool result and bounded follow-up page extraction are available in this turn. Treat this fresh web context as primary evidence for current facts.\n"
-        "Do NOT claim or imply that the bot has no web tools, no live data capability, or cannot search the web.\n"
-        "Use the supplied search summary and extracted page evidence; mention source hosts when relevant. Do NOT override it with stale memory/priors.\n"
-        "Strict anti-hallucination: do NOT invent exact prices, rates, dates, levels, or news not supported by the supplied evidence. If exact values are absent, say the live evidence does not confirm the exact value.\n"
-        f"Operation: {capability}\n"
-        f"Search summary: {compact_search}\n"
-        f"Search source hosts: {host_text}\n"
-        f"Extracted page evidence:\n{evidence}"
-    )
-
-
-def _format_auto_research_chain_no_confirmation_note(*, capability: str, search_text: str, search_hosts: tuple[str, ...], followup: bool = False) -> str:
-    compact_search = " ".join(search_text.split())[:700]
-    host_text = ", ".join(search_hosts[:5])
-    heading = "FOLLOW-UP AUTO-RESEARCH STATUS" if followup else "AUTO-RESEARCH STATUS"
-    context_line = (
-        "This was a bounded follow-up because user feedback requested more/different sources after a prior web/AI answer. "
-        if followup else ""
-    )
-    return (
-        f"{heading} — WEB SEARCH SUCCEEDED, FOLLOW-UP EXTRACTION UNCONFIRMED:\n"
-        f"{context_line}A live {capability} succeeded in this turn, but bounded follow-up page extraction produced no usable confirmation.\n"
-        "Be transparent: use the search summary only as limited live context, and if evidence remains insufficient, say clearly that the follow-up search/extraction still could not confirm the requested information.\n"
-        "Do NOT say or imply that the bot has no web tools, no live data capability, or cannot search the web.\n"
-        "Strict anti-hallucination: do NOT invent exact prices, rates, dates, levels, or news without reliable live confirmation from this turn.\n"
-        f"Operation: {capability}\n"
-        f"Search summary: {compact_search}\n"
-        f"Search source hosts: {host_text}"
-    )
-
-
-def _format_auto_research_success_note(*, capability: str, text: str, hosts: tuple[str, ...]) -> str:
-    compact_text = " ".join(text.split())[:700]
-    host_text = ", ".join(hosts[:5])
-    return (
-        "AUTO-RESEARCH (LIVE WEB) — STRICT INSTRUCTION:\n"
-        f"A live {capability}/web tool result is available in this turn. Treat this fresh web context as primary evidence for current facts.\n"
-        "Do NOT claim or imply that the bot has no web tools, no live data capability, or cannot search the web.\n"
-        "Use the supplied web summary as primary evidence, cite or mention the source hosts when relevant, and do NOT override it with stale memory/priors.\n"
-        "Strict anti-hallucination: do NOT invent dates, prices, levels, or news not supported by the supplied live summary. "
-        "If exact values are not in the supplied summary, state that the available live sources do not confirm that exact value; do not say no webtools.\n"
-        "If sources conflict, say so transparently.\n"
-        f"Operation: {capability}\n"
-        f"Research summary: {compact_text}\n"
-        f"Source hosts: {host_text}"
-    )
-
-
-def _format_auto_research_no_result_note(*, capability: str, reason: str | None) -> str:
-    normalized_reason = (reason or "").strip() or "no_usable_result"
-    reason_text = _AUTO_RESEARCH_NO_RESULT_TEXT.get(normalized_reason, "the attempt returned no usable live result")
-    return (
-        "AUTO-RESEARCH STATUS — WEB ATTEMPTED, NO USABLE RESULT:\n"
-        f"A live {capability} attempt was made in this turn, but {reason_text}. "
-        f"Reason code: {normalized_reason}.\n"
-        "Be transparent and precise: say the web search was attempted but this specific attempt produced no usable result, timed out, was limited, or the provider was unavailable. "
-        "Do NOT say or imply that the bot has no web tools, no live data capability, or cannot search the web in general. "
-        "If useful in German, say: 'Die Websuche wurde versucht, lieferte aber diesmal keine verwertbaren Treffer/keine Bestätigung.'\n"
-        "Strict anti-hallucination: do NOT invent current facts, dates, prices, levels, or news without reliable live confirmation from this turn. "
-        "Memory and model priors are not acceptable substitutes for live evidence when current external data was required."
-    )
-
-
-def _format_auto_research_retry_no_result_note(*, capability: str, reason: str | None) -> str:
-    normalized_reason = (reason or "").strip() or "no_usable_result"
-    reason_text = _AUTO_RESEARCH_NO_RESULT_TEXT.get(normalized_reason, "the retry returned no usable live result")
-    return (
-        "AUTO-RESEARCH STATUS — WEB ATTEMPTED, RETRY ALSO NO USABLE RESULT:\n"
-        f"A live {capability} attempt was made in this turn, then exactly one simplified retry from the current user message was also attempted, but {reason_text}. "
-        f"Final reason code: {normalized_reason}.\n"
-        "Be transparent and precise: say live websearch was attempted but did not return usable results after retry, so no current value/fact could be confirmed from live sources in this turn. "
-        "Do NOT say or imply that the bot has no web tools, no live data capability, or cannot search the web in general. "
-        "If useful in German, say: 'Die Live-Websuche wurde versucht, lieferte aber auch nach einem vereinfachten Retry keine verwertbaren Treffer; ein aktueller Wert konnte nicht bestätigt werden.'\n"
-        "Strict anti-hallucination: do NOT reuse old/stale prices, rates, dates, levels, news, or prior-answer context as an estimate. Do NOT provide an estimated current value when live confirmation is unavailable. "
-        "Memory and model priors are not acceptable substitutes for live evidence when current external data was required."
-    )
 
 SendTextFn = Callable[[int, str, int | None], Awaitable[object]]
 SendMarkupFn = Callable[[int, str, dict[str, Any], int | None], Awaitable[object]]
@@ -400,6 +126,12 @@ class Dispatcher:
     owner_notifier: OwnerNotifier | None = None
     ai_service: Any | None = None
     webtool_dispatcher: Any | None = None
+    web_evidence_pipeline: Any | None = None
+    current_info_service: Any | None = None
+    current_info_enabled: bool = False
+    current_info_timeout_seconds: float = 8.0
+    current_info_max_results: int = 5
+    current_info_max_documents: int = 3
     live_edit_adapter: TelegramLiveEditAdapter | None = None
     restart_terminator: Callable[[], None] = _terminate_current_process
     auto_image_followup_ttl_seconds: int = 180
@@ -1123,18 +855,7 @@ class Dispatcher:
         return command_name.casefold() in {"accept", "decline", "consent", "start"}
 
     def _is_consent_blocked(self, *, user_id: int, role: Role, command_name: str, chat_type: str | None) -> bool:
-        if self.database_url is None:
-            return False
-        session_factory = create_session_factory(self.database_url)
-        with session_factory() as session:
-            user = session.query(User).filter(User.telegram_user_id == user_id).one_or_none()
-            if user is None:
-                return False
-            return ConsentService().is_effectively_blocked(
-                user,
-                global_role=role,
-                is_owner=role is Role.OWNER,
-            )
+        return False
 
     def _is_user_unreachable(self, user_id: int) -> bool:
         if self.database_url is None:
@@ -1340,7 +1061,10 @@ class Dispatcher:
             return
         stored_count = 0
         with create_session_factory(self.database_url)() as session:
-            service = LearningFeedbackService(RetrievableMemoryRepository(session))
+            service = LearningFeedbackService(
+                RetrievableMemoryRepository(session),
+                eval_case_writer=ResearchEvalCaseRepository(session),
+            )
             scope = LearningFeedbackScope(
                 chat_id=reaction.chat.id,
                 message_thread_id=reaction.message_thread_id,
@@ -1375,7 +1099,10 @@ class Dispatcher:
             return
         try:
             with create_session_factory(self.database_url)() as session:
-                service = LearningFeedbackService(RetrievableMemoryRepository(session))
+                service = LearningFeedbackService(
+                    RetrievableMemoryRepository(session),
+                    eval_case_writer=ResearchEvalCaseRepository(session),
+                )
                 service.process_text_feedback(
                     text=message.text,
                     scope=LearningFeedbackScope(
@@ -1575,19 +1302,6 @@ class Dispatcher:
                     session.commit()
                     return
 
-                if ConsentService().is_effectively_blocked(user, global_role=role, is_owner=role is Role.OWNER):
-                    self._write_ai_audit(
-                        session=session,
-                        actor_user_id=message.from_user.id,
-                        chat_id=message.chat.id,
-                        message_id=message.message_id,
-                        message_thread_id=message.message_thread_id,
-                        event_type="ai_autoreply_denied",
-                        payload={"reason": "consent_denied", "router_reason": decision.reason_code.value},
-                    )
-                    session.commit()
-                    return
-
         adapter = self.live_edit_adapter or DisabledTelegramLiveEditAdapter()
 
         identity_instruction = (
@@ -1728,226 +1442,43 @@ class Dispatcher:
 
         auto_note = ""
         if trigger is None and self.webtool_dispatcher is not None:
-            decision_auto = decide_auto_research(normalized_text)
-            is_followup_research = False
-            if (
-                not decision_auto.enabled
-                and is_triggered_path
-                and is_web_research_followup_feedback(normalized_text)
+            if await self._maybe_handle_current_info_autoreply(
+                message=message,
+                role=role,
+                normalized_text=normalized_text,
+                locale=message_locale,
             ):
-                followup_query = build_web_research_followup_query(
-                    feedback_text=normalized_text,
-                    context_text=followup_context_text,
-                )
-                if followup_query:
-                    decision_auto = type("_AutoFollowup", (), {
-                        "enabled": True,
-                        "capability": "websearch",
-                        "reason": "user_feedback_followup",
-                        "query": followup_query,
-                        "url": "",
-                    })()
-                    is_followup_research = True
-            if decision_auto.enabled:
-                req = build_webtool_request(
-                    trigger=WebtoolChatTrigger(
-                        capability=decision_auto.capability,
-                        query=decision_auto.query,
-                        url=decision_auto.url,
-                    ),
-                    user_id=message.from_user.id,
+                return
+
+            research_session_factory = create_session_factory(self.database_url) if self.database_url is not None else None
+            research_result = WebResearchOrchestrator(
+                webtool_dispatcher=self.webtool_dispatcher,
+                evidence_pipeline=self.web_evidence_pipeline,
+                source_quality_reader=(
+                    DbBackedResearchSourceQualityReader(session_factory=research_session_factory)
+                    if research_session_factory is not None
+                    else None
+                ),
+                source_observation_writer=(
+                    DbBackedResearchSourceObservationWriter(session_factory=research_session_factory)
+                    if research_session_factory is not None
+                    else None
+                ),
+            ).execute(
+                WebResearchOrchestratorRequest(
+                    message=message,
+                    normalized_text=normalized_text,
                     role=role,
-                    chat_id=message.chat.id,
-                    topic_id=message.message_thread_id,
                     locale=message_locale,
+                    is_triggered_path=is_triggered_path,
+                    reply_context_text=followup_context_text,
+                    scope=decision.context.scope_type,
                 )
-                tool_result = self.webtool_dispatcher.execute(req)
-                log_event(
-                    logger,
-                    logging.INFO,
-                    event="ai.webtool.auto_research",
-                    component=_COMPONENT,
-                    chat_id=message.chat.id,
-                    message_id=message.message_id,
-                    message_thread_id=message.message_thread_id,
-                    user_id=message.from_user.id,
-                    extra={
-                        "mode": "followup" if is_followup_research else "auto",
-                        "operation": decision_auto.capability,
-                        "decision": decision_auto.reason,
-                        "status": "allow" if tool_result.allowed else "deny",
-                        "reason": tool_result.reason,
-                        "error_class": type(tool_result.error).__name__ if tool_result.error else None,
-                        "source_count": len(tool_result.sources),
-                        "host_count": len(tool_result.hosts),
-                        "scope": decision.context.scope_type,
-                    },
-                )
-                retry_attempted = False
-                if (
-                    decision_auto.capability == "websearch"
-                    and not (tool_result.allowed and (tool_result.text or "").strip())
-                    and (tool_result.reason or "") == "empty_result"
-                ):
-                    retry_query = build_empty_result_retry_query(normalized_text)
-                    if retry_query and retry_query != (decision_auto.query or "").strip():
-                        retry_attempted = True
-                        retry_req = build_webtool_request(
-                            trigger=WebtoolChatTrigger(
-                                capability="websearch",
-                                query=retry_query,
-                                url="",
-                            ),
-                            user_id=message.from_user.id,
-                            role=role,
-                            chat_id=message.chat.id,
-                            topic_id=message.message_thread_id,
-                            locale=message_locale,
-                        )
-                        retry_result = self.webtool_dispatcher.execute(retry_req)
-                        log_event(
-                            logger,
-                            logging.INFO,
-                            event="ai.webtool.auto_research_retry",
-                            component=_COMPONENT,
-                            chat_id=message.chat.id,
-                            message_id=message.message_id,
-                            message_thread_id=message.message_thread_id,
-                            user_id=message.from_user.id,
-                            extra={
-                                "mode": "followup" if is_followup_research else "auto",
-                                "operation": "websearch",
-                                "decision": decision_auto.reason,
-                                "status": "allow" if retry_result.allowed else "deny",
-                                "reason": retry_result.reason,
-                                "retry_attempted": True,
-                                "retry_reason": "empty_result",
-                                "query_length": len(retry_query),
-                                "error_class": type(retry_result.error).__name__ if retry_result.error else None,
-                                "source_count": len(retry_result.sources),
-                                "host_count": len(retry_result.hosts),
-                                "scope": decision.context.scope_type,
-                            },
-                        )
-                        tool_result = retry_result
-                if tool_result.allowed and (tool_result.text or "").strip():
-                    chain_extracts: list[tuple[str, str, str]] = []
-                    chain_urls = ()
-                    browser_fallbacks_used = 0
-                    if should_chain_auto_research(normalized_text, capability=decision_auto.capability, reason=decision_auto.reason):
-                        chain_urls = _select_chain_urls(tuple(tool_result.sources or ()))
-                        static_successes = 0
-                        browser_fallbacks_used = 0
-                        static_attempts = 0
-                        reason_buckets: dict[str, int] = {}
-                        content_length_buckets: dict[str, int] = {}
-                        error_class_buckets: dict[str, int] = {}
-                        timeout_count = 0
-
-                        def _record_chain_attempt(result: Any, text_len: int) -> None:
-                            nonlocal timeout_count
-                            reason_bucket = _chain_failure_reason(result, text_len)
-                            reason_buckets[reason_bucket] = reason_buckets.get(reason_bucket, 0) + 1
-                            length_bucket = _content_length_bucket(text_len)
-                            content_length_buckets[length_bucket] = content_length_buckets.get(length_bucket, 0) + 1
-                            if "timeout" in reason_bucket:
-                                timeout_count += 1
-                            error_value = getattr(result, "error", None) if result is not None else None
-                            if error_value is not None:
-                                error_class = type(error_value).__name__
-                                error_class_buckets[error_class] = error_class_buckets.get(error_class, 0) + 1
-
-                        for url in chain_urls:
-                            if static_successes >= _AUTO_RESEARCH_CHAIN_MAX_STATIC_SUCCESSES:
-                                break
-                            chain_trigger = type("_T", (), {"capability": "webscraping", "query": "", "url": url})()
-                            chain_req = build_webtool_request(
-                                trigger=chain_trigger,
-                                user_id=message.from_user.id,
-                                role=role,
-                                chat_id=message.chat.id,
-                                topic_id=message.message_thread_id,
-                                locale=message_locale,
-                            )
-                            chain_result = self.webtool_dispatcher.execute(chain_req)
-                            static_attempts += 1
-                            chain_text = _compact_chain_text(chain_result.text or "")
-                            _record_chain_attempt(chain_result, len(chain_text))
-                            if chain_result.allowed and len(chain_text) >= _AUTO_RESEARCH_CHAIN_MIN_EXTRACT_CHARS:
-                                chain_extracts.append(("webscraping", (tuple(chain_result.hosts or ()) or (_host_from_url(url),))[0], chain_text))
-                                static_successes += 1
-                                continue
-                            if browser_fallbacks_used < _AUTO_RESEARCH_CHAIN_MAX_BROWSER_FALLBACKS:
-                                browser_trigger = type("_T", (), {"capability": "browser", "query": "", "url": url})()
-                                browser_req = build_webtool_request(
-                                    trigger=browser_trigger,
-                                    user_id=message.from_user.id,
-                                    role=role,
-                                    chat_id=message.chat.id,
-                                    topic_id=message.message_thread_id,
-                                    locale=message_locale,
-                                )
-                                browser_result = self.webtool_dispatcher.execute(browser_req)
-                                browser_fallbacks_used += 1
-                                browser_text = _compact_chain_text(browser_result.text or "")
-                                _record_chain_attempt(browser_result, len(browser_text))
-                                if browser_result.allowed and len(browser_text) >= _AUTO_RESEARCH_CHAIN_MIN_EXTRACT_CHARS:
-                                    chain_extracts.append(("browser", (tuple(browser_result.hosts or ()) or (_host_from_url(url),))[0], browser_text))
-                                    break
-
-                        log_event(
-                            logger,
-                            logging.INFO,
-                            event="ai.webtool.auto_research_chain",
-                            component=_COMPONENT,
-                            chat_id=message.chat.id,
-                            message_id=message.message_id,
-                            message_thread_id=message.message_thread_id,
-                            user_id=message.from_user.id,
-                            extra={
-                                "mode": "followup_chain" if is_followup_research else "auto_chain",
-                                "status": "success" if chain_extracts else "no_usable_extraction",
-                                **_chain_diagnostic_snapshot(
-                                    search_hosts=tuple(tool_result.hosts or ()),
-                                    chain_urls=chain_urls,
-                                    static_attempts=static_attempts,
-                                    browser_attempts=browser_fallbacks_used,
-                                    chain_extracts=chain_extracts,
-                                    reason_buckets=reason_buckets,
-                                    content_length_buckets=content_length_buckets,
-                                    timeout_count=timeout_count,
-                                    error_class_buckets=error_class_buckets,
-                                ),
-                                "scope": decision.context.scope_type,
-                            },
-                        )
-
-                    if chain_extracts:
-                        auto_note = _format_auto_research_chained_success_note(
-                            capability=decision_auto.capability,
-                            search_text=tool_result.text,
-                            search_hosts=tuple(tool_result.hosts or ()),
-                            extracts=tuple(chain_extracts),
-                            followup=is_followup_research,
-                        )
-                    elif chain_urls:
-                        auto_note = _format_auto_research_chain_no_confirmation_note(
-                            capability=decision_auto.capability,
-                            search_text=tool_result.text,
-                            search_hosts=tuple(tool_result.hosts or ()),
-                            followup=is_followup_research,
-                        )
-                    else:
-                        auto_note = _format_auto_research_success_note(
-                            capability=decision_auto.capability,
-                            text=tool_result.text,
-                            hosts=tuple(tool_result.hosts or ()),
-                        )
-                else:
-                    if retry_attempted:
-                        auto_note = _format_auto_research_retry_no_result_note(capability=decision_auto.capability, reason=tool_result.reason)
-                    else:
-                        auto_note = _format_auto_research_no_result_note(capability=decision_auto.capability, reason=tool_result.reason)
+            )
+            auto_note = research_result.auto_note
+            if research_result.user_response:
+                await self._send_text(message.chat.id, research_result.user_response, message.message_thread_id)
+                return
 
         if auto_note:
             llm_prompt = f"{auto_note}\n\n{llm_prompt}"
@@ -1956,7 +1487,12 @@ class Dispatcher:
         timing: dict[str, Any] = {}
         with duration_timer(timing):
             try:
-                response = await self.ai_service.ask(llm_prompt)
+                try:
+                    response = await self.ai_service.ask(llm_prompt, task_type="answer_synthesis")
+                except TypeError as exc:
+                    if "task_type" not in str(exc):
+                        raise
+                    response = await self.ai_service.ask(llm_prompt)
             except Exception:
                 logger.exception("ai_autoreply failed: user_id=%s chat_id=%s", message.from_user.id, message.chat.id)
                 if self.database_url is not None:
@@ -2021,6 +1557,9 @@ class Dispatcher:
         if not response:
             return
 
+        if auto_note:
+            response = sanitize_auto_research_user_response(response)
+
         await self._send_text(message.chat.id, response, message.message_thread_id)
 
         log_event(
@@ -2053,6 +1592,226 @@ class Dispatcher:
                     },
                 )
                 session.commit()
+
+    async def _maybe_handle_current_info_autoreply(
+        self,
+        *,
+        message: TelegramMessage,
+        role: Role,
+        normalized_text: str,
+        locale: str,
+    ) -> bool:
+        if not self.current_info_enabled or self.current_info_service is None or self.ai_service is None:
+            return False
+
+        decision = decide_auto_research(normalized_text)
+        if not decision.enabled or decision.capability != "websearch" or not decision.query:
+            return False
+
+        timeout_seconds = max(float(self.current_info_timeout_seconds), 0.001)
+        request = CurrentInfoRequest(
+            query=decision.query,
+            locale=locale,
+            domain_hint=classify_evidence_domain(decision.query),
+            max_results=max(1, min(int(self.current_info_max_results), 10)),
+            max_documents=max(0, min(int(self.current_info_max_documents), 10)),
+            user_id=message.from_user.id,
+            chat_id=message.chat.id,
+            topic_id=message.message_thread_id,
+            role=role,
+            metadata={
+                "telegram_message_id": message.message_id,
+                "auto_research_reason": decision.reason,
+            },
+        )
+
+        started = time.perf_counter()
+        try:
+            answer = await asyncio.wait_for(
+                asyncio.to_thread(self.current_info_service.answer, request),
+                timeout=timeout_seconds,
+            )
+        except TimeoutError:
+            log_event(
+                logger,
+                logging.INFO,
+                event="current_info.telegram.fallback",
+                component=_COMPONENT,
+                chat_id=message.chat.id,
+                message_id=message.message_id,
+                message_thread_id=message.message_thread_id,
+                user_id=message.from_user.id,
+                extra={
+                    "reason": "timeout",
+                    "stage": "retrieval",
+                    "timeout_seconds": timeout_seconds,
+                },
+            )
+            return False
+        except Exception as exc:
+            log_event(
+                logger,
+                logging.INFO,
+                event="current_info.telegram.fallback",
+                component=_COMPONENT,
+                chat_id=message.chat.id,
+                message_id=message.message_id,
+                message_thread_id=message.message_thread_id,
+                user_id=message.from_user.id,
+                extra={
+                    "reason": "service_error",
+                    "error_class": exc.__class__.__name__,
+                },
+            )
+            return False
+
+        if not isinstance(answer, CurrentInfoAnswer) or not answer.answered:
+            log_event(
+                logger,
+                logging.INFO,
+                event="current_info.telegram.fallback",
+                component=_COMPONENT,
+                chat_id=message.chat.id,
+                message_id=message.message_id,
+                message_thread_id=message.message_thread_id,
+                user_id=message.from_user.id,
+                extra={
+                    "reason": "not_answered",
+                    "status": getattr(answer, "status", "invalid_response"),
+                    "warning_count": len(getattr(answer, "warnings", ()) or ()),
+                },
+            )
+            return False
+
+        remaining_seconds = timeout_seconds - (time.perf_counter() - started)
+        if remaining_seconds <= 0:
+            log_event(
+                logger,
+                logging.INFO,
+                event="current_info.telegram.fallback",
+                component=_COMPONENT,
+                chat_id=message.chat.id,
+                message_id=message.message_id,
+                message_thread_id=message.message_thread_id,
+                user_id=message.from_user.id,
+                extra={
+                    "reason": "timeout",
+                    "stage": "budget_exhausted",
+                    "timeout_seconds": timeout_seconds,
+                    "status": answer.status,
+                    "confidence": answer.confidence,
+                },
+            )
+            return False
+        try:
+            synthesized = await asyncio.wait_for(
+                self._synthesize_current_info_answer(answer=answer, locale=locale),
+                timeout=remaining_seconds,
+            )
+        except TimeoutError:
+            log_event(
+                logger,
+                logging.INFO,
+                event="current_info.telegram.fallback",
+                component=_COMPONENT,
+                chat_id=message.chat.id,
+                message_id=message.message_id,
+                message_thread_id=message.message_thread_id,
+                user_id=message.from_user.id,
+                extra={
+                    "reason": "timeout",
+                    "stage": "synthesis",
+                    "timeout_seconds": timeout_seconds,
+                    "status": answer.status,
+                    "confidence": answer.confidence,
+                },
+            )
+            return False
+        except Exception as exc:
+            log_event(
+                logger,
+                logging.INFO,
+                event="current_info.telegram.fallback",
+                component=_COMPONENT,
+                chat_id=message.chat.id,
+                message_id=message.message_id,
+                message_thread_id=message.message_thread_id,
+                user_id=message.from_user.id,
+                extra={
+                    "reason": "synthesis_error",
+                    "error_class": exc.__class__.__name__,
+                    "status": answer.status,
+                    "confidence": answer.confidence,
+                },
+            )
+            return False
+
+        text = self._format_current_info_telegram_answer(answer=answer, synthesized=synthesized, locale=locale)
+        if not text.strip():
+            return False
+
+        await self._send_text(message.chat.id, text, message.message_thread_id)
+        log_event(
+            logger,
+            logging.INFO,
+            event="current_info.telegram.sent",
+            component=_COMPONENT,
+            chat_id=message.chat.id,
+            message_id=message.message_id,
+            message_thread_id=message.message_thread_id,
+            user_id=message.from_user.id,
+            extra={
+                "status": answer.status,
+                "confidence": answer.confidence,
+                "source_count": len(answer.sources),
+                "warning_count": len(answer.warnings),
+            },
+        )
+        return True
+
+    async def _synthesize_current_info_answer(self, *, answer: CurrentInfoAnswer, locale: str) -> str:
+        prompt = self._current_info_synthesis_prompt(answer=answer, locale=locale)
+        try:
+            return await self.ai_service.ask(prompt, task_type="answer_synthesis")
+        except TypeError as exc:
+            if "task_type" not in str(exc):
+                raise
+            return await self.ai_service.ask(prompt)
+
+    @staticmethod
+    def _current_info_synthesis_prompt(*, answer: CurrentInfoAnswer, locale: str) -> str:
+        query = answer.request.query if answer.request is not None else ""
+        target_language = "German" if locale != "en" else "English"
+        evidence = _current_info_evidence_text(answer)
+        freshness = answer.evidence.freshness if answer.evidence is not None else ""
+        warnings = ", ".join(answer.warnings) if answer.warnings else "none"
+        return (
+            "Synthesize a concise Telegram answer from the checked current-info evidence only.\n"
+            f"Target language: {target_language}.\n"
+            "Do not invent facts, links, dates, or numbers. If the evidence is uncertain, say so briefly.\n"
+            "Do not include a source list; the application appends sources separately.\n\n"
+            f"User question:\n{query}\n\n"
+            f"Evidence confidence: {answer.confidence:.2f}\n"
+            f"Evidence freshness: {freshness or 'unknown'}\n"
+            f"Warnings: {warnings}\n\n"
+            f"Checked evidence:\n{evidence}"
+        )
+
+    @staticmethod
+    def _format_current_info_telegram_answer(*, answer: CurrentInfoAnswer, synthesized: str, locale: str) -> str:
+        body = " ".join((synthesized or "").split())
+        if not body:
+            body = " ".join(answer.answer_text.split())
+        if not body:
+            return ""
+
+        sources = tuple(dict.fromkeys(source for source in answer.sources if source))[:CURRENT_INFO_SYNTHESIS_MAX_SOURCE_COUNT]
+        if not sources:
+            return body
+
+        label = "Sources" if locale == "en" else "Quellen"
+        source_lines = [f"{index}. {url}" for index, url in enumerate(sources, start=1)]
+        return f"{body}\n\n{label}:\n" + "\n".join(source_lines)
 
     def _auto_image_followup_cache(self) -> list[_RecentAutoImageCandidate]:
         return self._recent_auto_image_candidates
@@ -2148,16 +1907,16 @@ class Dispatcher:
         return matched
 
     async def _send_text(self, chat_id: int, text: str, message_thread_id: int | None) -> None:
-        if message_thread_id is None:
-            result = await self.send_text(chat_id, text)
-            await self._persist_bot_send_result(chat_id=chat_id, message_thread_id=None, text=text, result=result)
-            return
-        try:
-            result = await self.send_text(chat_id, text, message_thread_id)
-        except TypeError:
-            result = await self.send_text(chat_id, text)
-        await self._persist_bot_send_result(chat_id=chat_id, message_thread_id=message_thread_id, text=text, result=result)
-
+        for chunk in split_telegram_message_text(text):
+            if message_thread_id is None:
+                result = await self.send_text(chat_id, chunk)
+                await self._persist_bot_send_result(chat_id=chat_id, message_thread_id=None, text=chunk, result=result)
+                continue
+            try:
+                result = await self.send_text(chat_id, chunk, message_thread_id)
+            except TypeError:
+                result = await self.send_text(chat_id, chunk)
+            await self._persist_bot_send_result(chat_id=chat_id, message_thread_id=message_thread_id, text=chunk, result=result)
 
     async def _persist_bot_send_result(
         self,
@@ -2212,3 +1971,32 @@ class Dispatcher:
                 }, ensure_ascii=False),
             )
         )
+
+
+def _current_info_evidence_text(answer: CurrentInfoAnswer) -> str:
+    chunks = answer.evidence.chunks if answer.evidence is not None else ()
+    lines: list[str] = []
+    for index, chunk in enumerate(chunks[:CURRENT_INFO_SYNTHESIS_MAX_SOURCE_COUNT], start=1):
+        text = " ".join(chunk.text.split())
+        if not text:
+            continue
+        if len(text) > 900:
+            text = text[:900].rstrip() + " ..."
+        title = " ".join((chunk.source_title or "").split())
+        source = chunk.source_url or ""
+        heading = f"[{index}]"
+        if title:
+            heading = f"{heading} {title}"
+        if source:
+            heading = f"{heading} ({source})"
+        lines.append(f"{heading}\n{text}")
+
+    if not lines:
+        fallback = " ".join(answer.answer_text.split())
+        if fallback:
+            lines.append(fallback[:CURRENT_INFO_SYNTHESIS_MAX_EVIDENCE_CHARS])
+
+    text = "\n\n".join(lines).strip()
+    if len(text) > CURRENT_INFO_SYNTHESIS_MAX_EVIDENCE_CHARS:
+        text = text[:CURRENT_INFO_SYNTHESIS_MAX_EVIDENCE_CHARS].rstrip() + " ..."
+    return text

@@ -263,9 +263,18 @@ class PluginSandboxRunner:
         # When installed via `pip install -e .` (as in CI), the package lives under
         # sys.prefix/site-packages.  We add it to PYTHONPATH so that the worker can
         # `import amo_bot.ai` without relying on the current working directory.
+        python_paths: list[str] = []
         site_packages = Path(sys.prefix) / "lib" / f"python{sys.version_info.major}.{sys.version_info.minor}" / "site-packages"
         if site_packages.exists():
-            env["PYTHONPATH"] = str(site_packages)
+            python_paths.append(str(site_packages))
+        for path in sys.path:
+            if not path:
+                continue
+            candidate = Path(path)
+            if candidate.exists():
+                python_paths.append(str(candidate.resolve()))
+        if python_paths:
+            env["PYTHONPATH"] = os.pathsep.join(dict.fromkeys(python_paths))
         return env
 
     @staticmethod

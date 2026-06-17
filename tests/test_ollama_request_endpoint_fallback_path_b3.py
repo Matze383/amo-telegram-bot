@@ -35,14 +35,29 @@ def test_fallback_client_preserves_primary_request_endpoint(monkeypatch) -> None
 
     captured: dict[str, object] = {}
 
-    def _mk_fallback(*, base_url: str, model: str, timeout_seconds: float, max_response_chars: int, request_endpoint: str):
+    def _mk_fallback(
+        *,
+        base_url: str,
+        model: str,
+        timeout_seconds: float,
+        max_prompt_chars: int,
+        max_predict_tokens: int,
+        max_response_chars: int,
+        request_endpoint: str,
+        streaming_mode: str,
+        think: bool,
+    ):
         captured.update(
             {
                 "base_url": base_url,
                 "model": model,
                 "timeout_seconds": timeout_seconds,
+                "max_prompt_chars": max_prompt_chars,
+                "max_predict_tokens": max_predict_tokens,
                 "max_response_chars": max_response_chars,
                 "request_endpoint": request_endpoint,
+                "streaming_mode": streaming_mode,
+                "think": think,
             }
         )
         return fallback
@@ -65,6 +80,10 @@ def test_fallback_client_preserves_primary_request_endpoint(monkeypatch) -> None
         "base_url": "http://ollama",
         "model": "fallback-model",
         "timeout_seconds": 1.0,
+        "max_prompt_chars": 4000,
+        "max_predict_tokens": 512,
         "max_response_chars": 1000,
         "request_endpoint": "chat",
+        "streaming_mode": "off",
+        "think": False,
     }

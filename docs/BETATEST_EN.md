@@ -113,6 +113,19 @@ OLLAMA_TIMEOUT_SECONDS=20
 OLLAMA_MAX_PROMPT_CHARS=4000
 OLLAMA_MAX_PREDICT_TOKENS=512
 OLLAMA_MAX_RESPONSE_CHARS=1500
+# OLLAMA_REQUEST_ENDPOINT=generate  # generate (default) or chat
+# OLLAMA_STREAMING_MODE=off  # off (default), collect_only, live_edit
+
+# Optional: Ollama Model Policy (task-based model selection)
+# OLLAMA_MODEL_POLICY_ENABLED=false  # false (default), true
+# OLLAMA_THINKING_MODEL=             # Model for complex tasks (e.g., deepseek-r1:14b)
+# OLLAMA_NON_THINKING_MODEL=         # Model for simple tasks (e.g., qwen2.5-coder:14b)
+# OLLAMA_THINKING_TASK_TYPES=web_research,sports,news,answer_synthesis
+# OLLAMA_SIMPLE_PROMPT_MAX_CHARS=240
+# OLLAMA_THINKING_TIMEOUT_SECONDS=      # optional; default: OLLAMA_TIMEOUT_SECONDS
+# OLLAMA_NON_THINKING_TIMEOUT_SECONDS=  # optional; default: OLLAMA_TIMEOUT_SECONDS
+# OLLAMA_THINKING_BUDGET_MAX_PROMPT_CHARS=      # optional; default: OLLAMA_MAX_PROMPT_CHARS
+# OLLAMA_NON_THINKING_BUDGET_MAX_PROMPT_CHARS=  # optional; default: OLLAMA_MAX_PROMPT_CHARS
 
 # Database (default: SQLite; optional MariaDB/MySQL via mysql+pymysql://...)
 DATABASE_URL=sqlite:///./data/amo_bot.db
@@ -143,8 +156,11 @@ POLL_RETRY_MAX_SECONDS=30
 OFFSET_STATE_FILE=.state/offset.json
 
 # SearXNG Websearch (optional – for websearch feature)
-# SEARXNG_BASE_URL=https://your-searxng-instance.com  # Primary configuration
-# AMO_WEBSEARCH_SEARXNG_BASE_URL=https://fallback.com  # Fallback (optional)
+# AMO_WEBSEARCH_SEARXNG_BASE_URL=https://your-searxng-instance.com
+# AMO_WEBSEARCH_SEARXNG_TIMEOUT_SECONDS=30
+# AMO_WEBSEARCH_MAX_RESULTS=10
+# AMO_WEBSEARCH_SEARXNG_LANGUAGE=en-US
+# AMO_WEBSEARCH_SEARXNG_CATEGORIES=general
 # Note: Only HTTPS URLs allowed for public endpoints. HTTP only for loopback/private.
 ```
 
@@ -271,25 +287,11 @@ Start a private chat with your bot:
 - Send: `/help`
 - Expected: List of available commands (depends on your role)
 
-**Test 3: /consent**
-- Send: `/consent`
-- Expected: Shows your current consent status and available commands
-  - **Private chat**: Full status and details shown
-  - **Groups**: Privacy notice only (no status details shown in groups for data protection)
-
-**Test 4: /accept**
-- Send: `/accept`
-- Expected: Consent accepted confirmation
-- Note: If you previously declined, you can use `/accept` again to re-consent
-
-**Test 5: /decline**
-- Send: `/decline`
-- Expected: Consent declined confirmation
-- Note: You can use `/accept` later if you change your mind
-
-**Test 6: /role**
+**Test 3: /role**
 - Send: `/role`
 - Expected: Your current role (e.g., "owner")
+
+> **Usage Note:** Human users can use the bot automatically. No consent dialog required. Roles (owner/admin/vip/normal/ignore) still control permissions. Bot-to-bot communication still requires explicit approval.
 
 ---
 
@@ -365,6 +367,20 @@ Start a private chat with your bot:
 # Check Ollama status
 curl http://127.0.0.1:11434/api/tags
 ```
+
+**Ollama Model Policy (optional):**
+When `OLLAMA_MODEL_POLICY_ENABLED=true`:
+- The bot automatically selects between Thinking and Non-Thinking models based on task
+- `OLLAMA_THINKING_MODEL`: For complex tasks (e.g., `deepseek-r1:14b`)
+- `OLLAMA_NON_THINKING_MODEL`: For simple tasks (e.g., `qwen2.5-coder:14b`)
+- `OLLAMA_THINKING_TASK_TYPES`: Comma-separated list of task types requiring Thinking
+- `OLLAMA_SIMPLE_PROMPT_MAX_CHARS`: Max characters for "simple" prompts (Non-Thinking)
+- Optional timeouts and prompt budgets for Thinking vs. Non-Thinking
+
+**Test – Model Policy:**
+- [ ] Short simple question (`/ask What is 2+2?`) uses Non-Thinking model
+- [ ] Complex research question (`/ask Explain quantum computing`) uses Thinking model
+- [ ] On transient timeout/error, fallback to the configured Non-Thinking/fallback model after retry
 
 **For Anthropic:**
 - Ensure `ANTHROPIC_API_KEY` is set in `.env`
@@ -443,13 +459,12 @@ The bot can auto-respond via AI when mentioned or replied to in **active scopes*
 
 **Requirements:**
 - User must have role `vip`, `admin`, or `owner`
-- User must have accepted consent (`/accept`)
 - The scope (topic or private chat) must have AI enabled in the configuration
 - The AI service must be configured (Ollama, OpenAI, Anthropic, Google, OpenRouter, Groq, Mistral, xAI or DeepSeek)
 
 **Audit Events:**
 - `ai_autoreply_sent` — Response successfully sent
-- `ai_autoreply_denied` — Blocked (role or consent)
+- `ai_autoreply_denied` — Blocked (role or other restriction)
 - `ai_autoreply_error` — AI service error
 
 **Note:** This is separate from the `/ask` command. Auto-reply is triggered implicitly by mentions/replies; `/ask` is an explicit command.
@@ -608,92 +623,7 @@ When `WEBUI_PUBLIC_MODE=true`, the HTTP Request Gate blocks access to protected 
 - Global manual memories are disabled for v1. Sensitive-looking tokens/secrets/system-prompt content and texts over 1000 characters are rejected.
 - Normal messages such as `remember: ...` are not harvested automatically in v1.
 
-### Consent Commands (Block 1)
-
-The bot now includes user consent management via Telegram commands.
-
-**Test Steps:**
-
-1. **Test `/consent` in private chat:**
-   - Send: `/consent`
-   - Expected: Shows current consent status, details, and available commands
-
-2. **Test `/accept`:**
-   - Send: `/accept`
-   - Expected: Confirmation that consent has been accepted
-
-3. **Test `/decline`:**
-   - Send: `/decline`
-   - Expected: Confirmation that consent has been declined
-
-4. **Test `/consent` after declining:**
-   - Send: `/consent`
-   - Expected: Shows declined status and reminds that you can `/accept` again
-
-5. **Test re-accepting:**
-   - Send: `/accept` (after previously declining)
-   - Expected: Consent accepted again successfully
-
-6. **Test `/consent` in groups:**
-   - Send: `/consent` in a group where the bot is present
-   - Expected: Privacy notice only — no consent status details shown in groups for data protection reasons
-
-**Checklist:**
-- [ ] `/consent` in private chat shows full status
-- [ ] `/accept` confirms consent accepted
-- [ ] `/decline` confirms consent declined
-- [ ] `/consent` shows declined status correctly
-- [ ] `/accept` works after previous decline
-- [ ] `/consent` in groups shows only privacy hint (no details)
-
----
-
-### Automatic Private Consent DM Prompt (Block 2)
-
-The bot automatically sends a private consent prompt to users who are in "pending" status (not yet accepted or declined).
-
-**How it works:**
-- When a pending user is seen in a group, the bot automatically sends them a private DM with a consent notice
-- The DM includes **inline buttons** (✅ Accept / ❌ Decline) for quick consent, plus fallback commands: `/accept`, `/decline`, `/consent`
-- **One-shot policy:** Exactly 1 automatic DM per user — only sent if `consent_prompt_count == 0`. After successful delivery, `prompt_count` is set to 1 and no further automatic DMs are sent.
-- **Unreachable users:** If the bot cannot initiate a private conversation (user hasn't started the bot), the user is marked as `unreachable` and won't receive prompts. The user must start the bot privately and use `/accept` (or the Accept button) to consent.
-
-**Test Steps:**
-
-1. **Test automatic prompt:**
-   - Have a new user join a group where the bot is present
-   - User should receive exactly one private DM from the bot with the consent notice
-
-2. **Test one-shot policy:**
-   - After receiving the first (and only) automatic prompt, the user will not receive any further automatic DMs
-   - The `consent_prompt_count` is set to 1 after successful delivery
-
-3. **Test unreachable handling:**
-   - If the user hasn't started a private chat with the bot, the DM cannot be delivered
-   - User is marked as `unreachable` in the system
-   - To become reachable and consent, the user must start the bot privately first and use `/accept`
-
-**Checklist:**
-- [ ] Pending users receive exactly one automatic DM prompt when first seen in groups
-- [ ] DM contains **inline buttons** (Accept/Decline) and `/accept`, `/decline`, `/consent` fallback commands
-- [ ] Inline buttons work: Accept button sets consent to accepted, Decline button sets consent to declined
-- [ ] Fallback commands remain usable alongside buttons
-- [ ] One-shot policy enforced: only 1 automatic prompt per user (when `consent_prompt_count == 0`)
-- [ ] No automatic retries after successful delivery or failure
-- [ ] Unreachable users are marked appropriately and must start the bot privately to consent
-- [ ] Runtime gate blocks normal usage for `pending`/`declined`/`unreachable` users
-- [ ] Allowed commands work despite gate: `/accept`, `/decline`, `/consent`, `/start`
-- [ ] `accepted` users can use all commands normally
-- [ ] Owner bypass works for consent (owner can always use the bot)
-- [ ] Global `ignore` role remains blocking regardless of consent
-
-**Runtime Consent Gate:** The runtime gate is **now active**. Users with status `pending`, `declined`, or `unreachable` cannot use normal bot functions until they `/accept`.
-
-**Allowed commands despite gate:** `/accept`, `/decline`, `/consent`, `/start` — these always work.
-
-**Group behavior:** In groups, only a privacy-preserving notice is shown. No status details are revealed.
-
-**Private block message:** Blocked users in private chats are told to use `/accept` or `/consent`. For `unreachable` users: Start the bot privately first, then `/accept`.
+> **Usage Note:** Human users can use the bot automatically. No consent dialog required. Roles (owner/admin/vip/normal/ignore) still control permissions. Bot-to-bot communication still requires explicit approval (see "Bot-to-Bot Approval" section).
 
 ---
 
@@ -864,7 +794,7 @@ The image analysis coreplugin provides secure, default-off image analysis for AI
 
 **Prerequisites:**
 - `vip`, `admin` or `owner` role (`ignore` is always blocked)
-- Consent granted (`/accept`)
+- Topic/quota gates apply
 
 **Role-Based Limits (IMG-B8):**
 | Role | Limit |
@@ -956,8 +886,8 @@ The bot supports sending images via Telegram with policy/role/topic gates.
 
 **Prerequisites:**
 - `vip`, `admin` or `owner` role
-- Consent granted (`/accept`)
 - Image sending enabled for the topic
+- Quota limits apply
 
 **Policy Gates:**
 - Same role checks as text messages (`send_message` capability)
@@ -1068,9 +998,42 @@ The bot supports sending images via Telegram with policy/role/topic gates.
 
 ### Auto Web Research (Search→Scrape Chain)
 
-Enhanced automatic web research for current/freshness-relevant questions (market/rate/price, news, releases, status, weather, traffic, outages, versions, updates, etc.). Starts with configured SearXNG websearch. For freshness-critical intents only, it can follow up with bounded static page extraction from top URLs and Chromium/browser fallback for max one URL if static extraction is empty/unusable. No new user/admin commands, no new config required. Behavior is bounded/transparent. Timeless/general educational questions do not trigger it. If extraction cannot confirm exact current values, the bot states web search succeeded but follow-up extraction did not confirm the exact value.
+Enhanced automatic web research for current/freshness-relevant questions (market/rate/price, news, releases, status, weather, traffic, outages, versions, updates, etc.). Starts with configured SearXNG websearch. For freshness-critical intents only, it can follow up with bounded document extraction from top URLs via Crawlee with httpx fallback, plus Chromium/browser fallback for max one URL if static extraction is empty/unusable. **Manual browser trigger:** `browser: <http-or-https-url>` or `webbrowser: <http-or-https-url>` in chat triggers a direct browser fetch (e.g., `browser: https://example.com` or `browser: http://example.com`). No new user/admin commands are required; optional `AMO_DOCUMENT_FETCH_*` settings tune document timeout, maximum bytes, redirect limit, and Crawlee preference. Browser output is bounded structured evidence (URL, title, UTC timestamp, HTTP status, capped text snippets), not a raw page dump. The browser/document providers are security-guarded and capped by page, time, snippet, output, document-size, MIME, and redirect limits; only `http://` and `https://` URLs are allowed, credentials and localhost/private/internal IP targets are blocked, and form submissions are not performed. Telemetry records browser success, HTTP error, timeout, and failure outcomes. Timeless/general educational questions do not trigger it. If extraction cannot confirm exact current values, the bot states web search succeeded but follow-up extraction did not confirm the exact value.
 
 **Feedback-driven follow-up search:** User feedback can trigger another bounded research round when the prior answer is perceived as insufficient (e.g., "search more", "other sources", "open/check the sources", "that's not enough", "more sources", "such weiter", "andere Quellen"). The follow-up remains bounded (SearXNG first, static extraction capped, max one browser fallback) and transparent: if still unconfirmed, the bot says so. Context from the previous bot answer/reply may be used for the follow-up search query; raw query/context is not logged but is sent to the configured websearch provider.
+
+---
+
+### Manual Browser Commands
+
+For targeted browser requests, direct triggers can be used in chat:
+
+**Format:** `browser: <url>` or `webbrowser: <url>`
+**Example:** `browser: https://example.com`
+
+**Requirements:**
+- Only HTTP/HTTPS URLs allowed
+- Supports both `http://` and `https://`
+
+**Browser Output:**
+- URL, page title, UTC timestamp, HTTP status
+- Capped text snippets (maximum length limited)
+- No full page content
+
+**Security Restrictions:**
+- No credentials/authentication
+- No private/local IPs (localhost, 127.0.0.1, internal networks)
+- No DNS resolution to private IPs
+- Blocks non-GET/HEAD/OPTIONS methods
+- Form submits suppressed
+
+**Limits:**
+- Max 1 URL per request
+- Time budget per request limited
+- Output capped for fast responses
+- No unlimited page depth
+
+**Usage:** Manual browser commands are suitable for current, dynamic sources (e.g., current prices, status pages, availability) when normal web search is insufficient.
 
 ### Webtool Quotas (Issue #48)
 
@@ -1270,9 +1233,6 @@ Use this checklist for your test:
 - [ ] WebUI starts without errors
 - [ ] Private chat /ping: OK
 - [ ] Private chat /help: OK
-- [ ] Private chat /consent: OK
-- [ ] Private chat /accept: OK
-- [ ] Private chat /decline: OK
 - [ ] Private chat /role: OK
 - [ ] Group test /ping: OK
 - [ ] Group test /help: OK
@@ -1303,7 +1263,7 @@ Use this checklist for your test:
 - [ ] IMG-B3 Size limit (oversize handling): OK / Not tested
 - [ ] IMG-B4 Image sending via Telegram API: OK / Not tested
 - [ ] IMG-B4 Topic-safe image sending (message_thread_id): OK / Not tested
-- [ ] IMG-B4 Deny behavior (role/consent/topic gates): OK / Not tested
+- [ ] IMG-B4 Deny behavior (role/topic/quota gates): OK / Not tested
 - [ ] IMG-B5 WebUI image analysis per topic (inherit/enabled/disabled): OK / Not tested
 - [ ] IMG-B7 WebUI Image Analysis Role Quotas (/users page, disabled/unlimited/limited): OK / Not tested
 - [ ] Security headers present (check browser dev tools): OK

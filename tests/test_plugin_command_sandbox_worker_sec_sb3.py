@@ -53,6 +53,27 @@ async def handle_command(context, host_api):
     ]
 
 
+def test_worker_splits_long_send_message_ops_without_protocol_error(tmp_path) -> None:
+    pdir = tmp_path / "plugins" / "longsend"
+    pdir.mkdir(parents=True)
+    (pdir / "main.py").write_text(
+        """
+async def handle_command(context, host_api):
+    await host_api.send_message(context.chat_id, "x" * 4200)
+""",
+        encoding="utf-8",
+    )
+    request = _request("longsend/main.py")
+    request["limits"] = {"timeout_ms": 1000, "max_ops": 3, "max_text_len": 4000}
+
+    response = asyncio.run(execute_command_request(request, plugins_root=tmp_path / "plugins"))
+
+    assert response["ok"] is True
+    assert response["error"] is None
+    assert [len(op["text"]) for op in response["ops"]] == [4000, 200]
+    assert "".join(op["text"] for op in response["ops"]) == "x" * 4200
+
+
 def test_worker_disallowed_host_op_is_sanitized(tmp_path) -> None:
     pdir = tmp_path / "plugins" / "badop"
     pdir.mkdir(parents=True)

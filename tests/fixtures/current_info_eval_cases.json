@@ -1,0 +1,224 @@
+{
+  "version": 1,
+  "mode": "local",
+  "cases": [
+    {
+      "case_id": "news_two_fresh_sources",
+      "query_type": "news",
+      "request": {
+        "query": "latest AMO service news today",
+        "locale": "en",
+        "domain_hint": "news",
+        "max_results": 3,
+        "max_documents": 2,
+        "metadata": {
+          "max_source_age_seconds": 172800
+        }
+      },
+      "search_results": [
+        {
+          "title": "AMO service update",
+          "url": "https://news-one.example/amo-update",
+          "snippet": "AMO service update shipped today.",
+          "provider": "fixture_search",
+          "rank": 1,
+          "host": "news-one.example",
+          "metadata": {
+            "source_type": "News"
+          }
+        },
+        {
+          "title": "AMO status roundup",
+          "url": "https://news-two.example/amo-roundup",
+          "snippet": "Second report confirms the AMO update.",
+          "provider": "fixture_search",
+          "rank": 2,
+          "host": "news-two.example",
+          "metadata": {
+            "source_type": "News"
+          }
+        }
+      ],
+      "search_metrics": [
+        {
+          "provider": "fixture_search",
+          "latency_ms": 12.0,
+          "hit_count": 2,
+          "host_diversity": 2
+        }
+      ],
+      "documents": [
+        {
+          "url": "https://news-one.example/amo-update",
+          "title": "AMO service update",
+          "text": "AMO shipped a service update today and enabled the new Current-Info path.",
+          "fetched_at": "2026-06-16T10:00:00+00:00",
+          "status_code": 200,
+          "provider": "fixture_fetch"
+        },
+        {
+          "url": "https://news-two.example/amo-roundup",
+          "title": "AMO status roundup",
+          "text": "The AMO service update is confirmed by a second independent source.",
+          "fetched_at": "2026-06-16T10:05:00+00:00",
+          "status_code": 200,
+          "provider": "fixture_fetch"
+        }
+      ],
+      "chunks": [
+        {
+          "text": "AMO shipped a service update today and enabled the new Current-Info path.",
+          "source_url": "https://news-one.example/amo-update",
+          "source_title": "AMO service update",
+          "relevance": 0.95,
+          "metadata": {
+            "claim_key": "amo_update",
+            "claim_value": "current-info-path"
+          }
+        },
+        {
+          "text": "The AMO service update is confirmed by a second independent source.",
+          "source_url": "https://news-two.example/amo-roundup",
+          "source_title": "AMO status roundup",
+          "relevance": 0.92,
+          "metadata": {
+            "claim_key": "amo_update",
+            "claim_value": "current-info-path"
+          }
+        }
+      ],
+      "expected": {
+        "statuses": ["answered"],
+        "min_sources": 2,
+        "freshness": ["fresh"],
+        "required_evidence_terms": ["service update", "Current-Info path", "second independent source"],
+        "min_evidence_coverage": 1.0,
+        "max_latency_ms": 1000,
+        "max_provider_errors": 0
+      }
+    },
+    {
+      "case_id": "release_official_source",
+      "query_type": "release",
+      "request": {
+        "query": "latest AMO release version",
+        "locale": "en",
+        "domain_hint": "release",
+        "max_results": 2,
+        "max_documents": 1
+      },
+      "search_results": [
+        {
+          "title": "AMO releases",
+          "url": "https://docs.example/releases",
+          "snippet": "AMO 2026.6.17 is available.",
+          "provider": "fixture_search",
+          "rank": 1,
+          "host": "docs.example",
+          "metadata": {
+            "source_type": "Official"
+          }
+        }
+      ],
+      "search_metrics": [
+        {
+          "provider": "fixture_search",
+          "latency_ms": 8.0,
+          "hit_count": 1,
+          "host_diversity": 1
+        }
+      ],
+      "documents": [
+        {
+          "url": "https://docs.example/releases",
+          "title": "AMO releases",
+          "text": "The latest AMO release is version 2026.6.17.",
+          "fetched_at": "2026-06-17T08:00:00+00:00",
+          "status_code": 200,
+          "provider": "fixture_fetch"
+        }
+      ],
+      "chunks": [
+        {
+          "text": "The latest AMO release is version 2026.6.17.",
+          "source_url": "https://docs.example/releases",
+          "source_title": "AMO releases",
+          "relevance": 0.98,
+          "metadata": {
+            "claim_key": "release_version",
+            "claim_value": "2026.6.17"
+          }
+        }
+      ],
+      "expected": {
+        "statuses": ["answered"],
+        "min_sources": 1,
+        "freshness": ["fresh"],
+        "required_evidence_terms": ["latest AMO release", "2026.6.17"],
+        "min_evidence_coverage": 1.0,
+        "max_latency_ms": 1000,
+        "max_provider_errors": 0
+      }
+    },
+    {
+      "case_id": "local_event_provider_error_regression",
+      "query_type": "local_event",
+      "request": {
+        "query": "local AMO meetup Berlin tonight",
+        "locale": "de",
+        "domain_hint": "local_event",
+        "max_results": 2,
+        "max_documents": 1
+      },
+      "search_results": [
+        {
+          "title": "AMO Meetup Berlin",
+          "url": "https://events.example/berlin-amo",
+          "snippet": "AMO meetup starts tonight at 19:00 in Berlin.",
+          "provider": "fixture_search",
+          "rank": 1,
+          "host": "events.example",
+          "metadata": {
+            "source_type": "Official"
+          }
+        }
+      ],
+      "search_metrics": [
+        {
+          "provider": "fixture_search",
+          "latency_ms": 18.0,
+          "hit_count": 1,
+          "error_class": "timeout",
+          "host_diversity": 1
+        }
+      ],
+      "documents": [
+        {
+          "url": "https://events.example/berlin-amo",
+          "title": "AMO Meetup Berlin",
+          "text": "The local AMO meetup in Berlin starts tonight at 19:00.",
+          "fetched_at": "2026-06-17T09:00:00+00:00",
+          "status_code": 200,
+          "provider": "fixture_fetch"
+        }
+      ],
+      "chunks": [
+        {
+          "text": "The local AMO meetup in Berlin starts tonight at 19:00.",
+          "source_url": "https://events.example/berlin-amo",
+          "source_title": "AMO Meetup Berlin",
+          "relevance": 0.9
+        }
+      ],
+      "expected": {
+        "statuses": ["answered"],
+        "min_sources": 1,
+        "freshness": ["fresh"],
+        "required_evidence_terms": ["Berlin", "19:00"],
+        "min_evidence_coverage": 1.0,
+        "max_latency_ms": 1000,
+        "max_provider_errors": 1
+      }
+    }
+  ]
+}

@@ -174,7 +174,7 @@ WEBUI_PASSWORD=your_secure_password
 WEBUI_OWNER_TELEGRAM_ID=your_telegram_user_id
 
 # AI Provider Configuration
-AI_PROVIDER=ollama  # ollama (default), openai, anthropic, google, openrouter, groq, mistral, xai, deepseek, together, fireworks, litellm, lmstudio, vllm, or sglang
+AI_PROVIDER=ollama  # ollama (default), openai, anthropic, google, openrouter, groq, mistral, xai, deepseek, together, fireworks, amazon-bedrock, litellm, lmstudio, vllm, or sglang
 
 # Optional: OpenAI (for /ask command)
 # OPENAI_API_KEY=your-openai-api-key-here
@@ -253,6 +253,13 @@ AI_PROVIDER=ollama  # ollama (default), openai, anthropic, google, openrouter, g
 # SGLANG_TIMEOUT_SECONDS=60   # higher timeout recommended for local inference
 # SGLANG_BASE_URL=http://127.0.0.1:8000/v1
 
+# Optional: Amazon Bedrock (for /ask command) - AWS Cloud
+# AWS_ACCESS_KEY_ID=          # optional; omit when using AWS profile
+# AWS_SECRET_ACCESS_KEY=      # optional; omit when using AWS profile
+# AWS_REGION=                 # e.g. us-east-1 (default: us-east-1)
+# BEDROCK_MODEL=              # e.g. anthropic.claude-3-5-sonnet-20241022-v2:0
+# BEDROCK_TIMEOUT_SECONDS=60  # higher timeout recommended for AWS API
+
 # Optional: Ollama (for /ask command)
 OLLAMA_URL=http://127.0.0.1:11434
 OLLAMA_MODEL=llama3.1
@@ -262,6 +269,17 @@ OLLAMA_MAX_PREDICT_TOKENS=512
 OLLAMA_MAX_RESPONSE_CHARS=1500
 # OLLAMA_REQUEST_ENDPOINT=generate  # generate (default) or chat; invalid values fail startup validation
 # OLLAMA_STREAMING_MODE=off  # off (default), collect_only, live_edit (parsed gate only; no live Telegram streaming)
+
+# Optional: Ollama Model Policy (task-based model selection)
+# OLLAMA_MODEL_POLICY_ENABLED=false  # false (default), true
+# OLLAMA_THINKING_MODEL=             # Model for complex tasks (e.g., deepseek-r1:14b)
+# OLLAMA_NON_THINKING_MODEL=         # Model for simple tasks (e.g., qwen2.5-coder:14b)
+# OLLAMA_THINKING_TASK_TYPES=web_research,sports,news,answer_synthesis
+# OLLAMA_SIMPLE_PROMPT_MAX_CHARS=240
+# OLLAMA_THINKING_TIMEOUT_SECONDS=      # optional; default: OLLAMA_TIMEOUT_SECONDS
+# OLLAMA_NON_THINKING_TIMEOUT_SECONDS=  # optional; default: OLLAMA_TIMEOUT_SECONDS
+# OLLAMA_THINKING_BUDGET_MAX_PROMPT_CHARS=      # optional; default: OLLAMA_MAX_PROMPT_CHARS
+# OLLAMA_NON_THINKING_BUDGET_MAX_PROMPT_CHARS=  # optional; default: OLLAMA_MAX_PROMPT_CHARS
 
 # Optional: Database (defaults to SQLite)
 DATABASE_URL=sqlite:///./data/amo_bot.db
@@ -494,6 +512,172 @@ DREAMING_WINDOW_END=05:00
 
 ---
 
+## Websearch / SearXNG (optional)
+
+The bot optionally supports web search functionality via a SearXNG instance. This enables AI-powered research with current web content.
+
+### Prerequisites
+
+- A running [SearXNG](https://github.com/searxng/searxng) instance (self-hosted or public)
+- Network access from the bot to the SearXNG instance
+
+### Configuration
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `AMO_WEBSEARCH_SEARXNG_BASE_URL` | *(empty)* | Base URL of your SearXNG instance (e.g., `http://localhost:8080` or `https://searx.example.com`) |
+| `AMO_WEBSEARCH_SEARXNG_TIMEOUT_SECONDS` | `30` | Timeout for search requests in seconds |
+| `AMO_WEBSEARCH_MAX_RESULTS` | `10` | Maximum number of search results |
+| `AMO_WEBSEARCH_SEARXNG_LANGUAGE` | `auto` | Language preference for search results (e.g., `de-DE`, `en-US`, `auto`) |
+| `AMO_WEBSEARCH_SEARXNG_CATEGORIES` | `general` | Comma-separated list of search categories (e.g., `general`, `news`, `images`) |
+
+### Example Configuration
+
+```ini
+# Websearch / SearXNG
+AMO_WEBSEARCH_SEARXNG_BASE_URL=http://localhost:8080
+AMO_WEBSEARCH_SEARXNG_TIMEOUT_SECONDS=30
+AMO_WEBSEARCH_MAX_RESULTS=10
+AMO_WEBSEARCH_SEARXNG_LANGUAGE=en-US
+AMO_WEBSEARCH_SEARXNG_CATEGORIES=general,news
+```
+
+> **Note:** If `AMO_WEBSEARCH_SEARXNG_BASE_URL` is not set, web search functionality is disabled.
+
+---
+
+## Current-Info Search / SearchBroker (optional)
+
+The bot uses a SearchBroker for current information (news, weather, sports, stocks). It uses SearXNG as the primary source with optional Brave Search as fallback.
+Safesearch and region settings tune the SearXNG/Brave search-profile parameter mapping; they do not make Brave the primary provider.
+Optional profile files tune the generic intent layer before provider mapping. Invalid files are rejected and Current-Info search is disabled instead of sending unsafe provider parameters.
+For result-page extraction, the document fetcher prefers Crawlee and falls back to httpx. It follows only bounded redirects, caps response size, blocks private/internal targets, and accepts HTML/XHTML/plain-text responses.
+
+### Prerequisites
+
+- A running [SearXNG](https://github.com/searxng/searxng) instance (self-hosted or public), **OR**
+- A [Brave Search API Key](https://brave.com/search/api/) (as fallback)
+- Network access from the bot to the SearXNG instance
+
+### Configuration
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `AMO_SEARXNG_URL` | *(empty)* | Base URL of your SearXNG instance for Current-Info (e.g., `http://localhost:8080`) |
+| `AMO_BRAVE_SEARCH_API_KEY` | *(empty)* | Brave Search API key for fallback |
+| `AMO_SEARCH_FALLBACK_PROVIDER` | *(empty)* | Fallback when SearXNG fails: `brave` or empty to disable |
+| `AMO_SEARCH_MAX_RESULTS` | `10` | Maximum number of search results |
+| `AMO_SEARXNG_TIMEOUT_SECONDS` | `30` | Timeout for SearXNG requests (seconds) |
+| `AMO_BRAVE_SEARCH_TIMEOUT_SECONDS` | `30` | Timeout for Brave Search requests (seconds) |
+| `AMO_SEARCH_MIN_HOST_DIVERSITY` | `3` | Minimum number of distinct hosts (spam avoidance) |
+| `AMO_SEARCH_SAFESEARCH` | `moderate` | Safesearch profile: `off`, `moderate`, or `strict` |
+| `AMO_SEARCH_REGION` | *(empty)* | Optional 2-letter country code for search profile mapping |
+| `AMO_SEARCH_PROFILES_FILE` | *(empty)* | Optional YAML/JSON profile tuning file for `default`, `news/current`, `docs/official`, `local/region`, and `broad web` |
+| `AMO_DOCUMENT_FETCH_TIMEOUT_SECONDS` | `5` | Timeout for fetching followed result documents (seconds) |
+| `AMO_DOCUMENT_FETCH_MAX_BYTES` | `1000000` | Maximum fetched document body size in bytes |
+| `AMO_DOCUMENT_FETCH_MAX_REDIRECTS` | `3` | Maximum redirects while fetching a document |
+| `AMO_DOCUMENT_FETCH_PREFER_CRAWLEE` | `true` | Prefer Crawlee for document fetching with httpx fallback |
+| `AMO_CURRENT_INFO_ENABLED` | `false` | Enable Current-Info Telegram answers before falling back to the legacy webtool pipeline |
+| `AMO_CURRENT_INFO_TIMEOUT_SECONDS` | `8` | Total Current-Info answer budget in seconds, including answer synthesis |
+| `AMO_CURRENT_INFO_MAX_RESULTS` | `5` | Maximum Current-Info search results per Telegram answer |
+| `AMO_CURRENT_INFO_MAX_DOCUMENTS` | `3` | Maximum followed documents per Current-Info Telegram answer |
+| `AMO_CURRENT_INFO_CACHE_REALTIME_TTL_SECONDS` | `900` | TTL for realtime/news cache entries |
+| `AMO_CURRENT_INFO_CACHE_DOCS_TTL_SECONDS` | `604800` | TTL for docs/official cache entries |
+| `AMO_CURRENT_INFO_CACHE_GENERAL_TTL_SECONDS` | `86400` | TTL for general cache entries |
+| `AMO_CURRENT_INFO_CACHE_UNKNOWN_TTL_SECONDS` | `3600` | Conservative TTL for unknown source types |
+| `AMO_CURRENT_INFO_CACHE_MAX_DOCUMENTS` | `5000` | Maximum retained Current-Info documents before pruning oldest entries |
+| `AMO_CURRENT_INFO_CACHE_RETENTION_DAYS` | `30` | Retention window for old/expired cache documents |
+| `AMO_CURRENT_INFO_CACHE_MAX_CHUNK_CHARS` | `1200` | Maximum text length per keyword-retrieval chunk |
+| `AMO_CURRENT_INFO_CACHE_MAX_CHUNKS_PER_DOCUMENT` | `12` | Maximum retrieval chunks stored per document |
+| `AMO_VECTOR_ENABLED` | `false` | Enable optional semantic retrieval for Current-Info document chunks |
+| `AMO_VECTOR_PROVIDER` | `qdrant` | Vector database provider; currently `qdrant` |
+| `AMO_VECTOR_URL` | *(empty)* | Qdrant base URL; `QDRANT_URL` is accepted as an alias |
+| `AMO_VECTOR_API_KEY` | *(empty)* | Optional Qdrant API key; `QDRANT_API_KEY` is accepted as an alias. Store only in env/secrets, never in code or docs |
+| `AMO_VECTOR_COLLECTION` | `current_info_chunks` | Qdrant collection for Current-Info chunk vectors |
+| `AMO_VECTOR_EMBEDDING_PROVIDER` | `ollama` | Embedding provider for chunk/query vectors: `ollama` or `openai` |
+| `AMO_VECTOR_EMBEDDING_MODEL` | `nomic-embed-text` | Embedding model used for Current-Info vectors |
+| `AMO_VECTOR_TIMEOUT_SECONDS` | `3` | Timeout for vector DB and embedding requests |
+
+Current-Info cache tables are created through the existing SQLAlchemy/MariaDB database setup. Query metrics store only a SHA-256 query hash, not the raw private user query text.
+When semantic retrieval is enabled, MariaDB remains the source of truth for documents, metadata, cache TTLs, and pruning. Qdrant stores vectors plus chunk/document pointers and source metadata only; private user questions are not stored as vectors.
+
+### Example Configuration (SearXNG only)
+
+```ini
+# Current-Info Search — SearXNG only
+AMO_SEARXNG_URL=http://localhost:8080
+AMO_SEARCH_MAX_RESULTS=10
+AMO_SEARXNG_TIMEOUT_SECONDS=30
+AMO_SEARCH_MIN_HOST_DIVERSITY=3
+AMO_SEARCH_SAFESEARCH=moderate
+AMO_SEARCH_REGION=
+AMO_SEARCH_PROFILES_FILE=
+AMO_DOCUMENT_FETCH_TIMEOUT_SECONDS=5
+AMO_DOCUMENT_FETCH_MAX_BYTES=1000000
+AMO_DOCUMENT_FETCH_MAX_REDIRECTS=3
+AMO_DOCUMENT_FETCH_PREFER_CRAWLEE=true
+```
+
+### Example Configuration (SearXNG + Brave Fallback)
+
+```ini
+# Current-Info Search — SearXNG with Brave fallback
+AMO_SEARXNG_URL=http://localhost:8080
+AMO_BRAVE_SEARCH_API_KEY=your_brave_api_key_here
+AMO_SEARCH_FALLBACK_PROVIDER=brave
+AMO_SEARCH_MAX_RESULTS=10
+AMO_SEARXNG_TIMEOUT_SECONDS=30
+AMO_BRAVE_SEARCH_TIMEOUT_SECONDS=30
+AMO_SEARCH_MIN_HOST_DIVERSITY=3
+AMO_SEARCH_SAFESEARCH=moderate
+AMO_SEARCH_REGION=
+AMO_SEARCH_PROFILES_FILE=
+```
+
+> **Note:** If `AMO_SEARXNG_URL` is not set, Current-Info automatically uses the fallback (if configured). Without SearXNG and without fallback, Current-Info search is disabled.
+
+### Search Profile Tuning
+
+Profiles are provider-neutral. Each intent declares `content_types` and optional freshness (`day`, `week`, `month`, `year`, or empty). SearXNG maps those values to `categories`, `time_range` (`day`, `month`, `year`) and safesearch. Brave maps them to `result_filter`, `freshness` (`pd`, `pw`, `pm`, `py`) and safesearch. Brave custom date ranges are not integrated.
+
+```yaml
+profiles:
+  news/current:
+    content_types:
+      - news
+      - web
+    freshness: day
+  local/region:
+    content_types:
+      - web
+      - news
+      - locations
+    freshness: week
+```
+
+Code-level safety gates validate profile shape, safesearch, country/region codes, provider category/filter values, freshness values, and HTTP(S) endpoints before any network request is made.
+
+### Eval Harness (Development)
+
+For reproducible testing of current-info answer quality, a CLI eval harness is available:
+
+```bash
+# Run single fixture
+python -m amo_bot.current_info.eval tests/fixtures/current_info_eval_cases.json
+
+# As JSONL for pipeline integration
+python -m amo_bot.current_info.eval tests/fixtures/current_info_eval_cases.json --jsonl
+
+# Use local providers only
+python -m amo_bot.current_info.eval tests/fixtures/current_info_eval_cases.json --local-only
+```
+
+**Fixtures format:** JSON array with test cases (query, expected keywords, optional `local_only` flag).
+
+**Output:** Exit code 0 on successful validation of all cases, exit code >0 on failures.
+
+---
+
 ## Security Headers
 
 The WebUI sets the following HTTP security headers:
@@ -641,6 +825,30 @@ python main.py
 venv\Scripts\activate.bat
 python main.py
 ```
+
+### Stopping the Bot (for systemd/service integration)
+
+To stop a running bot via the PID file (sends SIGTERM for graceful shutdown):
+
+**Linux / macOS:**
+
+```bash
+source venv/bin/activate
+python main.py --stop
+```
+
+**Windows (PowerShell):**
+
+```powershell
+.\venv\Scripts\Activate.ps1
+python main.py --stop
+```
+
+**Alias:** `--stop-running` also works.
+
+**Optional:** `--pid-file PATH` overrides the default PID file path.
+
+**Default PID file:** `.state/amo_bot.pid` (configurable via `BOT_PID_FILE` in `.env`)
 
 ---
 
@@ -913,8 +1121,11 @@ The WebUI access can be controlled via Telegram commands. This allows the owner 
 | `/webui status` | Shows whether the WebUI access window is OPEN or CLOSED, and the remaining time if open | Private chat, Owner only |
 | `/webui on` | Opens the WebUI access window for 60 minutes (extends if already open) | Private chat, Owner only |
 | `/webui off` | Closes the WebUI access window immediately | Private chat, Owner only |
+| `/restart` | Sends an acknowledgement and exits the bot process for a controlled supervisor restart | Private chat, Owner only |
 
 **Important:** These commands only work in **private chats** (not in groups) and only for the **owner**.
+
+For `/restart`, AMO sends an acknowledgement before the process exits. It also persists the current polling offset before restarting so the same Telegram update ID cannot trigger a restart loop after startup.
 
 ### Access Denied Reasons
 
@@ -1117,7 +1328,6 @@ The `image_analyze` coreplugin provides a secure image analysis interface for AI
 - Outside enabled topics, no automatic image analysis is performed
 
 **Usage Policy:**
-- `consent_required` (default: true) — Users must have granted consent
 - `min_role` (default: admin) — Minimum role for image analysis
 - Supported roles: `owner` > `admin` > `vip` > `normal` > `ignore`
 
@@ -1169,7 +1379,6 @@ IMAGE_ANALYSIS_OLLAMA_VISION_MODELS=llava,llama3.2-vision,qwen2.5vl,kimi-k2.5
 
 **Deterministic Reason Codes:**
 - `not_enabled` — Image analysis is disabled
-- `consent_required` — User has not granted consent
 - `role_forbidden` — User role insufficient
 - `role_disabled` — Role is `ignore` or set to `disabled`
 - `quota_exceeded` — Rolling 24h limit reached (NORMAL/VIP only)
@@ -1259,7 +1468,6 @@ The following errors are explicitly communicated to users:
 The WebUI displays the image analysis status:
 - **Enabled:** `true`/`false` — Is image analysis enabled?
 - **Min Role:** Current minimum role requirement
-- **Consent Required:** Is consent required?
 
 **Note:** Configuration is done via settings/policy, not directly through WebUI toggles.
 
@@ -1321,7 +1529,6 @@ The bot supports sending images via Telegram's `send_photo` and `send_document` 
 
 - `role_forbidden` — User role insufficient to send images
 - `topic_disabled` — Image sending disabled for this topic
-- `consent_required` — User has not granted consent
 - `rate_limited` — Too many image sends in short time
 - `invalid_file` — File type or size not allowed
 - `send_failed` — Telegram API error (generic user message)

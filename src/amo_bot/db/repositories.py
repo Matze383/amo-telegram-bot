@@ -1,18 +1,21 @@
 from __future__ import annotations
 
-import json
 from collections import defaultdict
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta, timezone
+from hashlib import sha256
+import json
+import re
 from typing import TYPE_CHECKING
+from urllib.parse import urlparse
 
-from sqlalchemy import and_, func, or_, select, text
+from sqlalchemy import and_, func, or_, select, text, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from amo_bot.auth.roles import Role
 from amo_bot.core.context_filters import is_bot_authored_context_record, is_obvious_meta_status_message
-from amo_bot.consent import ConsentService
 from amo_bot.db.models import (
     AuditEvent,
     BotPeer,
@@ -25,8 +28,15 @@ from amo_bot.db.models import (
     PluginPolicyAllowedGroup,
     PluginPolicyAllowedTopic,
     PluginPolicyOverride,
+    PopgunAlertState,
+    PopgunSetting,
+    PopgunTopicSetting,
     PrivateChatPolicy,
     PromptContextDoc,
+    ResearchEvalCase,
+    ResearchProvider,
+    ResearchProviderHealth,
+    ResearchSourceObservation,
     RetrievableMemory,
     TelegramChat,
     TelegramTopic,
@@ -44,6 +54,14 @@ from amo_bot.db.models import (
 
 if TYPE_CHECKING:
     from amo_bot.plugins.manifest import PluginManifest
+
+
+def _ensure_aware_utc(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
 
 
 @dataclass(slots=True)
@@ -90,6 +108,16 @@ class PluginPolicyOverrideSnapshot:
     topics_mode: str
     allowed_group_ids: list[int]
     allowed_topics: list[tuple[int, int]]
+
+
+@dataclass(slots=True)
+class PopgunTopicSettingSnapshot:
+    chat_id: int
+    thread_id: int | None
+    enabled: bool
+    symbols: list[str]
+    timeframes: list[str]
+    updated_at: str
 
 
 PRIVATE_CHAT_THRESHOLD_ROLES: tuple[Role, ...] = (Role.OWNER, Role.ADMIN, Role.VIP, Role.NORMAL)
@@ -439,6 +467,956 @@ class WebToolQuotaDecision:
     reason: str
     error: str | None = None
     timing_ms: int | None = None
+
+
+@dataclass(slots=True)
+class ResearchProviderHealthRecord:
+    provider_name: str
+    success_count: int = 0
+    failure_count: int = 0
+    timeout_count: int = 0
+    rate_limit_count: int = 0
+    last_success_at: datetime | None = None
+    last_failure_at: datetime | None = None
+    last_error: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class ResearchProviderRecord:
+    provider_name: str
+    source_name: str
+    domain: str
+    enabled: bool
+    default_priority: int
+    fallback_allowed: bool
+    min_confidence: float
+    max_age_seconds: int | None = None
+    metadata: dict[str, object] | None = None
+    selection_score: int | None = None
+    health_penalty: int = 0
+    observation_penalty: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class ResearchSourceObservationRecord:
+    provider_name: str
+    domain: str
+    outcome: str
+    confidence: float | None = None
+    source_name: str | None = None
+    source_hosts: tuple[str, ...] = ()
+    source_count: int = 0
+    warning_count: int = 0
+    warning_codes: tuple[str, ...] = ()
+    error_class: str | None = None
+    timing_ms: int | None = None
+    created_at: datetime | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ResearchEvalCaseRecord:
+    case_key: str
+    domain: str
+    sanitized_prompt: str
+    locale: str | None = None
+    expected_status: str | None = None
+    expected_metadata: dict[str, object] | None = None
+    enabled: bool = True
+
+
+@dataclass(frozen=True, slots=True)
+class ResearchHostQualityRecord:
+    host: str
+    success_count: int = 0
+    failure_count: int = 0
+    warning_count: int = 0
+    conflict_count: int = 0
+
+    @property
+    def usable(self) -> bool:
+        return self.success_count > 0 and self.failure_count <= self.success_count + self.warning_count
+
+
+class ResearchProviderRepository:
+    """Read configured research providers without exposing query or URL data."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def list_enabled_by_domain(self, domain: str) -> tuple[ResearchProviderRecord, ...]:
+        normalized_domain = ResearchSourceObservationRepository._safe_label(
+            domain,
+            default="generic",
+            max_len=64,
+        )
+        rows = self._session.scalars(
+            select(ResearchProvider)
+            .where(and_(ResearchProvider.domain == normalized_domain, ResearchProvider.enabled.is_(True)))
+            .order_by(ResearchProvider.default_priority.asc(), ResearchProvider.provider_name.asc())
+        ).all()
+        return tuple(self._to_record(row) for row in rows)
+
+    def list_ranked_by_domain(
+        self,
+        domain: str,
+        *,
+        observation_window: timedelta = timedelta(days=7),
+        observation_limit: int = 500,
+    ) -> tuple[ResearchProviderRecord, ...]:
+        """Rank enabled providers from DB health and metadata-only observations."""
+
+        normalized_domain = ResearchSourceObservationRepository._safe_label(
+            domain,
+            default="generic",
+            max_len=64,
+        )
+        rows = self._session.scalars(
+            select(ResearchProvider)
+            .where(and_(ResearchProvider.domain == normalized_domain, ResearchProvider.enabled.is_(True)))
+            .order_by(ResearchProvider.default_priority.asc(), ResearchProvider.provider_name.asc())
+        ).all()
+        if not rows:
+            return ()
+
+        providers = tuple(row.provider_name for row in rows)
+        health_rows = self._session.scalars(
+            select(ResearchProviderHealth).where(ResearchProviderHealth.provider_name.in_(providers))
+        ).all()
+        health_by_provider = {row.provider_name: row for row in health_rows}
+        observation_penalties = self._observation_penalties(
+            domain=normalized_domain,
+            providers=providers,
+            since=datetime.now(timezone.utc) - observation_window,
+            limit=observation_limit,
+        )
+
+        ranked: list[ResearchProviderRecord] = []
+        for row in rows:
+            health_penalty = self._health_penalty(health_by_provider.get(row.provider_name))
+            observation_penalty = observation_penalties.get(row.provider_name, 0)
+            record = self._to_record(row)
+            score = record.default_priority + health_penalty + observation_penalty
+            ranked.append(
+                ResearchProviderRecord(
+                    provider_name=record.provider_name,
+                    source_name=record.source_name,
+                    domain=record.domain,
+                    enabled=record.enabled,
+                    default_priority=record.default_priority,
+                    fallback_allowed=record.fallback_allowed,
+                    min_confidence=record.min_confidence,
+                    max_age_seconds=record.max_age_seconds,
+                    metadata=record.metadata,
+                    selection_score=score,
+                    health_penalty=health_penalty,
+                    observation_penalty=observation_penalty,
+                )
+            )
+        return tuple(
+            sorted(
+                ranked,
+                key=lambda record: (
+                    record.selection_score if record.selection_score is not None else record.default_priority,
+                    record.provider_name,
+                ),
+            )
+        )
+
+    @staticmethod
+    def _to_record(row: ResearchProvider) -> ResearchProviderRecord:
+        metadata: dict[str, object] | None = None
+        if row.metadata_json:
+            try:
+                parsed = json.loads(row.metadata_json)
+            except json.JSONDecodeError:
+                parsed = None
+            if isinstance(parsed, dict):
+                metadata = {str(key): value for key, value in parsed.items() if isinstance(value, (str, int, float, bool)) or value is None}
+        return ResearchProviderRecord(
+            provider_name=row.provider_name,
+            source_name=row.source_name,
+            domain=row.domain,
+            enabled=bool(row.enabled),
+            default_priority=int(row.default_priority or 100),
+            fallback_allowed=bool(row.fallback_allowed),
+            min_confidence=float(row.min_confidence or 0.0),
+            max_age_seconds=row.max_age_seconds,
+            metadata=metadata,
+        )
+
+    @staticmethod
+    def _health_penalty(row: ResearchProviderHealth | None) -> int:
+        if row is None:
+            return 0
+        penalty = min(int(row.failure_count or 0), 5) * 10
+        penalty += min(int(row.timeout_count or 0), 3) * 8
+        penalty += min(int(row.rate_limit_count or 0), 3) * 12
+        last_failure = _ensure_aware_utc(row.last_failure_at)
+        last_success = _ensure_aware_utc(row.last_success_at)
+        now = datetime.now(timezone.utc)
+        if last_failure and now - last_failure < timedelta(minutes=15):
+            penalty += 30
+        if last_success and now - last_success < timedelta(minutes=15):
+            penalty -= 10
+        return penalty
+
+    def _observation_penalties(
+        self,
+        *,
+        domain: str,
+        providers: Sequence[str],
+        since: datetime,
+        limit: int,
+    ) -> dict[str, int]:
+        if not providers:
+            return {}
+        rows = self._session.scalars(
+            select(ResearchSourceObservation)
+            .where(
+                and_(
+                    ResearchSourceObservation.domain == domain,
+                    ResearchSourceObservation.provider_name.in_(tuple(providers)),
+                    ResearchSourceObservation.created_at >= since,
+                )
+            )
+            .order_by(ResearchSourceObservation.created_at.desc())
+            .limit(max(1, min(int(limit), 2000)))
+        ).all()
+        stats: dict[str, dict[str, float]] = defaultdict(
+            lambda: {
+                "success": 0.0,
+                "failure": 0.0,
+                "warning": 0.0,
+                "conflict": 0.0,
+                "confidence_sum": 0.0,
+                "confidence_count": 0.0,
+            }
+        )
+        for row in rows:
+            provider = row.provider_name
+            warnings = ResearchSourceObservationRepository._warning_codes(row.warning_codes_json)
+            outcome = (row.outcome or "").strip().lower()
+            if outcome in {"confirmed", "allow", "search_completed", "scrape_completed", "browser_completed"}:
+                stats[provider]["success"] += 1
+            elif outcome and outcome != "unknown":
+                stats[provider]["failure"] += 1
+            stats[provider]["warning"] += len(warnings)
+            if any("conflict" in warning or "mismatch" in warning for warning in warnings):
+                stats[provider]["conflict"] += 1
+            if row.confidence is not None:
+                stats[provider]["confidence_sum"] += max(0.0, min(1.0, float(row.confidence)))
+                stats[provider]["confidence_count"] += 1
+
+        penalties: dict[str, int] = {}
+        for provider, values in stats.items():
+            penalty = 0
+            penalty += int(min(values["failure"], 5) * 8)
+            penalty += int(min(values["warning"], 10))
+            penalty += int(min(values["conflict"], 3) * 15)
+            penalty -= int(min(values["success"], 5) * 3)
+            if values["confidence_count"]:
+                average_confidence = values["confidence_sum"] / values["confidence_count"]
+                if average_confidence < 0.5:
+                    penalty += 10
+                elif average_confidence >= 0.85:
+                    penalty -= 4
+            penalties[provider] = penalty
+        return penalties
+
+
+class ResearchProviderHealthRepository:
+    """Persist provider health without storing query text, URLs, prompts, or secrets."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def load_provider_health(self, provider_name: str) -> ResearchProviderHealthRecord:
+        normalized_name = self._normalize_provider_name(provider_name)
+        row = self._session.scalar(
+            select(ResearchProviderHealth).where(ResearchProviderHealth.provider_name == normalized_name)
+        )
+        if row is None:
+            return ResearchProviderHealthRecord(provider_name=normalized_name)
+        return self._to_record(row)
+
+    def record_success(self, provider_name: str, *, occurred_at: datetime | None = None) -> ResearchProviderHealthRecord:
+        when = occurred_at or datetime.now(timezone.utc)
+        row = self._get_or_create(provider_name)
+        normalized_name = row.provider_name
+        self._session.execute(
+            update(ResearchProviderHealth)
+            .where(ResearchProviderHealth.provider_name == normalized_name)
+            .values(
+                success_count=func.coalesce(ResearchProviderHealth.success_count, 0) + 1,
+                last_success_at=when,
+                last_error="",
+                updated_at=when,
+            )
+            .execution_options(synchronize_session=False)
+        )
+        self._session.commit()
+        return self.load_provider_health(normalized_name)
+
+    def record_failure(
+        self,
+        provider_name: str,
+        *,
+        reason: str,
+        occurred_at: datetime | None = None,
+    ) -> ResearchProviderHealthRecord:
+        return self._record_negative(provider_name, reason=reason, occurred_at=occurred_at)
+
+    def record_timeout(
+        self,
+        provider_name: str,
+        *,
+        reason: str = "timeout",
+        occurred_at: datetime | None = None,
+    ) -> ResearchProviderHealthRecord:
+        return self._record_negative(provider_name, reason=reason, occurred_at=occurred_at, timeout=True)
+
+    def record_rate_limit(
+        self,
+        provider_name: str,
+        *,
+        reason: str = "rate_limit",
+        occurred_at: datetime | None = None,
+    ) -> ResearchProviderHealthRecord:
+        return self._record_negative(provider_name, reason=reason, occurred_at=occurred_at, rate_limit=True)
+
+    @staticmethod
+    def _normalize_provider_name(provider_name: str) -> str:
+        normalized = (provider_name or "").strip()
+        if not normalized:
+            raise ValueError("provider_name is required")
+        return normalized[:128]
+
+    @classmethod
+    def _to_record(cls, row: ResearchProviderHealth) -> ResearchProviderHealthRecord:
+        return ResearchProviderHealthRecord(
+            provider_name=row.provider_name,
+            success_count=int(row.success_count or 0),
+            failure_count=int(row.failure_count or 0),
+            timeout_count=int(row.timeout_count or 0),
+            rate_limit_count=int(row.rate_limit_count or 0),
+            last_success_at=row.last_success_at,
+            last_failure_at=row.last_failure_at,
+            last_error=row.last_error or "",
+        )
+
+    def _get_or_create(self, provider_name: str) -> ResearchProviderHealth:
+        normalized_name = self._normalize_provider_name(provider_name)
+        row = self._session.scalar(
+            select(ResearchProviderHealth).where(ResearchProviderHealth.provider_name == normalized_name)
+        )
+        if row is not None:
+            return row
+        row = ResearchProviderHealth(provider_name=normalized_name)
+        self._session.add(row)
+        try:
+            self._session.flush()
+        except IntegrityError:
+            self._session.rollback()
+            row = self._session.scalar(
+                select(ResearchProviderHealth).where(ResearchProviderHealth.provider_name == normalized_name)
+            )
+            if row is None:
+                raise
+        return row
+
+    def _record_negative(
+        self,
+        provider_name: str,
+        *,
+        reason: str,
+        occurred_at: datetime | None,
+        timeout: bool = False,
+        rate_limit: bool = False,
+    ) -> ResearchProviderHealthRecord:
+        when = occurred_at or datetime.now(timezone.utc)
+        row = self._get_or_create(provider_name)
+        normalized_name = row.provider_name
+        values = {
+            "failure_count": func.coalesce(ResearchProviderHealth.failure_count, 0) + 1,
+            "last_failure_at": when,
+            "last_error": (reason or "failure")[:512],
+            "updated_at": when,
+        }
+        if timeout:
+            values["timeout_count"] = func.coalesce(ResearchProviderHealth.timeout_count, 0) + 1
+        if rate_limit:
+            values["rate_limit_count"] = func.coalesce(ResearchProviderHealth.rate_limit_count, 0) + 1
+        self._session.execute(
+            update(ResearchProviderHealth)
+            .where(ResearchProviderHealth.provider_name == normalized_name)
+            .values(**values)
+            .execution_options(synchronize_session=False)
+        )
+        self._session.commit()
+        return self.load_provider_health(normalized_name)
+
+
+class ResearchSourceObservationRepository:
+    """Write metadata-only research source observations.
+
+    Stored fields intentionally exclude raw user queries, full URLs, prompts,
+    message text, and secrets. Source details are reduced to hostnames.
+    """
+
+    _SAFE_CODE_RE = re.compile(r"[^a-zA-Z0-9_.:-]+")
+    _URL_RE = re.compile(r"\b[a-z][a-z0-9+.-]*://\S+", re.I)
+    _HOSTLIKE_RE = re.compile(r"(?:^|[^a-z0-9-])(?:[a-z0-9-]+\.)+[a-z]{2,}(?:\b|[/:?#])", re.I)
+    _SENSITIVE_KEY_RE = re.compile(
+        r"(?:query|prompt|message|raw|text|secret|token|api[_-]?key|password|authorization|bearer|url|uri|link|endpoint)",
+        re.I,
+    )
+    _SENSITIVE_VALUE_RE = re.compile(
+        r"(?:"
+        r"bearer\s+[a-z0-9._~+/=-]{6,}|"
+        r"(?:^|[^a-z0-9])(?:api[_-]?key|token|secret|password|authorization|bearer)[^a-z0-9]?[a-z0-9][a-z0-9._~+/=-]{5,}"
+        r")",
+        re.I,
+    )
+    _ERROR_CLASS_RE = re.compile(r"\b([A-Z][A-Za-z0-9_]*(?:Error|Exception|Timeout|Failure))\b")
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def record_observation(
+        self,
+        *,
+        provider_name: str,
+        domain: str,
+        outcome: str,
+        confidence: float | None = None,
+        source_name: str | None = None,
+        source_hosts: Sequence[str] | None = None,
+        source_urls: Sequence[str] | None = None,
+        source_count: int | None = None,
+        warning_codes: Sequence[str] | None = None,
+        warning_count: int | None = None,
+        error_class: str | None = None,
+        timing_ms: int | None = None,
+        created_at: datetime | None = None,
+        metadata: Mapping[str, object] | None = None,
+    ) -> ResearchSourceObservationRecord:
+        hosts = self._safe_hosts((*tuple(source_hosts or ()), *tuple(source_urls or ())))
+        warnings = self._safe_codes(warning_codes or ())
+        normalized_provider = self._safe_label(provider_name, default="unknown_provider", max_len=128)
+        normalized_domain = self._safe_label(domain, default="generic", max_len=64)
+        normalized_outcome = self._safe_label(outcome, default="unknown", max_len=64)
+        normalized_source_name = self._safe_optional_label(source_name, max_len=128)
+        normalized_error_class = self._safe_error_class(error_class)
+        normalized_timing = max(0, int(timing_ms)) if timing_ms is not None else None
+        normalized_confidence = self._safe_confidence(confidence)
+        normalized_source_count = max(0, int(source_count if source_count is not None else len(hosts)))
+        normalized_warning_count = max(0, int(warning_count if warning_count is not None else len(warnings)))
+        when = created_at or datetime.now(timezone.utc)
+
+        safe_metadata = {
+            "source_count": normalized_source_count,
+            "warning_count": normalized_warning_count,
+            "source_hosts": list(hosts[:10]),
+        }
+        if normalized_error_class:
+            safe_metadata["error_class"] = normalized_error_class
+        if normalized_timing is not None:
+            safe_metadata["timing_ms"] = normalized_timing
+        for key, value in (metadata or {}).items():
+            metadata_key = self._safe_metadata_key(str(key))
+            if not metadata_key:
+                continue
+            if isinstance(value, (str, int, float, bool)) or value is None:
+                safe_metadata[metadata_key] = self._safe_metadata_value(value, key=metadata_key)
+
+        self._session.add(
+            ResearchSourceObservation(
+                provider_name=normalized_provider,
+                source_name=normalized_source_name,
+                domain=normalized_domain,
+                outcome=normalized_outcome,
+                confidence=normalized_confidence,
+                warning_codes_json=json.dumps(list(warnings), sort_keys=True),
+                metadata_json=json.dumps(safe_metadata, sort_keys=True),
+                created_at=when,
+            )
+        )
+        self._session.commit()
+        return ResearchSourceObservationRecord(
+            provider_name=normalized_provider,
+            source_name=normalized_source_name,
+            domain=normalized_domain,
+            outcome=normalized_outcome,
+            confidence=normalized_confidence,
+            source_hosts=hosts,
+            source_count=normalized_source_count,
+            warning_count=normalized_warning_count,
+            warning_codes=warnings,
+            error_class=normalized_error_class,
+            timing_ms=normalized_timing,
+            created_at=when,
+        )
+
+    def assess_recent_hosts(
+        self,
+        *,
+        domain: str,
+        source_hosts: Sequence[str],
+        since: datetime | None = None,
+        limit: int = 250,
+    ) -> tuple[ResearchHostQualityRecord, ...]:
+        hosts = set(self._safe_hosts(source_hosts))
+        if not hosts:
+            return ()
+        normalized_domain = self._safe_label(domain, default="generic", max_len=64)
+        conditions = [ResearchSourceObservation.domain == normalized_domain]
+        if since is not None:
+            conditions.append(ResearchSourceObservation.created_at >= since)
+        rows = self._session.scalars(
+            select(ResearchSourceObservation)
+            .where(and_(*conditions))
+            .order_by(ResearchSourceObservation.created_at.desc())
+            .limit(max(1, min(int(limit), 1000)))
+        ).all()
+
+        counters = {host: {"success": 0, "failure": 0, "warning": 0, "conflict": 0} for host in hosts}
+        for row in rows:
+            row_hosts = self._metadata_hosts(row.metadata_json)
+            matched = hosts.intersection(row_hosts)
+            if not matched:
+                continue
+            warnings = self._warning_codes(row.warning_codes_json)
+            outcome = (row.outcome or "").strip().lower()
+            is_success = outcome in {"confirmed", "allow", "search_completed", "scrape_completed", "browser_completed"}
+            is_failure = not is_success and outcome not in {"unknown"}
+            has_conflict = any("conflict" in warning or "mismatch" in warning for warning in warnings)
+            for host in matched:
+                if is_success:
+                    counters[host]["success"] += 1
+                if is_failure:
+                    counters[host]["failure"] += 1
+                counters[host]["warning"] += len(warnings)
+                if has_conflict:
+                    counters[host]["conflict"] += 1
+
+        return tuple(
+            ResearchHostQualityRecord(
+                host=host,
+                success_count=values["success"],
+                failure_count=values["failure"],
+                warning_count=values["warning"],
+                conflict_count=values["conflict"],
+            )
+            for host, values in sorted(counters.items())
+        )
+
+    def list_reliable_hosts(
+        self,
+        *,
+        domain: str,
+        since: datetime | None = None,
+        limit: int = 500,
+        max_hosts: int = 5,
+        min_success_count: int = 1,
+    ) -> tuple[ResearchHostQualityRecord, ...]:
+        """Return recently successful hosts for a domain from metadata-only observations."""
+
+        normalized_domain = self._safe_label(domain, default="generic", max_len=64)
+        conditions = [ResearchSourceObservation.domain == normalized_domain]
+        if since is not None:
+            conditions.append(ResearchSourceObservation.created_at >= since)
+        rows = self._session.scalars(
+            select(ResearchSourceObservation)
+            .where(and_(*conditions))
+            .order_by(ResearchSourceObservation.created_at.desc())
+            .limit(max(1, min(int(limit), 2000)))
+        ).all()
+
+        counters: dict[str, dict[str, int]] = defaultdict(
+            lambda: {"success": 0, "failure": 0, "warning": 0, "conflict": 0}
+        )
+        for row in rows:
+            hosts = self._metadata_hosts(row.metadata_json)
+            if not hosts:
+                continue
+            warnings = self._warning_codes(row.warning_codes_json)
+            outcome = (row.outcome or "").strip().lower()
+            is_success = outcome in {"confirmed", "allow", "search_completed", "scrape_completed", "browser_completed"}
+            is_failure = not is_success and outcome not in {"unknown"}
+            has_conflict = any("conflict" in warning or "mismatch" in warning for warning in warnings)
+            for host in hosts:
+                if is_success:
+                    counters[host]["success"] += 1
+                if is_failure:
+                    counters[host]["failure"] += 1
+                counters[host]["warning"] += len(warnings)
+                if has_conflict:
+                    counters[host]["conflict"] += 1
+
+        records = [
+            ResearchHostQualityRecord(
+                host=host,
+                success_count=values["success"],
+                failure_count=values["failure"],
+                warning_count=values["warning"],
+                conflict_count=values["conflict"],
+            )
+            for host, values in counters.items()
+            if values["success"] >= max(1, int(min_success_count))
+            and values["failure"] == 0
+            and values["warning"] == 0
+            and values["conflict"] == 0
+        ]
+        return tuple(
+            sorted(
+                records,
+                key=lambda record: (
+                    -(record.success_count - record.failure_count - record.conflict_count),
+                    record.warning_count,
+                    record.host,
+                ),
+            )[: max(1, min(int(max_hosts), 20))]
+        )
+
+    @classmethod
+    def _metadata_hosts(cls, metadata_json: str | None) -> tuple[str, ...]:
+        if not metadata_json:
+            return ()
+        try:
+            payload = json.loads(metadata_json)
+        except json.JSONDecodeError:
+            return ()
+        if not isinstance(payload, dict):
+            return ()
+        raw_hosts = payload.get("source_hosts")
+        if not isinstance(raw_hosts, list):
+            return ()
+        return cls._safe_hosts(tuple(str(host) for host in raw_hosts))
+
+    @classmethod
+    def _warning_codes(cls, warning_codes_json: str | None) -> tuple[str, ...]:
+        if not warning_codes_json:
+            return ()
+        try:
+            payload = json.loads(warning_codes_json)
+        except json.JSONDecodeError:
+            return ()
+        if not isinstance(payload, list):
+            return ()
+        return cls._safe_codes(tuple(str(item) for item in payload))
+
+    @classmethod
+    def _safe_label(cls, value: str | None, *, default: str, max_len: int) -> str:
+        raw = (value or "").strip()
+        if cls._contains_unsafe_text(raw):
+            return default[:max_len]
+        cleaned = cls._SAFE_CODE_RE.sub("_", raw)
+        cleaned = cleaned.strip("._:-")
+        return (cleaned or default)[:max_len]
+
+    @classmethod
+    def _safe_optional_label(cls, value: str | None, *, max_len: int) -> str | None:
+        if not value:
+            return None
+        if cls._contains_unsafe_text(value):
+            return None
+        cleaned = cls._safe_label(value, default="", max_len=max_len)
+        return cleaned or None
+
+    @classmethod
+    def _safe_codes(cls, values: Sequence[str]) -> tuple[str, ...]:
+        seen: set[str] = set()
+        result: list[str] = []
+        for value in values:
+            code = cls._safe_optional_label(str(value), max_len=96)
+            if not code or code in seen:
+                continue
+            seen.add(code)
+            result.append(code)
+        return tuple(result[:20])
+
+    @staticmethod
+    def _safe_confidence(value: float | None) -> float | None:
+        if value is None:
+            return None
+        try:
+            return min(1.0, max(0.0, float(value)))
+        except (TypeError, ValueError):
+            return None
+
+    @classmethod
+    def _safe_hosts(cls, values: Sequence[str]) -> tuple[str, ...]:
+        seen: set[str] = set()
+        result: list[str] = []
+        for value in values:
+            host = cls._extract_host(value)
+            if not host or host in seen:
+                continue
+            seen.add(host)
+            result.append(host)
+        return tuple(result[:10])
+
+    @staticmethod
+    def _extract_host(value: str) -> str:
+        raw = (value or "").strip()
+        if not raw:
+            return ""
+        candidate = raw if "://" in raw else f"https://{raw}"
+        try:
+            host = (urlparse(candidate).hostname or "").casefold().removeprefix("www.")
+        except Exception:
+            return ""
+        if not host or "/" in host or len(host) > 253:
+            return ""
+        return host
+
+    @classmethod
+    def _safe_metadata_key(cls, key: str) -> str | None:
+        if cls._SENSITIVE_KEY_RE.search(key or ""):
+            return None
+        return cls._safe_optional_label(key, max_len=64)
+
+    @classmethod
+    def _safe_metadata_value(cls, value: object, *, key: str) -> object:
+        if isinstance(value, str):
+            if cls._contains_unsafe_text(value):
+                return "redacted"
+            if not cls._is_categorical_metadata_value(key=key, value=value):
+                return "present"
+            cleaned = cls._safe_label(value, default="value", max_len=64)
+            return cleaned if cleaned != "value" else "present"
+        return value
+
+    @staticmethod
+    def _is_categorical_metadata_value(*, key: str, value: str) -> bool:
+        raw = (value or "").strip()
+        if not raw or len(raw) > 64 or re.search(r"\s", raw):
+            return False
+        return bool(re.fullmatch(r"[A-Za-z0-9_.:-]+", raw)) and any(
+            marker in key
+            for marker in (
+                "status",
+                "code",
+                "reason",
+                "decision",
+                "operation",
+                "outcome",
+                "domain",
+                "provider",
+                "class",
+                "type",
+            )
+        )
+
+    @classmethod
+    def _safe_error_class(cls, value: str | None) -> str | None:
+        if not value:
+            return None
+        match = cls._ERROR_CLASS_RE.search(value)
+        if match:
+            return match.group(1)[:128]
+        return cls._safe_optional_label(value, max_len=128)
+
+    @classmethod
+    def _contains_unsafe_text(cls, value: str | None) -> bool:
+        raw = (value or "").strip()
+        if not raw:
+            return False
+        return bool(cls._URL_RE.search(raw) or cls._HOSTLIKE_RE.search(raw) or cls._SENSITIVE_VALUE_RE.search(raw))
+
+
+class ResearchEvalCaseRepository:
+    """Persist sanitized research eval cases without retaining raw chat text."""
+
+    _SAFE_SUMMARY_RE = re.compile(r"https?://\S+|(?:[a-z0-9-]+\.)+[a-z]{2,}", re.I)
+    _DOMAIN_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+        ("weather", re.compile(r"\b(?:wetter|weather|temperatur|temperature|regen|rain|forecast|vorhersage)\b", re.I)),
+        ("sports", re.compile(r"\b(?:fußball|fussball|football|soccer|wm|weltmeisterschaft|world\s+cup|bundesliga|champions\s+league|tabelle|standings?|spielplan|fixtures?|score|ergebnis(?:se)?)\b", re.I)),
+        ("crypto", re.compile(r"\b(?:btc|bitcoin|eth|ethereum|crypto|krypto|kryptow(?:ä|ae)hrung|coin|token|blockchain)\b", re.I)),
+        ("finance", re.compile(r"\b(?:aktie|stock|share|shares|börse|boerse|nasdaq|nyse|dax|etf|fundamental|research|dividende|earnings|kurs|price|preis)\b", re.I)),
+        ("news", re.compile(r"\b(?:news|nachrichten|breaking|latest|neueste(?:n)?|meldung(?:en)?|presse|bericht(?:e)?)\b", re.I)),
+        ("local_info", re.compile(r"\b(?:in der n(?:ä|ae)he|near me|adresse|address|öffnungszeit(?:en)?|oeffnungszeit(?:en)?|restaurant|laden|geschäft|geschaeft|lokal|local)\b", re.I)),
+        ("generic_current_facts", re.compile(r"\b(?:aktuell|current|heute|today|jetzt|now|202\d|neueste(?:n)?|latest|status|stand)\b", re.I)),
+    )
+    _FAILURE_CLASS_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+        ("source_quality", re.compile(r"\b(?:quelle|source|domain|seite|website|link|url|abschreiber|primärquelle|primaerquelle|corroborat|korrobor)\b", re.I)),
+        ("insufficient_evidence", re.compile(r"\b(?:nicht genug|not enough|zu wenig|nur eine(?:r)? quelle|single[-\s]?source|oberfl(?:ä|ae)chlich|reicht nicht)\b", re.I)),
+        ("incorrect_answer", re.compile(r"\b(?:falsch|wrong|incorrect|stimmt nicht|nicht korrekt|korrigier|correction|halluzin)\b", re.I)),
+        ("stale_data", re.compile(r"\b(?:veraltet|stale|old|nicht aktuell|outdated|expired|alter stand)\b", re.I)),
+        ("routing", re.compile(r"\b(?:nicht gesucht|nicht recherchiert|search weiter|such weiter|andere quellen|browser|scrape)\b", re.I)),
+    )
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def create_from_negative_feedback(
+        self,
+        *,
+        sanitized_summary: str,
+        failure_label: str,
+        domain: str = "generic",
+        locale: str | None = None,
+        evidence_status: str | None = None,
+        source_hosts: Sequence[str] | None = None,
+        expected_behavior: str = "improve future research answer quality without treating feedback as fact",
+        enabled: bool = True,
+    ) -> ResearchEvalCaseRecord:
+        summary = self._sanitize_summary(sanitized_summary)
+        if not summary:
+            raise ValueError("sanitized_summary is required")
+        normalized_failure = ResearchSourceObservationRepository._safe_label(
+            failure_label,
+            default="negative_feedback",
+            max_len=64,
+        )
+        normalized_domain = self._classify_domain(summary, fallback=domain)
+        failure_class = self._classify_failure_class(summary, fallback=normalized_failure)
+        normalized_status = ResearchSourceObservationRepository._safe_optional_label(evidence_status, max_len=64)
+        hosts = ResearchSourceObservationRepository._safe_hosts(source_hosts or ())
+        expected_metadata = {
+            "failure_label": normalized_failure,
+            "failure_class": failure_class,
+            "source_hosts": list(hosts),
+            "expected_behavior": self._sanitize_summary(expected_behavior, max_len=256),
+        }
+        if normalized_status:
+            expected_metadata["evidence_status"] = normalized_status
+        case_key = self._case_key(
+            domain=normalized_domain,
+            summary=summary,
+            failure_label=normalized_failure,
+            evidence_status=normalized_status,
+            source_hosts=hosts,
+        )
+
+        row = self._session.scalar(select(ResearchEvalCase).where(ResearchEvalCase.case_key == case_key))
+        if row is None:
+            row = ResearchEvalCase(
+                case_key=case_key,
+                domain=normalized_domain,
+                locale=ResearchSourceObservationRepository._safe_optional_label(locale, max_len=16),
+                sanitized_prompt=summary,
+                expected_status=normalized_status or "needs_improvement",
+                expected_metadata_json=json.dumps(expected_metadata, sort_keys=True),
+                enabled=enabled,
+            )
+            self._session.add(row)
+        else:
+            row.domain = normalized_domain
+            row.locale = ResearchSourceObservationRepository._safe_optional_label(locale, max_len=16)
+            row.sanitized_prompt = summary
+            row.expected_status = normalized_status or "needs_improvement"
+            row.expected_metadata_json = json.dumps(expected_metadata, sort_keys=True)
+            row.enabled = enabled
+        self._session.commit()
+        return ResearchEvalCaseRecord(
+            case_key=case_key,
+            domain=normalized_domain,
+            locale=ResearchSourceObservationRepository._safe_optional_label(locale, max_len=16),
+            sanitized_prompt=summary,
+            expected_status=normalized_status or "needs_improvement",
+            expected_metadata=expected_metadata,
+            enabled=enabled,
+        )
+
+    def list_enabled(self, *, domain: str | None = None, limit: int = 100) -> tuple[ResearchEvalCaseRecord, ...]:
+        conditions = [ResearchEvalCase.enabled.is_(True)]
+        if domain:
+            conditions.append(
+                ResearchEvalCase.domain
+                == ResearchSourceObservationRepository._safe_label(domain, default="generic", max_len=64)
+            )
+        rows = self._session.scalars(
+            select(ResearchEvalCase)
+            .where(and_(*conditions))
+            .order_by(ResearchEvalCase.updated_at.desc(), ResearchEvalCase.id.desc())
+            .limit(max(1, min(int(limit), 500)))
+        ).all()
+        return tuple(self._to_record(row) for row in rows)
+
+    @classmethod
+    def _to_record(cls, row: ResearchEvalCase) -> ResearchEvalCaseRecord:
+        metadata: dict[str, object] | None = None
+        if row.expected_metadata_json:
+            try:
+                parsed = json.loads(row.expected_metadata_json)
+            except json.JSONDecodeError:
+                parsed = None
+            if isinstance(parsed, dict):
+                metadata = parsed
+        return ResearchEvalCaseRecord(
+            case_key=row.case_key,
+            domain=row.domain,
+            locale=row.locale,
+            sanitized_prompt=row.sanitized_prompt,
+            expected_status=row.expected_status,
+            expected_metadata=metadata,
+            enabled=bool(row.enabled),
+        )
+
+    @classmethod
+    def _sanitize_summary(cls, value: str, *, max_len: int = 512) -> str:
+        cleaned = cls._SAFE_SUMMARY_RE.sub("[redacted-source]", value or "")
+        cleaned = re.sub(r"\b(?:api[_-]?key|token|secret|password|authorization|bearer)\b\s*[:=]?\s*\S+", "[redacted-secret]", cleaned, flags=re.I)
+        cleaned = re.sub(r"\s+", " ", cleaned).strip()
+        return cleaned[:max_len].rstrip()
+
+    @classmethod
+    def _classify_domain(cls, summary: str, *, fallback: str) -> str:
+        normalized_fallback = ResearchSourceObservationRepository._safe_label(
+            fallback,
+            default="generic",
+            max_len=64,
+        )
+        if normalized_fallback not in {"generic", "source_quality", "analysis"}:
+            return normalized_fallback
+        for domain, pattern in cls._DOMAIN_PATTERNS:
+            if pattern.search(summary):
+                if normalized_fallback == "source_quality" and domain == "generic_current_facts":
+                    continue
+                return domain
+        return normalized_fallback
+
+    @classmethod
+    def _classify_failure_class(cls, summary: str, *, fallback: str) -> str:
+        for failure_class, pattern in cls._FAILURE_CLASS_PATTERNS:
+            if pattern.search(summary):
+                return failure_class
+        normalized_fallback = ResearchSourceObservationRepository._safe_label(
+            fallback,
+            default="negative_feedback",
+            max_len=64,
+        )
+        if normalized_fallback == "negative_reaction_feedback":
+            return "answer_quality_risk"
+        if normalized_fallback == "negative_answer_feedback":
+            return "answer_quality"
+        if normalized_fallback == "source_quality_feedback":
+            return "source_quality"
+        return normalized_fallback
+
+    @staticmethod
+    def _case_key(
+        *,
+        domain: str,
+        summary: str,
+        failure_label: str,
+        evidence_status: str | None,
+        source_hosts: Sequence[str],
+    ) -> str:
+        digest = sha256(
+            json.dumps(
+                {
+                    "domain": domain,
+                    "summary": summary,
+                    "failure_label": failure_label,
+                    "evidence_status": evidence_status,
+                    "source_hosts": list(source_hosts),
+                },
+                sort_keys=True,
+            ).encode("utf-8")
+        ).hexdigest()[:24]
+        return f"feedback:{domain}:{digest}"[:128]
 
 
 class WebToolRoleQuotaRepository:
@@ -889,9 +1867,6 @@ class UserRoleRepository:
             user.last_name = last_name
             user.last_seen_at = seen
 
-        if is_new_user:
-            ConsentService().ensure_pending_for_new_user(user, now=seen)
-
         self._session.commit()
         return user
 
@@ -1274,6 +2249,193 @@ class ChatTopicRepository:
 
         self._session.commit()
         return topic
+
+
+class PopgunRepository:
+    DEFAULTS_KEY = "defaults"
+    LEGACY_IMPORT_KEY = "legacy_state_import"
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    @staticmethod
+    def topic_key(chat_id: int, thread_id: int | None) -> str:
+        return f"{chat_id}:{thread_id if thread_id is not None else 'root'}"
+
+    def ensure_defaults(self, *, symbols: list[str], timeframes: list[str]) -> None:
+        row = self._session.scalar(select(PopgunSetting).where(PopgunSetting.key == self.DEFAULTS_KEY))
+        if row is None:
+            self._session.add(
+                PopgunSetting(
+                    key=self.DEFAULTS_KEY,
+                    value_json=json.dumps(
+                        {"default_symbols": symbols, "default_timeframes": timeframes},
+                        sort_keys=True,
+                    ),
+                )
+            )
+            self._session.commit()
+
+    def set_defaults(self, *, symbols: list[str], timeframes: list[str]) -> None:
+        payload = json.dumps({"default_symbols": symbols, "default_timeframes": timeframes}, sort_keys=True)
+        row = self._session.scalar(select(PopgunSetting).where(PopgunSetting.key == self.DEFAULTS_KEY))
+        if row is None:
+            self._session.add(PopgunSetting(key=self.DEFAULTS_KEY, value_json=payload))
+        else:
+            row.value_json = payload
+            row.updated_at = datetime.now(timezone.utc)
+        self._session.commit()
+
+    def get_defaults(self, *, fallback_symbols: list[str], fallback_timeframes: list[str]) -> tuple[list[str], list[str]]:
+        row = self._session.scalar(select(PopgunSetting).where(PopgunSetting.key == self.DEFAULTS_KEY))
+        if row is None:
+            self.ensure_defaults(symbols=fallback_symbols, timeframes=fallback_timeframes)
+            return list(fallback_symbols), list(fallback_timeframes)
+        try:
+            payload = json.loads(row.value_json)
+        except json.JSONDecodeError:
+            return list(fallback_symbols), list(fallback_timeframes)
+        if not isinstance(payload, dict):
+            return list(fallback_symbols), list(fallback_timeframes)
+        symbols = payload.get("default_symbols")
+        timeframes = payload.get("default_timeframes")
+        return (
+            list(symbols) if isinstance(symbols, list) else list(fallback_symbols),
+            list(timeframes) if isinstance(timeframes, list) else list(fallback_timeframes),
+        )
+
+    def has_topics_or_alerts(self) -> bool:
+        topic_count = self._session.scalar(select(func.count()).select_from(PopgunTopicSetting)) or 0
+        alert_count = self._session.scalar(select(func.count()).select_from(PopgunAlertState)) or 0
+        return bool(topic_count or alert_count)
+
+    def is_legacy_import_completed(self) -> bool:
+        row = self._session.scalar(select(PopgunSetting).where(PopgunSetting.key == self.LEGACY_IMPORT_KEY))
+        return row is not None
+
+    def mark_legacy_import_completed(self, *, state_path: str, topics_count: int, alerts_count: int) -> None:
+        payload = json.dumps(
+            {
+                "state_path": state_path,
+                "topics_count": topics_count,
+                "alerts_count": alerts_count,
+                "imported_at": datetime.now(timezone.utc).isoformat(),
+            },
+            sort_keys=True,
+        )
+        row = self._session.scalar(select(PopgunSetting).where(PopgunSetting.key == self.LEGACY_IMPORT_KEY))
+        if row is None:
+            self._session.add(PopgunSetting(key=self.LEGACY_IMPORT_KEY, value_json=payload))
+        else:
+            row.value_json = payload
+            row.updated_at = datetime.now(timezone.utc)
+        self._session.commit()
+
+    def get_topic(self, *, chat_id: int, thread_id: int | None) -> PopgunTopicSettingSnapshot | None:
+        row = self._session.scalar(
+            select(PopgunTopicSetting).where(PopgunTopicSetting.topic_key == self.topic_key(chat_id, thread_id))
+        )
+        return self._snapshot(row) if row is not None else None
+
+    def upsert_topic(
+        self,
+        *,
+        chat_id: int,
+        thread_id: int | None,
+        enabled: bool,
+        symbols: list[str],
+        timeframes: list[str],
+    ) -> PopgunTopicSettingSnapshot:
+        key = self.topic_key(chat_id, thread_id)
+        row = self._session.scalar(select(PopgunTopicSetting).where(PopgunTopicSetting.topic_key == key))
+        if row is None:
+            row = PopgunTopicSetting(
+                topic_key=key,
+                chat_id=chat_id,
+                message_thread_id=thread_id,
+                enabled=enabled,
+                symbols_json=json.dumps(symbols, sort_keys=True),
+                timeframes_json=json.dumps(timeframes, sort_keys=True),
+            )
+            self._session.add(row)
+        else:
+            row.chat_id = chat_id
+            row.message_thread_id = thread_id
+            row.enabled = enabled
+            row.symbols_json = json.dumps(symbols, sort_keys=True)
+            row.timeframes_json = json.dumps(timeframes, sort_keys=True)
+            row.updated_at = datetime.now(timezone.utc)
+        self._session.commit()
+        self._session.refresh(row)
+        return self._snapshot(row)
+
+    def list_enabled_topics(self) -> list[PopgunTopicSettingSnapshot]:
+        rows = self._session.scalars(
+            select(PopgunTopicSetting)
+            .where(PopgunTopicSetting.enabled.is_(True))
+            .order_by(PopgunTopicSetting.chat_id.asc(), PopgunTopicSetting.message_thread_id.asc())
+        ).all()
+        return [snapshot for row in rows if (snapshot := self._snapshot(row)).symbols]
+
+    def record_alert_if_new(
+        self,
+        *,
+        chat_id: int,
+        thread_id: int | None,
+        symbol: str,
+        timeframe: str,
+        signal_timestamp: int,
+        inside_high: float | None,
+        inside_low: float | None,
+        outside_high: float | None,
+        outside_low: float | None,
+    ) -> bool:
+        key = self.topic_key(chat_id, thread_id)
+        self._session.add(
+            PopgunAlertState(
+                topic_key=key,
+                chat_id=chat_id,
+                message_thread_id=thread_id,
+                symbol=symbol,
+                timeframe=timeframe,
+                signal_timestamp=signal_timestamp,
+                inside_high=inside_high,
+                inside_low=inside_low,
+                outside_high=outside_high,
+                outside_low=outside_low,
+            )
+        )
+        try:
+            self._session.commit()
+        except IntegrityError:
+            self._session.rollback()
+            return False
+        return True
+
+    @staticmethod
+    def _json_list(value: str) -> list[str]:
+        try:
+            raw = json.loads(value)
+        except json.JSONDecodeError:
+            return []
+        if not isinstance(raw, list):
+            return []
+        return [item for item in raw if isinstance(item, str)]
+
+    def _snapshot(self, row: PopgunTopicSetting) -> PopgunTopicSettingSnapshot:
+        updated_at = row.updated_at
+        if updated_at is None:
+            updated_at_text = datetime.now(timezone.utc).isoformat()
+        else:
+            updated_at_text = updated_at.isoformat()
+        return PopgunTopicSettingSnapshot(
+            chat_id=row.chat_id,
+            thread_id=row.message_thread_id,
+            enabled=bool(row.enabled),
+            symbols=self._json_list(row.symbols_json),
+            timeframes=self._json_list(row.timeframes_json),
+            updated_at=updated_at_text,
+        )
 
 
 class PluginRepository:

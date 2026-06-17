@@ -17,6 +17,7 @@ from amo_bot.plugins.sandbox.command_protocol import (
     CommandOp,
     CommandProtocolError,
 )
+from amo_bot.telegram.outbound_text import split_telegram_message_text
 
 
 class CommandWorkerError(RuntimeError):
@@ -84,14 +85,19 @@ class _RecordingHostAPI:
                 reply_markup = raw_markup
         else:
             text_clean = str(text or "").strip()
-        op = CommandOp(op="send_message", chat_id=chat_id, text=text_clean, message_thread_id=message_thread_id)
-        if reply_markup is not None:
+        chunks = split_telegram_message_text(text_clean, limit=self._max_text_len)
+        if reply_markup is not None and chunks:
+            op = CommandOp(op="send_message", chat_id=chat_id, text=chunks[0], message_thread_id=message_thread_id)
             payload = asdict(op)
             payload["reply_markup"] = reply_markup
-            payload["text"] = op.text
             self._append_op_payload(payload)
+            for chunk in chunks[1:]:
+                self._append_op(
+                    CommandOp(op="send_message", chat_id=chat_id, text=chunk, message_thread_id=message_thread_id)
+                )
             return {"ok": True}
-        self._append_op(op)
+        for chunk in chunks:
+            self._append_op(CommandOp(op="send_message", chat_id=chat_id, text=chunk, message_thread_id=message_thread_id))
         return {"ok": True}
 
     async def reply(self, chat_id: int, message_id: int, text: str | dict[str, object]) -> dict[str, object]:
@@ -115,21 +121,25 @@ class _RecordingHostAPI:
             text_clean = (text or "").strip()
 
         message_thread_id = self._request_context.context.message_thread_id if self._request_context is not None else None
+        chunks = split_telegram_message_text(text_clean, limit=self._max_text_len)
+        if not chunks:
+            raise ValueError("text must not be empty")
+
         op = CommandOp(
             op="reply",
             chat_id=chat_id,
             message_id=message_id,
-            text=text_clean,
+            text=chunks[0],
             message_thread_id=message_thread_id,
         )
         if reply_markup is not None:
             payload = asdict(op)
             payload["reply_markup"] = reply_markup
-            payload["text"] = op.text
             self._append_op_payload(payload)
-            return {"ok": True}
-
-        self._append_op(op)
+        else:
+            self._append_op(op)
+        for chunk in chunks[1:]:
+            self._append_op(CommandOp(op="send_message", chat_id=chat_id, text=chunk, message_thread_id=message_thread_id))
         return {"ok": True}
 
     async def send_photo(

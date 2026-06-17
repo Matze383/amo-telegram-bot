@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import os
+import re
 from datetime import datetime
 
 from dotenv import load_dotenv
-from pydantic import Field, model_validator
+from pydantic import AliasChoices, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -18,6 +19,7 @@ class Settings(BaseSettings):
     poll_limit: int = Field(default=100, alias="POLL_LIMIT")
     poll_retry_max_seconds: int = Field(default=30, alias="POLL_RETRY_MAX_SECONDS")
     offset_state_file: str = Field(default=".state/offset.json", alias="OFFSET_STATE_FILE")
+    bot_pid_file: str = Field(default=".state/amo_bot.pid", alias="BOT_PID_FILE")
 
     ai_provider: str = Field(default="ollama", alias="AI_PROVIDER")
 
@@ -112,6 +114,18 @@ class Settings(BaseSettings):
     ollama_fallback_model: str | None = Field(default=None, alias="OLLAMA_FALLBACK_MODEL")
     ollama_request_endpoint: str = Field(default="generate", alias="OLLAMA_REQUEST_ENDPOINT")
     ollama_streaming_mode: str = Field(default="off", alias="OLLAMA_STREAMING_MODE")
+    ollama_model_policy_enabled: bool = Field(default=False, alias="OLLAMA_MODEL_POLICY_ENABLED")
+    ollama_thinking_model: str = Field(default="", alias="OLLAMA_THINKING_MODEL")
+    ollama_non_thinking_model: str = Field(default="", alias="OLLAMA_NON_THINKING_MODEL")
+    ollama_thinking_task_types: str = Field(
+        default="web_research,sports,news,answer_synthesis",
+        alias="OLLAMA_THINKING_TASK_TYPES",
+    )
+    ollama_simple_prompt_max_chars: int = Field(default=240, alias="OLLAMA_SIMPLE_PROMPT_MAX_CHARS", ge=1)
+    ollama_thinking_timeout_seconds: float | None = Field(default=None, alias="OLLAMA_THINKING_TIMEOUT_SECONDS", gt=0)
+    ollama_non_thinking_timeout_seconds: float | None = Field(default=None, alias="OLLAMA_NON_THINKING_TIMEOUT_SECONDS", gt=0)
+    ollama_thinking_budget_max_prompt_chars: int | None = Field(default=None, alias="OLLAMA_THINKING_BUDGET_MAX_PROMPT_CHARS", gt=0)
+    ollama_non_thinking_budget_max_prompt_chars: int | None = Field(default=None, alias="OLLAMA_NON_THINKING_BUDGET_MAX_PROMPT_CHARS", gt=0)
 
     image_analysis_ollama_vision_models: str = Field(
         default="llava,llama3.2-vision,qwen2.5vl",
@@ -121,6 +135,44 @@ class Settings(BaseSettings):
     database_url: str = Field(default="sqlite:///./data/amo_bot.db", alias="DATABASE_URL")
     amo_plugin_dir: str = Field(default="./plugins", alias="AMO_PLUGIN_DIR")
     plugin_command_sandbox_enabled: bool = Field(default=False, alias="PLUGIN_COMMAND_SANDBOX_ENABLED")
+
+    amo_searxng_url: str = Field(default="", alias="AMO_SEARXNG_URL")
+    amo_brave_search_api_key: str | None = Field(default=None, alias="AMO_BRAVE_SEARCH_API_KEY")
+    amo_search_fallback_provider: str = Field(default="", alias="AMO_SEARCH_FALLBACK_PROVIDER")
+    amo_search_max_results: int = Field(default=5, alias="AMO_SEARCH_MAX_RESULTS", ge=1, le=10)
+    amo_searxng_timeout_seconds: float = Field(default=3.0, alias="AMO_SEARXNG_TIMEOUT_SECONDS", gt=0, le=30)
+    amo_brave_search_timeout_seconds: float = Field(default=3.0, alias="AMO_BRAVE_SEARCH_TIMEOUT_SECONDS", gt=0, le=30)
+    amo_search_min_host_diversity: int = Field(default=0, alias="AMO_SEARCH_MIN_HOST_DIVERSITY", ge=0, le=10)
+    amo_search_safesearch: str = Field(default="moderate", alias="AMO_SEARCH_SAFESEARCH")
+    amo_search_region: str = Field(default="", alias="AMO_SEARCH_REGION")
+    amo_search_profiles_file: str = Field(default="", alias="AMO_SEARCH_PROFILES_FILE")
+    amo_document_fetch_timeout_seconds: float = Field(default=5.0, alias="AMO_DOCUMENT_FETCH_TIMEOUT_SECONDS", gt=0, le=30)
+    amo_document_fetch_max_bytes: int = Field(default=1_000_000, alias="AMO_DOCUMENT_FETCH_MAX_BYTES", ge=1024, le=5_000_000)
+    amo_document_fetch_max_redirects: int = Field(default=3, alias="AMO_DOCUMENT_FETCH_MAX_REDIRECTS", ge=0, le=10)
+    amo_document_fetch_prefer_crawlee: bool = Field(default=True, alias="AMO_DOCUMENT_FETCH_PREFER_CRAWLEE")
+    amo_current_info_enabled: bool = Field(default=False, alias="AMO_CURRENT_INFO_ENABLED")
+    amo_current_info_timeout_seconds: float = Field(default=8.0, alias="AMO_CURRENT_INFO_TIMEOUT_SECONDS", gt=0, le=60)
+    amo_current_info_max_results: int = Field(default=5, alias="AMO_CURRENT_INFO_MAX_RESULTS", ge=1, le=10)
+    amo_current_info_max_documents: int = Field(default=3, alias="AMO_CURRENT_INFO_MAX_DOCUMENTS", ge=0, le=10)
+    amo_current_info_cache_realtime_ttl_seconds: int = Field(default=900, alias="AMO_CURRENT_INFO_CACHE_REALTIME_TTL_SECONDS", ge=60, le=86400)
+    amo_current_info_cache_docs_ttl_seconds: int = Field(default=604800, alias="AMO_CURRENT_INFO_CACHE_DOCS_TTL_SECONDS", ge=3600, le=2592000)
+    amo_current_info_cache_general_ttl_seconds: int = Field(default=86400, alias="AMO_CURRENT_INFO_CACHE_GENERAL_TTL_SECONDS", ge=300, le=604800)
+    amo_current_info_cache_unknown_ttl_seconds: int = Field(default=3600, alias="AMO_CURRENT_INFO_CACHE_UNKNOWN_TTL_SECONDS", ge=300, le=86400)
+    amo_current_info_cache_max_documents: int = Field(default=5000, alias="AMO_CURRENT_INFO_CACHE_MAX_DOCUMENTS", ge=1, le=100000)
+    amo_current_info_cache_retention_days: int = Field(default=30, alias="AMO_CURRENT_INFO_CACHE_RETENTION_DAYS", ge=1, le=365)
+    amo_current_info_cache_max_chunk_chars: int = Field(default=1200, alias="AMO_CURRENT_INFO_CACHE_MAX_CHUNK_CHARS", ge=200, le=4000)
+    amo_current_info_cache_max_chunks_per_document: int = Field(default=12, alias="AMO_CURRENT_INFO_CACHE_MAX_CHUNKS_PER_DOCUMENT", ge=1, le=100)
+    amo_vector_enabled: bool = Field(default=False, alias="AMO_VECTOR_ENABLED")
+    amo_vector_provider: str = Field(default="qdrant", alias="AMO_VECTOR_PROVIDER")
+    amo_vector_url: str = Field(default="", validation_alias=AliasChoices("AMO_VECTOR_URL", "QDRANT_URL"))
+    amo_vector_api_key: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("AMO_VECTOR_API_KEY", "QDRANT_API_KEY"),
+    )
+    amo_vector_collection: str = Field(default="current_info_chunks", alias="AMO_VECTOR_COLLECTION")
+    amo_vector_timeout_seconds: float = Field(default=3.0, alias="AMO_VECTOR_TIMEOUT_SECONDS", gt=0, le=30)
+    amo_vector_embedding_provider: str = Field(default="ollama", alias="AMO_VECTOR_EMBEDDING_PROVIDER")
+    amo_vector_embedding_model: str = Field(default="nomic-embed-text", alias="AMO_VECTOR_EMBEDDING_MODEL")
 
     webui_host: str = Field(default="127.0.0.1", alias="WEBUI_HOST")
     webui_port: int = Field(default=8080, alias="WEBUI_PORT")
@@ -419,6 +471,42 @@ class Settings(BaseSettings):
         if streaming_mode not in {"off", "collect_only", "live_edit"}:
             raise ValueError("OLLAMA_STREAMING_MODE must be one of: off, collect_only, live_edit")
         self.ollama_streaming_mode = streaming_mode
+
+        search_fallback_provider = self.amo_search_fallback_provider.strip().casefold()
+        if search_fallback_provider not in {"", "brave"}:
+            raise ValueError("AMO_SEARCH_FALLBACK_PROVIDER must be empty or brave")
+        self.amo_search_fallback_provider = search_fallback_provider
+
+        self.amo_searxng_url = self.amo_searxng_url.strip().rstrip("/")
+        brave_search_api_key = (self.amo_brave_search_api_key or "").strip()
+        self.amo_brave_search_api_key = brave_search_api_key or None
+        search_safesearch = self.amo_search_safesearch.strip().casefold()
+        if search_safesearch not in {"off", "moderate", "strict"}:
+            raise ValueError("AMO_SEARCH_SAFESEARCH must be one of: off, moderate, strict")
+        self.amo_search_safesearch = search_safesearch
+        search_region = self.amo_search_region.strip().upper()
+        if search_region and not re.fullmatch(r"[A-Z]{2}", search_region):
+            raise ValueError("AMO_SEARCH_REGION must be empty or a 2-letter country code")
+        self.amo_search_region = search_region
+        self.amo_search_profiles_file = self.amo_search_profiles_file.strip()
+
+        vector_provider = self.amo_vector_provider.strip().casefold()
+        if vector_provider not in {"qdrant"}:
+            raise ValueError("AMO_VECTOR_PROVIDER must be qdrant")
+        self.amo_vector_provider = vector_provider
+        self.amo_vector_url = self.amo_vector_url.strip().rstrip("/")
+        vector_api_key = (self.amo_vector_api_key or "").strip()
+        self.amo_vector_api_key = vector_api_key or None
+        self.amo_vector_collection = self.amo_vector_collection.strip() or "current_info_chunks"
+        embedding_provider = self.amo_vector_embedding_provider.strip().casefold()
+        if embedding_provider not in {"ollama", "openai"}:
+            raise ValueError("AMO_VECTOR_EMBEDDING_PROVIDER must be one of: ollama, openai")
+        self.amo_vector_embedding_provider = embedding_provider
+        self.amo_vector_embedding_model = self.amo_vector_embedding_model.strip()
+        if self.amo_vector_enabled and not self.amo_vector_url:
+            raise ValueError("AMO_VECTOR_URL (or QDRANT_URL) is required when AMO_VECTOR_ENABLED=true")
+        if self.amo_vector_enabled and not self.amo_vector_embedding_model:
+            raise ValueError("AMO_VECTOR_EMBEDDING_MODEL is required when AMO_VECTOR_ENABLED=true")
 
         # Validate dreaming window: start must be before end (in the same timezone).
         try:

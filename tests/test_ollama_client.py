@@ -83,6 +83,30 @@ def test_ollama_client_sends_server_side_request_limits(monkeypatch) -> None:
     assert seen_payload["options"] == {"num_predict": 42}
 
 
+def test_ollama_client_can_enable_thinking_payload(monkeypatch) -> None:
+    seen_payload: dict[str, Any] = {}
+
+    async def post_impl(url: str, payload: dict[str, Any]) -> httpx.Response:
+        nonlocal seen_payload
+        seen_payload = payload
+        req = httpx.Request("POST", url)
+        return httpx.Response(200, json={"response": "ok"}, request=req)
+
+    _patch_async_client(monkeypatch, post_impl)
+
+    client = OllamaClient(
+        base_url="http://ollama",
+        model="thinking-model",
+        timeout_seconds=1.0,
+        think=True,
+    )
+    out = asyncio.run(client.generate("hello"))
+
+    assert out == "ok"
+    assert seen_payload["model"] == "thinking-model"
+    assert seen_payload["think"] is True
+
+
 def test_ollama_client_http_error(monkeypatch) -> None:
     async def post_impl(url: str, payload: dict[str, Any]) -> httpx.Response:
         req = httpx.Request("POST", url)

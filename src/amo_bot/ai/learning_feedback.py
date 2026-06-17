@@ -72,6 +72,22 @@ class LearningMemoryRepository(Protocol):
     ) -> RetrievableMemoryRecord: ...
 
 
+class ResearchEvalCaseWriter(Protocol):
+    def create_from_negative_feedback(
+        self,
+        *,
+        sanitized_summary: str,
+        failure_label: str,
+        domain: str = "generic",
+        locale: str | None = None,
+        evidence_status: str | None = None,
+        source_hosts: Iterable[str] | None = None,
+        expected_behavior: str = "improve future research answer quality without treating feedback as fact",
+        enabled: bool = True,
+    ):
+        ...
+
+
 class LearningFeedbackService:
     """Detect and store scoped, summarized learning signals without raw chat retention."""
 
@@ -97,8 +113,9 @@ class LearningFeedbackService:
     _POSITIVE_TEXT_RE = re.compile(r"\b(?:genau\s+so|das\s+war\s+richtig|richtig|passt|gut\s+so|korrekt|works?|helpful)\b", re.I)
     _NEGATIVE_TEXT_RE = re.compile(r"\b(?:das\s+war\s+falsch|falsch|nicht\s+korrekt|stimmt\s+nicht|das\s+reicht\s+nicht|zu\s+oberflächlich|oberflaechlich|wrong|incorrect|not\s+enough)\b", re.I)
 
-    def __init__(self, repository: LearningMemoryRepository) -> None:
+    def __init__(self, repository: LearningMemoryRepository, eval_case_writer: ResearchEvalCaseWriter | None = None) -> None:
         self._repository = repository
+        self._eval_case_writer = eval_case_writer
 
     def process_text_feedback(self, *, text: str, scope: LearningFeedbackScope, user_id: int | None = None) -> LearningFeedbackResult:
         candidate = self.detect_text_candidate(text=text, scope=scope, user_id=user_id)
@@ -336,6 +353,7 @@ class LearningFeedbackService:
                 confidence_bucket=candidate.confidence_bucket,
                 learning_type=candidate.learning_type,
             )
+            self._maybe_write_research_eval_case(candidate)
             return LearningFeedbackResult(stored=True, candidate=candidate, record=record)
         except Exception as exc:
             self._log_decision(
@@ -350,6 +368,61 @@ class LearningFeedbackService:
                 error_class=exc.__class__.__name__,
             )
             return LearningFeedbackResult(stored=False, candidate=candidate, skipped_reason=LearningFeedbackSkipReason.STORE_ERROR, error_class=exc.__class__.__name__)
+
+    def _maybe_write_research_eval_case(self, candidate: LearningFeedbackCandidate) -> None:
+        if self._eval_case_writer is None or not self._is_negative_research_signal(candidate):
+            return
+        try:
+            self._eval_case_writer.create_from_negative_feedback(
+                sanitized_summary=candidate.summary,
+                failure_label=self._failure_label(candidate),
+                domain=self._eval_domain(candidate),
+                evidence_status="needs_improvement",
+                source_hosts=(),
+                expected_behavior="future research answers should acknowledge uncertainty, improve source corroboration, and avoid overconfident claims",
+            )
+        except Exception as exc:
+            self._log_decision(
+                event="learning_feedback.research_eval_case",
+                decision="error",
+                scope_type=candidate.visibility,
+                memory_type=candidate.memory_type,
+                source=candidate.source,
+                confidence_bucket=candidate.confidence_bucket,
+                learning_type=candidate.learning_type,
+                skipped_reason=LearningFeedbackSkipReason.STORE_ERROR.value,
+                error_class=exc.__class__.__name__,
+            )
+
+    @staticmethod
+    def _is_negative_research_signal(candidate: LearningFeedbackCandidate) -> bool:
+        summary = candidate.summary.casefold()
+        if candidate.memory_type == "warning":
+            return True
+        if candidate.learning_type == "source_preference":
+            return "avoid or down-rank" in summary or "negative" in summary
+        return (
+            "negative" in summary
+            or "not enough" in summary
+            or "avoid or down-rank" in summary
+        )
+
+    @staticmethod
+    def _failure_label(candidate: LearningFeedbackCandidate) -> str:
+        if candidate.learning_type == "reaction_feedback":
+            return "negative_reaction_feedback"
+        if candidate.learning_type == "source_preference":
+            return "source_quality_feedback"
+        return "negative_answer_feedback"
+
+    @staticmethod
+    def _eval_domain(candidate: LearningFeedbackCandidate) -> str:
+        summary = candidate.summary.casefold()
+        if "source_preference" in summary or "source-quality" in summary:
+            return "source_quality"
+        if "chart" in summary:
+            return "analysis"
+        return "generic"
 
     @staticmethod
     def _log_decision(
