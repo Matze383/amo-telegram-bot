@@ -581,6 +581,13 @@ For result-page extraction, the document fetcher prefers Crawlee and falls back 
 | `AMO_CURRENT_INFO_TIMEOUT_SECONDS` | `8` | Total Current-Info answer budget in seconds, including answer synthesis |
 | `AMO_CURRENT_INFO_MAX_RESULTS` | `5` | Maximum Current-Info search results per Telegram answer |
 | `AMO_CURRENT_INFO_MAX_DOCUMENTS` | `3` | Maximum followed documents per Current-Info Telegram answer |
+| `AMO_CURRENT_INFO_MAX_SEARCH_PROVIDER_RUNS_PER_RESPONSE` | `2` | Maximum search-provider calls per Current-Info response |
+| `AMO_CURRENT_INFO_MAX_FETCH_RUNS_PER_RESPONSE` | `3` | Maximum document-fetch calls per Current-Info response |
+| `AMO_CURRENT_INFO_MAX_TOTAL_PROVIDER_RUNS_PER_RESPONSE` | `8` | Combined search/fetch provider-call budget per Current-Info response |
+| `AMO_CURRENT_INFO_PROVIDER_RATE_LIMIT_PER_MINUTE` | `60` | Per-provider in-memory Current-Info search rate limit |
+| `AMO_BRAVE_SEARCH_QUOTA_PER_MINUTE` | `30` | Additional in-memory Brave Search quota guard |
+| `AMO_CRAWLEE_MAX_CONCURRENT_PER_HOST` | `2` | Maximum concurrent Crawlee document fetches per host |
+| `AMO_CURRENT_INFO_DEBUG_OUTPUT` | `false` | Include operator budget diagnostics in Current-Info answer metadata |
 | `AMO_CURRENT_INFO_CACHE_REALTIME_TTL_SECONDS` | `900` | TTL for realtime/news cache entries |
 | `AMO_CURRENT_INFO_CACHE_DOCS_TTL_SECONDS` | `604800` | TTL for docs/official cache entries |
 | `AMO_CURRENT_INFO_CACHE_GENERAL_TTL_SECONDS` | `86400` | TTL for general cache entries |

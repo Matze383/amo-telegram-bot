@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import ast
+import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
@@ -7,6 +9,7 @@ from amo_bot.current_info import (
     CurrentInfoAnswer,
     CurrentInfoRequest,
     CurrentInfoService,
+    CurrentInfoSafetyConfig,
     EvidenceChunk,
     EvidencePackage,
     EvidencePackageSource,
@@ -16,7 +19,14 @@ from amo_bot.current_info import (
     SearchResult,
     TaskSpec,
 )
+from amo_bot.current_info.observability import (
+    CurrentInfoBudgetExceeded,
+    HostConcurrencyLimiter,
+    InMemoryRateLimiter,
+    query_hash,
+)
 from amo_bot.current_info.legacy_webtool import LegacyWebtoolCurrentInfoService
+from amo_bot.current_info.search import SearchProviderRateLimited
 
 
 @dataclass
@@ -34,6 +44,12 @@ class _FakeSearchProvider:
     def search(self, *, query: str, locale: str, max_results: int) -> tuple[SearchResult, ...]:
         self.calls.append(_SearchCall(query=query, locale=locale, max_results=max_results))
         return self.results[:max_results]
+
+
+class _RateLimitedSearchProvider:
+    def search(self, *, query: str, locale: str, max_results: int) -> tuple[SearchResult, ...]:
+        del query, locale, max_results
+        raise SearchProviderRateLimited("provider_rate_limited")
 
 
 class _FakeFetchProvider:
@@ -392,6 +408,93 @@ def test_current_info_service_reports_empty_result_from_fake_provider():
     assert answer.search_bundle is not None
     assert answer.search_bundle.results == ()
     assert answer.warnings == ("empty_search_result",)
+
+
+def test_current_info_service_fails_closed_when_search_provider_is_rate_limited():
+    service = CurrentInfoService(search_provider=_RateLimitedSearchProvider())
+
+    answer = service.answer(CurrentInfoRequest(query="current status"))
+
+    assert answer.status == "provider_unavailable"
+    assert answer.warnings == ("rate_limited",)
+    assert answer.search_bundle is None
+
+
+def test_current_info_observability_logs_privacy_safe_pipeline_events(caplog):
+    sensitive_query = "latest private user query about Matze"
+    result = SearchResult(
+        title="Status page",
+        url="https://example.com/status",
+        snippet="Fallback snippet",
+        provider="fake_search",
+        rank=1,
+    )
+    document = FetchedDocument(url=result.url, title=result.title, text="Current status is green.")
+    chunk = EvidenceChunk(text="Current status is green.", source_url=result.url, source_title=result.title)
+    service = CurrentInfoService(
+        search_provider=_FakeSearchProvider((result,)),
+        fetch_provider=_FakeFetchProvider({result.url: document}),
+        retrieval_provider=_FakeRetrievalProvider((chunk,)),
+    )
+
+    with caplog.at_level(logging.INFO, logger="amo_bot.current_info.service"):
+        answer = service.answer(CurrentInfoRequest(query=sensitive_query, chat_id=-100123456, user_id=123456789))
+
+    assert answer.status == "answered"
+    rendered_logs = "\n".join(record.getMessage() for record in caplog.records)
+    assert sensitive_query not in rendered_logs
+    assert query_hash(sensitive_query) in rendered_logs
+    payloads = [ast.literal_eval(record.getMessage()) for record in caplog.records]
+    assert {
+        "current_info.QueryRun",
+        "current_info.ProviderRun",
+        "current_info.FetchRun",
+        "current_info.EvidenceDecision",
+        "current_info.AnswerSynthesis",
+    }.issubset({payload["event"] for payload in payloads})
+
+
+def test_current_info_service_enforces_fetch_budget_and_exposes_operator_debug():
+    first = SearchResult(title="A", url="https://a.example/status", provider="fake", rank=1, host="a.example")
+    second = SearchResult(title="B", url="https://b.example/status", provider="fake", rank=2, host="b.example")
+    service = CurrentInfoService(
+        search_provider=_FakeSearchProvider((first, second)),
+        fetch_provider=_FakeFetchProvider(
+            {
+                first.url: FetchedDocument(url=first.url, text="The status is green."),
+                second.url: FetchedDocument(url=second.url, text="The status is green."),
+            }
+        ),
+        safety_config=CurrentInfoSafetyConfig(max_fetch_runs_per_response=1, debug_enabled=True),
+    )
+
+    answer = service.answer(CurrentInfoRequest(query="current status", max_results=2, max_documents=2))
+
+    assert answer.status == "answered"
+    assert answer.metadata["debug"]["budgets"]["fetch_runs"] == 1
+    assert "fetch_budget_exceeded" in answer.metadata["debug"]["budgets"]["warnings"]
+
+
+def test_current_info_rate_limiter_blocks_after_configured_window_budget():
+    limiter = InMemoryRateLimiter()
+
+    assert limiter.allow("brave", limit=1, window_seconds=60.0) is True
+    assert limiter.allow("brave", limit=1, window_seconds=60.0) is False
+    assert limiter.allow("searxng", limit=1, window_seconds=60.0) is True
+
+
+def test_current_info_host_concurrency_limiter_blocks_same_host_only():
+    limiter = HostConcurrencyLimiter()
+
+    with limiter.acquire("https://example.com/a", limit=1):
+        try:
+            with limiter.acquire("https://example.com/b", limit=1):
+                raise AssertionError("same-host concurrency should be blocked")
+        except CurrentInfoBudgetExceeded as exc:
+            assert exc.reason_code == "host_concurrency_limit"
+
+        with limiter.acquire("https://other.example/b", limit=1):
+            pass
 
 
 def test_legacy_webtool_current_info_adapter_keeps_old_dispatcher_activatable():

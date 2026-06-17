@@ -9,6 +9,11 @@ from urllib.parse import urlparse
 import httpx
 
 from amo_bot.current_info.models import SearchProviderMetric, SearchProviderResponse, SearchResult
+from amo_bot.current_info.observability import (
+    GLOBAL_PROVIDER_RATE_LIMITER,
+    CurrentInfoSafetyConfig,
+    log_current_info_event,
+)
 from amo_bot.current_info.profiles import (
     SearchIntent,
     SearchProfile,
@@ -43,6 +48,10 @@ class SearchProviderInvalidResponse(SearchProviderError):
     error_class = "invalid_response"
 
 
+class SearchProviderRateLimited(SearchProviderError):
+    error_class = "rate_limited"
+
+
 @dataclass(frozen=True, slots=True)
 class SearxngSearchConfig:
     base_url: str
@@ -54,6 +63,7 @@ class SearxngSearchConfig:
     safesearch: str = "moderate"
     region: str | None = None
     profile_config: SearchProfileConfig | None = None
+    rate_limit_per_minute: int = 60
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,6 +79,8 @@ class BraveSearchConfig:
     safesearch: str = "moderate"
     result_filter: str | None = None
     profile_config: SearchProfileConfig | None = None
+    rate_limit_per_minute: int = 60
+    quota_per_minute: int = 30
 
 
 @dataclass(frozen=True, slots=True)
@@ -89,6 +101,7 @@ class SearxngSearchProvider:
         started = time.perf_counter()
         limit = _bounded_limit(max_results=max_results, configured_max_results=self._config.max_results)
         try:
+            _enforce_provider_rate_limit(self.name, limit_per_minute=self._config.rate_limit_per_minute, query=query)
             results = self._search(query=query, locale=locale, limit=limit)
         except SearchProviderError as exc:
             raise exc
@@ -175,6 +188,8 @@ class BraveSearchProvider:
         started = time.perf_counter()
         limit = _bounded_limit(max_results=max_results, configured_max_results=self._config.max_results)
         try:
+            _enforce_provider_rate_limit(self.name, limit_per_minute=self._config.rate_limit_per_minute, query=query)
+            _enforce_provider_rate_limit("brave_quota", limit_per_minute=self._config.quota_per_minute, query=query)
             results = self._search(query=query, locale=locale, limit=limit)
         except SearchProviderError as exc:
             raise exc
@@ -377,6 +392,10 @@ def build_search_broker_from_settings(settings: Any, *, http_client_factory: Any
         return None
 
     max_results = int(getattr(settings, "amo_search_max_results", 5))
+    safety_config = CurrentInfoSafetyConfig(
+        provider_rate_limit_per_minute=int(getattr(settings, "amo_current_info_provider_rate_limit_per_minute", 60)),
+        brave_quota_per_minute=int(getattr(settings, "amo_brave_search_quota_per_minute", 30)),
+    )
     try:
         profile_config = _load_profile_config_from_settings(settings)
     except SearchProfileConfigError as exc:
@@ -393,6 +412,7 @@ def build_search_broker_from_settings(settings: Any, *, http_client_factory: Any
             safesearch=str(getattr(settings, "amo_search_safesearch", "moderate") or "moderate"),
             region=str(getattr(settings, "amo_search_region", "") or ""),
             profile_config=profile_config,
+            rate_limit_per_minute=safety_config.provider_rate_limit_per_minute,
         ),
         http_client_factory=http_client_factory,
     )
@@ -408,6 +428,8 @@ def build_search_broker_from_settings(settings: Any, *, http_client_factory: Any
                 country=str(getattr(settings, "amo_search_region", "") or "") or None,
                 safesearch=str(getattr(settings, "amo_search_safesearch", "moderate") or "moderate"),
                 profile_config=profile_config,
+                rate_limit_per_minute=safety_config.provider_rate_limit_per_minute,
+                quota_per_minute=safety_config.brave_quota_per_minute,
             ),
             http_client_factory=http_client_factory,
         )
@@ -554,3 +576,20 @@ def _bound_text(value: str, max_len: int) -> str:
     if len(text) <= max_len:
         return text
     return text[:max_len].rstrip()
+
+
+def _enforce_provider_rate_limit(provider: str, *, limit_per_minute: int, query: str) -> None:
+    if GLOBAL_PROVIDER_RATE_LIMITER.allow(provider, limit=limit_per_minute):
+        return
+    reason_code = "brave_quota_exceeded" if provider == "brave_quota" else "provider_rate_limited"
+    log_current_info_event(
+        logger,
+        event="current_info.ProviderRun",
+        stage="search",
+        query=query,
+        outcome="rate_limited",
+        reason_code=reason_code,
+        extra={"provider": "brave" if provider == "brave_quota" else provider},
+        level=logging.WARNING,
+    )
+    raise SearchProviderRateLimited(reason_code)

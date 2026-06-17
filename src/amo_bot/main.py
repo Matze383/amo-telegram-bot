@@ -36,6 +36,7 @@ from amo_bot.current_info import (
     CurrentInfoService,
     build_cached_fetch_provider_from_settings,
     build_current_info_retrieval_provider_from_settings,
+    build_current_info_safety_config_from_settings,
     build_document_fetcher_from_settings,
     build_search_broker_from_settings,
 )
@@ -384,6 +385,7 @@ def run(argv: list[str] | None = None) -> None:
                     settings,
                     session_factory=session_factory,
                 ),
+                safety_config=build_current_info_safety_config_from_settings(settings),
             )
 
     dispatcher = Dispatcher(

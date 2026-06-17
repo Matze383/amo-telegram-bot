@@ -249,6 +249,81 @@ def test_vector_qdrant_env_aliases_are_parsed_without_secret_leak(monkeypatch, t
     assert settings.amo_vector_api_key == "super-secret-qdrant-key"
 
 
+def test_current_info_release_defaults_and_issue_76_env_values_are_parsed(monkeypatch, tmp_path) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "\n".join(
+            [
+                "BOT_TOKEN=token-from-dotenv",
+                "WEBUI_PASSWORD=pw-from-dotenv",
+                "WEBUI_SECRET_KEY=dotenv-secret-key-0123456789-abcdefghij",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("DOTENV_PATH", str(env_file))
+    monkeypatch.delenv("AMO_ENV_OVERRIDE", raising=False)
+    monkeypatch.delenv("WEBUI_LOGIN_DELAY_BASE_SECONDS", raising=False)
+    monkeypatch.delenv("WEBUI_LOGIN_DELAY_MAX_SECONDS", raising=False)
+    for key in (
+        "AMO_SEARCH_MAX_RESULTS",
+        "AMO_SEARXNG_TIMEOUT_SECONDS",
+        "AMO_BRAVE_SEARCH_TIMEOUT_SECONDS",
+        "AMO_SEARCH_MIN_HOST_DIVERSITY",
+        "AMO_CURRENT_INFO_MAX_SEARCH_PROVIDER_RUNS_PER_RESPONSE",
+        "AMO_CURRENT_INFO_MAX_FETCH_RUNS_PER_RESPONSE",
+        "AMO_CURRENT_INFO_MAX_TOTAL_PROVIDER_RUNS_PER_RESPONSE",
+        "AMO_CURRENT_INFO_PROVIDER_RATE_LIMIT_PER_MINUTE",
+        "AMO_BRAVE_SEARCH_QUOTA_PER_MINUTE",
+        "AMO_CRAWLEE_MAX_CONCURRENT_PER_HOST",
+        "AMO_CURRENT_INFO_DEBUG_OUTPUT",
+    ):
+        monkeypatch.delenv(key, raising=False)
+
+    settings = get_settings()
+
+    assert settings.amo_search_max_results == 10
+    assert settings.amo_searxng_timeout_seconds == 30.0
+    assert settings.amo_brave_search_timeout_seconds == 30.0
+    assert settings.amo_search_min_host_diversity == 3
+    assert settings.amo_current_info_max_search_provider_runs_per_response == 2
+    assert settings.amo_current_info_max_fetch_runs_per_response == 3
+    assert settings.amo_current_info_max_total_provider_runs_per_response == 8
+    assert settings.amo_current_info_provider_rate_limit_per_minute == 60
+    assert settings.amo_brave_search_quota_per_minute == 30
+    assert settings.amo_crawlee_max_concurrent_per_host == 2
+    assert settings.amo_current_info_debug_output is False
+
+    monkeypatch.setenv("AMO_SEARCH_MAX_RESULTS", "7")
+    monkeypatch.setenv("AMO_SEARXNG_TIMEOUT_SECONDS", "4.5")
+    monkeypatch.setenv("AMO_BRAVE_SEARCH_TIMEOUT_SECONDS", "6.5")
+    monkeypatch.setenv("AMO_SEARCH_MIN_HOST_DIVERSITY", "2")
+    monkeypatch.setenv("AMO_CURRENT_INFO_MAX_SEARCH_PROVIDER_RUNS_PER_RESPONSE", "3")
+    monkeypatch.setenv("AMO_CURRENT_INFO_MAX_FETCH_RUNS_PER_RESPONSE", "4")
+    monkeypatch.setenv("AMO_CURRENT_INFO_MAX_TOTAL_PROVIDER_RUNS_PER_RESPONSE", "9")
+    monkeypatch.setenv("AMO_CURRENT_INFO_PROVIDER_RATE_LIMIT_PER_MINUTE", "120")
+    monkeypatch.setenv("AMO_BRAVE_SEARCH_QUOTA_PER_MINUTE", "40")
+    monkeypatch.setenv("AMO_CRAWLEE_MAX_CONCURRENT_PER_HOST", "5")
+    monkeypatch.setenv("AMO_CURRENT_INFO_DEBUG_OUTPUT", "true")
+
+    overridden = get_settings()
+
+    assert overridden.amo_search_max_results == 7
+    assert overridden.amo_searxng_timeout_seconds == 4.5
+    assert overridden.amo_brave_search_timeout_seconds == 6.5
+    assert overridden.amo_search_min_host_diversity == 2
+    assert overridden.amo_current_info_max_search_provider_runs_per_response == 3
+    assert overridden.amo_current_info_max_fetch_runs_per_response == 4
+    assert overridden.amo_current_info_max_total_provider_runs_per_response == 9
+    assert overridden.amo_current_info_provider_rate_limit_per_minute == 120
+    assert overridden.amo_brave_search_quota_per_minute == 40
+    assert overridden.amo_crawlee_max_concurrent_per_host == 5
+    assert overridden.amo_current_info_debug_output is True
+
+
 def test_no_secret_values_are_exposed_in_validation_error(monkeypatch, tmp_path) -> None:
     env_file = tmp_path / ".env"
     secret_value = "super-secret-value"

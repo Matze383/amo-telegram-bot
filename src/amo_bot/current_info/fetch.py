@@ -17,6 +17,11 @@ import httpx
 
 from amo_bot.ai.research_extraction_quality import classify_extraction_quality
 from amo_bot.current_info.models import FetchedDocument, JsonDict
+from amo_bot.current_info.observability import (
+    GLOBAL_HOST_CONCURRENCY_LIMITER,
+    CurrentInfoBudgetExceeded,
+    CurrentInfoSafetyConfig,
+)
 
 
 _DEFAULT_ALLOWED_MIME_TYPES = (
@@ -37,6 +42,7 @@ class DocumentFetchConfig:
     prefer_crawlee: bool = True
     block_private_ips: bool = True
     user_agent: str = _DEFAULT_USER_AGENT
+    crawlee_max_concurrent_per_host: int = 2
 
 
 @dataclass(frozen=True, slots=True)
@@ -137,11 +143,17 @@ class CrawleeDocumentFetcher:
             return None
 
         try:
-            return asyncio.run(self._async_fetch_once_with_crawlee(url))
+            with GLOBAL_HOST_CONCURRENCY_LIMITER.acquire(
+                url,
+                limit=self._config.crawlee_max_concurrent_per_host,
+            ):
+                return asyncio.run(self._async_fetch_once_with_crawlee(url))
         except ModuleNotFoundError:
             return None
         except ImportError:
             return None
+        except CurrentInfoBudgetExceeded as exc:
+            raise CurrentInfoFetchBlocked(exc.reason_code) from exc
 
     async def _async_fetch_once_with_crawlee(self, url: str) -> _RawFetchResult:
         from crawlee.http_clients import HttpxHttpClient
@@ -256,12 +268,16 @@ class CrawleeDocumentFetcher:
 
 
 def build_document_fetcher_from_settings(settings: Any, *, http_client_factory: Any = None) -> CrawleeDocumentFetcher:
+    safety_config = CurrentInfoSafetyConfig(
+        crawlee_max_concurrent_per_host=int(getattr(settings, "amo_crawlee_max_concurrent_per_host", 2)),
+    )
     return CrawleeDocumentFetcher(
         DocumentFetchConfig(
             timeout_seconds=float(getattr(settings, "amo_document_fetch_timeout_seconds", 5.0)),
             max_bytes=int(getattr(settings, "amo_document_fetch_max_bytes", 1_000_000)),
             max_redirects=int(getattr(settings, "amo_document_fetch_max_redirects", 3)),
             prefer_crawlee=bool(getattr(settings, "amo_document_fetch_prefer_crawlee", True)),
+            crawlee_max_concurrent_per_host=safety_config.crawlee_max_concurrent_per_host,
         ),
         http_client_factory=http_client_factory,
     )

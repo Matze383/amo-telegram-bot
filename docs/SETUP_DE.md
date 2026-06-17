@@ -581,6 +581,13 @@ Für die Extraktion von Ergebnis-Seiten bevorzugt der Dokument-Fetcher Crawlee u
 | `AMO_CURRENT_INFO_TIMEOUT_SECONDS` | `8` | Gesamtes Current-Info-Antwortbudget in Sekunden, inklusive Antwortsynthese |
 | `AMO_CURRENT_INFO_MAX_RESULTS` | `5` | Maximale Anzahl Current-Info-Suchergebnisse pro Telegram-Antwort |
 | `AMO_CURRENT_INFO_MAX_DOCUMENTS` | `3` | Maximale Anzahl gefolgter Dokumente pro Current-Info-Telegram-Antwort |
+| `AMO_CURRENT_INFO_MAX_SEARCH_PROVIDER_RUNS_PER_RESPONSE` | `2` | Maximale Suchprovider-Aufrufe pro Current-Info-Antwort |
+| `AMO_CURRENT_INFO_MAX_FETCH_RUNS_PER_RESPONSE` | `3` | Maximale Dokument-Fetch-Aufrufe pro Current-Info-Antwort |
+| `AMO_CURRENT_INFO_MAX_TOTAL_PROVIDER_RUNS_PER_RESPONSE` | `8` | Kombiniertes Such-/Fetch-Providerbudget pro Current-Info-Antwort |
+| `AMO_CURRENT_INFO_PROVIDER_RATE_LIMIT_PER_MINUTE` | `60` | In-Memory-Rate-Limit pro Current-Info-Suchprovider |
+| `AMO_BRAVE_SEARCH_QUOTA_PER_MINUTE` | `30` | Zusätzlicher In-Memory-Quota-Schutz für Brave Search |
+| `AMO_CRAWLEE_MAX_CONCURRENT_PER_HOST` | `2` | Maximale parallele Crawlee-Dokument-Fetches pro Host |
+| `AMO_CURRENT_INFO_DEBUG_OUTPUT` | `false` | Operator-Budgetdiagnostik in Current-Info-Antwort-Metadaten aufnehmen |
 | `AMO_CURRENT_INFO_CACHE_REALTIME_TTL_SECONDS` | `900` | TTL für Realtime-/News-Cache-Einträge |
 | `AMO_CURRENT_INFO_CACHE_DOCS_TTL_SECONDS` | `604800` | TTL für Docs-/Official-Cache-Einträge |
 | `AMO_CURRENT_INFO_CACHE_GENERAL_TTL_SECONDS` | `86400` | TTL für allgemeine Cache-Einträge |

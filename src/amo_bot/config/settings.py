@@ -139,10 +139,10 @@ class Settings(BaseSettings):
     amo_searxng_url: str = Field(default="", alias="AMO_SEARXNG_URL")
     amo_brave_search_api_key: str | None = Field(default=None, alias="AMO_BRAVE_SEARCH_API_KEY")
     amo_search_fallback_provider: str = Field(default="", alias="AMO_SEARCH_FALLBACK_PROVIDER")
-    amo_search_max_results: int = Field(default=5, alias="AMO_SEARCH_MAX_RESULTS", ge=1, le=10)
-    amo_searxng_timeout_seconds: float = Field(default=3.0, alias="AMO_SEARXNG_TIMEOUT_SECONDS", gt=0, le=30)
-    amo_brave_search_timeout_seconds: float = Field(default=3.0, alias="AMO_BRAVE_SEARCH_TIMEOUT_SECONDS", gt=0, le=30)
-    amo_search_min_host_diversity: int = Field(default=0, alias="AMO_SEARCH_MIN_HOST_DIVERSITY", ge=0, le=10)
+    amo_search_max_results: int = Field(default=10, alias="AMO_SEARCH_MAX_RESULTS", ge=1, le=10)
+    amo_searxng_timeout_seconds: float = Field(default=30.0, alias="AMO_SEARXNG_TIMEOUT_SECONDS", gt=0, le=30)
+    amo_brave_search_timeout_seconds: float = Field(default=30.0, alias="AMO_BRAVE_SEARCH_TIMEOUT_SECONDS", gt=0, le=30)
+    amo_search_min_host_diversity: int = Field(default=3, alias="AMO_SEARCH_MIN_HOST_DIVERSITY", ge=0, le=10)
     amo_search_safesearch: str = Field(default="moderate", alias="AMO_SEARCH_SAFESEARCH")
     amo_search_region: str = Field(default="", alias="AMO_SEARCH_REGION")
     amo_search_profiles_file: str = Field(default="", alias="AMO_SEARCH_PROFILES_FILE")
@@ -150,10 +150,37 @@ class Settings(BaseSettings):
     amo_document_fetch_max_bytes: int = Field(default=1_000_000, alias="AMO_DOCUMENT_FETCH_MAX_BYTES", ge=1024, le=5_000_000)
     amo_document_fetch_max_redirects: int = Field(default=3, alias="AMO_DOCUMENT_FETCH_MAX_REDIRECTS", ge=0, le=10)
     amo_document_fetch_prefer_crawlee: bool = Field(default=True, alias="AMO_DOCUMENT_FETCH_PREFER_CRAWLEE")
+    amo_crawlee_max_concurrent_per_host: int = Field(default=2, alias="AMO_CRAWLEE_MAX_CONCURRENT_PER_HOST", ge=1, le=20)
     amo_current_info_enabled: bool = Field(default=False, alias="AMO_CURRENT_INFO_ENABLED")
     amo_current_info_timeout_seconds: float = Field(default=8.0, alias="AMO_CURRENT_INFO_TIMEOUT_SECONDS", gt=0, le=60)
     amo_current_info_max_results: int = Field(default=5, alias="AMO_CURRENT_INFO_MAX_RESULTS", ge=1, le=10)
     amo_current_info_max_documents: int = Field(default=3, alias="AMO_CURRENT_INFO_MAX_DOCUMENTS", ge=0, le=10)
+    amo_current_info_max_search_provider_runs_per_response: int = Field(
+        default=2,
+        alias="AMO_CURRENT_INFO_MAX_SEARCH_PROVIDER_RUNS_PER_RESPONSE",
+        ge=1,
+        le=10,
+    )
+    amo_current_info_max_fetch_runs_per_response: int = Field(
+        default=3,
+        alias="AMO_CURRENT_INFO_MAX_FETCH_RUNS_PER_RESPONSE",
+        ge=0,
+        le=20,
+    )
+    amo_current_info_max_total_provider_runs_per_response: int = Field(
+        default=8,
+        alias="AMO_CURRENT_INFO_MAX_TOTAL_PROVIDER_RUNS_PER_RESPONSE",
+        ge=1,
+        le=50,
+    )
+    amo_current_info_provider_rate_limit_per_minute: int = Field(
+        default=60,
+        alias="AMO_CURRENT_INFO_PROVIDER_RATE_LIMIT_PER_MINUTE",
+        ge=1,
+        le=10000,
+    )
+    amo_brave_search_quota_per_minute: int = Field(default=30, alias="AMO_BRAVE_SEARCH_QUOTA_PER_MINUTE", ge=1, le=10000)
+    amo_current_info_debug_output: bool = Field(default=False, alias="AMO_CURRENT_INFO_DEBUG_OUTPUT")
     amo_current_info_cache_realtime_ttl_seconds: int = Field(default=900, alias="AMO_CURRENT_INFO_CACHE_REALTIME_TTL_SECONDS", ge=60, le=86400)
     amo_current_info_cache_docs_ttl_seconds: int = Field(default=604800, alias="AMO_CURRENT_INFO_CACHE_DOCS_TTL_SECONDS", ge=3600, le=2592000)
     amo_current_info_cache_general_ttl_seconds: int = Field(default=86400, alias="AMO_CURRENT_INFO_CACHE_GENERAL_TTL_SECONDS", ge=300, le=604800)

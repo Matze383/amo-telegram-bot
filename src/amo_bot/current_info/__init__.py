@@ -54,6 +54,15 @@ from amo_bot.current_info.models import (
     SearchResult,
     TaskSpec,
 )
+from amo_bot.current_info.observability import (
+    CurrentInfoBudgetExceeded,
+    CurrentInfoRunBudget,
+    CurrentInfoSafetyConfig,
+    HostConcurrencyLimiter,
+    InMemoryRateLimiter,
+    build_current_info_safety_config_from_settings,
+    query_hash,
+)
 from amo_bot.current_info.ports import (
     CurrentInfoFetchProvider,
     CurrentInfoQueryPlanner,
@@ -94,6 +103,7 @@ from amo_bot.current_info.search import (
     SearchProvider,
     SearchProviderError,
     SearchProviderInvalidResponse,
+    SearchProviderRateLimited,
     SearchProviderTimeout,
     SearxngSearchConfig,
     SearxngSearchProvider,
@@ -116,6 +126,7 @@ from amo_bot.current_info.vector import (
 
 __all__ = [
     "CurrentInfoAnswer",
+    "CurrentInfoBudgetExceeded",
     "CrawleeDocumentFetcher",
     "CurrentInfoFetchProvider",
     "CurrentInfoFetchBlocked",
@@ -126,6 +137,8 @@ __all__ = [
     "CurrentInfoQueryPlanner",
     "CurrentInfoRequest",
     "CurrentInfoRetrievalProvider",
+    "CurrentInfoRunBudget",
+    "CurrentInfoSafetyConfig",
     "CurrentInfoSearchProvider",
     "CurrentInfoService",
     "CurrentInfoTaskPlanner",
@@ -138,7 +151,9 @@ __all__ = [
     "EvidencePackage",
     "EvidencePackageSource",
     "FetchedDocument",
+    "HostConcurrencyLimiter",
     "HybridCurrentInfoRetrievalProvider",
+    "InMemoryRateLimiter",
     "LegacyWebtoolCurrentInfoService",
     "OllamaEmbeddingProvider",
     "OpenAIEmbeddingProvider",
@@ -169,6 +184,7 @@ __all__ = [
     "SearchProviderError",
     "SearchProviderInvalidResponse",
     "SearchProviderMetric",
+    "SearchProviderRateLimited",
     "SearchProviderResponse",
     "SearchProviderTimeout",
     "SearchResult",
@@ -199,6 +215,7 @@ __all__ = [
     "build_cached_fetch_provider_from_settings",
     "build_current_info_cache_config_from_settings",
     "build_current_info_retrieval_provider_from_settings",
+    "build_current_info_safety_config_from_settings",
     "build_current_info_vector_components_from_settings",
     "build_embedding_provider_from_settings",
     "build_search_broker_from_settings",
@@ -210,6 +227,7 @@ __all__ = [
     "load_search_profile_config_file",
     "map_search_profile",
     "normalize_dedupe_and_rank_search_results",
+    "query_hash",
     "searxng_profile_params",
     "select_search_profile",
 ]
