@@ -657,6 +657,25 @@ profiles:
 
 Code-seitige Safety-Gates validieren Profilstruktur, Safesearch, Länder-/Regionscodes, Provider-Kategorien/Filter, Freshness-Werte und HTTP(S)-Endpoints, bevor eine Netzwerkanfrage ausgeführt wird.
 
+### Eval-Harness (Entwicklung)
+
+Für reproduzierbare Tests der Current-Info-Antwortqualität steht ein CLI-Eval-Harness zur Verfügung:
+
+```bash
+# Einzelnes Fixture ausführen
+python -m amo_bot.current_info.eval tests/fixtures/current_info_eval_cases.json
+
+# Als JSONL für Pipeline-Integration
+python -m amo_bot.current_info.eval tests/fixtures/current_info_eval_cases.json --jsonl
+
+# Nur lokale Provider verwenden
+python -m amo_bot.current_info.eval tests/fixtures/current_info_eval_cases.json --local-only
+```
+
+**Fixtures-Format:** JSON-Array mit Testfällen (Query, erwartete Keywords, optionale `local_only`-Flag).
+
+**Ausgabe:** Exit-Code 0 bei erfolgreicher Validierung aller Fälle, Exit-Code >0 bei Fehlern.
+
 ---
 
 ## Security Headers

@@ -657,6 +657,25 @@ profiles:
 
 Code-level safety gates validate profile shape, safesearch, country/region codes, provider category/filter values, freshness values, and HTTP(S) endpoints before any network request is made.
 
+### Eval Harness (Development)
+
+For reproducible testing of current-info answer quality, a CLI eval harness is available:
+
+```bash
+# Run single fixture
+python -m amo_bot.current_info.eval tests/fixtures/current_info_eval_cases.json
+
+# As JSONL for pipeline integration
+python -m amo_bot.current_info.eval tests/fixtures/current_info_eval_cases.json --jsonl
+
+# Use local providers only
+python -m amo_bot.current_info.eval tests/fixtures/current_info_eval_cases.json --local-only
+```
+
+**Fixtures format:** JSON array with test cases (query, expected keywords, optional `local_only` flag).
+
+**Output:** Exit code 0 on successful validation of all cases, exit code >0 on failures.
+
 ---
 
 ## Security Headers

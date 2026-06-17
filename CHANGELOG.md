@@ -2,6 +2,58 @@
 
 ---
 
+## [Unreleased] – Current-Info Eval Harness (Issue #75)
+
+**Datum / Date:** 2026-06-17
+
+### 🇩🇪 Deutsch
+
+#### Übersicht
+Einführung eines deterministischen Eval-Harness für Current-Info-Antwortqualität. Ermöglicht reproduzierbare Tests für Suchanfragen mit lokalen Fixtures und Live-Providern.
+
+#### Neu
+- **Eval CLI:** `python -m amo_bot.current_info.eval <fixture>` zum Ausführen von Eval-Fällen.
+- **Ausgabeformate:** Stabile `--json` und `--jsonl` Ausgabe für Integrationen.
+- **Trennung local/live:** Fixtures unterstützen `local_only`-Modus für deterministische Tests.
+- **Testabdeckung:** Unit-Tests und Beispiel-Fixtures in `tests/fixtures/current_info_eval_cases.json`.
+
+#### Verwendung
+```bash
+# Einzelnes Fixture ausführen
+python -m amo_bot.current_info.eval tests/fixtures/current_info_eval_cases.json
+
+# Als JSONL für Pipeline-Integration
+python -m amo_bot.current_info.eval tests/fixtures/current_info_eval_cases.json --jsonl
+
+# Nur lokale Provider verwenden
+python -m amo_bot.current_info.eval tests/fixtures/current_info_eval_cases.json --local-only
+```
+
+### 🇬🇧 English
+
+#### Overview
+Introduction of a deterministic eval harness for current-info answer quality. Enables reproducible testing of search queries with local fixtures and live providers.
+
+#### New
+- **Eval CLI:** `python -m amo_bot.current_info.eval <fixture>` for running eval cases.
+- **Output formats:** Stable `--json` and `--jsonl` output for integrations.
+- **Local/live separation:** Fixtures support `local_only` mode for deterministic testing.
+- **Test coverage:** Unit tests and sample fixtures in `tests/fixtures/current_info_eval_cases.json`.
+
+#### Usage
+```bash
+# Run single fixture
+python -m amo_bot.current_info.eval tests/fixtures/current_info_eval_cases.json
+
+# As JSONL for pipeline integration
+python -m amo_bot.current_info.eval tests/fixtures/current_info_eval_cases.json --jsonl
+
+# Use local providers only
+python -m amo_bot.current_info.eval tests/fixtures/current_info_eval_cases.json --local-only
+```
+
+---
+
 ## [Unreleased] – Current-Info Telegram Bot Integration (Issue #74)
 
 **Datum / Date:** 2026-06-17
