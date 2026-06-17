@@ -236,6 +236,8 @@ def test_vector_qdrant_env_aliases_are_parsed_without_secret_leak(monkeypatch, t
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("DOTENV_PATH", str(env_file))
     monkeypatch.delenv("AMO_ENV_OVERRIDE", raising=False)
+    monkeypatch.delenv("AMO_VECTOR_URL", raising=False)
+    monkeypatch.delenv("AMO_VECTOR_API_KEY", raising=False)
     monkeypatch.delenv("WEBUI_LOGIN_DELAY_BASE_SECONDS", raising=False)
     monkeypatch.delenv("WEBUI_LOGIN_DELAY_MAX_SECONDS", raising=False)
 

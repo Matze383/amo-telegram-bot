@@ -116,6 +116,15 @@ def test_current_info_eval_cli_emits_comparable_json_and_jsonl() -> None:
     assert len(lines) == 3
     assert lines[0]["case_id"] == "local_event_provider_error_regression"
 
+    local_only_run = subprocess.run(
+        [sys.executable, "-m", "amo_bot.current_info.eval", str(FIXTURE_PATH), "--local-only"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert local_only_run.returncode == 0, local_only_run.stderr
+    assert "Current-Info eval: 3/3 passed" in local_only_run.stdout
+
 
 def test_current_info_eval_cli_rejects_live_mode() -> None:
     result = subprocess.run(

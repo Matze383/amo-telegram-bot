@@ -203,9 +203,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run Current-Info answer-quality evals.")
     parser.add_argument("fixture", type=Path, help="JSON fixture with deterministic local eval cases.")
     parser.add_argument("--mode", choices=("local", "live"), default="local", help="Eval mode. Local is deterministic.")
+    parser.add_argument(
+        "--local-only",
+        action="store_true",
+        help="Explicit alias for local deterministic fixture mode.",
+    )
     parser.add_argument("--json", action="store_true", help="Print a stable JSON report.")
     parser.add_argument("--jsonl", action="store_true", help="Print one stable JSON object per case.")
     args = parser.parse_args(argv)
+
+    if args.local_only:
+        args.mode = "local"
 
     if args.mode == "live":
         parser.error("live evals are intentionally separated from deterministic local fixture evals")
