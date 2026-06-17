@@ -32,6 +32,13 @@ from amo_bot.ai.daily_memory_runtime import DailyMemoryRuntime
 from amo_bot.ai.webtool_dispatcher import WebtoolCapabilityDispatcher
 from amo_bot.ai.webtool_provider_adapter import RealBrowserProviderAdapter, RealWebscrapeProviderAdapter, RealWebsearchProviderAdapter
 from amo_bot.ai.webtool_subagent import create_webtool_subagent_service
+from amo_bot.current_info import (
+    CurrentInfoService,
+    build_cached_fetch_provider_from_settings,
+    build_current_info_retrieval_provider_from_settings,
+    build_document_fetcher_from_settings,
+    build_search_broker_from_settings,
+)
 from amo_bot.db.repositories import WebToolRoleQuotaRepository
 from amo_bot.telegram.webtool_evidence import (
     BinanceTickerEvidenceProvider,
@@ -361,6 +368,23 @@ def run(argv: list[str] | None = None) -> None:
 
     webtool_dispatcher = SessionBoundWebtoolCapabilityDispatcher(session_factory=session_factory)
     web_evidence_pipeline = WebEvidencePipeline(session_factory=session_factory)
+    current_info_service = None
+    if settings.amo_current_info_enabled:
+        current_info_search_provider = build_search_broker_from_settings(settings)
+        if current_info_search_provider is not None:
+            current_info_fetch_provider = build_cached_fetch_provider_from_settings(
+                settings,
+                session_factory=session_factory,
+                fetch_provider=build_document_fetcher_from_settings(settings),
+            )
+            current_info_service = CurrentInfoService(
+                search_provider=current_info_search_provider,
+                fetch_provider=current_info_fetch_provider,
+                retrieval_provider=build_current_info_retrieval_provider_from_settings(
+                    settings,
+                    session_factory=session_factory,
+                ),
+            )
 
     dispatcher = Dispatcher(
         command_registry=command_registry,
@@ -377,6 +401,11 @@ def run(argv: list[str] | None = None) -> None:
         owner_notifier=owner_notifier,
         webtool_dispatcher=webtool_dispatcher,
         web_evidence_pipeline=web_evidence_pipeline,
+        current_info_service=current_info_service,
+        current_info_enabled=settings.amo_current_info_enabled,
+        current_info_timeout_seconds=settings.amo_current_info_timeout_seconds,
+        current_info_max_results=settings.amo_current_info_max_results,
+        current_info_max_documents=settings.amo_current_info_max_documents,
         prompt_timezone=settings.dreaming_timezone,
     )
 

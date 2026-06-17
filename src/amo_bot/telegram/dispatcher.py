@@ -24,6 +24,7 @@ from amo_bot.core.logging import (
     set_request_id,
     get_request_id,
 )
+from amo_bot.current_info.models import CurrentInfoAnswer, CurrentInfoRequest
 from amo_bot.db.base import create_session_factory
 from amo_bot.db.repositories import (
     BotPeerRepository,
@@ -49,6 +50,8 @@ from amo_bot.telegram.webtool_chat_integration import (
     format_webtool_success_text,
     parse_webtool_chat_trigger,
 )
+from amo_bot.telegram.webtool_auto_research import decide_auto_research
+from amo_bot.telegram.webtool_evidence import classify_evidence_domain
 from amo_bot.telegram.webtool_research_orchestrator import (
     DbBackedResearchSourceObservationWriter,
     DbBackedResearchSourceQualityReader,
@@ -63,6 +66,8 @@ _COMPONENT = "telegram.dispatcher"
 AUTOREPLY_ALLOWED_ROLES: set[Role] = {Role.OWNER, Role.ADMIN, Role.VIP}
 BOT_PEER_V1_ALLOWED_COMMANDS: set[str] = {"help", "ping"}
 RESTART_ACK_TIMEOUT_SECONDS = 3.0
+CURRENT_INFO_SYNTHESIS_MAX_EVIDENCE_CHARS = 4500
+CURRENT_INFO_SYNTHESIS_MAX_SOURCE_COUNT = 5
 
 
 def _terminate_current_process() -> None:
@@ -122,6 +127,11 @@ class Dispatcher:
     ai_service: Any | None = None
     webtool_dispatcher: Any | None = None
     web_evidence_pipeline: Any | None = None
+    current_info_service: Any | None = None
+    current_info_enabled: bool = False
+    current_info_timeout_seconds: float = 8.0
+    current_info_max_results: int = 5
+    current_info_max_documents: int = 3
     live_edit_adapter: TelegramLiveEditAdapter | None = None
     restart_terminator: Callable[[], None] = _terminate_current_process
     auto_image_followup_ttl_seconds: int = 180
@@ -1432,6 +1442,14 @@ class Dispatcher:
 
         auto_note = ""
         if trigger is None and self.webtool_dispatcher is not None:
+            if await self._maybe_handle_current_info_autoreply(
+                message=message,
+                role=role,
+                normalized_text=normalized_text,
+                locale=message_locale,
+            ):
+                return
+
             research_session_factory = create_session_factory(self.database_url) if self.database_url is not None else None
             research_result = WebResearchOrchestrator(
                 webtool_dispatcher=self.webtool_dispatcher,
@@ -1574,6 +1592,226 @@ class Dispatcher:
                     },
                 )
                 session.commit()
+
+    async def _maybe_handle_current_info_autoreply(
+        self,
+        *,
+        message: TelegramMessage,
+        role: Role,
+        normalized_text: str,
+        locale: str,
+    ) -> bool:
+        if not self.current_info_enabled or self.current_info_service is None or self.ai_service is None:
+            return False
+
+        decision = decide_auto_research(normalized_text)
+        if not decision.enabled or decision.capability != "websearch" or not decision.query:
+            return False
+
+        timeout_seconds = max(float(self.current_info_timeout_seconds), 0.001)
+        request = CurrentInfoRequest(
+            query=decision.query,
+            locale=locale,
+            domain_hint=classify_evidence_domain(decision.query),
+            max_results=max(1, min(int(self.current_info_max_results), 10)),
+            max_documents=max(0, min(int(self.current_info_max_documents), 10)),
+            user_id=message.from_user.id,
+            chat_id=message.chat.id,
+            topic_id=message.message_thread_id,
+            role=role,
+            metadata={
+                "telegram_message_id": message.message_id,
+                "auto_research_reason": decision.reason,
+            },
+        )
+
+        started = time.perf_counter()
+        try:
+            answer = await asyncio.wait_for(
+                asyncio.to_thread(self.current_info_service.answer, request),
+                timeout=timeout_seconds,
+            )
+        except TimeoutError:
+            log_event(
+                logger,
+                logging.INFO,
+                event="current_info.telegram.fallback",
+                component=_COMPONENT,
+                chat_id=message.chat.id,
+                message_id=message.message_id,
+                message_thread_id=message.message_thread_id,
+                user_id=message.from_user.id,
+                extra={
+                    "reason": "timeout",
+                    "stage": "retrieval",
+                    "timeout_seconds": timeout_seconds,
+                },
+            )
+            return False
+        except Exception as exc:
+            log_event(
+                logger,
+                logging.INFO,
+                event="current_info.telegram.fallback",
+                component=_COMPONENT,
+                chat_id=message.chat.id,
+                message_id=message.message_id,
+                message_thread_id=message.message_thread_id,
+                user_id=message.from_user.id,
+                extra={
+                    "reason": "service_error",
+                    "error_class": exc.__class__.__name__,
+                },
+            )
+            return False
+
+        if not isinstance(answer, CurrentInfoAnswer) or not answer.answered:
+            log_event(
+                logger,
+                logging.INFO,
+                event="current_info.telegram.fallback",
+                component=_COMPONENT,
+                chat_id=message.chat.id,
+                message_id=message.message_id,
+                message_thread_id=message.message_thread_id,
+                user_id=message.from_user.id,
+                extra={
+                    "reason": "not_answered",
+                    "status": getattr(answer, "status", "invalid_response"),
+                    "warning_count": len(getattr(answer, "warnings", ()) or ()),
+                },
+            )
+            return False
+
+        remaining_seconds = timeout_seconds - (time.perf_counter() - started)
+        if remaining_seconds <= 0:
+            log_event(
+                logger,
+                logging.INFO,
+                event="current_info.telegram.fallback",
+                component=_COMPONENT,
+                chat_id=message.chat.id,
+                message_id=message.message_id,
+                message_thread_id=message.message_thread_id,
+                user_id=message.from_user.id,
+                extra={
+                    "reason": "timeout",
+                    "stage": "budget_exhausted",
+                    "timeout_seconds": timeout_seconds,
+                    "status": answer.status,
+                    "confidence": answer.confidence,
+                },
+            )
+            return False
+        try:
+            synthesized = await asyncio.wait_for(
+                self._synthesize_current_info_answer(answer=answer, locale=locale),
+                timeout=remaining_seconds,
+            )
+        except TimeoutError:
+            log_event(
+                logger,
+                logging.INFO,
+                event="current_info.telegram.fallback",
+                component=_COMPONENT,
+                chat_id=message.chat.id,
+                message_id=message.message_id,
+                message_thread_id=message.message_thread_id,
+                user_id=message.from_user.id,
+                extra={
+                    "reason": "timeout",
+                    "stage": "synthesis",
+                    "timeout_seconds": timeout_seconds,
+                    "status": answer.status,
+                    "confidence": answer.confidence,
+                },
+            )
+            return False
+        except Exception as exc:
+            log_event(
+                logger,
+                logging.INFO,
+                event="current_info.telegram.fallback",
+                component=_COMPONENT,
+                chat_id=message.chat.id,
+                message_id=message.message_id,
+                message_thread_id=message.message_thread_id,
+                user_id=message.from_user.id,
+                extra={
+                    "reason": "synthesis_error",
+                    "error_class": exc.__class__.__name__,
+                    "status": answer.status,
+                    "confidence": answer.confidence,
+                },
+            )
+            return False
+
+        text = self._format_current_info_telegram_answer(answer=answer, synthesized=synthesized, locale=locale)
+        if not text.strip():
+            return False
+
+        await self._send_text(message.chat.id, text, message.message_thread_id)
+        log_event(
+            logger,
+            logging.INFO,
+            event="current_info.telegram.sent",
+            component=_COMPONENT,
+            chat_id=message.chat.id,
+            message_id=message.message_id,
+            message_thread_id=message.message_thread_id,
+            user_id=message.from_user.id,
+            extra={
+                "status": answer.status,
+                "confidence": answer.confidence,
+                "source_count": len(answer.sources),
+                "warning_count": len(answer.warnings),
+            },
+        )
+        return True
+
+    async def _synthesize_current_info_answer(self, *, answer: CurrentInfoAnswer, locale: str) -> str:
+        prompt = self._current_info_synthesis_prompt(answer=answer, locale=locale)
+        try:
+            return await self.ai_service.ask(prompt, task_type="answer_synthesis")
+        except TypeError as exc:
+            if "task_type" not in str(exc):
+                raise
+            return await self.ai_service.ask(prompt)
+
+    @staticmethod
+    def _current_info_synthesis_prompt(*, answer: CurrentInfoAnswer, locale: str) -> str:
+        query = answer.request.query if answer.request is not None else ""
+        target_language = "German" if locale != "en" else "English"
+        evidence = _current_info_evidence_text(answer)
+        freshness = answer.evidence.freshness if answer.evidence is not None else ""
+        warnings = ", ".join(answer.warnings) if answer.warnings else "none"
+        return (
+            "Synthesize a concise Telegram answer from the checked current-info evidence only.\n"
+            f"Target language: {target_language}.\n"
+            "Do not invent facts, links, dates, or numbers. If the evidence is uncertain, say so briefly.\n"
+            "Do not include a source list; the application appends sources separately.\n\n"
+            f"User question:\n{query}\n\n"
+            f"Evidence confidence: {answer.confidence:.2f}\n"
+            f"Evidence freshness: {freshness or 'unknown'}\n"
+            f"Warnings: {warnings}\n\n"
+            f"Checked evidence:\n{evidence}"
+        )
+
+    @staticmethod
+    def _format_current_info_telegram_answer(*, answer: CurrentInfoAnswer, synthesized: str, locale: str) -> str:
+        body = " ".join((synthesized or "").split())
+        if not body:
+            body = " ".join(answer.answer_text.split())
+        if not body:
+            return ""
+
+        sources = tuple(dict.fromkeys(source for source in answer.sources if source))[:CURRENT_INFO_SYNTHESIS_MAX_SOURCE_COUNT]
+        if not sources:
+            return body
+
+        label = "Sources" if locale == "en" else "Quellen"
+        source_lines = [f"{index}. {url}" for index, url in enumerate(sources, start=1)]
+        return f"{body}\n\n{label}:\n" + "\n".join(source_lines)
 
     def _auto_image_followup_cache(self) -> list[_RecentAutoImageCandidate]:
         return self._recent_auto_image_candidates
@@ -1733,3 +1971,32 @@ class Dispatcher:
                 }, ensure_ascii=False),
             )
         )
+
+
+def _current_info_evidence_text(answer: CurrentInfoAnswer) -> str:
+    chunks = answer.evidence.chunks if answer.evidence is not None else ()
+    lines: list[str] = []
+    for index, chunk in enumerate(chunks[:CURRENT_INFO_SYNTHESIS_MAX_SOURCE_COUNT], start=1):
+        text = " ".join(chunk.text.split())
+        if not text:
+            continue
+        if len(text) > 900:
+            text = text[:900].rstrip() + " ..."
+        title = " ".join((chunk.source_title or "").split())
+        source = chunk.source_url or ""
+        heading = f"[{index}]"
+        if title:
+            heading = f"{heading} {title}"
+        if source:
+            heading = f"{heading} ({source})"
+        lines.append(f"{heading}\n{text}")
+
+    if not lines:
+        fallback = " ".join(answer.answer_text.split())
+        if fallback:
+            lines.append(fallback[:CURRENT_INFO_SYNTHESIS_MAX_EVIDENCE_CHARS])
+
+    text = "\n\n".join(lines).strip()
+    if len(text) > CURRENT_INFO_SYNTHESIS_MAX_EVIDENCE_CHARS:
+        text = text[:CURRENT_INFO_SYNTHESIS_MAX_EVIDENCE_CHARS].rstrip() + " ..."
+    return text

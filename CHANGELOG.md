@@ -2,6 +2,48 @@
 
 ---
 
+## [Unreleased] – Current-Info Telegram Bot Integration (Issue #74)
+
+**Datum / Date:** 2026-06-17
+
+### 🇩🇪 Deutsch
+
+#### Übersicht
+Integration von Current-Info Antwort-Synthese in den Telegram Bot. Current-Info wird vor dem Legacy-Webtool als automatische Antwort verwendet, wenn aktuelle Informationen benötigt werden.
+
+#### Neu
+- **AMO_CURRENT_INFO_ENABLED:** Feature-Gate zum Aktivieren/Deaktivieren der Current-Info-Integration.
+- **Service-Konstruktion:** Current-Info-Service wird in `main.py` konditional bei aktiviertem Feature-Gate erstellt.
+- **Dispatcher Autoreply:** Current-Info-Autoreply wird vor dem Legacy-AI-Autoreply ausgeführt; Fallback bei Timeout oder Fehler.
+- **Locale-Aware Formatierung:** "Quellen:" (DE) oder "Sources:" (EN) basierend auf User-Locale.
+- **Timeout-Handling:** Konfigurierbares Timeout mit Fallback zu Legacy-AI bei Überschreitung.
+
+#### Technisch
+- Neue Dispatcher-Parameter: `current_info_enabled`, `current_info_timeout_seconds`, `current_info_max_results`, `current_info_max_documents`.
+- `_try_current_info_autoreply()` prüft auf Research-Bedarf und führt Current-Info-Query durch.
+- `_format_current_info_telegram_answer()` formatiert Antwort mit lokalisierten Quellen.
+- Alle Tests passieren.
+
+### 🇬🇧 English
+
+#### Overview
+Integration of Current-Info answer synthesis into the Telegram bot. Current-Info is used as an automatic reply before the legacy webtool when current information is needed.
+
+#### New
+- **AMO_CURRENT_INFO_ENABLED:** Feature gate to enable/disable Current-Info integration.
+- **Service Construction:** Current-Info service is conditionally built in `main.py` when feature gate is enabled.
+- **Dispatcher Autoreply:** Current-Info autoreply runs before legacy AI autoreply; fallback on timeout or error.
+- **Locale-Aware Formatting:** "Quellen:" (DE) or "Sources:" (EN) based on user locale.
+- **Timeout Handling:** Configurable timeout with fallback to legacy AI on exceedance.
+
+#### Technical
+- New dispatcher parameters: `current_info_enabled`, `current_info_timeout_seconds`, `current_info_max_results`, `current_info_max_documents`.
+- `_try_current_info_autoreply()` checks for research need and performs Current-Info query.
+- `_format_current_info_telegram_answer()` formats response with localized sources.
+- All tests passing.
+
+---
+
 ## [Unreleased] – Current-Info Evidence Assembly (Issue #73)
 
 **Datum / Date:** 2026-06-16

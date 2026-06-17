@@ -194,3 +194,56 @@ def test_main_runtime_wires_session_factory_into_web_evidence_pipeline(monkeypat
 
     assert captured["pipeline_session_factory"] is not None
     assert captured["dispatcher_pipeline"].__class__ is _DummyPipeline
+
+
+def test_main_runtime_wires_current_info_when_enabled(monkeypatch, tmp_path):
+    from amo_bot import main as main_module
+
+    monkeypatch.setenv("BOT_TOKEN", "123:ABC")
+    monkeypatch.setenv("WEBUI_PASSWORD", "secret")
+    monkeypatch.setenv("WEBUI_SECRET_KEY", "unit-test-webui-secret-key-0123456789abcdef")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'bot.db'}")
+    monkeypatch.setenv("OFFSET_STATE_FILE", str(tmp_path / "offset.json"))
+    monkeypatch.setenv("BOT_PID_FILE", str(tmp_path / "amo_bot.pid"))
+    monkeypatch.setenv("AMO_PLUGIN_DIR", str(tmp_path / "plugins"))
+    monkeypatch.setenv("WEBUI_OWNER_TELEGRAM_ID", "")
+    monkeypatch.setenv("AMO_ENV_OVERRIDE", "0")
+    monkeypatch.setenv("AMO_CURRENT_INFO_ENABLED", "true")
+    monkeypatch.setenv("AMO_CURRENT_INFO_TIMEOUT_SECONDS", "6")
+    monkeypatch.setenv("AMO_CURRENT_INFO_MAX_RESULTS", "4")
+    monkeypatch.setenv("AMO_CURRENT_INFO_MAX_DOCUMENTS", "2")
+
+    captured: dict[str, object] = {}
+
+    class _DummyDispatcher:
+        def __init__(self, **kwargs) -> None:  # noqa: ANN003
+            captured.update(kwargs)
+
+    async def _fake_run_polling(*args, **kwargs):  # noqa: ANN002,ANN003
+        raise _StopFlow()
+
+    monkeypatch.setattr(main_module, "Dispatcher", _DummyDispatcher)
+    monkeypatch.setattr(main_module, "run_polling", _fake_run_polling)
+    monkeypatch.setattr(main_module, "build_search_broker_from_settings", lambda settings: object())
+    monkeypatch.setattr(main_module, "build_document_fetcher_from_settings", lambda settings: object())
+    monkeypatch.setattr(
+        main_module,
+        "build_cached_fetch_provider_from_settings",
+        lambda settings, *, session_factory, fetch_provider: object(),
+    )
+    monkeypatch.setattr(
+        main_module,
+        "build_current_info_retrieval_provider_from_settings",
+        lambda settings, *, session_factory: object(),
+    )
+
+    try:
+        main_module.run([])
+    except _StopFlow:
+        pass
+
+    assert captured["current_info_enabled"] is True
+    assert captured["current_info_service"] is not None
+    assert captured["current_info_timeout_seconds"] == 6
+    assert captured["current_info_max_results"] == 4
+    assert captured["current_info_max_documents"] == 2

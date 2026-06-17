@@ -577,6 +577,10 @@ Für die Extraktion von Ergebnis-Seiten bevorzugt der Dokument-Fetcher Crawlee u
 | `AMO_DOCUMENT_FETCH_MAX_BYTES` | `1000000` | Maximale Body-Größe eines abgerufenen Dokuments in Bytes |
 | `AMO_DOCUMENT_FETCH_MAX_REDIRECTS` | `3` | Maximale Anzahl Redirects beim Abrufen eines Dokuments |
 | `AMO_DOCUMENT_FETCH_PREFER_CRAWLEE` | `true` | Crawlee für Dokument-Fetches bevorzugen, mit httpx-Fallback |
+| `AMO_CURRENT_INFO_ENABLED` | `false` | Current-Info-Telegram-Antworten vor dem Legacy-Webtool-Fallback aktivieren |
+| `AMO_CURRENT_INFO_TIMEOUT_SECONDS` | `8` | Gesamtes Current-Info-Antwortbudget in Sekunden, inklusive Antwortsynthese |
+| `AMO_CURRENT_INFO_MAX_RESULTS` | `5` | Maximale Anzahl Current-Info-Suchergebnisse pro Telegram-Antwort |
+| `AMO_CURRENT_INFO_MAX_DOCUMENTS` | `3` | Maximale Anzahl gefolgter Dokumente pro Current-Info-Telegram-Antwort |
 | `AMO_CURRENT_INFO_CACHE_REALTIME_TTL_SECONDS` | `900` | TTL für Realtime-/News-Cache-Einträge |
 | `AMO_CURRENT_INFO_CACHE_DOCS_TTL_SECONDS` | `604800` | TTL für Docs-/Official-Cache-Einträge |
 | `AMO_CURRENT_INFO_CACHE_GENERAL_TTL_SECONDS` | `86400` | TTL für allgemeine Cache-Einträge |
