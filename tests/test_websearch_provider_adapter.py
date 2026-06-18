@@ -203,6 +203,7 @@ def test_resolve_searxng_config_prefers_primary_env(monkeypatch):
 
 def test_resolve_searxng_config_accepts_amo_fallback_env(monkeypatch):
     monkeypatch.delenv("SEARXNG_BASE_URL", raising=False)
+    monkeypatch.delenv("AMO_SEARXNG_URL", raising=False)
     monkeypatch.setenv("AMO_WEBSEARCH_SEARXNG_BASE_URL", "https://searx.internal")
     cfg = _resolve_searxng_config(locale="de", max_results=3)
     assert cfg is not None
@@ -210,9 +211,25 @@ def test_resolve_searxng_config_accepts_amo_fallback_env(monkeypatch):
     assert cfg.language == "de-de"
 
 
+def test_resolve_searxng_config_accepts_current_info_env(monkeypatch):
+    monkeypatch.delenv("SEARXNG_BASE_URL", raising=False)
+    monkeypatch.delenv("AMO_WEBSEARCH_SEARXNG_BASE_URL", raising=False)
+    monkeypatch.setenv("AMO_SEARXNG_URL", "https://current-info-searx.example")
+    monkeypatch.setenv("AMO_SEARXNG_TIMEOUT_SECONDS", "9")
+    monkeypatch.setenv("AMO_SEARCH_MAX_RESULTS", "4")
+
+    cfg = _resolve_searxng_config(locale="en", max_results=3)
+
+    assert cfg is not None
+    assert cfg.base_url == "https://current-info-searx.example"
+    assert cfg.timeout_seconds == 9
+    assert cfg.max_results == 4
+
+
 def test_resolve_searxng_config_none_when_unset(monkeypatch):
     monkeypatch.delenv("SEARXNG_BASE_URL", raising=False)
     monkeypatch.delenv("AMO_WEBSEARCH_SEARXNG_BASE_URL", raising=False)
+    monkeypatch.delenv("AMO_SEARXNG_URL", raising=False)
     assert _resolve_searxng_config(locale="en", max_results=3) is None
 
 
@@ -223,6 +240,7 @@ def test_coreplugin_adapter_configured_searxng_empty_never_calls_fallbacks(monke
 
     monkeypatch.setenv("SEARXNG_BASE_URL", "https://searx.example.org")
     monkeypatch.delenv("AMO_WEBSEARCH_SEARXNG_BASE_URL", raising=False)
+    monkeypatch.delenv("AMO_SEARXNG_URL", raising=False)
 
     def _fake_searxng_json(*, query: str, config):
         return ()
@@ -248,6 +266,7 @@ def test_coreplugin_adapter_returns_empty_without_searxng_and_never_calls_httpx(
 
     monkeypatch.delenv("SEARXNG_BASE_URL", raising=False)
     monkeypatch.delenv("AMO_WEBSEARCH_SEARXNG_BASE_URL", raising=False)
+    monkeypatch.delenv("AMO_SEARXNG_URL", raising=False)
 
     def _raising_client(**_kwargs):
         raise AssertionError("httpx.Client should not be called")
