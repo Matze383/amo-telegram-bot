@@ -7,6 +7,7 @@ from amo_bot.telegram.webtool_research_orchestrator import (
     build_extraction_browser_stage,
     build_query_planner_stage,
     build_source_selection_stage,
+    _format_news_insufficient_sources_response,
     synthesize_research_answer,
     validate_research_evidence,
 )
@@ -160,6 +161,32 @@ def test_evidence_validator_rejects_snippet_only_news_as_answer_evidence() -> No
     assert "nicht belastbar bestätigen" in synthesis.user_response
     assert "Acme announced a merger" not in synthesis.user_response
     assert "Such-Snippets" in synthesis.user_response
+
+
+def test_news_insufficient_sources_gate_only_bypasses_trusted_primary_hosts() -> None:
+    trusted = _format_news_insufficient_sources_response(
+        request_text="latest news about Acme today",
+        extract_hosts=("service.gov.uk",),
+        locale="en",
+    )
+
+    assert trusted == ""
+    for host in (
+        "official-news.example",
+        "press-release.example",
+        "wordpress.example",
+        "news.gov.example",
+        "example.gov.com",
+        "who.int.example",
+        "europa.eu.example",
+    ):
+        lookalike = _format_news_insufficient_sources_response(
+            request_text="latest news about Acme today",
+            extract_hosts=(host,),
+            locale="en",
+        )
+
+        assert "single uncorroborated source" in lookalike, host
 
 
 def test_evidence_validator_rejects_stock_listing_search_result_only_evidence() -> None:

@@ -33,7 +33,11 @@ from amo_bot.telegram.webtool_evidence import (
     format_domain_evidence_note,
     format_domain_fail_closed_response,
 )
-from amo_bot.telegram.webtool_news_corroboration import NewsCorroborationResult, assess_news_corroboration
+from amo_bot.telegram.webtool_news_corroboration import (
+    NewsCorroborationResult,
+    _is_trusted_primary_news_host,
+    assess_news_corroboration,
+)
 
 
 _COMPONENT = "telegram.webtool_research_orchestrator"
@@ -1713,13 +1717,7 @@ def _format_news_uncorroborated_response(*, result: NewsCorroborationResult, loc
 
 
 def _is_primary_news_host(host: str) -> bool:
-    normalized = (host or "").strip().lower().removeprefix("www.")
-    return bool(
-        normalized.endswith((".gov", ".gov.uk"))
-        or normalized.startswith(("gov.", "regierung.", "bund."))
-        or "official" in normalized
-        or "press" in normalized
-    )
+    return _is_trusted_primary_news_host(host)
 
 
 def _news_corroboration_status_text(result: NewsCorroborationResult) -> str:

@@ -224,14 +224,33 @@ def _extract_published_at(text: str) -> datetime | None:
 
 
 def _source_role(*, host: str, text: str) -> str:
-    lowered_host = host.lower()
-    if lowered_host.endswith((".gov", ".gov.uk")) or lowered_host.startswith(
-        ("gov.", "regierung.", "bund.")
-    ):
-        return "primary"
-    if "official" in lowered_host or "press" in lowered_host:
+    lowered_host = _normalize_host(host)
+    if _is_trusted_primary_news_host(lowered_host):
         return "primary"
     return "secondary"
+
+
+def _normalize_host(host: str) -> str:
+    return (host or "").strip().lower().removeprefix("www.")
+
+
+def _is_trusted_primary_news_host(host: str) -> bool:
+    normalized = _normalize_host(host)
+    if not normalized:
+        return False
+
+    trusted_suffixes = (".gov", ".mil", ".int")
+    trusted_exact_or_parent_hosts = (
+        "gov.uk",
+        "who.int",
+        "europa.eu",
+        "bund.de",
+        "regierung.de",
+    )
+    return normalized.endswith(trusted_suffixes) or any(
+        normalized == trusted_host or normalized.endswith(f".{trusted_host}")
+        for trusted_host in trusted_exact_or_parent_hosts
+    )
 
 
 def _is_stale(candidate: NewsClaimCandidate, *, now: datetime, max_age_days: int) -> bool:
