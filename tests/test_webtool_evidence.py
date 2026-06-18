@@ -166,8 +166,23 @@ def test_domain_classifier_routes_problem_prompts():
     assert classify_evidence_domain("Erklär mir Python decorators") == "generic"
     assert classify_evidence_domain("Was ist ACMEUSDT auf Bybit?") == "crypto"
     assert classify_evidence_domain("Gibt es ExampleCo tokenized exposure auf Bybit?") == "crypto"
+    assert classify_evidence_domain("Ist SpaceX an der Börse?") == "stock"
+    assert classify_evidence_domain("Ist Anthropic an der Börse?") == "stock"
+    assert classify_evidence_domain("Ist Siemens an der Börse?") == "stock"
+    assert classify_evidence_domain("Ist Adidas börsennotiert?") == "stock"
+    assert classify_evidence_domain("Ist Quarvex Labs an der Börse?") == "stock"
+    assert classify_evidence_domain("Ist AcmeBlubBla an der Börse?") == "stock"
+    assert classify_evidence_domain("Ist FooBarBaz AG an der Börse?") == "stock"
+    assert classify_evidence_domain("Kann man Anthropic Aktien kaufen?") == "stock"
+    assert classify_evidence_domain("Kann man Siemens Aktien kaufen?") == "stock"
+    assert classify_evidence_domain("Kann man Adidas Aktien kaufen?") == "stock"
+    assert classify_evidence_domain("Kann man Quarvex Labs Aktien kaufen?") == "stock"
+    assert classify_evidence_domain("Kann man AcmeBlubBla Aktien kaufen?") == "stock"
+    assert classify_evidence_domain("Kann man FooBarBaz AG Aktien kaufen?") == "stock"
     assert classify_evidence_domain("Nasdaq Anthropic") == "stock"
+    assert classify_evidence_domain("Nasdaq AcmeBlubBla") == "stock"
     assert classify_evidence_domain("NYSE Anthropic") == "stock"
+    assert classify_evidence_domain("NYSE FooBarBaz AG") == "stock"
     assert classify_evidence_domain("Ist Anthropic öffentlich gelistet?") == "stock"
 
 
@@ -753,12 +768,28 @@ def test_finance_listing_uses_generic_verified_web_research_profile_without_db_s
 
     for query in (
         "Ist SpaceX an der Börse?",
+        "Ist Anthropic an der Börse?",
+        "Ist Siemens an der Börse?",
+        "Ist Adidas börsennotiert?",
+        "Ist Quarvex Labs an der Börse?",
+        "Ist AcmeBlubBla an der Börse?",
+        "Ist FooBarBaz AG an der Börse?",
         "Kann man SpaceX Aktien kaufen?",
+        "Kann man Anthropic Aktien kaufen?",
+        "Kann man Siemens Aktien kaufen?",
+        "Kann man Adidas Aktien kaufen?",
+        "Kann man Quarvex Labs Aktien kaufen?",
+        "Kann man AcmeBlubBla Aktien kaufen?",
+        "Kann man FooBarBaz AG Aktien kaufen?",
         "Nasdaq Anthropic",
+        "Nasdaq Quarvex Labs",
+        "Nasdaq AcmeBlubBla",
+        "NYSE FooBarBaz AG",
         "Ist Anthropic öffentlich gelistet?",
     ):
         result = WebEvidencePipeline(session_factory=session_factory).evaluate(query=query, locale="de")
 
+        assert classify_evidence_domain(query) == "stock"
         assert result.status == "needs_profiled_web_research"
         assert "stock_domain_profile_builtin_source:finance_listing" in result.warnings
         assert "SEC company ticker data" in result.text

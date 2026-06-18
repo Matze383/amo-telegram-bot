@@ -114,6 +114,64 @@ def test_evidence_validator_rejects_snippet_only_news_as_answer_evidence() -> No
     assert "Such-Snippets" in synthesis.user_response
 
 
+def test_evidence_validator_rejects_stock_listing_search_result_only_evidence() -> None:
+    search_stage = SearchExecutionStageOutput(
+        result=_search_result(
+            text="Snippet says AcmeBlubBla may be listed on Nasdaq under ticker ACBL.",
+            sources=("https://search.example/acmeblubbla-stock",),
+            hosts=("search.example",),
+        ),
+        capability="websearch",
+        reason="market_current_info_signal",
+    )
+
+    validation = validate_research_evidence(
+        request_text="Ist AcmeBlubBla an der Börse?",
+        search_execution=search_stage,
+        extraction=None,
+    )
+    synthesis = synthesize_research_answer(validation=validation, capability="websearch", locale="de")
+
+    assert validation.domain == "stock"
+    assert validation.can_synthesize is False
+    assert validation.status == "search_result_only"
+    assert "snippet_only_result" in validation.warnings
+    assert "AcmeBlubBla may be listed" not in synthesis.user_response
+    assert "nicht belastbar bestätigen" in synthesis.user_response
+
+
+def test_evidence_validator_rejects_inconclusive_crypto_listing_source_check() -> None:
+    search_stage = SearchExecutionStageOutput(
+        result=_search_result(
+            text="Snippet says FooBarBazAGUSDT is a pre-market derivative contract.",
+            sources=("https://exchange.example/foobarbazagusdt",),
+            hosts=("exchange.example",),
+        ),
+        capability="websearch",
+        reason="market_current_info_signal",
+    )
+    extraction_stage = build_extraction_browser_stage(
+        request_text="Was ist FooBarBazAGUSDT auf Bybit?",
+        capability="websearch",
+        reason="market_current_info_signal",
+        search_text=search_stage.result.text,
+        source_hosts=search_stage.result.hosts,
+        source_urls=search_stage.result.sources,
+        extracts=(),
+    )
+
+    validation = validate_research_evidence(
+        request_text="Was ist FooBarBazAGUSDT auf Bybit?",
+        search_execution=search_stage,
+        extraction=extraction_stage,
+    )
+
+    assert validation.domain == "crypto"
+    assert validation.can_synthesize is False
+    assert validation.status == "source_check_inconclusive"
+    assert "source_check_inconclusive" in validation.warnings
+
+
 def test_evidence_validator_allows_checked_sports_source_evidence_for_synthesis() -> None:
     search_stage = SearchExecutionStageOutput(
         result=_search_result(

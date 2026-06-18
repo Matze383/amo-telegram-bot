@@ -78,7 +78,7 @@ def decide_auto_research(text: str, *, now: datetime | None = None) -> AutoResea
     url_match = _URL_RE.search(raw)
     if url_match:
         url = url_match.group(0).rstrip(".,;:!?)]}'\"")
-        if is_finance_listing_query(raw) and _MARKET_CURRENT_SIGNAL_RE.search(raw):
+        if is_finance_listing_query(raw):
             return AutoResearchDecision(True, "websearch", "market_current_info_signal", _sanitize_text(raw, max_len=220), url)
         capability = "browser" if url.startswith("https://") else "webscraping"
         return AutoResearchDecision(True, capability, "contains_url", "", url)
@@ -94,7 +94,7 @@ def decide_auto_research(text: str, *, now: datetime | None = None) -> AutoResea
         and (_SPORTS_CURRENT_INTENT_RE.search(raw) or re.search(r"\b(?:wie|was|wann|wer|wo)\b", lowered))
     )
     has_market_current_signal = bool(
-        _MARKET_CURRENT_SIGNAL_RE.search(raw)
+        (_MARKET_CURRENT_SIGNAL_RE.search(raw) or is_finance_listing_query(raw))
         and (
             _MARKET_CURRENT_INTENT_RE.search(raw)
             or is_finance_listing_query(raw)

@@ -2109,6 +2109,7 @@ def test_should_chain_auto_research_requires_websearch_and_current_intent():
     assert should_chain_auto_research("heute neues zu Python", capability="websearch")
     assert should_chain_auto_research("aktueller Stand OpenAI Release?", capability="websearch")
     assert should_chain_auto_research("current status of OpenAI release", capability="websearch")
+    assert should_chain_auto_research("Ist Anthropic an der Börse?", capability="websearch")
     assert not should_chain_auto_research("erkläre mir Python decorators", capability="websearch")
     assert not should_chain_auto_research("current USD EUR rate now", capability="browser")
 

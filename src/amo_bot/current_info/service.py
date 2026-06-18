@@ -754,7 +754,7 @@ def _is_finance_listing_query(*, request: CurrentInfoRequest, task: TaskSpec) ->
 
 
 def _finance_listing_followup_query(query: str) -> str:
-    return f"{query.strip()} official source listing derivative exchange"
+    return f"{query.strip()} public listing ticker exchange derivative sources"
 
 
 def _needs_stronger_evidence(

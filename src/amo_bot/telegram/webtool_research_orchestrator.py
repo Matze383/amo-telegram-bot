@@ -11,6 +11,7 @@ from urllib.parse import parse_qs, urlparse
 from amo_bot.ai.research_extraction_quality import classify_extraction_quality, extraction_length_bucket
 from amo_bot.auth.roles import Role
 from amo_bot.core.logging import log_event
+from amo_bot.evidence_intents import is_finance_listing_query
 from amo_bot.telegram import sports_query
 from amo_bot.telegram.update_parser import TelegramMessage
 from amo_bot.telegram.webtool_auto_research import decide_auto_research
@@ -579,7 +580,7 @@ class WebResearchOrchestrator:
             auto_note = synthesis_stage.auto_note
         else:
             domain = classify_evidence_domain(request.normalized_text)
-            if domain in {"stock", "crypto"}:
+            if domain in {"stock", "crypto"} and not is_finance_listing_query(request.normalized_text):
                 return WebResearchOrchestratorResult(
                     user_response=format_domain_fail_closed_response(
                         domain=domain,
@@ -1031,14 +1032,16 @@ class WebResearchOrchestrator:
 
 
 def _should_continue_with_generic_websearch(result: DomainEvidenceResult) -> bool:
-    """Allow sports fallback to configured websearch when no profiled source exists."""
-    if result.domain != "sports" or result.status == "needs_profiled_web_research":
+    """Allow search fallback when a dynamic domain lacks a configured source profile."""
+    if result.status == "needs_profiled_web_research":
+        return True
+    if result.domain not in {"sports", "stock", "crypto"}:
         return False
-    return any(
-        warning.startswith("sports_domain_profile_not_configured")
-        or warning.startswith("sports_domain_profile_no_usable_source:")
-        for warning in result.warnings
+    prefixes = (
+        f"{result.domain}_domain_profile_not_configured",
+        f"{result.domain}_domain_profile_no_usable_source:",
     )
+    return any(warning.startswith(prefixes) for warning in result.warnings)
 
 
 def _with_profiled_source_query(decision_auto: Any, result: DomainEvidenceResult) -> Any:
@@ -1087,11 +1090,14 @@ def should_chain_auto_research(text: str, *, capability: str, reason: str | None
     if _AUTO_RESEARCH_CHAIN_EXPLICIT_CURRENT_PHRASE_RE.search(raw):
         return True
     has_sports_freshness = sports_query.has_sports_signal(raw)
-    has_freshness = bool(_AUTO_RESEARCH_CHAIN_FRESHNESS_RE.search(raw)) or has_sports_freshness
+    has_finance_listing_freshness = classify_evidence_domain(raw) in {"stock", "crypto"} and is_finance_listing_query(raw)
+    has_freshness = bool(_AUTO_RESEARCH_CHAIN_FRESHNESS_RE.search(raw)) or has_sports_freshness or has_finance_listing_freshness
     if not has_freshness:
         return False
-    has_strong_freshness = bool(_AUTO_RESEARCH_CHAIN_STRONG_FRESHNESS_RE.search(raw)) or (
-        sports_query.has_phase(raw) or sports_query.infer_need(raw) != "sport_context"
+    has_strong_freshness = (
+        bool(_AUTO_RESEARCH_CHAIN_STRONG_FRESHNESS_RE.search(raw))
+        or has_finance_listing_freshness
+        or (sports_query.has_phase(raw) or sports_query.infer_need(raw) != "sport_context")
     )
     if _AUTO_RESEARCH_CHAIN_TIMELESS_EDU_RE.search(raw) and not has_strong_freshness:
         return False
@@ -1351,7 +1357,7 @@ def validate_research_evidence(
         capability=search_execution.capability,
         reason=search_execution.reason,
     )
-    if chain_required:
+    if chain_required or domain in {"stock", "crypto"}:
         primary_warning = "snippet_only_result" if not (extraction and extraction.attempted_urls) else "source_check_inconclusive"
         warnings = [primary_warning, *(warning for warning in warnings if warning != primary_warning)]
         return EvidenceValidationStageOutput(

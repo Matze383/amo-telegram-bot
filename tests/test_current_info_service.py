@@ -317,9 +317,24 @@ def test_current_info_service_routes_finance_listing_queries_to_listing_evidence
 
     for query in (
         "Ist SpaceX an der Börse?",
+        "Ist Anthropic an der Börse?",
+        "Ist Siemens an der Börse?",
+        "Ist Adidas börsennotiert?",
+        "Ist Quarvex Labs an der Börse?",
+        "Ist AcmeBlubBla an der Börse?",
+        "Ist FooBarBaz AG an der Börse?",
         "Kann man SpaceX Aktien kaufen?",
+        "Kann man Anthropic Aktien kaufen?",
+        "Kann man Siemens Aktien kaufen?",
+        "Kann man Adidas Aktien kaufen?",
+        "Kann man Quarvex Labs Aktien kaufen?",
+        "Kann man AcmeBlubBla Aktien kaufen?",
+        "Kann man FooBarBaz AG Aktien kaufen?",
         "Nasdaq Anthropic",
+        "Nasdaq Quarvex Labs",
+        "Nasdaq AcmeBlubBla",
         "NYSE Anthropic",
+        "NYSE FooBarBaz AG",
     ):
         search_provider = _FakeSearchProvider((result,))
         service = CurrentInfoService(
@@ -341,10 +356,11 @@ def test_current_info_service_routes_finance_listing_queries_to_listing_evidence
         assert answer.task.domain == "stock"
         assert answer.status == "unverified_evidence"
         assert answer.answer_text == ""
+        assert "needs_independent_source" in answer.warnings
         assert "finance_listing_requires_verified_sources" in answer.warnings
         assert [call.query for call in search_provider.calls] == [
             query,
-            f"{query} official source listing derivative exchange",
+            f"{query} public listing ticker exchange derivative sources",
         ]
 
 
@@ -388,12 +404,15 @@ def test_current_info_service_fetches_user_provided_url_for_spacex_ipo_question(
     assert answer.task is not None
     assert answer.task.domain == "stock"
     assert answer.status == "unverified_evidence"
+    assert answer.answer_text == ""
     assert answer.sources == (url,)
+    assert "needs_independent_source" in answer.warnings
     assert "finance_listing_requires_verified_sources" in answer.warnings
+    assert answer.metadata["reason"] == "needs_independent_source"
     assert fetch_provider.calls == [(url, "de")]
     assert [call.query for call in search_provider.calls] == [
         query,
-        f"{query} official source listing derivative exchange",
+        f"{query} public listing ticker exchange derivative sources",
     ]
 
 
@@ -433,10 +452,65 @@ def test_current_info_service_fetches_user_provided_url_for_general_listing_ques
     assert answer.task is not None
     assert answer.task.domain == "stock"
     assert answer.status == "unverified_evidence"
+    assert answer.answer_text == ""
     assert answer.sources == (url,)
     assert "stock_entity_not_identified" not in answer.warnings
+    assert "needs_independent_source" in answer.warnings
     assert "finance_listing_requires_verified_sources" in answer.warnings
+    assert answer.metadata["reason"] == "needs_independent_source"
     assert fetch_provider.calls == [(url, "de")]
+
+
+def test_current_info_service_blocks_single_source_anthropic_listing_from_fetched_web_evidence():
+    result = SearchResult(
+        title="Anthropic company profile",
+        url="https://company.example/anthropic-profile",
+        snippet="Anthropic is privately held.",
+        provider="fake_search",
+        rank=1,
+        host="company.example",
+    )
+    document = FetchedDocument(
+        url=result.url,
+        title=result.title,
+        text="Anthropic is a privately held company and does not have a public stock ticker.",
+        provider="fake_fetch",
+    )
+    chunk = EvidenceChunk(
+        text="Anthropic is a privately held company and does not have a public stock ticker.",
+        source_url=result.url,
+        source_title=result.title,
+        relevance=0.9,
+    )
+    search_provider = _FakeSearchProvider((result,))
+    service = CurrentInfoService(
+        search_provider=search_provider,
+        fetch_provider=_FakeFetchProvider({result.url: document}),
+        retrieval_provider=_FakeRetrievalProvider((chunk,)),
+    )
+
+    query = "Ist Anthropic an der Börse?"
+    answer = service.answer(
+        CurrentInfoRequest(
+            query=query,
+            locale="de",
+            domain_hint=classify_evidence_domain(query),
+            max_results=3,
+        )
+    )
+
+    assert answer.task is not None
+    assert answer.task.domain == "stock"
+    assert answer.status == "unverified_evidence"
+    assert answer.answer_text == ""
+    assert answer.sources == (result.url,)
+    assert "needs_independent_source" in answer.warnings
+    assert "finance_listing_requires_verified_sources" in answer.warnings
+    assert answer.metadata["reason"] == "needs_independent_source"
+    assert [call.query for call in search_provider.calls] == [
+        query,
+        f"{query} public listing ticker exchange derivative sources",
+    ]
 
 
 def test_current_info_service_fetches_non_finance_direct_url_as_first_evidence():
@@ -608,7 +682,7 @@ def test_current_info_service_answers_spacex_not_public_with_two_verified_source
     assert "no SpaceX public ticker entry" in answer.answer_text
     assert [call.query for call in search_provider.calls] == [
         query,
-        f"{query} official source listing derivative exchange",
+        f"{query} public listing ticker exchange derivative sources",
     ]
 
 
@@ -653,10 +727,13 @@ def test_current_info_service_routes_derivative_exchange_queries_as_crypto_listi
     assert answer.task is not None
     assert answer.task.domain == "crypto"
     assert answer.status == "unverified_evidence"
+    assert answer.answer_text == ""
+    assert "needs_independent_source" in answer.warnings
     assert "finance_listing_requires_verified_sources" in answer.warnings
+    assert answer.metadata["reason"] == "needs_independent_source"
     assert [call.query for call in search_provider.calls] == [
         query,
-        f"{query} official source listing derivative exchange",
+        f"{query} public listing ticker exchange derivative sources",
     ]
 
 
@@ -686,7 +763,7 @@ def test_current_info_service_does_not_treat_plain_stock_price_as_listing_query(
     assert [call.query for call in search_provider.calls] == ["NVDA stock price now"]
 
 
-def test_current_info_service_requires_stronger_evidence_for_finance_listing_claims():
+def test_current_info_service_blocks_single_source_finance_listing_claims_with_warning():
     result = SearchResult(
         title="SPCXUSDT Contract | Bybit",
         url="https://www.bybit.com/en/trade/usdt/SPCXUSDT",
@@ -729,6 +806,7 @@ def test_current_info_service_requires_stronger_evidence_for_finance_listing_cla
     assert answer.sources == (result.url,)
     assert "needs_independent_source" in answer.warnings
     assert "finance_listing_requires_verified_sources" in answer.warnings
+    assert answer.metadata["reason"] == "needs_independent_source"
     assert search_provider.calls == [
         _SearchCall(
             query="Ist SpaceX börsennotiert oder ist SPCXUSDT auf Bybit ein Derivat?",
@@ -738,12 +816,114 @@ def test_current_info_service_requires_stronger_evidence_for_finance_listing_cla
         _SearchCall(
             query=(
                 "Ist SpaceX börsennotiert oder ist SPCXUSDT auf Bybit ein Derivat? "
-                "official source listing derivative exchange"
+                "public listing ticker exchange derivative sources"
             ),
             locale="de",
             max_results=3,
         ),
     ]
+
+
+def test_current_info_service_still_blocks_weak_finance_listing_source():
+    result = SearchResult(
+        title="Anthropic rumors",
+        url="https://forum.example/anthropic-stock",
+        snippet="Someone says Anthropic has a ticker.",
+        provider="fake_search",
+        rank=1,
+        host="forum.example",
+        metadata={"source_type": "Forum"},
+    )
+    document = FetchedDocument(
+        url=result.url,
+        title=result.title,
+        text="A forum post speculates about an Anthropic ticker.",
+        provider="fake_fetch",
+    )
+    chunk = EvidenceChunk(
+        text="A forum post speculates about an Anthropic ticker.",
+        source_url=result.url,
+        source_title=result.title,
+        relevance=0.9,
+        metadata={"warning_codes": ("weak_source",)},
+    )
+    service = CurrentInfoService(
+        search_provider=_FakeSearchProvider((result,)),
+        fetch_provider=_FakeFetchProvider({result.url: document}),
+        retrieval_provider=_FakeRetrievalProvider((chunk,)),
+    )
+
+    answer = service.answer(CurrentInfoRequest(query="Ist Anthropic an der Börse?", locale="de", domain_hint="stock"))
+
+    assert answer.status == "unverified_evidence"
+    assert answer.answer_text == ""
+    assert "weak_source" in answer.warnings
+
+
+def test_current_info_service_blocks_conflicting_finance_listing_sources():
+    first = SearchResult(title="Exchange profile", url="https://exchange.example/acmeblubbla", provider="fake", rank=1)
+    second = SearchResult(title="Filings profile", url="https://filings.example/acmeblubbla", provider="fake", rank=2)
+    chunks = (
+        EvidenceChunk(
+            text="AcmeBlubBla is publicly listed with ticker ACBL.",
+            source_url=first.url,
+            metadata={"claim_key": "acmeblubbla_listing", "claim_value": "listed"},
+        ),
+        EvidenceChunk(
+            text="AcmeBlubBla has no public listing or ticker.",
+            source_url=second.url,
+            metadata={"claim_key": "acmeblubbla_listing", "claim_value": "not_listed"},
+        ),
+    )
+    service = CurrentInfoService(
+        search_provider=_FakeSearchProvider((first, second)),
+        fetch_provider=_FakeFetchProvider(
+            {
+                first.url: FetchedDocument(url=first.url, title=first.title, text=chunks[0].text),
+                second.url: FetchedDocument(url=second.url, title=second.title, text=chunks[1].text),
+            }
+        ),
+        retrieval_provider=_FakeRetrievalProvider(chunks),
+    )
+
+    answer = service.answer(
+        CurrentInfoRequest(query="Ist AcmeBlubBla an der Börse?", locale="de", domain_hint="stock", max_results=2)
+    )
+
+    assert answer.status == "unverified_evidence"
+    assert answer.answer_text == ""
+    assert "source_conflict" in answer.warnings
+    assert answer.metadata["reason"] == "source_conflict"
+
+
+def test_current_info_service_blocks_stale_finance_listing_source():
+    fetched_at = (datetime.now(UTC) - timedelta(days=10)).replace(microsecond=0).isoformat()
+    result = SearchResult(title="FooBarBaz AG listing", url="https://exchange.example/foobarbaz", provider="fake", rank=1)
+    document = FetchedDocument(
+        url=result.url,
+        title=result.title,
+        text="FooBarBaz AG is publicly listed with ticker FBB.",
+        fetched_at=fetched_at,
+    )
+    chunk = EvidenceChunk(
+        text="FooBarBaz AG is publicly listed with ticker FBB.",
+        source_url=result.url,
+        source_title=result.title,
+    )
+    service = CurrentInfoService(
+        search_provider=_FakeSearchProvider((result,)),
+        fetch_provider=_FakeFetchProvider({result.url: document}),
+        retrieval_provider=_FakeRetrievalProvider((chunk,)),
+    )
+
+    answer = service.answer(
+        CurrentInfoRequest(query="Ist FooBarBaz AG an der Börse?", locale="de", domain_hint="stock", max_results=1)
+    )
+
+    assert answer.status == "unverified_evidence"
+    assert answer.answer_text == ""
+    assert "stale_source" in answer.warnings
+    assert answer.metadata["reason"] == "stale_source"
 
 
 def test_current_info_service_rewards_two_independent_news_sources_that_agree():

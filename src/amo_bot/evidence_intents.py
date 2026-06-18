@@ -89,7 +89,7 @@ def classify_evidence_domain(text: str) -> str:
         ):
             return "stock"
         return "crypto"
-    if is_finance_listing_query(raw) and _STOCK_RE.search(raw):
+    if is_finance_listing_query(raw):
         return "stock"
     if _STOCK_RE.search(raw) and (_CURRENT_MARKET_RE.search(raw) or _FINANCE_RESEARCH_SIGNAL_RE.search(raw)):
         return "stock"

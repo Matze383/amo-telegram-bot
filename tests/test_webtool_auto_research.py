@@ -18,15 +18,30 @@ def test_auto_research_triggers_on_crypto_current_price_de_and_en():
     assert d_en.enabled is True and d_en.capability == "websearch"
 
 
-def test_auto_research_triggers_on_spacex_listing_and_derivative_prompts():
+def test_auto_research_triggers_on_generic_company_listing_and_derivative_prompts():
     prompts = [
         "Ist SpaceX an der Börse?",
+        "Ist Anthropic an der Börse?",
+        "Ist Siemens an der Börse?",
+        "Ist Adidas börsennotiert?",
+        "Ist Quarvex Labs an der Börse?",
+        "Ist AcmeBlubBla an der Börse?",
+        "Ist FooBarBaz AG an der Börse?",
         "Was ist SPCXUSDT auf Bybit?",
         "Kann man SpaceX Aktien kaufen?",
+        "Kann man Anthropic Aktien kaufen?",
+        "Kann man Siemens Aktien kaufen?",
+        "Kann man Adidas Aktien kaufen?",
+        "Kann man Quarvex Labs Aktien kaufen?",
+        "Kann man AcmeBlubBla Aktien kaufen?",
+        "Kann man FooBarBaz AG Aktien kaufen?",
         "Was ist OPENAIUSDT auf Bybit?",
         "Gibt es Neuralink tokenized exposure auf Bybit?",
         "Nasdaq Anthropic",
+        "Nasdaq Quarvex Labs",
+        "Nasdaq AcmeBlubBla",
         "NYSE Anthropic",
+        "NYSE FooBarBaz AG",
     ]
     for prompt in prompts:
         d = decide_auto_research(prompt)
