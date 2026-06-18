@@ -578,6 +578,15 @@ class WebResearchOrchestrator:
                 return WebResearchOrchestratorResult(user_response=synthesis_stage.user_response)
             auto_note = synthesis_stage.auto_note
         else:
+            domain = classify_evidence_domain(request.normalized_text)
+            if domain in {"stock", "crypto"}:
+                return WebResearchOrchestratorResult(
+                    user_response=format_domain_fail_closed_response(
+                        domain=domain,
+                        locale=request.locale,
+                        warnings=("checked_source_required",),
+                    )
+                )
             validation_stage = validate_research_evidence(
                 request_text=request.normalized_text,
                 search_execution=search_stage,
@@ -606,10 +615,20 @@ class WebResearchOrchestrator:
         if self._evidence_pipeline is None:
             return None
         domain = classify_evidence_domain(request.normalized_text)
-        if domain in {"weather", "crypto"}:
+        if domain == "weather":
             result = self._run_structured_evidence(request, domain=domain)
             self._log_domain_evidence(request, result)
             return result
+        if domain == "crypto":
+            structured = self._run_structured_evidence(request, domain=domain)
+            self._log_domain_evidence(request, structured)
+            if structured.confirmed:
+                return structured
+            profiled = self._evidence_pipeline.evaluate(query=request.normalized_text, locale=request.locale)
+            if profiled.status == "needs_profiled_web_research":
+                self._log_domain_evidence(request, profiled)
+                return profiled
+            return structured
 
         result = self._evidence_pipeline.evaluate(query=request.normalized_text, locale=request.locale)
         if result.domain == "generic" or result.status == "not_applicable":

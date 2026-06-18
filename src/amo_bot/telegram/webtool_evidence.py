@@ -434,9 +434,23 @@ class WebEvidencePipeline:
                 return _unavailable(domain, "weather_provider_not_configured")
             return self._weather_provider.get_weather(query=query, locale=locale)
         if domain == "crypto":
-            if self._crypto_provider is None:
-                return _unavailable(domain, "crypto_provider_not_configured")
-            return self._crypto_provider.get_crypto(query=query, locale=locale)
+            if self._crypto_provider is not None:
+                return self._crypto_provider.get_crypto(query=query, locale=locale)
+            profile = build_domain_research_profile(
+                session_factory=self._session_factory,
+                domain=domain,
+                query=query,
+            )
+            if not profile.usable:
+                return _unavailable(domain, profile.warnings[0] if profile.warnings else "crypto_provider_not_configured")
+            source_text = ", ".join(profile.source_names[:3]) or "checked crypto web sources"
+            return DomainEvidenceResult(
+                domain=domain,
+                status="needs_profiled_web_research",
+                confidence=0.0,
+                text=f"Need: {profile.need}. Strategy: {profile.strategy}. Candidate sources: {source_text}.",
+                warnings=profile.warnings,
+            )
         if domain in {"stock", "sports"}:
             profile = build_domain_research_profile(
                 session_factory=self._session_factory,

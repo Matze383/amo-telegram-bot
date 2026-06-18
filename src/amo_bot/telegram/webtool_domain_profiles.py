@@ -100,7 +100,7 @@ def build_domain_research_profile(*, session_factory, domain: str, query: str) -
     """Build a metadata-driven finance/sport source profile from the DB registry."""
 
     normalized_domain = "stock" if domain == "finance" else (domain or "generic")
-    if normalized_domain not in {"stock", "sports"} or session_factory is None:
+    if normalized_domain not in {"stock", "sports", "crypto"}:
         return DomainResearchProfile(
             domain=normalized_domain,
             need="not_applicable",
@@ -117,6 +117,18 @@ def build_domain_research_profile(*, session_factory, domain: str, query: str) -
             strategy="fail_closed",
             candidate_count=0,
             warnings=intent_warnings,
+        )
+
+    if session_factory is None:
+        built_in = _built_in_profile(domain=normalized_domain, need=need)
+        if built_in is not None:
+            return built_in
+        return DomainResearchProfile(
+            domain=normalized_domain,
+            need=need,
+            strategy="fail_closed",
+            candidate_count=0,
+            warnings=(f"{normalized_domain}_domain_profile_not_configured",),
         )
 
     from amo_bot.db.repositories import ResearchProviderRepository
@@ -204,6 +216,55 @@ def _built_in_profile(*, domain: str, need: str) -> DomainResearchProfile | None
             ),
             warnings=(f"{domain}_domain_profile_builtin_source:{need}", "strategy:verified_listing_web_research"),
         )
+    if domain == "stock" and need == "finance_quote":
+        return DomainResearchProfile(
+            domain=domain,
+            need=need,
+            strategy="verified_quote_web_research",
+            candidate_count=2,
+            provider_names=(
+                "builtin:exchange_or_market_data_quote",
+                "builtin:issuer_or_finance_quote_source",
+            ),
+            source_names=(
+                "Exchange or current market data quote source",
+                "Issuer or finance quote source",
+            ),
+            warnings=(f"{domain}_domain_profile_builtin_source:{need}", "strategy:verified_quote_web_research"),
+        )
+    if domain == "stock" and need == "finance_research":
+        return DomainResearchProfile(
+            domain=domain,
+            need=need,
+            strategy="verified_finance_research_web",
+            candidate_count=2,
+            provider_names=(
+                "builtin:issuer_investor_relations",
+                "builtin:filings_or_finance_research_source",
+            ),
+            source_names=(
+                "Issuer investor relations or filings",
+                "Checked finance research source",
+            ),
+            warnings=(f"{domain}_domain_profile_builtin_source:{need}", "strategy:verified_finance_research_web"),
+        )
+    if domain == "crypto":
+        strategy = "verified_crypto_listing_web_research" if need == "crypto_listing" else "verified_crypto_quote_web_research"
+        return DomainResearchProfile(
+            domain=domain,
+            need=need,
+            strategy=strategy,
+            candidate_count=2,
+            provider_names=(
+                "builtin:crypto_exchange_or_market_data",
+                "builtin:project_or_exchange_source",
+            ),
+            source_names=(
+                "Crypto exchange or market data source",
+                "Project or exchange source",
+            ),
+            warnings=(f"{domain}_domain_profile_builtin_source:{need}", f"strategy:{strategy}"),
+        )
     return None
 
 
@@ -224,6 +285,11 @@ def _infer_need(domain: str, query: str) -> tuple[str, tuple[str, ...]]:
         if not sports_query.has_competition(raw):
             return "sport_unknown_competition", ("sports_competition_not_identified",)
         return sports_query.infer_need(raw), ()
+
+    if domain == "crypto":
+        if is_finance_listing_query(raw):
+            return "crypto_listing", ()
+        return "crypto_quote", ()
 
     return "generic", ()
 

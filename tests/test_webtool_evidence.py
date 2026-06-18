@@ -616,14 +616,18 @@ def test_unknown_crypto_asset_does_not_poison_provider_health():
     assert health.get("coingecko_crypto").failure_count == 0
 
 
-def test_pipeline_fail_closed_for_stock_and_sports_without_structured_provider():
+def test_pipeline_allows_stock_quote_built_in_web_research_without_structured_provider():
     pipeline = WebEvidencePipeline()
 
     stock = pipeline.evaluate(query="Was macht die Nvidia Aktie?", locale="de")
     sports = pipeline.evaluate(query="Wie stehen die Gruppen der Fußball WM?", locale="de")
 
-    assert stock.status == "unavailable"
-    assert stock.warnings == ("stock_domain_profile_not_configured",)
+    assert stock.status == "needs_profiled_web_research"
+    assert stock.warnings == (
+        "stock_domain_profile_builtin_source:finance_quote",
+        "strategy:verified_quote_web_research",
+    )
+    assert "Need: finance_quote" in stock.text
     assert sports.status == "unavailable"
     assert sports.warnings == ("sports_domain_profile_not_configured",)
 
@@ -783,7 +787,7 @@ def test_finance_listing_fallback_does_not_use_finance_research_profile(tmp_path
         assert "Issuer Filings" not in result.text
 
 
-def test_finance_quote_without_quote_profile_still_fails_closed(tmp_path):
+def test_finance_quote_without_quote_profile_uses_generic_verified_web_research(tmp_path):
     session_factory = _db(tmp_path)
     _add_research_provider(
         session_factory,
@@ -796,9 +800,37 @@ def test_finance_quote_without_quote_profile_still_fails_closed(tmp_path):
 
     result = WebEvidencePipeline(session_factory=session_factory).evaluate(query="NVDA stock price now", locale="en")
 
-    assert result.status == "unavailable"
-    assert result.text == ""
-    assert result.warnings == ("stock_domain_profile_no_usable_source:finance_quote",)
+    assert result.status == "needs_profiled_web_research"
+    assert "Need: finance_quote" in result.text
+    assert "Exchange or current market data quote source" in result.text
+    assert result.warnings == (
+        "stock_domain_profile_builtin_source:finance_quote",
+        "strategy:verified_quote_web_research",
+    )
+
+
+def test_finance_research_without_research_profile_uses_generic_checked_web_research(tmp_path):
+    session_factory = _db(tmp_path)
+    _add_research_provider(
+        session_factory,
+        provider_name="finance_quote_source",
+        source_name="Quote Source",
+        domain="stock",
+        profile_needs="finance_quote",
+    )
+
+    result = WebEvidencePipeline(session_factory=session_factory).evaluate(
+        query="Nvidia fundamentals filings and dividend research",
+        locale="en",
+    )
+
+    assert result.status == "needs_profiled_web_research"
+    assert "Need: finance_research" in result.text
+    assert "Issuer investor relations or filings" in result.text
+    assert result.warnings == (
+        "stock_domain_profile_builtin_source:finance_research",
+        "strategy:verified_finance_research_web",
+    )
 
 
 def test_ipo_url_routes_to_generic_listing_research_profile_not_unknown_entity(tmp_path):
@@ -829,7 +861,7 @@ def test_ipo_url_routes_to_generic_listing_research_profile_not_unknown_entity(t
         )
 
 
-def test_derivative_exchange_queries_route_to_crypto_not_generic():
+def test_derivative_exchange_queries_route_to_crypto_listing_research_not_stock_listing():
     for query in (
         "Was ist ACMEUSDT auf Bybit?",
         "Gibt es ExampleCo tokenized exposure auf Bybit?",
@@ -837,8 +869,13 @@ def test_derivative_exchange_queries_route_to_crypto_not_generic():
         result = WebEvidencePipeline().evaluate(query=query, locale="de")
 
         assert result.domain == "crypto"
-        assert result.status == "unavailable"
-        assert result.warnings == ("crypto_provider_not_configured",)
+        assert result.status == "needs_profiled_web_research"
+        assert "Need: crypto_listing" in result.text
+        assert result.warnings == (
+            "crypto_domain_profile_builtin_source:crypto_listing",
+            "strategy:verified_crypto_listing_web_research",
+        )
+        assert "finance_listing" not in " ".join(result.warnings)
 
 
 def test_finance_unknown_entity_fails_closed_without_guessing_ticker(tmp_path):
@@ -1073,9 +1110,11 @@ def test_domain_profile_source_unavailable_fails_closed_from_db_state(tmp_path):
 
     result = WebEvidencePipeline(session_factory=session_factory).evaluate(query="NVDA stock price now", locale="en")
 
-    assert result.status == "unavailable"
-    assert result.text == ""
-    assert result.warnings == ("stock_domain_profile_no_usable_source:finance_quote",)
+    assert result.status == "needs_profiled_web_research"
+    assert result.warnings == (
+        "stock_domain_profile_builtin_source:finance_quote",
+        "strategy:verified_quote_web_research",
+    )
 
 
 def test_autoresearch_stock_does_not_use_search_snippet_numbers(monkeypatch):
@@ -1107,10 +1146,55 @@ def test_autoresearch_stock_does_not_use_search_snippet_numbers(monkeypatch):
         )
     )
 
-    assert d.webtool_dispatcher.calls == []
+    assert [c.capability for c in d.webtool_dispatcher.calls] == ["websearch"]
     assert calls == []
     assert sent and "Aktienkurs" in sent[0]
     assert "999" not in sent[0]
+
+
+def test_autoresearch_crypto_missing_provider_uses_websearch_but_not_snippet_price(monkeypatch):
+    monkeypatch.setattr("amo_bot.telegram.dispatcher.AIRouter.decide", lambda self, **kwargs: _allowing_router_decision())
+    crypto_unavailable = SimpleNamespace(
+        allowed=False,
+        decision="deny",
+        reason="crypto_provider_not_configured",
+        text="",
+        sources=(),
+        hosts=(),
+        metadata={},
+        error=None,
+    )
+    search = SimpleNamespace(
+        allowed=True,
+        decision="allow",
+        reason="search_completed",
+        text="BTC is 123456 USD in search snippet",
+        sources=("https://crypto.example/btc",),
+        hosts=("crypto.example",),
+        error=None,
+    )
+    d, sent = _mk_sequence_dispatcher([crypto_unavailable, search])
+    d.web_evidence_pipeline = WebEvidencePipeline()
+    calls = []
+
+    async def _ask(prompt: str) -> str:
+        calls.append(prompt)
+        return "normal ai"
+
+    d.ai_service.ask = _ask
+    asyncio.run(
+        d._maybe_handle_ai_autoreply(
+            message=_mk_message("@amo_bot BTC price now", reply_to_is_bot=False, reply_to_user_is_bot=False, reply_to_username=""),
+            role=Role.ADMIN,
+            bot_username="amo_bot",
+            from_parsed_update=True,
+        )
+    )
+
+    assert [c.capability for c in d.webtool_dispatcher.calls] == ["crypto_evidence", "websearch", "webscraping", "browser"]
+    assert calls == []
+    assert sent and "Krypto-Kurs" in sent[0]
+    assert "123456" not in sent[0]
 
 
 def test_autoresearch_crypto_uses_structured_evidence_before_search(monkeypatch):
