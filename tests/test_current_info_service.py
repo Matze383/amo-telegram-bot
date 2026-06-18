@@ -15,6 +15,8 @@ from amo_bot.current_info import (
     EvidencePackageSource,
     FetchedDocument,
     QueryPlan,
+    ResearchPlan,
+    ResearchPlanStep,
     SearchBundle,
     SearchResult,
     TaskSpec,
@@ -93,7 +95,16 @@ def test_current_info_models_roundtrip_dict_serialization():
         metadata={"origin": "unit-test"},
     )
     task = TaskSpec(task_type="current_info", query=request.query, locale="de", domain="news")
-    plan = QueryPlan(task=task, queries=("latest AMO news",), max_results=2)
+    plan = QueryPlan(
+        task=task,
+        queries=("latest AMO news",),
+        max_results=2,
+        research_plan=ResearchPlan(
+            strategy="search_first",
+            steps=(ResearchPlanStep(operation="search", reason="original_query", query="latest AMO news"),),
+            query_variants=("latest AMO news",),
+        ),
+    )
     result = SearchResult(
         title="AMO",
         url="https://example.com/amo",
@@ -144,6 +155,8 @@ def test_current_info_evidence_package_exposes_sources_freshness_confidence_and_
                 title="Status",
                 host="example.com",
                 source_type="Official",
+                source_role="official_source_candidate",
+                quality_label="official_source_candidate",
                 fetched=True,
                 fetched_at="2026-06-16T10:00:00+00:00",
             ),
@@ -198,11 +211,18 @@ def test_current_info_service_uses_fake_search_fetch_and_retrieval_ports():
     assert answer.evidence is not None
     assert answer.evidence.freshness == "fetched_unknown_age"
     assert answer.evidence.sources[0].fetched is True
-    assert search_provider.calls == [_SearchCall(query="current status", locale="de", max_results=3)]
+    assert [call.query for call in search_provider.calls] == [
+        "current status",
+        "current status official source latest verification",
+    ]
     assert fetch_provider.calls == [(result.url, "de")]
     assert retrieval_provider.calls[0][1] == (document,)
     assert retrieval_provider.calls[0][2][0].url == result.url
     assert retrieval_provider.calls[0][2][0].metadata["canonical_url"] == result.url
+    assert answer.query_plan is not None
+    assert answer.query_plan.research_plan is not None
+    assert [step.operation for step in answer.query_plan.research_plan.steps] == ["search", "search"]
+    assert answer.evidence.sources[0].source_role == "corroborating_source"
 
 
 def test_current_info_service_rejects_snippet_only_evidence_for_current_facts():
@@ -405,6 +425,101 @@ def test_current_info_service_fetches_user_provided_url_for_general_listing_ques
     assert "stock_entity_not_identified" not in answer.warnings
     assert "finance_listing_requires_verified_sources" in answer.warnings
     assert fetch_provider.calls == [(url, "de")]
+
+
+def test_current_info_service_fetches_non_finance_direct_url_as_first_evidence():
+    url = "https://docs.python.org/3/whatsnew/3.13.html"
+    document = FetchedDocument(
+        url=url,
+        title="What is new in Python 3.13",
+        text="Python 3.13 includes the updated interactive interpreter.",
+        provider="fake_fetch",
+    )
+    fetch_provider = _FakeFetchProvider({url: document})
+    service = CurrentInfoService(search_provider=_FakeSearchProvider(()), fetch_provider=fetch_provider)
+
+    answer = service.answer(CurrentInfoRequest(query=f"Bewerte diese Quelle: {url}", locale="de", max_documents=2))
+
+    assert answer.status == "answered"
+    assert answer.sources == (url,)
+    assert fetch_provider.calls[0] == (url, "de")
+    assert answer.query_plan is not None
+    assert answer.query_plan.strategy == "direct_url_first"
+    assert answer.query_plan.research_plan is not None
+    assert answer.query_plan.research_plan.steps[0].operation == "direct_url_fetch"
+    assert answer.evidence is not None
+    assert answer.evidence.sources[0].source_role == "direct_user_url"
+    assert answer.evidence.sources[0].quality_label == "direct_user_url"
+
+
+def test_current_info_service_uses_direct_url_and_independent_search_for_source_assessment():
+    user_url = "https://example.org/blog/release-note"
+    corroborating = SearchResult(
+        title="Release docs",
+        url="https://official.example/docs/release",
+        snippet="Official release docs.",
+        provider="fake_search",
+        rank=1,
+        host="official.example",
+    )
+    documents = {
+        user_url: FetchedDocument(url=user_url, title="Blog", text="The project released version 4.2."),
+        corroborating.url: FetchedDocument(
+            url=corroborating.url,
+            title=corroborating.title,
+            text="The official release documentation confirms version 4.2.",
+        ),
+    }
+    search_provider = _FakeSearchProvider((corroborating,))
+    fetch_provider = _FakeFetchProvider(documents)
+    service = CurrentInfoService(search_provider=search_provider, fetch_provider=fetch_provider)
+
+    query = f"Kann ich dieser Einschätzung trauen? {user_url}"
+    answer = service.answer(CurrentInfoRequest(query=query, locale="de", max_results=3, max_documents=3))
+
+    assert answer.status == "answered"
+    assert fetch_provider.calls[0] == (user_url, "de")
+    assert corroborating.url in [url for url, _locale in fetch_provider.calls]
+    assert [call.query for call in search_provider.calls] == [
+        "Kann ich dieser Einschätzung trauen?",
+        "Kann ich dieser Einschätzung trauen? official source latest verification",
+    ]
+    assert answer.evidence is not None
+    assert {source.source_role for source in answer.evidence.sources} >= {
+        "direct_user_url",
+        "official_source_candidate",
+    }
+
+
+def test_current_info_service_searches_official_source_variant_for_general_topic():
+    official = SearchResult(
+        title="Python Release Schedule",
+        url="https://docs.python.org/3/",
+        snippet="Official Python downloads.",
+        provider="fake_search",
+        rank=1,
+        host="docs.python.org",
+    )
+    search_provider = _FakeSearchProvider((official,))
+    service = CurrentInfoService(
+        search_provider=search_provider,
+        fetch_provider=_FakeFetchProvider(
+            {official.url: FetchedDocument(url=official.url, title=official.title, text="Python 3.13.5 is available.")}
+        ),
+    )
+
+    answer = service.answer(CurrentInfoRequest(query="aktueller Python Release heute", locale="de", max_results=3))
+
+    assert answer.status == "answered"
+    assert [call.query for call in search_provider.calls] == [
+        "aktueller Python Release heute",
+        "aktueller Python Release heute official source latest verification",
+    ]
+    assert answer.query_plan is not None
+    assert answer.query_plan.research_plan is not None
+    assert answer.query_plan.research_plan.query_variants == tuple(call.query for call in search_provider.calls)
+    assert answer.evidence is not None
+    assert answer.evidence.sources[0].source_role == "official_source_candidate"
 
 
 def test_current_info_service_routes_derivative_exchange_queries_as_crypto_listing_evidence():
@@ -610,7 +725,7 @@ def test_current_info_service_warns_for_conflicting_sources_instead_of_overconfi
     assert answer.confidence == 0.45
 
 
-def test_current_info_service_lowers_confidence_for_stale_source():
+def test_current_info_service_fails_closed_for_stale_source():
     fetched_at = (datetime.now(UTC) - timedelta(days=10)).replace(microsecond=0).isoformat()
     result = SearchResult(title="Old status", url="https://example.com/old", provider="fake", rank=1)
     document = FetchedDocument(url=result.url, title=result.title, text="Old current status.", fetched_at=fetched_at)
@@ -623,12 +738,37 @@ def test_current_info_service_lowers_confidence_for_stale_source():
 
     answer = service.answer(CurrentInfoRequest(query="current status"))
 
-    assert answer.status == "answered"
+    assert answer.status == "unverified_evidence"
+    assert answer.answer_text == ""
     assert answer.confidence == 0.55
     assert answer.warnings == ("stale_source",)
     assert answer.evidence is not None
     assert answer.evidence.freshness == "stale"
     assert answer.evidence.sources[0].stale is True
+
+
+def test_current_info_service_fails_closed_for_irrelevant_checked_source():
+    result = SearchResult(title="Unrelated", url="https://example.com/unrelated", provider="fake", rank=1)
+    document = FetchedDocument(url=result.url, title=result.title, text="This page is about an unrelated project.")
+    chunk = EvidenceChunk(
+        text="This page is about an unrelated project.",
+        source_url=result.url,
+        source_title=result.title,
+        metadata={"warning_codes": ("irrelevant_source",)},
+    )
+    service = CurrentInfoService(
+        search_provider=_FakeSearchProvider((result,)),
+        fetch_provider=_FakeFetchProvider({result.url: document}),
+        retrieval_provider=_FakeRetrievalProvider((chunk,)),
+    )
+
+    answer = service.answer(CurrentInfoRequest(query="current status"))
+
+    assert answer.status == "unverified_evidence"
+    assert answer.answer_text == ""
+    assert answer.evidence is not None
+    assert answer.warnings == ("irrelevant_source",)
+    assert answer.metadata["reason"] == "irrelevant_source"
 
 
 def test_current_info_service_normalizes_ranks_and_dedupes_search_candidates():

@@ -3,10 +3,15 @@ from __future__ import annotations
 import logging
 import re
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from urllib.parse import urlparse
 
-from amo_bot.current_info.candidates import normalize_dedupe_and_rank_search_results
+from amo_bot.current_info.candidates import (
+    SOURCE_TYPE_DOCS,
+    SOURCE_TYPE_NEWS,
+    SOURCE_TYPE_OFFICIAL,
+    normalize_dedupe_and_rank_search_results,
+)
 from amo_bot.current_info.evidence import assemble_evidence_package
 from amo_bot.evidence_intents import is_finance_listing_query
 from amo_bot.current_info.models import (
@@ -15,6 +20,8 @@ from amo_bot.current_info.models import (
     EvidenceChunk,
     FetchedDocument,
     QueryPlan,
+    ResearchPlan,
+    ResearchPlanStep,
     SearchBundle,
     SearchProviderMetric,
     SearchProviderResponse,
@@ -60,16 +67,46 @@ class DefaultCurrentInfoTaskPlanner:
 class DefaultCurrentInfoQueryPlanner:
     def plan_queries(self, *, request: CurrentInfoRequest, task: TaskSpec) -> QueryPlan:
         query = task.query or request.query.strip()
-        queries = (query,) if query else ()
+        direct_urls = _extract_direct_urls(query)
+        add_verification = bool(direct_urls) or _needs_official_source_variant(query, task=task)
+        queries = _general_query_variants(
+            query,
+            add_verification=add_verification,
+        )
         if query and _is_finance_listing_query(request=request, task=task):
             followup = _finance_listing_followup_query(query)
             if followup and followup.casefold() != query.casefold():
                 queries = tuple(dict.fromkeys((query, followup)))
+        steps: list[ResearchPlanStep] = [
+            ResearchPlanStep(
+                operation="direct_url_fetch",
+                reason="user_provided_url",
+                url=url,
+                source_role="direct_user_url",
+            )
+            for url in direct_urls
+        ]
+        steps.extend(
+            ResearchPlanStep(
+                operation="search",
+                reason="original_query" if index == 0 else "official_source_verification",
+                query=variant,
+                source_role="corroborating_source" if index == 0 else "official_source_candidate",
+            )
+            for index, variant in enumerate(queries)
+        )
+        strategy = "direct_url_first" if direct_urls else "search_first"
         return QueryPlan(
             task=task,
             queries=queries,
             max_results=request.max_results,
-            strategy="search_first",
+            strategy=strategy,
+            research_plan=ResearchPlan(
+                strategy=strategy,
+                steps=tuple(steps),
+                direct_urls=direct_urls,
+                query_variants=queries,
+            ),
         )
 
 
@@ -180,9 +217,11 @@ class CurrentInfoService:
         try:
             if self._search_provider is None:
                 search_response = SearchProviderResponse(
-                    results=normalize_dedupe_and_rank_search_results(
-                        direct_url_results,
-                        max_results=query_plan.max_results,
+                    results=_label_search_results(
+                        normalize_dedupe_and_rank_search_results(
+                            direct_url_results,
+                            max_results=query_plan.max_results,
+                        )
                     )
                 )
             else:
@@ -400,7 +439,9 @@ class CurrentInfoService:
                 seen_urls.add(item.url)
                 collected.append(item)
         return SearchProviderResponse(
-            results=normalize_dedupe_and_rank_search_results(tuple(collected), max_results=query_plan.max_results),
+            results=_label_search_results(
+                normalize_dedupe_and_rank_search_results(tuple(collected), max_results=query_plan.max_results)
+            ),
             metrics=tuple(metrics),
         )
 
@@ -419,7 +460,7 @@ class CurrentInfoService:
         if max_documents == 0:
             return ()
 
-        for result in search_results:
+        for result in _fetch_priority_results(search_results):
             if not result.url:
                 continue
             try:
@@ -428,7 +469,11 @@ class CurrentInfoService:
                 budget.warnings.append(exc.reason_code)
                 break
             fetch_started = time.perf_counter()
-            document = self._fetch_provider.fetch(url=result.url, locale=request.locale)
+            document = None
+            for candidate_url in _fetch_url_candidates(result):
+                document = self._fetch_provider.fetch(url=candidate_url, locale=request.locale)
+                if document is not None:
+                    break
             log_current_info_event(
                 logger,
                 event="current_info.FetchRun",
@@ -490,12 +535,7 @@ def _format_answer_text(chunks: tuple[EvidenceChunk, ...]) -> str:
 
 def _direct_url_search_results(query: str) -> tuple[SearchResult, ...]:
     results: list[SearchResult] = []
-    seen: set[str] = set()
-    for match in _URL_RE.finditer(query or ""):
-        url = match.group(0).rstrip(".,;:!?)]}'\"")
-        if not url or url in seen:
-            continue
-        seen.add(url)
+    for url in _extract_direct_urls(query):
         parsed = urlparse(url)
         host = (parsed.hostname or "").lower().rstrip(".")
         results.append(
@@ -506,10 +546,133 @@ def _direct_url_search_results(query: str) -> tuple[SearchResult, ...]:
                 provider="direct_user_url",
                 rank=0,
                 host=host,
-                metadata={"source_type": "user_provided"},
+                metadata={
+                    "source_type": "user_provided",
+                    "source_role": "direct_user_url",
+                    "quality_label": "direct_user_url",
+                },
             )
         )
     return tuple(results)
+
+
+def _extract_direct_urls(query: str) -> tuple[str, ...]:
+    urls: list[str] = []
+    seen: set[str] = set()
+    for match in _URL_RE.finditer(query or ""):
+        url = match.group(0).rstrip(".,;:!?)]}'\"")
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        urls.append(url)
+    return tuple(urls)
+
+
+def _general_query_variants(query: str, *, add_verification: bool = False) -> tuple[str, ...]:
+    compact = " ".join((query or "").split()).strip()
+    if not compact:
+        return ()
+    without_urls = _URL_RE.sub(" ", compact)
+    base = " ".join(without_urls.split()).strip() or compact
+    if not add_verification:
+        return (base,)
+    verification = f"{base} official source latest verification"
+    return tuple(dict.fromkeys(item for item in (base, verification) if item))
+
+
+def _needs_official_source_variant(query: str, *, task: TaskSpec) -> bool:
+    domain = (task.domain or "").strip().lower()
+    if domain in {"stock", "crypto"}:
+        return False
+    return bool(
+        re.search(
+            r"\b(?:"
+            r"aktuell|heute|jetzt|neueste|stand|"
+            r"current|latest|now|today|status|"
+            r"release|version|changelog|downloads?|docs?|documentation|official"
+            r")\b",
+            query or "",
+            re.IGNORECASE,
+        )
+    )
+
+
+def _label_search_results(results: tuple[SearchResult, ...]) -> tuple[SearchResult, ...]:
+    labeled: list[SearchResult] = []
+    for result in results:
+        metadata = dict(result.metadata)
+        role = _source_role(result)
+        quality = _quality_label(result, role=role)
+        metadata["source_role"] = role
+        metadata["quality_label"] = quality
+        labeled.append(replace(result, metadata=metadata))
+    return tuple(labeled)
+
+
+def _source_role(result: SearchResult) -> str:
+    provider = (result.provider or "").strip().lower()
+    existing = str(result.metadata.get("source_role") or "").strip()
+    if provider == "direct_user_url" or existing == "direct_user_url":
+        return "direct_user_url"
+    source_type = str(result.metadata.get("source_type") or "")
+    if source_type in {SOURCE_TYPE_OFFICIAL, SOURCE_TYPE_DOCS}:
+        return "official_source_candidate"
+    if _looks_like_official_source(result):
+        return "official_source_candidate"
+    if source_type == SOURCE_TYPE_NEWS:
+        return "corroborating_source"
+    if result.snippet and not result.metadata.get("canonical_url"):
+        return "snippet_only"
+    return "corroborating_source"
+
+
+def _quality_label(result: SearchResult, *, role: str) -> str:
+    if role in {"direct_user_url", "official_source_candidate"}:
+        return role
+    if result.date and str(result.metadata.get("stale") or "").lower() in {"1", "true", "yes", "stale"}:
+        return "stale"
+    if role == "snippet_only":
+        return "snippet_only"
+    source_type = str(result.metadata.get("source_type") or "")
+    if source_type in {"Forum", "Social", "Commerce", "Unknown"} and result.snippet:
+        return "weak_source"
+    return "corroborating_source"
+
+
+def _looks_like_official_source(result: SearchResult) -> bool:
+    host = (result.host or urlparse(result.url).hostname or "").lower().rstrip(".")
+    title = (result.title or "").casefold()
+    if host.startswith("docs.") or ".docs." in host:
+        return True
+    if host.endswith(".gov") or ".gov." in host:
+        return True
+    return "official" in title or "documentation" in title or "docs" in title
+
+
+def _fetch_priority_results(search_results: tuple[SearchResult, ...]) -> tuple[SearchResult, ...]:
+    return tuple(
+        sorted(
+            search_results,
+            key=lambda result: (
+                0 if (result.provider or "").strip().lower() == "direct_user_url" else 1,
+                result.rank,
+            ),
+        )
+    )
+
+
+def _fetch_url_candidates(result: SearchResult) -> tuple[str, ...]:
+    urls: list[str] = []
+    for raw in (result.url, str(result.metadata.get("original_url") or ""), str(result.metadata.get("final_url") or "")):
+        if raw and raw not in urls:
+            urls.append(raw)
+    parsed = urlparse(result.url)
+    path = parsed.path or ""
+    if result.url and path and not path.endswith("/") and "." not in path.rsplit("/", 1)[-1]:
+        slash_url = f"{result.url}/"
+        if slash_url not in urls:
+            urls.append(slash_url)
+    return tuple(urls)
 
 
 def _is_finance_listing_query(*, request: CurrentInfoRequest, task: TaskSpec) -> bool:
@@ -528,23 +691,36 @@ def _needs_stronger_evidence(
     task: TaskSpec,
     warnings: tuple[str, ...],
 ) -> bool:
-    if not _is_finance_listing_query(request=request, task=task):
-        return False
-    return any(
+    if any(
         warning in warnings
         for warning in (
-            "needs_independent_source",
-            "source_conflict",
+            "irrelevant_source",
+            "weak_source",
+            "low_quality_source",
             "stale_source",
-            "finance_listing_requires_verified_sources",
         )
-    )
+    ):
+        return True
+    if _is_finance_listing_query(request=request, task=task):
+        return any(
+            warning in warnings
+            for warning in (
+                "needs_independent_source",
+                "source_conflict",
+                "stale_source",
+                "finance_listing_requires_verified_sources",
+            )
+        )
+    return False
 
 
 def _stronger_evidence_reason(warnings: tuple[str, ...]) -> str:
     for warning in (
         "source_conflict",
         "stale_source",
+        "irrelevant_source",
+        "weak_source",
+        "low_quality_source",
         "needs_independent_source",
         "finance_listing_requires_verified_sources",
     ):

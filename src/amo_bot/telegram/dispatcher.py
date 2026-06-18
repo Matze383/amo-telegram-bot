@@ -1605,14 +1605,15 @@ class Dispatcher:
             return False
 
         decision = decide_auto_research(normalized_text)
-        if not decision.enabled or decision.capability != "websearch" or not decision.query:
+        current_info_query = normalized_text if decision.url and normalized_text.strip() else decision.query
+        if not decision.enabled or decision.capability not in {"websearch", "browser", "webscraping"} or not current_info_query:
             return False
 
         timeout_seconds = max(float(self.current_info_timeout_seconds), 0.001)
         request = CurrentInfoRequest(
-            query=decision.query,
+            query=current_info_query,
             locale=locale,
-            domain_hint=classify_evidence_domain(decision.query),
+            domain_hint=classify_evidence_domain(current_info_query),
             max_results=max(1, min(int(self.current_info_max_results), 10)),
             max_documents=max(0, min(int(self.current_info_max_documents), 10)),
             user_id=message.from_user.id,
@@ -1622,6 +1623,7 @@ class Dispatcher:
             metadata={
                 "telegram_message_id": message.message_id,
                 "auto_research_reason": decision.reason,
+                "direct_url": decision.url,
             },
         )
 
@@ -1817,11 +1819,15 @@ class Dispatcher:
             "For finance, listing, ticker, token, derivative, or exchange questions, avoid categorical claims unless the "
             "evidence directly supports them.\n"
             "Mention uncertainty briefly when confidence is low or warnings are present.\n"
+            "Use the source landscape below to distinguish checked sources, user-provided links, "
+            "official-source candidates, corroborating sources, weak/snippet-only sources, stale sources, "
+            "and rejected evidence gaps.\n"
             "Do not include a source list; the application appends sources separately.\n\n"
             f"User question:\n{query}\n\n"
             f"Evidence confidence: {answer.confidence:.2f}\n"
             f"Evidence freshness: {freshness or 'unknown'}\n"
             f"Warnings: {warnings}\n\n"
+            f"Source landscape:\n{_current_info_source_landscape(answer)}\n\n"
             f"Checked evidence:\n{evidence}"
         )
 
@@ -2044,3 +2050,22 @@ def _current_info_evidence_text(answer: CurrentInfoAnswer) -> str:
     if len(text) > CURRENT_INFO_SYNTHESIS_MAX_EVIDENCE_CHARS:
         text = text[:CURRENT_INFO_SYNTHESIS_MAX_EVIDENCE_CHARS].rstrip() + " ..."
     return text
+
+
+def _current_info_source_landscape(answer: CurrentInfoAnswer) -> str:
+    if answer.evidence is None or not answer.evidence.sources:
+        if answer.warnings:
+            return "No checked sources. Evidence gaps: " + ", ".join(answer.warnings)
+        return "No checked sources."
+
+    lines: list[str] = []
+    for index, source in enumerate(answer.evidence.sources[:CURRENT_INFO_SYNTHESIS_MAX_SOURCE_COUNT], start=1):
+        role = source.source_role or "corroborating_source"
+        quality = source.quality_label or ("stale" if source.stale else "checked_source" if source.fetched else "weak_source")
+        status = "checked" if source.fetched else "not_fetched"
+        stale = ", stale" if source.stale else ""
+        title = f" - {' '.join(source.title.split())}" if source.title else ""
+        lines.append(f"[{index}] {status}, role={role}, quality={quality}{stale}, host={source.host}{title}")
+    if answer.warnings:
+        lines.append("Evidence gaps: " + ", ".join(answer.warnings))
+    return "\n".join(lines)

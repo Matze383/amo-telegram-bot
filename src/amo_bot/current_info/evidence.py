@@ -135,6 +135,8 @@ def _package_sources(
             title=result.title,
             host=result.host or _host(result.url),
             source_type=str(result.metadata.get("source_type") or SOURCE_TYPE_UNKNOWN),
+            source_role=str(result.metadata.get("source_role") or ""),
+            quality_label=str(result.metadata.get("quality_label") or _fallback_quality_label(result)),
             fetched=False,
         )
 
@@ -148,12 +150,40 @@ def _package_sources(
             title=document.title or (existing.title if existing is not None else ""),
             host=(existing.host if existing is not None and existing.host else _host(document.url)),
             source_type=(existing.source_type if existing is not None else SOURCE_TYPE_UNKNOWN),
+            source_role=_fetched_source_role(existing.source_role if existing is not None else ""),
+            quality_label=_fetched_quality_label(
+                existing.quality_label if existing is not None else "",
+                stale=_is_stale(fetched_at, max_age_seconds=max_age_seconds)
+                or _metadata_truthy(document.metadata.get("stale")),
+            ),
             fetched=True,
             fetched_at=document.fetched_at,
             stale=_is_stale(fetched_at, max_age_seconds=max_age_seconds) or _metadata_truthy(document.metadata.get("stale")),
         )
         by_url[document.url] = source
     return tuple(by_url.values())
+
+
+def _fallback_quality_label(result: SearchResult) -> str:
+    if result.provider == "direct_user_url":
+        return "direct_user_url"
+    if result.snippet:
+        return "snippet_only"
+    return "corroborating_source"
+
+
+def _fetched_quality_label(existing: str, *, stale: bool) -> str:
+    if stale:
+        return "stale"
+    if existing and existing != "snippet_only":
+        return existing
+    return "checked_source"
+
+
+def _fetched_source_role(existing: str) -> str:
+    if existing and existing != "snippet_only":
+        return existing
+    return "corroborating_source"
 
 
 def _requires_independent_hosts(

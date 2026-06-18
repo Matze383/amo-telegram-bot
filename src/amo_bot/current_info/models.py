@@ -80,11 +80,65 @@ class TaskSpec:
 
 
 @dataclass(frozen=True, slots=True)
+class ResearchPlanStep:
+    operation: str
+    reason: str
+    query: str = ""
+    url: str = ""
+    source_role: str = ""
+
+    def to_dict(self) -> JsonDict:
+        return {
+            "operation": self.operation,
+            "reason": self.reason,
+            "query": self.query,
+            "url": self.url,
+            "source_role": self.source_role,
+        }
+
+    @classmethod
+    def from_dict(cls, payload: JsonDict) -> ResearchPlanStep:
+        return cls(
+            operation=str(payload.get("operation", "") or ""),
+            reason=str(payload.get("reason", "") or ""),
+            query=str(payload.get("query", "") or ""),
+            url=str(payload.get("url", "") or ""),
+            source_role=str(payload.get("source_role", "") or ""),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class ResearchPlan:
+    strategy: str = "search_first"
+    steps: tuple[ResearchPlanStep, ...] = ()
+    direct_urls: tuple[str, ...] = ()
+    query_variants: tuple[str, ...] = ()
+
+    def to_dict(self) -> JsonDict:
+        return {
+            "strategy": self.strategy,
+            "steps": [item.to_dict() for item in self.steps],
+            "direct_urls": list(self.direct_urls),
+            "query_variants": list(self.query_variants),
+        }
+
+    @classmethod
+    def from_dict(cls, payload: JsonDict) -> ResearchPlan:
+        return cls(
+            strategy=str(payload.get("strategy", "search_first") or "search_first"),
+            steps=tuple(ResearchPlanStep.from_dict(dict(item)) for item in payload.get("steps") or ()),
+            direct_urls=_coerce_str_tuple(payload.get("direct_urls")),
+            query_variants=_coerce_str_tuple(payload.get("query_variants")),
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class QueryPlan:
     task: TaskSpec
     queries: tuple[str, ...]
     max_results: int = 5
     strategy: str = "search_first"
+    research_plan: ResearchPlan | None = None
 
     def to_dict(self) -> JsonDict:
         return {
@@ -92,6 +146,7 @@ class QueryPlan:
             "queries": list(self.queries),
             "max_results": self.max_results,
             "strategy": self.strategy,
+            "research_plan": self.research_plan.to_dict() if self.research_plan is not None else None,
         }
 
     @classmethod
@@ -101,6 +156,9 @@ class QueryPlan:
             queries=_coerce_str_tuple(payload.get("queries")),
             max_results=_coerce_positive_int(payload.get("max_results"), default=5),
             strategy=str(payload.get("strategy", "search_first") or "search_first"),
+            research_plan=ResearchPlan.from_dict(dict(payload["research_plan"]))
+            if payload.get("research_plan")
+            else None,
         )
 
 
@@ -286,6 +344,8 @@ class EvidencePackageSource:
     title: str = ""
     host: str = ""
     source_type: str = "Unknown"
+    source_role: str = ""
+    quality_label: str = ""
     fetched: bool = False
     fetched_at: str = ""
     stale: bool = False
@@ -296,6 +356,8 @@ class EvidencePackageSource:
             "title": self.title,
             "host": self.host,
             "source_type": self.source_type,
+            "source_role": self.source_role,
+            "quality_label": self.quality_label,
             "fetched": self.fetched,
             "fetched_at": self.fetched_at,
             "stale": self.stale,
@@ -308,6 +370,8 @@ class EvidencePackageSource:
             title=str(payload.get("title", "") or ""),
             host=str(payload.get("host", "") or ""),
             source_type=str(payload.get("source_type", "Unknown") or "Unknown"),
+            source_role=str(payload.get("source_role", "") or ""),
+            quality_label=str(payload.get("quality_label", "") or ""),
             fetched=bool(payload.get("fetched", False)),
             fetched_at=str(payload.get("fetched_at", "") or ""),
             stale=bool(payload.get("stale", False)),

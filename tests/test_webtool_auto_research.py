@@ -42,6 +42,15 @@ def test_auto_research_triggers_on_url():
     assert d.url.startswith("https://")
 
 
+def test_auto_research_keeps_full_long_url():
+    url = "https://example.com/research/" + "very-long-path-segment-" * 18 + "final"
+
+    d = decide_auto_research(f"Bitte prüfe {url}")
+
+    assert d.enabled is True
+    assert d.url == url
+
+
 def test_auto_research_routes_finance_listing_url_to_current_info():
     url = (
         "https://www.reutersconnect.com/item/"
@@ -55,6 +64,23 @@ def test_auto_research_routes_finance_listing_url_to_current_info():
     assert d.capability == "websearch"
     assert d.reason == "market_current_info_signal"
     assert d.query.startswith("Ist SpaceX an der Börse?")
+    assert d.url == url
+
+
+def test_auto_research_keeps_full_url_when_finance_listing_prompt_is_long():
+    url = (
+        "https://www.reutersconnect.com/item/"
+        "spacexs-initial-public-offering-ipo-at-the-nasdaq-marketsite-in-new-york-city/"
+        "dGFnOnJldXRlcnMuY29tLDIwMjY6bmV3c21sX1JDMktTTEFSWE05Vw"
+    )
+    filler = " ".join(["bitte sehr genau prüfen"] * 20)
+
+    d = decide_auto_research(f"Ist SpaceX an der Börse? {filler} Quelle: {url}")
+
+    assert d.enabled is True
+    assert d.capability == "websearch"
+    assert d.reason == "market_current_info_signal"
+    assert len(d.query) < len(f"Ist SpaceX an der Börse? {filler} Quelle: {url}")
     assert d.url == url
 
 

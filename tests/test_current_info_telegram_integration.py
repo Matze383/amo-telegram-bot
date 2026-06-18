@@ -219,6 +219,74 @@ def test_current_info_autoreply_accepts_spacex_listing_url_as_user_evidence() ->
     assert ai.prompts is None
 
 
+def test_current_info_autoreply_keeps_full_long_url_in_request() -> None:
+    url = "https://example.com/research/" + "very-long-path-segment-" * 18 + "final"
+    prompt = f"@amo_bot Bitte prüfe diese Quelle und sag, ob sie belastbar ist: {url}"
+    answer = CurrentInfoAnswer(
+        status="answered",
+        answer_text="Die Quelle wurde geprüft.",
+        request=CurrentInfoRequest(query=prompt),
+        sources=(url,),
+        confidence=0.72,
+    )
+    service = _CurrentInfoService(answer)
+    dispatcher, sent = _dispatcher(service=service, ai=_AIService(response="Die Quelle wurde geprüft."))
+
+    handled = asyncio.run(
+        dispatcher._maybe_handle_current_info_autoreply(
+            message=_message(prompt),
+            role=Role.ADMIN,
+            normalized_text=prompt,
+            locale="de",
+        )
+    )
+
+    assert handled is True
+    assert service.requests[0].query == prompt
+    assert url in service.requests[0].query
+    assert service.requests[0].metadata["direct_url"] == url
+    assert sent == [f"Die Quelle wurde geprüft.\n\nQuellen:\n1. {url}"]
+
+
+def test_current_info_autoreply_preserves_long_finance_listing_url() -> None:
+    url = (
+        "https://www.reutersconnect.com/item/"
+        "spacexs-initial-public-offering-ipo-at-the-nasdaq-marketsite-in-new-york-city/"
+        "dGFnOnJldXRlcnMuY29tLDIwMjY6bmV3c21sX1JDMktTTEFSWE05Vw"
+    )
+    filler = " ".join(["bitte sehr genau prüfen"] * 20)
+    normalized = f"Ist SpaceX an der Börse? {filler} Quelle: {url}"
+    answer = CurrentInfoAnswer(
+        status="unverified_evidence",
+        answer_text="",
+        request=CurrentInfoRequest(query=normalized),
+        sources=(url,),
+        warnings=("finance_listing_requires_verified_sources",),
+        confidence=0.58,
+    )
+    service = _CurrentInfoService(answer)
+    dispatcher, sent = _dispatcher(service=service, ai=_AIService(response="SpaceX ist sicher börsennotiert."))
+
+    handled = asyncio.run(
+        dispatcher._maybe_handle_current_info_autoreply(
+            message=_message(f"@amo_bot {normalized}"),
+            role=Role.ADMIN,
+            normalized_text=normalized,
+            locale="de",
+        )
+    )
+
+    assert handled is True
+    assert service.requests[0].query == normalized
+    assert service.requests[0].metadata["direct_url"] == url
+    assert url in service.requests[0].query
+    assert sent == [
+        "Die verfügbaren geprüften Quellen reichen nicht aus, um das verlässlich zu beantworten.\n\n"
+        "Geprüfte Quellen:\n"
+        f"1. {url}"
+    ]
+
+
 def test_current_info_synthesis_timeout_falls_back_without_sending() -> None:
     answer = CurrentInfoAnswer(
         status="answered",

@@ -77,7 +77,7 @@ def decide_auto_research(text: str, *, now: datetime | None = None) -> AutoResea
 
     url_match = _URL_RE.search(raw)
     if url_match:
-        url = _sanitize_text(url_match.group(0), max_len=240)
+        url = url_match.group(0).rstrip(".,;:!?)]}'\"")
         if is_finance_listing_query(raw) and _MARKET_CURRENT_SIGNAL_RE.search(raw):
             return AutoResearchDecision(True, "websearch", "market_current_info_signal", _sanitize_text(raw, max_len=220), url)
         capability = "browser" if url.startswith("https://") else "webscraping"
