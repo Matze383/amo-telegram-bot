@@ -179,6 +179,11 @@ def test_auto_research_uses_generic_current_data_classifier_for_category_prompts
         "Was sagen die neuesten Umfragen?",
         "Ist der Dienst gerade down?",
         "Welche Filme laufen heute im Kino?",
+        "Ist GitHub Actions gerade down?",
+        "Ist die aktuelle FastAPI Version laut offiziellen Release Notes draußen?",
+        "Ist die Playstation Portal heute bei Saturn lieferbar?",
+        "Welche Bürgeramt Termine gibt es heute in Berlin?",
+        "What is the current OpenAI API status?",
     ]
     for prompt in prompts:
         d = decide_auto_research(prompt)
@@ -198,6 +203,8 @@ def test_auto_research_classifier_does_not_trigger_timeless_prompts():
         "Schreib mir eine Geschichte über eine WM",
         "Was ist eine Programmiersprache?",
         "Wie kann ich besser schlafen?",
+        "Schreib mir eine API-Dokumentation für mein Hobbyprojekt",
+        "Was bedeutet local variable scope in Python?",
     ]
     for prompt in prompts:
         d = decide_auto_research(prompt)

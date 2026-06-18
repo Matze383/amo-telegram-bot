@@ -44,6 +44,7 @@ _QUESTION_RE = re.compile(
 _TIMELESS_CREATIVE_RE = re.compile(
     r"\b(?:"
     r"erkl(?:ä|ae)r(?:e|en)?|explain|was\s+ist|what\s+is|warum|why|wie\s+kann|how\s+can|"
+    r"was\s+bedeutet|what\s+does|bedeutet|means?|"
     r"schreib(?:e)?|write|geschichte|story|märchen|maerchen|poem|gedicht|"
     r"definition|grundlagen|basics|tutorial|concept|konzept"
     r")\b",
@@ -68,17 +69,20 @@ _TEMPORAL_CURRENT_RE = re.compile(
 )
 _PRICE_RE = re.compile(
     r"\b(?:kostet|preis(?:e)?|price(?:s)?|kurs(?:e)?|rate(?:s)?|tarif(?:e)?|angebot(?:e)?|"
-    r"verf(?:ü|ue)gbarkeit|availability|available|stock|lieferbar|in\s+stock)\b",
+    r"verf(?:ü|ue)gbarkeit|availability|available|stock|lieferbar|in\s+stock|"
+    r"ausverkauft|sold\s+out|vorbestell(?:en|bar)|pre[-\s]?order)\b",
     re.IGNORECASE,
 )
 _STATUS_RE = re.compile(
     r"\b(?:status|down|st(?:ö|oe)rung(?:en)?|ausfall|outage(?:s)?|incident(?:s)?|"
-    r"funktioniert|offline|online|erreichbar|läuft|laeuft|running)\b",
+    r"funktioniert|offline|online|erreichbar|läuft|laeuft|running|"
+    r"statuspage|wartung|maintenance|degraded|problem(?:e)?|issue(?:s)?)\b",
     re.IGNORECASE,
 )
 _VERSION_RE = re.compile(
     r"\b(?:version(?:en)?|release(?:s|d)?|erschienen|drau(?:ß|ss)en|changelog|update(?:s)?|"
-    r"verf(?:ü|ue)gbar|available|published|launched)\b",
+    r"verf(?:ü|ue)gbar|available|published|launched|stable|beta|rc|"
+    r"npm|pypi|github\s+release|release\s+notes)\b",
     re.IGNORECASE,
 )
 _SCHEDULE_RESULTS_RE = re.compile(
@@ -92,9 +96,20 @@ _SCHEDULE_RESULTS_RE = re.compile(
 )
 _WEATHER_RE = re.compile(r"\b(?:wetter|weather|regen|rain|temperatur|temperature|forecast)\b", re.IGNORECASE)
 _NEWS_RE = re.compile(r"\b(?:news|nachrichten|meldung(?:en)?|neu(?:es|igkeiten)|latest)\b", re.IGNORECASE)
+_DOCS_OFFICIAL_RE = re.compile(
+    r"\b(?:docs?|documentation|dokumentation|api\s+docs?|official|offiziell(?:e[nrms]?)?|"
+    r"primary\s+source|quelle|release\s+notes|changelog)\b",
+    re.IGNORECASE,
+)
+_LOCAL_REGION_RE = re.compile(
+    r"\b(?:near|nearby|lokal|regional|region|stadt|city|"
+    r"berlin|hamburg|münchen|muenchen|köln|koeln|deutschland|germany)\b",
+    re.IGNORECASE,
+)
 _EXTERNAL_NOUN_RE = re.compile(
     r"\b(?:dienst|service|anbieter|provider|vodafone|telekom|o2|python|iphone|kino|berlin|"
-    r"deutschland|germany|markt|market|produkt|product|app|website|server)\b",
+    r"deutschland|germany|markt|market|produkt|product|app|website|server|"
+    r"api|sdk|library|bibliothek|package|paket|github|npm|pypi|docker|openai|anthropic)\b",
     re.IGNORECASE,
 )
 
@@ -140,6 +155,10 @@ class HeuristicCurrentDataClassifier:
             signals.append("weather")
         if _NEWS_RE.search(raw):
             signals.append("news")
+        if _DOCS_OFFICIAL_RE.search(raw):
+            signals.append("docs_or_official")
+        if _LOCAL_REGION_RE.search(raw):
+            signals.append("local_or_region")
         if _EXTERNAL_NOUN_RE.search(raw):
             signals.append("external_entity")
         if _QUESTION_RE.search(raw):
@@ -155,6 +174,8 @@ class HeuristicCurrentDataClassifier:
                 "schedule_results_polls",
                 "weather",
                 "news",
+                "docs_or_official",
+                "local_or_region",
                 "external_entity",
             }
         )
@@ -176,6 +197,24 @@ class HeuristicCurrentDataClassifier:
                 "requires_current_data", "semantic_current_data_required", _dedupe(signals), True
             )
         if "schedule_results_polls" in signal_set and "temporal_current" in signal_set:
+            return CurrentDataDecision(
+                "requires_current_data", "semantic_current_data_required", _dedupe(signals), True
+            )
+        if "docs_or_official" in signal_set and (
+            "version_or_release" in signal_set
+            or "temporal_current" in signal_set
+            or "question_intent" in signal_set
+        ):
+            return CurrentDataDecision(
+                "requires_current_data", "semantic_current_data_required", _dedupe(signals), True
+            )
+        if "local_or_region" in signal_set and (
+            "price_or_availability" in signal_set
+            or "service_status" in signal_set
+            or "schedule_results_polls" in signal_set
+            or "weather" in signal_set
+            or "temporal_current" in signal_set
+        ):
             return CurrentDataDecision(
                 "requires_current_data", "semantic_current_data_required", _dedupe(signals), True
             )

@@ -14,6 +14,10 @@ def test_classifier_requires_current_data_for_category_prompts():
         "Was sagen die neuesten Umfragen?",
         "Ist der Dienst gerade down?",
         "Welche Filme laufen heute im Kino?",
+        "Ist die OpenAI API Statuspage degraded?",
+        "Was ist die aktuelle stabile Django Version laut offiziellen Docs?",
+        "Ist die Playstation Portal gerade bei MediaMarkt lieferbar?",
+        "Welche Termine gibt es heute im Kino in Berlin?",
     ]
     for prompt in prompts:
         decision = classify_current_data(prompt)
@@ -32,6 +36,8 @@ def test_classifier_does_not_require_current_data_for_timeless_prompts():
         "Schreib mir eine Geschichte über eine WM",
         "Was ist eine Programmiersprache?",
         "Wie kann ich besser schlafen?",
+        "Schreib mir eine Dokumentation für meine Beispiel-API",
+        "Was bedeutet local im Python Scope?",
     ]
     for prompt in prompts:
         decision = classify_current_data(prompt)

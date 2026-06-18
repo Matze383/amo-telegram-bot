@@ -1351,3 +1351,176 @@ def test_autoresearch_sports_missing_profile_uses_websearch_but_not_snippet_tabl
     assert calls == []
     assert sent and "Tabelle oder den Stand" in sent[0]
     assert "Team X" not in sent[0]
+
+
+def test_autoresearch_weather_structured_miss_falls_back_to_checked_websearch(monkeypatch):
+    monkeypatch.setattr("amo_bot.telegram.dispatcher.AIRouter.decide", lambda self, **kwargs: _allowing_router_decision())
+    weather_unavailable = SimpleNamespace(
+        allowed=False,
+        decision="deny",
+        reason="weather_location_not_found",
+        text="",
+        sources=(),
+        hosts=(),
+        metadata={},
+        error=None,
+    )
+    search = SimpleNamespace(
+        allowed=True,
+        decision="allow",
+        reason="search_completed",
+        text="Search result says Met Service forecast for Exampletown is 18 C and rain likely.",
+        sources=("https://weather.example/forecast/exampletown",),
+        hosts=("weather.example",),
+        error=None,
+    )
+    scrape = SimpleNamespace(
+        allowed=True,
+        decision="allow",
+        reason="scrape_completed",
+        text=(
+            "Exampletown forecast published today by Weather Example. Current conditions and forecast: "
+            "temperature 18 C, rain likely this afternoon, wind moderate. Updated 2026-06-18 09:00 UTC."
+        ),
+        sources=("https://weather.example/forecast/exampletown",),
+        hosts=("weather.example",),
+        error=None,
+    )
+    d, sent = _mk_sequence_dispatcher([weather_unavailable, search, scrape])
+    d.web_evidence_pipeline = WebEvidencePipeline()
+    calls = []
+
+    async def _ask(prompt: str) -> str:
+        calls.append(prompt)
+        return "normal ai"
+
+    d.ai_service.ask = _ask
+    asyncio.run(
+        d._maybe_handle_ai_autoreply(
+            message=_mk_message("@amo_bot Wetter morgen in Exampletown", reply_to_is_bot=False, reply_to_user_is_bot=False, reply_to_username=""),
+            role=Role.ADMIN,
+            bot_username="amo_bot",
+            from_parsed_update=True,
+        )
+    )
+
+    assert [c.capability for c in d.webtool_dispatcher.calls] == ["weather_evidence", "websearch", "webscraping"]
+    assert sent == ["normal ai"]
+    assert calls and "AUTO-RESEARCH (LIVE WEB + SOURCE CHECK)" in calls[0]
+    assert "temperature 18 C" in calls[0]
+
+
+def test_autoresearch_generic_status_release_and_availability_search_first(monkeypatch):
+    monkeypatch.setattr("amo_bot.telegram.dispatcher.AIRouter.decide", lambda self, **kwargs: _allowing_router_decision())
+    prompts = [
+        "@amo_bot Ist GitHub Actions gerade down?",
+        "@amo_bot Ist die aktuelle FastAPI Version laut offiziellen Release Notes draußen?",
+        "@amo_bot Ist die Playstation Portal heute bei Saturn lieferbar?",
+    ]
+    for prompt in prompts:
+        search = SimpleNamespace(
+            allowed=True,
+            decision="allow",
+            reason="search_completed",
+            text="Current checked web result summary points to an official current source.",
+            sources=("https://official.example/status",),
+            hosts=("official.example",),
+            error=None,
+        )
+        followup = SimpleNamespace(
+            allowed=True,
+            decision="allow",
+            reason="search_completed",
+            text="Follow-up result keeps the same official current source as the best candidate.",
+            sources=("https://official.example/status",),
+            hosts=("official.example",),
+            error=None,
+        )
+        scrape = SimpleNamespace(
+            allowed=True,
+            decision="allow",
+            reason="scrape_completed",
+            text=(
+                "Official current source page updated today. It contains the requested status, release, "
+                "or availability details with a current timestamp and stable confirmation."
+            ),
+            sources=("https://official.example/status",),
+            hosts=("official.example",),
+            error=None,
+        )
+        d, sent = _mk_sequence_dispatcher([search, followup, scrape])
+        calls = []
+
+        async def _ask(prompt_text: str) -> str:
+            calls.append(prompt_text)
+            return "normal ai"
+
+        d.ai_service.ask = _ask
+        asyncio.run(
+            d._maybe_handle_ai_autoreply(
+                message=_mk_message(prompt, reply_to_is_bot=False, reply_to_user_is_bot=False, reply_to_username=""),
+                role=Role.ADMIN,
+                bot_username="amo_bot",
+                from_parsed_update=True,
+            )
+        )
+
+        assert [c.capability for c in d.webtool_dispatcher.calls] == ["websearch", "websearch", "webscraping"], prompt
+        assert sent == ["normal ai"]
+        assert calls and "AUTO-RESEARCH (LIVE WEB + SOURCE CHECK)" in calls[0]
+
+
+def test_autoresearch_news_accepts_checked_official_primary_source(monkeypatch):
+    monkeypatch.setattr("amo_bot.telegram.dispatcher.AIRouter.decide", lambda self, **kwargs: _allowing_router_decision())
+    search = SimpleNamespace(
+        allowed=True,
+        decision="allow",
+        reason="search_completed",
+        text="Official press release says Acme launched the Example Program today.",
+        sources=("https://press.example.gov/acme/example-program",),
+        hosts=("press.example.gov",),
+        error=None,
+    )
+    followup = SimpleNamespace(
+        allowed=True,
+        decision="allow",
+        reason="search_completed",
+        text="Official source result confirms the Acme Example Program press release.",
+        sources=("https://press.example.gov/acme/example-program",),
+        hosts=("press.example.gov",),
+        error=None,
+    )
+    scrape = SimpleNamespace(
+        allowed=True,
+        decision="allow",
+        reason="scrape_completed",
+        text=(
+            "2026-06-18 Official press release from the Example Government press office: "
+            "Acme launched the Example Program today after approval by the responsible agency, "
+            "with implementation beginning immediately and further official updates to follow."
+        ),
+        sources=("https://press.example.gov/acme/example-program",),
+        hosts=("press.example.gov",),
+        error=None,
+    )
+    d, sent = _mk_sequence_dispatcher([search, followup, scrape])
+    calls = []
+
+    async def _ask(prompt: str) -> str:
+        calls.append(prompt)
+        return "normal ai"
+
+    d.ai_service.ask = _ask
+    asyncio.run(
+        d._maybe_handle_ai_autoreply(
+            message=_mk_message("@amo_bot latest news Acme Example Program", reply_to_is_bot=False, reply_to_user_is_bot=False, reply_to_username=""),
+            role=Role.ADMIN,
+            bot_username="amo_bot",
+            from_parsed_update=True,
+        )
+    )
+
+    assert [c.capability for c in d.webtool_dispatcher.calls] == ["websearch", "websearch", "webscraping"]
+    assert sent == ["normal ai"]
+    assert calls and "Official press release" in calls[0]
+    assert "nicht aus mehreren geprüften Quellen bestätigen" not in sent[0]

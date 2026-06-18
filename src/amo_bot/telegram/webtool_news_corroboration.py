@@ -128,6 +128,20 @@ def assess_news_corroboration(
             best_candidates = current
 
     if not best_candidates:
+        primary_candidates = tuple(
+            candidate
+            for candidate in fresh_candidates
+            if candidate.source_role == "primary" and not candidate.weak_snippet
+        )
+        if primary_candidates:
+            best_primary = max(primary_candidates, key=lambda candidate: len(candidate.text))
+            return NewsCorroborationResult(
+                status="corroborated",
+                supporting_hosts=(best_primary.host,),
+                stale_hosts=stale_hosts,
+                primary_hosts=(best_primary.host,),
+                claim_key=best_primary.claim_key,
+            )
         return NewsCorroborationResult(status="no_corroborated_claim", stale_hosts=stale_hosts)
 
     if all(candidate.weak_snippet for candidate in best_candidates) and _looks_like_repeated_weak_snippet(

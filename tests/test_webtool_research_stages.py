@@ -64,6 +64,25 @@ def test_query_planner_contract_routes_broad_crypto_to_source_checked_search() -
         assert stage.strategy.requires_source_check is True
 
 
+def test_query_planner_contract_routes_generic_current_info_search_first() -> None:
+    prompts = {
+        "Ist GitHub Actions gerade down?": "generic",
+        "Ist die aktuelle FastAPI Version laut offiziellen Release Notes draußen?": "generic",
+        "Ist die Playstation Portal heute bei Saturn lieferbar?": "generic",
+        "Welche Bürgeramt Termine gibt es heute in Berlin?": "generic",
+        "What is the current OpenAI API status?": "generic",
+    }
+    for prompt, domain in prompts.items():
+        stage = build_query_planner_stage(request_text=prompt)
+
+        assert stage.enabled is True, prompt
+        assert stage.domain == domain
+        assert stage.capability == "websearch"
+        assert stage.query
+        assert stage.strategy is not None
+        assert stage.strategy.requires_source_check is True
+
+
 def test_query_planner_contract_does_not_route_common_coin_or_token_phrases_as_crypto() -> None:
     for prompt in (
         "Was ist ein Coin Toss?",

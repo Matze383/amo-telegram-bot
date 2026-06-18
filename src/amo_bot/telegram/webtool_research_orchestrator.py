@@ -84,18 +84,21 @@ _SPORTS_RESULT_OPPONENT_STOPWORDS = frozenset(
 )
 _AUTO_RESEARCH_CHAIN_FRESHNESS_RE = re.compile(
     r"\b(?:"
-    r"current|aktuell(?:e[nrms]?)?|jetzt|heute|live|realtime|real-time|right\s+now|"
+    r"current|aktuell(?:e[nrms]?)?|jetzt|gerade|heute|live|realtime|real-time|right\s+now|"
     r"derzeit|stand|status|neueste(?:n)?|latest|news|nachrichten|release|version|"
     r"update|verf(?:ü|ue)gbar(?:keit)?|availability|weather|wetter|traffic|verkehr|"
-    r"outage|st(?:ö|oe)rung|kurs|preis|price|rate|market|markt|exchange|fx"
+    r"outage|down|degraded|wartung|maintenance|st(?:ö|oe)rung|kurs|preis|price|rate|market|markt|exchange|fx|"
+    r"docs?|documentation|dokumentation|official|offiziell(?:e[nrms]?)?|changelog|"
+    r"release\s+notes|lieferbar|in\s+stock|sold\s+out|local|lokal|regional"
     r")\b",
     re.IGNORECASE,
 )
 _AUTO_RESEARCH_CHAIN_STRONG_FRESHNESS_RE = re.compile(
     r"\b(?:"
     r"jetzt|heute|live|realtime|real-time|right\s+now|derzeit|neueste(?:n)?|latest|"
-    r"news|nachrichten|release|version|update|verf(?:ü|ue)gbar(?:keit)?|availability|"
-    r"weather|wetter|traffic|verkehr|outage|st(?:ö|oe)rung|kurs|preis|price|rate|market|markt"
+    r"news|nachrichten|status|down|degraded|wartung|maintenance|release|version|update|verf(?:ü|ue)gbar(?:keit)?|availability|"
+    r"weather|wetter|traffic|verkehr|outage|st(?:ö|oe)rung|kurs|preis|price|rate|market|markt|"
+    r"official|offiziell(?:e[nrms]?)?|release\s+notes|changelog|lieferbar|sold\s+out"
     r")\b",
     re.IGNORECASE,
 )
@@ -1035,8 +1038,24 @@ def _should_continue_with_generic_websearch(result: DomainEvidenceResult) -> boo
     """Allow search fallback when a dynamic domain lacks a configured source profile."""
     if result.status == "needs_profiled_web_research":
         return True
-    if result.domain not in {"sports", "stock", "crypto"}:
+    if result.domain not in {"weather", "sports", "stock", "crypto"}:
         return False
+    if result.domain == "weather":
+        return any(
+            warning.startswith(
+                (
+                    "weather_provider_not_configured",
+                    "weather_evidence_unavailable",
+                    "weather_provider_error",
+                    "weather_location_missing",
+                    "weather_location_not_found",
+                    "open_meteo_weather:",
+                    "wttr_in_weather:",
+                )
+            )
+            or "weather_" in warning
+            for warning in result.warnings
+        )
     prefixes = (
         f"{result.domain}_domain_profile_not_configured",
         f"{result.domain}_domain_profile_no_usable_source:",
@@ -1642,6 +1661,8 @@ def _format_news_insufficient_sources_response(
     usable_hosts = {host for host in extract_hosts if host}
     if source_quality:
         usable_hosts = set(source_quality.get("usable_hosts", usable_hosts))
+    if any(_is_primary_news_host(host) for host in usable_hosts):
+        return ""
     if len(usable_hosts) >= 2 and not (source_quality or {}).get("conflict_hosts"):
         return ""
     status = "fewer than two checked news sources in this attempt"
@@ -1688,6 +1709,16 @@ def _format_news_uncorroborated_response(*, result: NewsCorroborationResult, loc
         "Ich kann die angefragten aktuellen Nachrichten gerade nicht auf Aussage-Ebene belastbar bestätigen. "
         "Die geprüften Quellen liefern nicht genug unabhängige, aktuelle Bestätigung aus mehreren geprüften Quellen; Unsicherheiten oder Konflikte glätte ich deshalb nicht.\n"
         f"Quelle/Stand: {status}."
+    )
+
+
+def _is_primary_news_host(host: str) -> bool:
+    normalized = (host or "").strip().lower().removeprefix("www.")
+    return bool(
+        normalized.endswith((".gov", ".gov.uk"))
+        or normalized.startswith(("gov.", "regierung.", "bund."))
+        or "official" in normalized
+        or "press" in normalized
     )
 
 
