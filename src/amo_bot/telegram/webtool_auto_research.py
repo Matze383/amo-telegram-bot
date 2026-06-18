@@ -39,7 +39,22 @@ _SPORTS_CURRENT_INTENT_RE = re.compile(
 _MARKET_CURRENT_SIGNAL_RE = re.compile(
     r"\b(?:aktie|aktien|stock|share|shares|stock\s+exchange|nasdaq|nyse|dax|etf|börse|boerse|börsennotiert|boersennotiert|listed|"
     r"publicly\s+traded|ipo|ticker|derivat|derivative|tokeni[sz]ed|perpetual|bybit|usdt|"
+    r"crypto|krypto|kryptow(?:ä|ae)hrung|btc|bitcoin|eth|ethereum|sol|solana|xrp|ripple|"
+    r"ada|cardano|doge|dogecoin|bnb|dot|polkadot|matic|polygon|avax|avalanche|ltc|litecoin|"
     r"[A-Z]{2,16}USDT)\b",
+    re.IGNORECASE,
+)
+_COMMON_CRYPTO_NOUN_RE = re.compile(r"\b(?:coin|coins|token)\b", re.IGNORECASE)
+_CRYPTO_ASSET_HINT_RE = re.compile(
+    r"\b(?:[A-Za-z][A-Za-z0-9-]{1,24}(?:coin|token)|[A-Z0-9]{2,20}USDT)\b",
+    re.IGNORECASE,
+)
+_CRYPTO_CONTEXT_RE = re.compile(
+    r"\b(?:"
+    r"btc|bitcoin|eth|ethereum|sol|solana|xrp|ripple|ada|cardano|doge|dogecoin|"
+    r"crypto|krypto|kryptow(?:ä|ae)hrung|kurs|price|preis|market|exchange|blockchain|"
+    r"wallet|dex|cex|usdt|bybit|tokeni[sz]ed|perpetual|derivat|derivative|trade|traden|handeln"
+    r")\b",
     re.IGNORECASE,
 )
 _MARKET_CURRENT_INTENT_RE = re.compile(
@@ -93,8 +108,15 @@ def decide_auto_research(text: str, *, now: datetime | None = None) -> AutoResea
         and (sports_query.has_phase(raw) or sports_query.infer_need(raw) != "sport_context")
         and (_SPORTS_CURRENT_INTENT_RE.search(raw) or re.search(r"\b(?:wie|was|wann|wer|wo)\b", lowered))
     )
+    has_common_crypto_noun_with_context = bool(_COMMON_CRYPTO_NOUN_RE.search(raw) and _CRYPTO_CONTEXT_RE.search(raw))
+    has_market_signal = bool(
+        _MARKET_CURRENT_SIGNAL_RE.search(raw)
+        or _CRYPTO_ASSET_HINT_RE.search(raw)
+        or has_common_crypto_noun_with_context
+        or is_finance_listing_query(raw)
+    )
     has_market_current_signal = bool(
-        (_MARKET_CURRENT_SIGNAL_RE.search(raw) or is_finance_listing_query(raw))
+        has_market_signal
         and (
             _MARKET_CURRENT_INTENT_RE.search(raw)
             or is_finance_listing_query(raw)
@@ -111,6 +133,11 @@ def decide_auto_research(text: str, *, now: datetime | None = None) -> AutoResea
             else "current_info_signal"
         )
         return AutoResearchDecision(True, "websearch", reason, _sanitize_text(raw, max_len=220), "")
+
+    if _COMMON_CRYPTO_NOUN_RE.search(raw) and not (
+        _CRYPTO_ASSET_HINT_RE.search(raw) or has_common_crypto_noun_with_context or _MARKET_CURRENT_SIGNAL_RE.search(raw)
+    ):
+        return AutoResearchDecision(False, "", "timeless_or_unclear", "", "")
 
     classifier_decision = classify_current_data(
         raw,

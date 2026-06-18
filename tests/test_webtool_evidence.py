@@ -166,6 +166,14 @@ def test_domain_classifier_routes_problem_prompts():
     assert classify_evidence_domain("Erklär mir Python decorators") == "generic"
     assert classify_evidence_domain("Was ist ACMEUSDT auf Bybit?") == "crypto"
     assert classify_evidence_domain("Gibt es ExampleCo tokenized exposure auf Bybit?") == "crypto"
+    assert classify_evidence_domain("Was macht Solana?") == "crypto"
+    assert classify_evidence_domain("XRP price now") == "crypto"
+    assert classify_evidence_domain("Wie steht Dogecoin aktuell?") == "crypto"
+    assert classify_evidence_domain("BlorpCoin") == "crypto"
+    assert classify_evidence_domain("FooToken") == "crypto"
+    assert classify_evidence_domain("BlorpCoin token price now") == "crypto"
+    assert classify_evidence_domain("coin price now") == "crypto"
+    assert classify_evidence_domain("Was ist ein Blockchain token?") == "crypto"
     assert classify_evidence_domain("Ist SpaceX an der Börse?") == "stock"
     assert classify_evidence_domain("Ist Anthropic an der Börse?") == "stock"
     assert classify_evidence_domain("Ist Siemens an der Börse?") == "stock"
@@ -184,6 +192,17 @@ def test_domain_classifier_routes_problem_prompts():
     assert classify_evidence_domain("NYSE Anthropic") == "stock"
     assert classify_evidence_domain("NYSE FooBarBaz AG") == "stock"
     assert classify_evidence_domain("Ist Anthropic öffentlich gelistet?") == "stock"
+
+
+def test_domain_classifier_ignores_common_standalone_coin_and_token_phrases():
+    prompts = [
+        "Was ist ein Coin Toss?",
+        "coin collector",
+        "token bucket",
+        "Wie funktioniert ein Token Bucket Algorithmus?",
+    ]
+    for prompt in prompts:
+        assert classify_evidence_domain(prompt) == "generic", prompt
 
 
 def test_open_meteo_provider_builds_confirmed_weather_evidence_from_mock():
@@ -907,6 +926,23 @@ def test_derivative_exchange_queries_route_to_crypto_listing_research_not_stock_
             "strategy:verified_crypto_listing_web_research",
         )
         assert "finance_listing" not in " ".join(result.warnings)
+
+
+def test_generic_crypto_queries_use_builtin_crypto_web_research_profile():
+    for query in (
+        "Was macht Solana?",
+        "XRP price now",
+        "BlorpCoin token price now",
+    ):
+        result = WebEvidencePipeline().evaluate(query=query, locale="de")
+
+        assert result.domain == "crypto"
+        assert result.status == "needs_profiled_web_research"
+        assert "Need: crypto_quote" in result.text
+        assert result.warnings == (
+            "crypto_domain_profile_builtin_source:crypto_quote",
+            "strategy:verified_crypto_quote_web_research",
+        )
 
 
 def test_finance_unknown_entity_fails_closed_without_guessing_ticker(tmp_path):

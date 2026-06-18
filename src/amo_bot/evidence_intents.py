@@ -29,7 +29,25 @@ _FINANCE_EXPOSURE_RE = re.compile(
 
 _WEATHER_RE = re.compile(r"\b(?:wetter|weather|temperatur|temperature|regen|rain|forecast|vorhersage)\b", re.IGNORECASE)
 _CRYPTO_RE = re.compile(
-    r"\b(?:btc|bitcoin|eth|ethereum|crypto|krypto|kryptow(?:ä|ae)hrung|kurs|price|preis|usdt|token|bybit)\b",
+    r"\b(?:"
+    r"btc|bitcoin|eth|ethereum|sol|solana|xrp|ripple|ada|cardano|doge|dogecoin|"
+    r"bnb|binance\s+coin|dot|polkadot|matic|polygon|avax|avalanche|ltc|litecoin|"
+    r"link|chainlink|xlm|stellar|ton|toncoin|trx|tron|"
+    r"crypto|krypto|kryptow(?:ä|ae)hrung|usdt|bybit"
+    r")\b",
+    re.IGNORECASE,
+)
+_COMMON_CRYPTO_NOUN_RE = re.compile(r"\b(?:coin|coins|token)\b", re.IGNORECASE)
+_CRYPTO_CONTEXT_RE = re.compile(
+    r"\b(?:"
+    r"btc|bitcoin|eth|ethereum|sol|solana|xrp|ripple|ada|cardano|doge|dogecoin|"
+    r"crypto|krypto|kryptow(?:ä|ae)hrung|kurs|price|preis|market|exchange|blockchain|"
+    r"wallet|dex|cex|usdt|bybit|tokeni[sz]ed|perpetual|derivat|derivative|trade|traden|handeln"
+    r")\b",
+    re.IGNORECASE,
+)
+_CRYPTO_ASSET_HINT_RE = re.compile(
+    r"\b(?:[A-Za-z][A-Za-z0-9-]{1,24}(?:coin|token)|[A-Z0-9]{2,20}USDT)\b",
     re.IGNORECASE,
 )
 _STOCK_RE = re.compile(
@@ -75,11 +93,12 @@ def classify_evidence_domain(text: str) -> str:
         return "weather"
     if is_derivative_exchange_query(raw):
         return "crypto"
-    if _CRYPTO_RE.search(raw) and re.search(
-        r"\b(?:btc|bitcoin|eth|ethereum|crypto|krypto|kurs|price|preis|usdt|token|bybit)\b",
-        raw,
-        re.IGNORECASE,
-    ):
+    has_crypto_signal = bool(
+        _CRYPTO_RE.search(raw)
+        or _CRYPTO_ASSET_HINT_RE.search(raw)
+        or (_COMMON_CRYPTO_NOUN_RE.search(raw) and _CRYPTO_CONTEXT_RE.search(raw))
+    )
+    if has_crypto_signal:
         if re.search(
             r"\b(?:aktie|stock|share|shares|börsennotiert|boersennotiert|"
             r"(?:öffentlich|oeffentlich)\s+gelistet|listed|publicly\s+(?:traded|listed)|"

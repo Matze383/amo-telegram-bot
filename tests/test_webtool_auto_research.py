@@ -18,6 +18,46 @@ def test_auto_research_triggers_on_crypto_current_price_de_and_en():
     assert d_en.enabled is True and d_en.capability == "websearch"
 
 
+def test_auto_research_triggers_on_broad_crypto_names_symbols_and_unknown_coin():
+    prompts = [
+        "Was macht Solana?",
+        "XRP price now",
+        "Wie steht Dogecoin aktuell?",
+        "Was ist BlorpCoin?",
+        "Was ist FooToken?",
+        "BlorpCoin token price now",
+    ]
+    for prompt in prompts:
+        d = decide_auto_research(prompt)
+        assert d.enabled is True, prompt
+        assert d.capability == "websearch"
+        assert d.reason in {"market_current_info_signal", "current_info_signal"}
+
+
+def test_auto_research_does_not_treat_standalone_coin_or_token_as_crypto_current_signal():
+    prompts = [
+        "Was ist ein Coin Toss?",
+        "coin collector",
+        "token bucket",
+        "Wie funktioniert ein Token Bucket Algorithmus?",
+    ]
+    for prompt in prompts:
+        d = decide_auto_research(prompt)
+        assert d.enabled is False, prompt
+
+
+def test_auto_research_allows_common_crypto_nouns_with_market_context():
+    prompts = [
+        "coin price now",
+        "token market aktuell",
+        "Was ist ein Blockchain token?",
+    ]
+    for prompt in prompts:
+        d = decide_auto_research(prompt)
+        assert d.enabled is True, prompt
+        assert d.capability == "websearch"
+
+
 def test_auto_research_triggers_on_generic_company_listing_and_derivative_prompts():
     prompts = [
         "Ist SpaceX an der Börse?",

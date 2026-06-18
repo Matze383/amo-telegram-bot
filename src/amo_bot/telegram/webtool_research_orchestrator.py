@@ -1090,8 +1090,17 @@ def should_chain_auto_research(text: str, *, capability: str, reason: str | None
     if _AUTO_RESEARCH_CHAIN_EXPLICIT_CURRENT_PHRASE_RE.search(raw):
         return True
     has_sports_freshness = sports_query.has_sports_signal(raw)
-    has_finance_listing_freshness = classify_evidence_domain(raw) in {"stock", "crypto"} and is_finance_listing_query(raw)
-    has_freshness = bool(_AUTO_RESEARCH_CHAIN_FRESHNESS_RE.search(raw)) or has_sports_freshness or has_finance_listing_freshness
+    evidence_domain = classify_evidence_domain(raw)
+    has_crypto_freshness = evidence_domain == "crypto"
+    if has_crypto_freshness:
+        return True
+    has_finance_listing_freshness = evidence_domain in {"stock", "crypto"} and is_finance_listing_query(raw)
+    has_freshness = (
+        bool(_AUTO_RESEARCH_CHAIN_FRESHNESS_RE.search(raw))
+        or has_sports_freshness
+        or has_crypto_freshness
+        or has_finance_listing_freshness
+    )
     if not has_freshness:
         return False
     has_strong_freshness = (

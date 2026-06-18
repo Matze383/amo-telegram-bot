@@ -48,6 +48,35 @@ def test_query_planner_contract_detects_current_sports_result_intent() -> None:
     assert stage.strategy.requires_source_check is True
 
 
+def test_query_planner_contract_routes_broad_crypto_to_source_checked_search() -> None:
+    for prompt in (
+        "Was macht Solana?",
+        "XRP price now",
+        "Was ist FooToken?",
+        "BlorpCoin token price now",
+    ):
+        stage = build_query_planner_stage(request_text=prompt)
+
+        assert stage.enabled is True, prompt
+        assert stage.domain == "crypto"
+        assert stage.capability == "websearch"
+        assert stage.strategy is not None
+        assert stage.strategy.requires_source_check is True
+
+
+def test_query_planner_contract_does_not_route_common_coin_or_token_phrases_as_crypto() -> None:
+    for prompt in (
+        "Was ist ein Coin Toss?",
+        "coin collector",
+        "token bucket",
+    ):
+        stage = build_query_planner_stage(request_text=prompt)
+
+        assert stage.enabled is False, prompt
+        assert stage.domain == "generic"
+        assert stage.strategy is None
+
+
 def test_source_selection_contract_plans_sports_followup_for_partial_result_snippet() -> None:
     search_stage = SearchExecutionStageOutput(
         result=_search_result(

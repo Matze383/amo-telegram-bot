@@ -737,6 +737,84 @@ def test_current_info_service_routes_derivative_exchange_queries_as_crypto_listi
     ]
 
 
+def test_current_info_service_searches_broad_crypto_quotes_without_known_symbol_profile():
+    result = SearchResult(
+        title="Solana price live",
+        url="https://crypto.example/solana",
+        snippet="Solana live market data.",
+        provider="fake_search",
+        rank=1,
+        host="crypto.example",
+    )
+    document = FetchedDocument(
+        url=result.url,
+        title=result.title,
+        text="Solana live market data is available from this checked source.",
+        provider="fake_fetch",
+    )
+    chunk = EvidenceChunk(
+        text="Solana live market data is available from this checked source.",
+        source_url=result.url,
+        source_title=result.title,
+        relevance=0.9,
+    )
+    search_provider = _FakeSearchProvider((result,))
+    service = CurrentInfoService(
+        search_provider=search_provider,
+        fetch_provider=_FakeFetchProvider({result.url: document}),
+        retrieval_provider=_FakeRetrievalProvider((chunk,)),
+    )
+
+    query = "Was macht Solana?"
+    answer = service.answer(
+        CurrentInfoRequest(
+            query=query,
+            locale="de",
+            domain_hint=classify_evidence_domain(query),
+            max_results=3,
+        )
+    )
+
+    assert answer.task is not None
+    assert answer.task.domain == "crypto"
+    assert answer.status == "answered"
+    assert answer.sources == (result.url,)
+    assert [call.query for call in search_provider.calls] == [query]
+
+
+def test_current_info_service_keeps_unknown_crypto_snippets_unverified_after_search():
+    result = SearchResult(
+        title="BlorpCoin token price",
+        url="https://search.example/blorpcoin",
+        snippet="Search snippet claims BlorpCoin is trading at 42 USD.",
+        provider="fake_search",
+        rank=1,
+        host="search.example",
+    )
+    search_provider = _FakeSearchProvider((result,))
+    service = CurrentInfoService(search_provider=search_provider)
+
+    query = "BlorpCoin token price now"
+    answer = service.answer(
+        CurrentInfoRequest(
+            query=query,
+            locale="en",
+            domain_hint=classify_evidence_domain(query),
+            max_results=3,
+        )
+    )
+
+    assert answer.task is not None
+    assert answer.task.domain == "crypto"
+    assert answer.status == "unverified_evidence"
+    assert answer.answer_text == ""
+    assert answer.evidence is not None
+    assert answer.evidence.freshness == "snippet_only"
+    assert "snippet_only_evidence" in answer.warnings
+    assert answer.metadata["reason"] == "current_facts_need_fetched_sources"
+    assert [call.query for call in search_provider.calls] == [query]
+
+
 def test_current_info_service_does_not_treat_plain_stock_price_as_listing_query():
     result = SearchResult(
         title="NVDA Stock Quote",
