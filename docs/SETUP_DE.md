@@ -1623,6 +1623,97 @@ Die SQL-Capability:
 
 ---
 
+## Lern-Feedback und Quellen-Präferenzen (Source Preferences)
+
+AMO kann Quellen-Präferenz-Metadaten aus quellenbezogenem Text-Feedback speichern. Diese Präferenzen beeinflussen, wie Current-Info-Quellen gerankt werden; sie sind keine autoritativen Fakten und erzwingen weder Verwendung noch Ausschluss.
+
+### Was erzeugt Quellen-Präferenzen?
+
+Quellen-Präferenzen werden nur geschrieben, wenn Text-Feedback als `source_preference`-Learning-Candidate erkannt wird und AMO beides extrahieren kann:
+
+- einen Quellen-Host aus einer URL/Domain/Host-Nennung
+- ein Quellen-Signal aus quellenbezogener Sprache
+
+Aktuelles Text-Feedback schreibt nur diese Signale:
+
+| Feedback-Formulierung | Gespeichertes Signal |
+|-----------------------|----------------------|
+| Quelle oder Domain bevorzugen/verwenden/vertrauen | `preferred` |
+| Quelle oder Domain vermeiden/herunterstufen | `low_quality` |
+
+Reaktions-Feedback erzeugt **keine** Quellen-Präferenzen. Reaktionen werden separat als Low-Confidence-Reaktions-Feedback-Memories gespeichert.
+
+Beobachtete Quellenqualität kann Lookup-Ergebnisse ebenfalls beeinflussen, ohne zwingend Zeilen in `research_source_preferences` anzulegen: Die Bewertung von Quellen-Beobachtungen kann Fallback-Präferenz-Datensätze wie `trusted` für erfolgreiche Hosts oder `low_quality` für Fehler/Konflikte ableiten.
+
+### Scope-Grenzen (Geltungsbereiche)
+
+Beim Speichern einer Präferenz wird der Scope aus den verfügbaren IDs gewählt:
+
+| Scope | Wird gespeichert, wenn |
+|-------|-------------------------|
+| `topic` | `chat_id` und `topic_id` verfügbar sind |
+| `chat` | `chat_id` ohne `topic_id` verfügbar ist |
+| `user` | `user_id` ohne Chat-Scope verfügbar ist |
+| `global` | kein User-/Chat-/Topic-Scope verfügbar ist |
+
+Beim Lookup kann AMO passende `global`-, `user`-, `chat`- und `topic`-Filter berücksichtigen. Danach wird der beste Treffer nach Domain-/Host-Match, Scope-Spezifität und Zeitstempel gewählt. Die Spezifitätsreihenfolge ist `global` < `user` < `chat` < `topic`.
+
+### Gespeicherte Signale
+
+Das Repository akzeptiert Aliasse und unterstützt diese gespeicherten Signalwerte:
+
+| Signal | Bedeutung |
+|--------|-----------|
+| `preferred` | Quelle wurde in Text-Feedback bevorzugt |
+| `trusted` | Abgeleitetes oder gespeichertes Trusted-Quellen-Signal |
+| `avoid` | Quelle sollte nach Möglichkeit vermieden werden |
+| `rejected` | Quelle wurde explizit abgelehnt |
+| `low_quality` | Quelle wurde heruntergestuft oder als Low-Quality bewertet |
+| `negative` | Negatives Quellen-Signal |
+
+Der aktuelle Text-Feedback-Writer erzeugt nur `preferred` und `low_quality`.
+
+### Normalisierung und Datenschutz
+
+**Was gespeichert wird:**
+- **Normalisierter Host** (z.B. `example.com`)
+- **Domain-Hint** (z.B. `generic`, `analysis`; das ist keine TLD)
+- **Signal-Typ** (einer der oben genannten Werte)
+- **Weight**
+- **Scope-Informationen** (`scope_type` plus rohe numerische Scope-IDs für `chat_id`, `topic_id` und/oder `user_id`, wenn gescoped)
+- **Source-Marker und Zeitstempel**
+
+**Was NICHT gespeichert wird:**
+- Rohe URLs mit Query-Strings oder Pfaden
+- Der eigentliche Feedback-Text
+- Nachrichteninhalte oder Prompts
+
+**Beispiel:**
+- Eingehende URL: `https://example.com/path?query=secret&token=abc123`
+- Gespeichert: `host="example.com"`, `domain="generic"`, `signal="preferred"`
+
+### Einfluss auf Current-Info und Quellen-Auswahl
+
+Current-Info-Lookup übergibt Quellen-Präferenz-Metadaten an Normalisierung und Ranking von Suchergebnissen:
+
+1. Positive Signale und negative Weights können das Ranking verbessern.
+2. Negative Signale und positive Weights können Quellen herunterstufen.
+3. Das Ergebnis ist Ranking-Einfluss, kein absoluter Einschluss oder Ausschluss.
+
+### Lern-Memories und Trust Boundary
+
+Lern-Memories werden für Router/Modell als **untrusted context** formatiert. Sie können Verhalten leiten, sind aber keine autoritativen Fakten.
+
+Quellen-Präferenzen selbst sind Ranking-Metadaten für die Quellenauswahl. Sie sollten als Hinweise zu Quellenqualität oder Präferenz behandelt werden, nicht als Beweis, dass eine Quelle korrekt ist.
+
+### Datenschutz-Grenzen
+
+Quellen-Präferenz-Zeilen speichern keine rohen URLs, URL-Pfade, Query-Strings, Feedback-Texte, Nachrichteninhalte oder Prompts. Gescope-te Zeilen können rohe numerische Scope-IDs für User-/Chat-/Topic-Scope-Matching speichern.
+
+Learning-Feedback-Logging nutzt metadata-only Decision-Logs wie `learning_feedback.text` und `learning_feedback.source_preference`. Dedizierte Audit-Events namens `source_preference_created` oder `source_preference_updated` werden nicht erzeugt.
+
+---
+
 ## Fehlerbehebung
 
 ### Bot antwortet nicht

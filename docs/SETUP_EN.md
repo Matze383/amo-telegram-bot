@@ -1623,6 +1623,97 @@ The SQL capability:
 
 ---
 
+## Learning Feedback and Source Preferences
+
+AMO can store source preference metadata from source-related text feedback. These preferences influence how Current-Info sources are ranked; they are not authoritative facts and do not force inclusion or exclusion.
+
+### What Creates Source Preferences?
+
+Source preferences are written only when text feedback is detected as a `source_preference` learning candidate and AMO can extract both:
+
+- a source host from a URL/domain/host mention
+- a source signal from source-related language
+
+Current text feedback writes only these signals:
+
+| Feedback wording | Stored signal |
+|------------------|---------------|
+| Prefer/use/trust this source or domain | `preferred` |
+| Avoid/down-rank this source or domain | `low_quality` |
+
+Reaction feedback does **not** create source preferences. Reactions are stored separately as low-confidence reaction feedback memories.
+
+Observed source quality can also influence lookup results without necessarily creating rows in `research_source_preferences`: source observation assessment can derive fallback preference records such as `trusted` for successful hosts or `low_quality` for failures/conflicts.
+
+### Scope Boundaries
+
+When a preference is recorded, its scope is chosen from the available IDs:
+
+| Scope | Recorded when |
+|-------|---------------|
+| `topic` | `chat_id` and `topic_id` are available |
+| `chat` | `chat_id` is available without `topic_id` |
+| `user` | `user_id` is available without chat scope |
+| `global` | no user/chat/topic scope is available |
+
+During lookup, AMO can consider matching `global`, `user`, `chat`, and `topic` filters. It then chooses the best match by domain/host match quality, scope specificity, and timestamp. Specificity order is `global` < `user` < `chat` < `topic`.
+
+### Stored Signals
+
+The repository accepts aliases and supports these stored signal values:
+
+| Signal | Meaning |
+|--------|---------|
+| `preferred` | Source was preferred in text feedback |
+| `trusted` | Derived or stored trusted source signal |
+| `avoid` | Source should be avoided when possible |
+| `rejected` | Source was explicitly rejected |
+| `low_quality` | Source was down-ranked or assessed as low quality |
+| `negative` | Negative source signal |
+
+The current text feedback writer emits `preferred` and `low_quality` only.
+
+### Normalization and Privacy
+
+**What is stored:**
+- **Normalized host** (e.g., `example.com`)
+- **Domain hint** (e.g., `generic`, `analysis`; this is not a TLD)
+- **Signal type** (one of the values above)
+- **Weight**
+- **Scope information** (`scope_type` plus raw numeric scope IDs for `chat_id`, `topic_id`, and/or `user_id` when scoped)
+- **Source marker and timestamps**
+
+**What is NOT stored:**
+- Raw URLs with query strings or paths
+- The actual feedback text
+- Message content or prompts
+
+**Example:**
+- Incoming URL: `https://example.com/path?query=secret&token=abc123`
+- Stored: `host="example.com"`, `domain="generic"`, `signal="preferred"`
+
+### Influence on Current-Info and Source Selection
+
+Current-Info lookup passes source preference metadata into search result normalization and ranking:
+
+1. Positive signals and negative weights can improve rank.
+2. Negative signals and positive weights can down-rank sources.
+3. The result is ranking influence, not absolute inclusion or exclusion.
+
+### Learning Memories and Trust Boundary
+
+Learning memories are formatted for the router/model as **untrusted context**. They can guide behavior but are not authoritative facts.
+
+Source preferences themselves are ranking metadata for source selection. They should be treated as hints about source quality or preference, not as proof that a source is correct.
+
+### Privacy Boundaries
+
+Source preference rows do not store raw URLs, URL paths, query strings, feedback text, message content, or prompts. Scoped rows may store raw numeric scope IDs for user/chat/topic scope matching.
+
+Learning feedback logging uses metadata-only decision logs such as `learning_feedback.text` and `learning_feedback.source_preference`. No dedicated audit events named `source_preference_created` or `source_preference_updated` are emitted.
+
+---
+
 ## Troubleshooting
 
 ### Bot does not respond
