@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Iterable
 
+from amo_bot.evidence_intents import is_finance_listing_query
 from amo_bot.telegram import sports_query
 
 
@@ -35,21 +36,63 @@ _FINANCE_RESEARCH_RE = re.compile(
 _FINANCE_ENTITY_RE = re.compile(
     r"\b(?:[A-Z]{1,5}(?:\.[A-Z])?|[A-ZÄÖÜ][A-Za-zÄÖÜäöüß.-]{2,}(?:\s+[A-ZÄÖÜ][A-Za-zÄÖÜäöüß.-]{2,}){0,3})\b"
 )
+_URL_RE = re.compile(r"https?://[^\s<>()\[\]{}\"']+", re.IGNORECASE)
+_FINANCE_PAIR_RE = re.compile(r"\b[a-z0-9]{2,20}usdt\b", re.IGNORECASE)
+_FINANCE_SUBJECT_TOKEN_RE = re.compile(r"\b[A-Za-zÄÖÜäöüß][A-Za-zÄÖÜäöüß0-9&.-]{1,}\b")
 _FINANCE_STOPWORDS = {
-    "Was",
-    "Wie",
-    "Aktie",
-    "Aktien",
-    "Stock",
-    "Share",
-    "Shares",
-    "Kurs",
-    "Price",
-    "Research",
-    "Fundamentals",
-    "News",
-    "Börse",
-    "Boerse",
+    "a",
+    "about",
+    "aktie",
+    "aktien",
+    "an",
+    "auf",
+    "boerse",
+    "börse",
+    "buy",
+    "bybit",
+    "can",
+    "der",
+    "die",
+    "ein",
+    "eine",
+    "es",
+    "exchange",
+    "for",
+    "frage",
+    "fundamentals",
+    "gibt",
+    "handeln",
+    "ipo",
+    "is",
+    "ist",
+    "kann",
+    "kaufen",
+    "kurs",
+    "listed",
+    "listing",
+    "jetzt",
+    "macht",
+    "man",
+    "nasdaq",
+    "news",
+    "nyse",
+    "ob",
+    "offering",
+    "on",
+    "price",
+    "public",
+    "publicly",
+    "quelle",
+    "research",
+    "share",
+    "shares",
+    "stock",
+    "the",
+    "traded",
+    "usdt",
+    "was",
+    "whether",
+    "wie",
 }
 
 
@@ -144,6 +187,8 @@ def _infer_need(domain: str, query: str) -> tuple[str, tuple[str, ...]]:
     if domain == "stock":
         if not _has_finance_entity(raw):
             return "finance_unknown_entity", ("stock_entity_not_identified",)
+        if is_finance_listing_query(raw):
+            return "finance_listing", ()
         if _FINANCE_RESEARCH_RE.search(raw):
             return "finance_research", ()
         if _FINANCE_QUOTE_RE.search(raw):
@@ -159,11 +204,27 @@ def _infer_need(domain: str, query: str) -> tuple[str, tuple[str, ...]]:
 
 
 def _has_finance_entity(query: str) -> bool:
-    for match in _FINANCE_ENTITY_RE.finditer(query or ""):
+    raw = query or ""
+    if _FINANCE_PAIR_RE.search(raw):
+        return True
+    if _URL_RE.search(raw) and is_finance_listing_query(raw):
+        return True
+    for match in _FINANCE_ENTITY_RE.finditer(raw):
         token = match.group(0).strip()
-        if token and token not in _FINANCE_STOPWORDS:
+        if token and not _is_finance_stopword_token(token):
             return True
+    if is_finance_listing_query(raw):
+        without_urls = _URL_RE.sub(" ", raw)
+        for match in _FINANCE_SUBJECT_TOKEN_RE.finditer(without_urls):
+            token = match.group(0).strip()
+            if token and not _is_finance_stopword_token(token):
+                return True
     return False
+
+
+def _is_finance_stopword_token(token: str) -> bool:
+    parts = tuple(part.casefold() for part in re.findall(r"[A-Za-zÄÖÜäöüß]+", token or ""))
+    return bool(parts) and all(part in _FINANCE_STOPWORDS for part in parts)
 
 
 def _record_supports_need(metadata: dict[str, object], need: str) -> bool:

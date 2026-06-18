@@ -1665,6 +1665,29 @@ class Dispatcher:
             )
             return False
 
+        if isinstance(answer, CurrentInfoAnswer) and answer.status in {"empty_evidence", "unverified_evidence"}:
+            text = self._format_current_info_insufficient_answer(answer=answer, locale=locale)
+            if text.strip():
+                await self._send_text(message.chat.id, text, message.message_thread_id)
+                log_event(
+                    logger,
+                    logging.INFO,
+                    event="current_info.telegram.sent",
+                    component=_COMPONENT,
+                    chat_id=message.chat.id,
+                    message_id=message.message_id,
+                    message_thread_id=message.message_thread_id,
+                    user_id=message.from_user.id,
+                    extra={
+                        "status": answer.status,
+                        "confidence": answer.confidence,
+                        "source_count": len(answer.sources),
+                        "warning_count": len(answer.warnings),
+                        "reason": "insufficient_evidence",
+                    },
+                )
+                return True
+
         if not isinstance(answer, CurrentInfoAnswer) or not answer.answered:
             log_event(
                 logger,
@@ -1788,7 +1811,12 @@ class Dispatcher:
         return (
             "Synthesize a concise Telegram answer from the checked current-info evidence only.\n"
             f"Target language: {target_language}.\n"
-            "Do not invent facts, links, dates, or numbers. If the evidence is uncertain, say so briefly.\n"
+            "Use only the checked evidence below; do not use prior model knowledge.\n"
+            "Do not invent facts, links, dates, numbers, securities listings, exchange listings, or derivatives.\n"
+            "If the evidence does not directly establish a claim, say that the available sources do not establish it.\n"
+            "For finance, listing, ticker, token, derivative, or exchange questions, avoid categorical claims unless the "
+            "evidence directly supports them.\n"
+            "Mention uncertainty briefly when confidence is low or warnings are present.\n"
             "Do not include a source list; the application appends sources separately.\n\n"
             f"User question:\n{query}\n\n"
             f"Evidence confidence: {answer.confidence:.2f}\n"
@@ -1810,6 +1838,22 @@ class Dispatcher:
             return body
 
         label = "Sources" if locale == "en" else "Quellen"
+        source_lines = [f"{index}. {url}" for index, url in enumerate(sources, start=1)]
+        return f"{body}\n\n{label}:\n" + "\n".join(source_lines)
+
+    @staticmethod
+    def _format_current_info_insufficient_answer(*, answer: CurrentInfoAnswer, locale: str) -> str:
+        sources = tuple(dict.fromkeys(source for source in answer.sources if source))[
+            :CURRENT_INFO_SYNTHESIS_MAX_SOURCE_COUNT
+        ]
+        if locale == "en":
+            body = "The available checked sources are not sufficient to answer this reliably."
+            label = "Sources checked"
+        else:
+            body = "Die verfügbaren geprüften Quellen reichen nicht aus, um das verlässlich zu beantworten."
+            label = "Geprüfte Quellen"
+        if not sources:
+            return body
         source_lines = [f"{index}. {url}" for index, url in enumerate(sources, start=1)]
         return f"{body}\n\n{label}:\n" + "\n".join(source_lines)
 

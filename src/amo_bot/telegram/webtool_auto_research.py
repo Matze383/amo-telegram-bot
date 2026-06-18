@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from amo_bot.ai.current_data_classifier import classify_current_data
+from amo_bot.evidence_intents import is_finance_listing_query
 from amo_bot.telegram import sports_query
 
 
@@ -36,11 +37,14 @@ _SPORTS_CURRENT_INTENT_RE = re.compile(
     re.IGNORECASE,
 )
 _MARKET_CURRENT_SIGNAL_RE = re.compile(
-    r"\b(?:aktie|stock|share|shares|nasdaq|nyse|dax|etf|nvidia|nvda|tesla|tsla|apple|aapl|microsoft|msft)\b",
+    r"\b(?:aktie|aktien|stock|share|shares|stock\s+exchange|nasdaq|nyse|dax|etf|börse|boerse|börsennotiert|boersennotiert|listed|"
+    r"publicly\s+traded|ipo|ticker|derivat|derivative|tokeni[sz]ed|perpetual|bybit|usdt|"
+    r"[A-Z]{2,16}USDT)\b",
     re.IGNORECASE,
 )
 _MARKET_CURRENT_INTENT_RE = re.compile(
-    r"\b(?:macht|steht|stand|kurs|price|preis|current|aktuell|jetzt|now|wert|market)\b",
+    r"\b(?:macht|steht|stand|kurs|price|preis|current|aktuell|jetzt|now|wert|market|listing|listed|"
+    r"börsennotiert|boersennotiert|derivat|derivative|kaufen|buy|trade|traden|handeln|handelbar)\b",
     re.IGNORECASE,
 )
 
@@ -74,6 +78,8 @@ def decide_auto_research(text: str, *, now: datetime | None = None) -> AutoResea
     url_match = _URL_RE.search(raw)
     if url_match:
         url = _sanitize_text(url_match.group(0), max_len=240)
+        if is_finance_listing_query(raw) and _MARKET_CURRENT_SIGNAL_RE.search(raw):
+            return AutoResearchDecision(True, "websearch", "market_current_info_signal", _sanitize_text(raw, max_len=220), url)
         capability = "browser" if url.startswith("https://") else "webscraping"
         return AutoResearchDecision(True, capability, "contains_url", "", url)
 
@@ -89,7 +95,11 @@ def decide_auto_research(text: str, *, now: datetime | None = None) -> AutoResea
     )
     has_market_current_signal = bool(
         _MARKET_CURRENT_SIGNAL_RE.search(raw)
-        and (_MARKET_CURRENT_INTENT_RE.search(raw) or re.search(r"\b(?:wie|was)\b", lowered))
+        and (
+            _MARKET_CURRENT_INTENT_RE.search(raw)
+            or is_finance_listing_query(raw)
+            or re.search(r"\b(?:wie|was)\b", lowered)
+        )
     )
 
     if has_temporal or has_year or has_date or has_current_year or has_sports_current_signal or has_market_current_signal:

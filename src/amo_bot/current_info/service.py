@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import logging
+import re
 import time
 from dataclasses import dataclass
+from urllib.parse import urlparse
 
 from amo_bot.current_info.candidates import normalize_dedupe_and_rank_search_results
 from amo_bot.current_info.evidence import assemble_evidence_package
+from amo_bot.evidence_intents import is_finance_listing_query
 from amo_bot.current_info.models import (
     CurrentInfoAnswer,
     CurrentInfoRequest,
@@ -36,6 +39,7 @@ from amo_bot.current_info.search import SearchProviderError
 
 logger = logging.getLogger(__name__)
 
+_URL_RE = re.compile(r"https?://[^\s<>()\[\]{}\"']+", re.IGNORECASE)
 
 @dataclass(frozen=True, slots=True)
 class DefaultCurrentInfoTaskPlanner:
@@ -56,9 +60,14 @@ class DefaultCurrentInfoTaskPlanner:
 class DefaultCurrentInfoQueryPlanner:
     def plan_queries(self, *, request: CurrentInfoRequest, task: TaskSpec) -> QueryPlan:
         query = task.query or request.query.strip()
+        queries = (query,) if query else ()
+        if query and _is_finance_listing_query(request=request, task=task):
+            followup = _finance_listing_followup_query(query)
+            if followup and followup.casefold() != query.casefold():
+                queries = tuple(dict.fromkeys((query, followup)))
         return QueryPlan(
             task=task,
-            queries=(query,) if query else (),
+            queries=queries,
             max_results=request.max_results,
             strategy="search_first",
         )
@@ -149,7 +158,8 @@ class CurrentInfoService:
                 metadata=self._debug_metadata(budget),
             )
 
-        if self._search_provider is None:
+        direct_url_results = _direct_url_search_results(task.query)
+        if self._search_provider is None and not direct_url_results:
             self._log_synthesis(
                 request=request,
                 task=task,
@@ -168,7 +178,21 @@ class CurrentInfoService:
             )
 
         try:
-            search_response = self._run_search_plan(query_plan, locale=task.locale, budget=budget, request=request)
+            if self._search_provider is None:
+                search_response = SearchProviderResponse(
+                    results=normalize_dedupe_and_rank_search_results(
+                        direct_url_results,
+                        max_results=query_plan.max_results,
+                    )
+                )
+            else:
+                search_response = self._run_search_plan(
+                    query_plan,
+                    locale=task.locale,
+                    budget=budget,
+                    request=request,
+                    direct_url_results=direct_url_results,
+                )
         except CurrentInfoBudgetExceeded as exc:
             self._log_synthesis(
                 request=request,
@@ -298,6 +322,28 @@ class CurrentInfoService:
                 confidence=evidence.confidence,
                 metadata=self._debug_metadata(budget, reason="current_facts_need_fetched_sources"),
             )
+        if _needs_stronger_evidence(request=request, task=task, warnings=evidence.warnings):
+            reason_code = _stronger_evidence_reason(evidence.warnings)
+            self._log_synthesis(
+                request=request,
+                task=task,
+                started=started,
+                status="unverified_evidence",
+                budget=budget,
+                reason_code=reason_code,
+            )
+            return CurrentInfoAnswer(
+                status="unverified_evidence",
+                request=request,
+                task=task,
+                query_plan=query_plan,
+                search_bundle=search_bundle,
+                evidence=evidence,
+                sources=tuple(dict.fromkeys(chunk.source_url for chunk in chunks if chunk.source_url)),
+                warnings=evidence.warnings,
+                confidence=evidence.confidence,
+                metadata=self._debug_metadata(budget, reason=reason_code),
+            )
 
         self._log_synthesis(request=request, task=task, started=started, status="answered", budget=budget)
         return CurrentInfoAnswer(
@@ -321,11 +367,12 @@ class CurrentInfoService:
         locale: str,
         budget: CurrentInfoRunBudget,
         request: CurrentInfoRequest,
+        direct_url_results: tuple[SearchResult, ...] = (),
     ) -> SearchProviderResponse:
         assert self._search_provider is not None
-        collected: list[SearchResult] = []
+        collected: list[SearchResult] = list(direct_url_results)
         metrics: list[SearchProviderMetric] = []
-        seen_urls: set[str] = set()
+        seen_urls: set[str] = {item.url for item in direct_url_results if item.url}
         for query in query_plan.queries:
             budget.consume_search_provider_run()
             provider_started = time.perf_counter()
@@ -439,3 +486,68 @@ def _format_answer_text(chunks: tuple[EvidenceChunk, ...]) -> str:
         if text:
             lines.append(text)
     return "\n\n".join(lines)
+
+
+def _direct_url_search_results(query: str) -> tuple[SearchResult, ...]:
+    results: list[SearchResult] = []
+    seen: set[str] = set()
+    for match in _URL_RE.finditer(query or ""):
+        url = match.group(0).rstrip(".,;:!?)]}'\"")
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        parsed = urlparse(url)
+        host = (parsed.hostname or "").lower().rstrip(".")
+        results.append(
+            SearchResult(
+                title=host or url,
+                url=url,
+                snippet="User-provided source URL.",
+                provider="direct_user_url",
+                rank=0,
+                host=host,
+                metadata={"source_type": "user_provided"},
+            )
+        )
+    return tuple(results)
+
+
+def _is_finance_listing_query(*, request: CurrentInfoRequest, task: TaskSpec) -> bool:
+    domain = (task.domain or request.domain_hint or "").strip().lower()
+    text = " ".join((request.query, task.query))
+    return domain in {"stock", "crypto"} and is_finance_listing_query(text)
+
+
+def _finance_listing_followup_query(query: str) -> str:
+    return f"{query.strip()} official source listing derivative exchange"
+
+
+def _needs_stronger_evidence(
+    *,
+    request: CurrentInfoRequest,
+    task: TaskSpec,
+    warnings: tuple[str, ...],
+) -> bool:
+    if not _is_finance_listing_query(request=request, task=task):
+        return False
+    return any(
+        warning in warnings
+        for warning in (
+            "needs_independent_source",
+            "source_conflict",
+            "stale_source",
+            "finance_listing_requires_verified_sources",
+        )
+    )
+
+
+def _stronger_evidence_reason(warnings: tuple[str, ...]) -> str:
+    for warning in (
+        "source_conflict",
+        "stale_source",
+        "needs_independent_source",
+        "finance_listing_requires_verified_sources",
+    ):
+        if warning in warnings:
+            return warning
+    return "insufficient_verified_evidence"

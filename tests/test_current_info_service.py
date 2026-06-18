@@ -27,6 +27,7 @@ from amo_bot.current_info.observability import (
 )
 from amo_bot.current_info.legacy_webtool import LegacyWebtoolCurrentInfoService
 from amo_bot.current_info.search import SearchProviderRateLimited
+from amo_bot.telegram.webtool_evidence import classify_evidence_domain
 
 
 @dataclass
@@ -258,6 +259,286 @@ def test_current_info_service_rejects_chunks_without_fetched_source_even_when_ot
     assert answer.status == "unverified_evidence"
     assert answer.confidence == 0.0
     assert answer.warnings == ("snippet_only_evidence", "unfetched_chunk_evidence")
+
+
+def test_current_info_service_routes_finance_listing_queries_to_listing_evidence_path():
+    result = SearchResult(
+        title="SPCXUSDT Contract | Bybit",
+        url="https://www.bybit.com/en/trade/usdt/SPCXUSDT",
+        snippet="Trade SPCXUSDT on Bybit.",
+        provider="fake_search",
+        rank=1,
+        host="www.bybit.com",
+    )
+    document = FetchedDocument(
+        url=result.url,
+        title=result.title,
+        text="Bybit lists SPCXUSDT as a pre-market perpetual contract.",
+        provider="fake_fetch",
+    )
+    chunk = EvidenceChunk(
+        text="Bybit lists SPCXUSDT as a pre-market perpetual contract.",
+        source_url=result.url,
+        source_title=result.title,
+        relevance=0.9,
+    )
+
+    for query in (
+        "Ist SpaceX an der Börse?",
+        "Kann man SpaceX Aktien kaufen?",
+        "Nasdaq Anthropic",
+        "NYSE Anthropic",
+    ):
+        search_provider = _FakeSearchProvider((result,))
+        service = CurrentInfoService(
+            search_provider=search_provider,
+            fetch_provider=_FakeFetchProvider({result.url: document}),
+            retrieval_provider=_FakeRetrievalProvider((chunk,)),
+        )
+
+        answer = service.answer(
+            CurrentInfoRequest(
+                query=query,
+                locale="de",
+                domain_hint=classify_evidence_domain(query),
+                max_results=3,
+            )
+        )
+
+        assert answer.task is not None
+        assert answer.task.domain == "stock"
+        assert answer.status == "unverified_evidence"
+        assert answer.answer_text == ""
+        assert "finance_listing_requires_verified_sources" in answer.warnings
+        assert [call.query for call in search_provider.calls] == [
+            query,
+            f"{query} official source listing derivative exchange",
+        ]
+
+
+def test_current_info_service_fetches_user_provided_url_for_spacex_ipo_question():
+    url = (
+        "https://www.reutersconnect.com/item/"
+        "spacexs-initial-public-offering-ipo-at-the-nasdaq-marketsite-in-new-york-city/"
+        "dGFnOnJldXRlcnMuY29tLDIwMjY6bmV3c21sX1JDMktTTEFSWE05Vw"
+    )
+    document = FetchedDocument(
+        url=url,
+        title="SpaceX IPO at Nasdaq MarketSite",
+        text="Reuters Connect page text about SpaceX's initial public offering at the Nasdaq MarketSite.",
+        provider="fake_fetch",
+    )
+    chunk = EvidenceChunk(
+        text="Reuters Connect page text about SpaceX's initial public offering at the Nasdaq MarketSite.",
+        source_url=url,
+        source_title=document.title,
+        relevance=0.9,
+    )
+    search_provider = _FakeSearchProvider(())
+    fetch_provider = _FakeFetchProvider({url: document})
+    service = CurrentInfoService(
+        search_provider=search_provider,
+        fetch_provider=fetch_provider,
+        retrieval_provider=_FakeRetrievalProvider((chunk,)),
+    )
+
+    query = f"Ist SpaceX an der Börse? Quelle: {url}"
+    answer = service.answer(
+        CurrentInfoRequest(
+            query=query,
+            locale="de",
+            domain_hint=classify_evidence_domain(query),
+            max_results=3,
+            max_documents=2,
+        )
+    )
+
+    assert answer.task is not None
+    assert answer.task.domain == "stock"
+    assert answer.status == "unverified_evidence"
+    assert answer.sources == (url,)
+    assert "finance_listing_requires_verified_sources" in answer.warnings
+    assert fetch_provider.calls == [(url, "de")]
+    assert [call.query for call in search_provider.calls] == [
+        query,
+        f"{query} official source listing derivative exchange",
+    ]
+
+
+def test_current_info_service_fetches_user_provided_url_for_general_listing_question():
+    url = "https://www.reutersconnect.com/item/anthropic-ipo-at-the-nasdaq-marketsite/example"
+    document = FetchedDocument(
+        url=url,
+        title="Anthropic IPO at Nasdaq MarketSite",
+        text="Reuters Connect page text about Anthropic's initial public offering at the Nasdaq MarketSite.",
+        provider="fake_fetch",
+    )
+    chunk = EvidenceChunk(
+        text="Reuters Connect page text about Anthropic's initial public offering at the Nasdaq MarketSite.",
+        source_url=url,
+        source_title=document.title,
+        relevance=0.9,
+    )
+    search_provider = _FakeSearchProvider(())
+    fetch_provider = _FakeFetchProvider({url: document})
+    service = CurrentInfoService(
+        search_provider=search_provider,
+        fetch_provider=fetch_provider,
+        retrieval_provider=_FakeRetrievalProvider((chunk,)),
+    )
+
+    query = f"Ist Anthropic an der Nasdaq? Quelle: {url}"
+    answer = service.answer(
+        CurrentInfoRequest(
+            query=query,
+            locale="de",
+            domain_hint=classify_evidence_domain(query),
+            max_results=3,
+            max_documents=2,
+        )
+    )
+
+    assert answer.task is not None
+    assert answer.task.domain == "stock"
+    assert answer.status == "unverified_evidence"
+    assert answer.sources == (url,)
+    assert "stock_entity_not_identified" not in answer.warnings
+    assert "finance_listing_requires_verified_sources" in answer.warnings
+    assert fetch_provider.calls == [(url, "de")]
+
+
+def test_current_info_service_routes_derivative_exchange_queries_as_crypto_listing_evidence():
+    result = SearchResult(
+        title="ACMEUSDT Contract | Bybit",
+        url="https://www.bybit.com/en/trade/usdt/ACMEUSDT",
+        snippet="Trade ACMEUSDT on Bybit.",
+        provider="fake_search",
+        rank=1,
+        host="www.bybit.com",
+    )
+    document = FetchedDocument(
+        url=result.url,
+        title=result.title,
+        text="Bybit lists ACMEUSDT as a tokenized pre-market perpetual contract.",
+        provider="fake_fetch",
+    )
+    chunk = EvidenceChunk(
+        text="Bybit lists ACMEUSDT as a tokenized pre-market perpetual contract.",
+        source_url=result.url,
+        source_title=result.title,
+        relevance=0.9,
+    )
+    search_provider = _FakeSearchProvider((result,))
+    service = CurrentInfoService(
+        search_provider=search_provider,
+        fetch_provider=_FakeFetchProvider({result.url: document}),
+        retrieval_provider=_FakeRetrievalProvider((chunk,)),
+    )
+
+    query = "Was ist ACMEUSDT auf Bybit?"
+    answer = service.answer(
+        CurrentInfoRequest(
+            query=query,
+            locale="de",
+            domain_hint=classify_evidence_domain(query),
+            max_results=3,
+        )
+    )
+
+    assert answer.task is not None
+    assert answer.task.domain == "crypto"
+    assert answer.status == "unverified_evidence"
+    assert "finance_listing_requires_verified_sources" in answer.warnings
+    assert [call.query for call in search_provider.calls] == [
+        query,
+        f"{query} official source listing derivative exchange",
+    ]
+
+
+def test_current_info_service_does_not_treat_plain_stock_price_as_listing_query():
+    result = SearchResult(
+        title="NVDA Stock Quote",
+        url="https://finance.example/nvda",
+        snippet="NVDA stock price.",
+        provider="fake_search",
+        rank=1,
+        host="finance.example",
+    )
+    search_provider = _FakeSearchProvider((result,))
+    service = CurrentInfoService(
+        search_provider=search_provider,
+        fetch_provider=_FakeFetchProvider(
+            {result.url: FetchedDocument(url=result.url, title=result.title, text="NVDA stock price is 1.23.")}
+        ),
+        retrieval_provider=_FakeRetrievalProvider(
+            (EvidenceChunk(text="NVDA stock price is 1.23.", source_url=result.url, source_title=result.title),)
+        ),
+    )
+
+    answer = service.answer(CurrentInfoRequest(query="NVDA stock price now", locale="en", domain_hint="stock"))
+
+    assert answer.status == "answered"
+    assert [call.query for call in search_provider.calls] == ["NVDA stock price now"]
+
+
+def test_current_info_service_requires_stronger_evidence_for_finance_listing_claims():
+    result = SearchResult(
+        title="SPCXUSDT Contract | Bybit",
+        url="https://www.bybit.com/en/trade/usdt/SPCXUSDT",
+        snippet="Trade SPCXUSDT on Bybit.",
+        provider="fake_search",
+        rank=1,
+        host="www.bybit.com",
+    )
+    document = FetchedDocument(
+        url=result.url,
+        title=result.title,
+        text="Bybit lists SPCXUSDT as a pre-market perpetual contract.",
+        provider="fake_fetch",
+    )
+    chunk = EvidenceChunk(
+        text="Bybit lists SPCXUSDT as a pre-market perpetual contract.",
+        source_url=result.url,
+        source_title=result.title,
+        relevance=0.9,
+    )
+    search_provider = _FakeSearchProvider((result,))
+    service = CurrentInfoService(
+        search_provider=search_provider,
+        fetch_provider=_FakeFetchProvider({result.url: document}),
+        retrieval_provider=_FakeRetrievalProvider((chunk,)),
+    )
+
+    answer = service.answer(
+        CurrentInfoRequest(
+            query="Ist SpaceX börsennotiert oder ist SPCXUSDT auf Bybit ein Derivat?",
+            locale="de",
+            domain_hint="stock",
+            max_results=3,
+        )
+    )
+
+    assert answer.status == "unverified_evidence"
+    assert answer.answer_text == ""
+    assert answer.confidence == 0.58
+    assert answer.sources == (result.url,)
+    assert "needs_independent_source" in answer.warnings
+    assert "finance_listing_requires_verified_sources" in answer.warnings
+    assert search_provider.calls == [
+        _SearchCall(
+            query="Ist SpaceX börsennotiert oder ist SPCXUSDT auf Bybit ein Derivat?",
+            locale="de",
+            max_results=3,
+        ),
+        _SearchCall(
+            query=(
+                "Ist SpaceX börsennotiert oder ist SPCXUSDT auf Bybit ein Derivat? "
+                "official source listing derivative exchange"
+            ),
+            locale="de",
+            max_results=3,
+        ),
+    ]
 
 
 def test_current_info_service_rewards_two_independent_news_sources_that_agree():

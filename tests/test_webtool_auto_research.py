@@ -18,11 +18,44 @@ def test_auto_research_triggers_on_crypto_current_price_de_and_en():
     assert d_en.enabled is True and d_en.capability == "websearch"
 
 
+def test_auto_research_triggers_on_spacex_listing_and_derivative_prompts():
+    prompts = [
+        "Ist SpaceX an der Börse?",
+        "Was ist SPCXUSDT auf Bybit?",
+        "Kann man SpaceX Aktien kaufen?",
+        "Was ist OPENAIUSDT auf Bybit?",
+        "Gibt es Neuralink tokenized exposure auf Bybit?",
+        "Nasdaq Anthropic",
+        "NYSE Anthropic",
+    ]
+    for prompt in prompts:
+        d = decide_auto_research(prompt)
+        assert d.enabled is True, prompt
+        assert d.capability == "websearch"
+        assert d.reason == "market_current_info_signal"
+
+
 def test_auto_research_triggers_on_url():
     d = decide_auto_research("Bitte prüfe https://example.com/news")
     assert d.enabled is True
     assert d.capability in {"browser", "webscraping"}
     assert d.url.startswith("https://")
+
+
+def test_auto_research_routes_finance_listing_url_to_current_info():
+    url = (
+        "https://www.reutersconnect.com/item/"
+        "spacexs-initial-public-offering-ipo-at-the-nasdaq-marketsite-in-new-york-city/"
+        "dGFnOnJldXRlcnMuY29tLDIwMjY6bmV3c21sX1JDMktTTEFSWE05Vw"
+    )
+
+    d = decide_auto_research(f"Ist SpaceX an der Börse? Quelle: {url}")
+
+    assert d.enabled is True
+    assert d.capability == "websearch"
+    assert d.reason == "market_current_info_signal"
+    assert d.query.startswith("Ist SpaceX an der Börse?")
+    assert d.url == url
 
 
 def test_auto_research_not_triggered_for_smalltalk():

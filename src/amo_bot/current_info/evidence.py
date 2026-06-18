@@ -15,7 +15,7 @@ from amo_bot.current_info.models import (
     SearchResult,
     TaskSpec,
 )
-from amo_bot.telegram.webtool_evidence import classify_evidence_domain
+from amo_bot.evidence_intents import classify_evidence_domain, is_finance_listing_query
 
 
 DEFAULT_MAX_SOURCE_AGE_SECONDS = 7 * 24 * 60 * 60
@@ -72,6 +72,11 @@ def assemble_evidence_package(
             confidence = min(confidence, 0.58)
         elif _source_hosts_agree(chunks):
             confidence = max(confidence, 0.9)
+
+    if _is_finance_listing_query(domain=domain, request=request, task=task):
+        if len(fetched_hosts) < 2:
+            warnings.append("finance_listing_requires_verified_sources")
+            confidence = min(confidence, 0.58)
 
     if _has_source_conflict(chunks):
         warnings.append("source_conflict")
@@ -161,7 +166,16 @@ def _requires_independent_hosts(
         return True
     if any(str(result.metadata.get("source_type") or "") == SOURCE_TYPE_NEWS for result in search_results):
         return True
+    if _is_finance_listing_query(domain=domain, request=request, task=TaskSpec(task_type="", query=request.query)):
+        return True
     return classify_evidence_domain(request.query) == "news"
+
+
+def _is_finance_listing_query(*, domain: str, request: CurrentInfoRequest, task: TaskSpec) -> bool:
+    if domain not in {"stock", "crypto"}:
+        return False
+    text = " ".join((request.query, task.query))
+    return is_finance_listing_query(text)
 
 
 def _has_fetched_chunk(*, chunks: tuple[EvidenceChunk, ...], fetched_urls: frozenset[str]) -> bool:

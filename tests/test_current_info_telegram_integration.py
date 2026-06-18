@@ -131,6 +131,7 @@ def test_current_info_autoreply_synthesizes_and_appends_sources() -> None:
     assert service.requests[0].role == Role.ADMIN
     assert ai.task_types == ["answer_synthesis"]
     assert "Checked evidence" in (ai.prompts or [""])[0]
+    assert "do not use prior model knowledge" in (ai.prompts or [""])[0]
 
 
 def test_current_info_timeout_falls_back_without_sending() -> None:
@@ -147,6 +148,75 @@ def test_current_info_timeout_falls_back_without_sending() -> None:
 
     assert handled is False
     assert sent == []
+
+
+def test_current_info_unverified_evidence_sends_insufficient_answer_without_synthesis() -> None:
+    answer = CurrentInfoAnswer(
+        status="unverified_evidence",
+        answer_text="",
+        request=CurrentInfoRequest(query="Ist SpaceX börsennotiert oder SPCXUSDT ein Derivat?"),
+        sources=("https://www.bybit.com/en/trade/usdt/SPCXUSDT",),
+        warnings=("needs_independent_source", "finance_listing_requires_verified_sources"),
+        confidence=0.58,
+    )
+    service = _CurrentInfoService(answer)
+    ai = _AIService(response="SpaceX ist sicher nicht börsennotiert.")
+    dispatcher, sent = _dispatcher(service=service, ai=ai)
+
+    handled = asyncio.run(
+        dispatcher._maybe_handle_current_info_autoreply(
+            message=_message("@amo_bot Ist SpaceX börsennotiert oder SPCXUSDT ein Derivat?"),
+            role=Role.ADMIN,
+            normalized_text="Ist SpaceX börsennotiert oder SPCXUSDT ein Derivat?",
+            locale="de",
+        )
+    )
+
+    assert handled is True
+    assert sent == [
+        "Die verfügbaren geprüften Quellen reichen nicht aus, um das verlässlich zu beantworten.\n\n"
+        "Geprüfte Quellen:\n"
+        "1. https://www.bybit.com/en/trade/usdt/SPCXUSDT"
+    ]
+    assert ai.prompts is None
+
+
+def test_current_info_autoreply_accepts_spacex_listing_url_as_user_evidence() -> None:
+    url = (
+        "https://www.reutersconnect.com/item/"
+        "spacexs-initial-public-offering-ipo-at-the-nasdaq-marketsite-in-new-york-city/"
+        "dGFnOnJldXRlcnMuY29tLDIwMjY6bmV3c21sX1JDMktTTEFSWE05Vw"
+    )
+    answer = CurrentInfoAnswer(
+        status="unverified_evidence",
+        answer_text="",
+        request=CurrentInfoRequest(query=f"Ist SpaceX an der Börse? Quelle: {url}"),
+        sources=(url,),
+        warnings=("finance_listing_requires_verified_sources",),
+        confidence=0.58,
+    )
+    service = _CurrentInfoService(answer)
+    ai = _AIService(response="SpaceX ist sicher börsennotiert.")
+    dispatcher, sent = _dispatcher(service=service, ai=ai)
+
+    handled = asyncio.run(
+        dispatcher._maybe_handle_current_info_autoreply(
+            message=_message(f"@amo_bot Ist SpaceX an der Börse? Quelle: {url}"),
+            role=Role.ADMIN,
+            normalized_text=f"Ist SpaceX an der Börse? Quelle: {url}",
+            locale="de",
+        )
+    )
+
+    assert handled is True
+    assert service.requests[0].domain_hint == "stock"
+    assert service.requests[0].query == f"Ist SpaceX an der Börse? Quelle: {url}"
+    assert sent == [
+        "Die verfügbaren geprüften Quellen reichen nicht aus, um das verlässlich zu beantworten.\n\n"
+        "Geprüfte Quellen:\n"
+        f"1. {url}"
+    ]
+    assert ai.prompts is None
 
 
 def test_current_info_synthesis_timeout_falls_back_without_sending() -> None:

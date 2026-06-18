@@ -52,7 +52,7 @@
           "url": "https://news-one.example/amo-update",
           "title": "AMO service update",
           "text": "AMO shipped a service update today and enabled the new Current-Info path.",
-          "fetched_at": "2026-06-16T10:00:00+00:00",
+          "fetched_at": "2026-06-18T10:00:00+00:00",
           "status_code": 200,
           "provider": "fixture_fetch"
         },
@@ -60,7 +60,7 @@
           "url": "https://news-two.example/amo-roundup",
           "title": "AMO status roundup",
           "text": "The AMO service update is confirmed by a second independent source.",
-          "fetched_at": "2026-06-16T10:05:00+00:00",
+          "fetched_at": "2026-06-18T10:05:00+00:00",
           "status_code": 200,
           "provider": "fixture_fetch"
         }
@@ -218,6 +218,112 @@
         "min_evidence_coverage": 1.0,
         "max_latency_ms": 1000,
         "max_provider_errors": 1
+      }
+    },
+    {
+      "case_id": "spacex_spcx_bybit_unverified_listing_regression",
+      "query_type": "finance_listing",
+      "request": {
+        "query": "Ist SpaceX börsennotiert oder ist SPCXUSDT auf Bybit ein Derivat?",
+        "locale": "de",
+        "domain_hint": "stock",
+        "max_results": 3,
+        "max_documents": 1
+      },
+      "search_results": [
+        {
+          "title": "SPCXUSDT Contract | Bybit",
+          "url": "https://www.bybit.com/en/trade/usdt/SPCXUSDT",
+          "snippet": "Trade SPCXUSDT on Bybit.",
+          "provider": "fixture_search",
+          "rank": 1,
+          "host": "www.bybit.com",
+          "metadata": {
+            "source_type": "Official"
+          }
+        }
+      ],
+      "search_metrics": [
+        {
+          "provider": "fixture_search",
+          "latency_ms": 10.0,
+          "hit_count": 1,
+          "host_diversity": 1
+        }
+      ],
+      "documents": [
+        {
+          "url": "https://www.bybit.com/en/trade/usdt/SPCXUSDT",
+          "title": "SPCXUSDT Contract | Bybit",
+          "text": "Bybit lists SPCXUSDT as a pre-market perpetual contract.",
+          "fetched_at": "2026-06-17T10:00:00+00:00",
+          "status_code": 200,
+          "provider": "fixture_fetch"
+        }
+      ],
+      "chunks": [
+        {
+          "text": "Bybit lists SPCXUSDT as a pre-market perpetual contract.",
+          "source_url": "https://www.bybit.com/en/trade/usdt/SPCXUSDT",
+          "source_title": "SPCXUSDT Contract | Bybit",
+          "relevance": 0.9
+        }
+      ],
+      "expected": {
+        "statuses": ["unverified_evidence"],
+        "min_sources": 1,
+        "freshness": ["fresh"],
+        "required_evidence_terms": ["SPCXUSDT", "pre-market perpetual contract"],
+        "min_evidence_coverage": 1.0,
+        "max_latency_ms": 1000,
+        "max_provider_errors": 0
+      }
+    },
+    {
+      "case_id": "spacex_ipo_direct_url_unverified_listing_regression",
+      "query_type": "finance_listing",
+      "request": {
+        "query": "Ist SpaceX an der Börse? Quelle: https://www.reutersconnect.com/item/spacexs-initial-public-offering-ipo-at-the-nasdaq-marketsite-in-new-york-city/dGFnOnJldXRlcnMuY29tLDIwMjY6bmV3c21sX1JDMktTTEFSWE05Vw",
+        "locale": "de",
+        "domain_hint": "stock",
+        "max_results": 3,
+        "max_documents": 1
+      },
+      "search_results": [],
+      "search_metrics": [
+        {
+          "provider": "fixture_search",
+          "latency_ms": 10.0,
+          "hit_count": 0,
+          "host_diversity": 0
+        }
+      ],
+      "documents": [
+        {
+          "url": "https://www.reutersconnect.com/item/spacexs-initial-public-offering-ipo-at-the-nasdaq-marketsite-in-new-york-city/dGFnOnJldXRlcnMuY29tLDIwMjY6bmV3c21sX1JDMktTTEFSWE05Vw",
+          "title": "SpaceX IPO at Nasdaq MarketSite",
+          "text": "Reuters Connect page text about SpaceX's initial public offering at the Nasdaq MarketSite.",
+          "fetched_at": "2026-06-17T10:00:00+00:00",
+          "status_code": 200,
+          "provider": "fixture_fetch"
+        }
+      ],
+      "chunks": [
+        {
+          "text": "Reuters Connect page text about SpaceX's initial public offering at the Nasdaq MarketSite.",
+          "source_url": "https://www.reutersconnect.com/item/spacexs-initial-public-offering-ipo-at-the-nasdaq-marketsite-in-new-york-city/dGFnOnJldXRlcnMuY29tLDIwMjY6bmV3c21sX1JDMktTTEFSWE05Vw",
+          "source_title": "SpaceX IPO at Nasdaq MarketSite",
+          "relevance": 0.9
+        }
+      ],
+      "expected": {
+        "statuses": ["unverified_evidence"],
+        "min_sources": 1,
+        "freshness": ["fresh"],
+        "required_evidence_terms": ["SpaceX", "initial public offering", "Nasdaq MarketSite"],
+        "min_evidence_coverage": 1.0,
+        "max_latency_ms": 1000,
+        "max_provider_errors": 0
       }
     }
   ]

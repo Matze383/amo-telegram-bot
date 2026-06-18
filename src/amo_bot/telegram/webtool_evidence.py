@@ -7,6 +7,8 @@ from typing import Any, Protocol
 
 import httpx
 
+from amo_bot.evidence_intents import classify_evidence_domain as _classify_evidence_domain
+from amo_bot.evidence_intents import is_finance_listing_query
 from amo_bot.telegram import sports_query
 from amo_bot.telegram.webtool_domain_profiles import build_domain_research_profile
 
@@ -308,39 +310,28 @@ PROVIDER_REGISTRY: dict[str, ProviderDefinition] = {
 
 
 _WEATHER_RE = re.compile(r"\b(?:wetter|weather|temperatur|temperature|regen|rain|forecast|vorhersage)\b", re.IGNORECASE)
-_CRYPTO_RE = re.compile(r"\b(?:btc|bitcoin|eth|ethereum|crypto|krypto|kryptow(?:ä|ae)hrung|kurs|price|preis)\b", re.IGNORECASE)
+_CRYPTO_RE = re.compile(
+    r"\b(?:btc|bitcoin|eth|ethereum|crypto|krypto|kryptow(?:ä|ae)hrung|kurs|price|preis|usdt|token|bybit)\b",
+    re.IGNORECASE,
+)
 _STOCK_RE = re.compile(
     r"\b(?:aktie|aktien|stock|share|shares|nasdaq|nyse|dax|etf|börse|boerse|ticker|filing|filings|"
-    r"fundamental|fundamentals|research|dividende|dividend|earnings|kgv|nvidia|nvda|tesla|tsla|apple|aapl|microsoft|msft)\b",
+    r"börsennotiert|boersennotiert|listed|publicly\s+traded|ipo|derivat|derivative|tokeni[sz]ed|"
+    r"fundamental|fundamentals|research|dividende|dividend|earnings|kgv)\b",
     re.IGNORECASE,
 )
 _NEWS_RE = re.compile(r"\b(?:news|nachrichten|neueste(?:n)?|latest|breaking|was\s+gibt\s+es\s+(?:heute\s+)?neues)\b", re.IGNORECASE)
-_CURRENT_MARKET_RE = re.compile(r"\b(?:kurs|price|preis|jetzt|now|aktuell|current|macht|steht)\b", re.IGNORECASE)
+_CURRENT_MARKET_RE = re.compile(
+    r"\b(?:kurs|price|preis|jetzt|now|aktuell|current|macht|steht|börsennotiert|boersennotiert|"
+    r"listed|publicly\s+traded|ipo|listing|derivat|derivative|kaufen|buy|trade|traden|handeln|handelbar)\b",
+    re.IGNORECASE,
+)
 _FINANCE_RESEARCH_SIGNAL_RE = re.compile(
     r"\b(?:fundamental|research|filing|filings|earnings|dividende|dividend|kgv)\b",
     re.IGNORECASE,
 )
-
-
 def classify_evidence_domain(text: str) -> str:
-    raw = text or ""
-    if _WEATHER_RE.search(raw):
-        return "weather"
-    if _CRYPTO_RE.search(raw) and re.search(
-        r"\b(?:btc|bitcoin|eth|ethereum|crypto|krypto|kurs|price|preis)\b",
-        raw,
-        re.IGNORECASE,
-    ):
-        if re.search(r"\b(?:aktie|stock|share|shares)\b", raw, re.IGNORECASE):
-            return "stock"
-        return "crypto"
-    if _STOCK_RE.search(raw) and (_CURRENT_MARKET_RE.search(raw) or _FINANCE_RESEARCH_SIGNAL_RE.search(raw)):
-        return "stock"
-    if sports_query.has_sports_signal(raw):
-        return "sports"
-    if _NEWS_RE.search(raw):
-        return "news"
-    return "generic"
+    return _classify_evidence_domain(text)
 
 
 def _target_answer_language_instruction(locale: str) -> str:
@@ -387,7 +378,7 @@ def format_domain_fail_closed_response(*, domain: str, locale: str, warnings: tu
         labels = {
             "weather": "weather values or forecast",
             "crypto": "crypto price",
-            "stock": "stock price",
+            "stock": "stock listing or finance question" if _is_listing_warning(reason) else "stock price",
             "sports": "sports table or standings",
             "news": "current news",
         }
@@ -400,7 +391,7 @@ def format_domain_fail_closed_response(*, domain: str, locale: str, warnings: tu
     labels = {
         "weather": "Wetterwerte oder die Vorhersage",
         "crypto": "Krypto-Kurs",
-        "stock": "Aktienkurs",
+        "stock": "das Börsenlisting oder die Finanzfrage" if _is_listing_warning(reason) else "Aktienkurs",
         "sports": "Tabelle oder den Stand",
         "news": "aktuellen Nachrichten",
     }
@@ -417,6 +408,11 @@ def format_domain_fail_closed_response(*, domain: str, locale: str, warnings: tu
         f"Evidenzstatus: {reason}. Ich rate nicht aus Such-Snippets oder altem Modellwissen.\n"
         "Quelle/Stand: keine bestätigte Quelle in diesem Versuch."
     )
+
+
+def _is_listing_warning(reason: str) -> bool:
+    lowered = (reason or "").casefold()
+    return "finance_listing" in lowered or "listing" in lowered or "derivative" in lowered
 
 
 class WebEvidencePipeline:

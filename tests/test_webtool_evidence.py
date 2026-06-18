@@ -164,6 +164,10 @@ def test_domain_classifier_routes_problem_prompts():
     assert classify_evidence_domain("Wie ist das Wetter morgen in Berlin?") == "weather"
     assert classify_evidence_domain("aktuelle News zu OpenAI") == "news"
     assert classify_evidence_domain("Erklär mir Python decorators") == "generic"
+    assert classify_evidence_domain("Was ist ACMEUSDT auf Bybit?") == "crypto"
+    assert classify_evidence_domain("Gibt es ExampleCo tokenized exposure auf Bybit?") == "crypto"
+    assert classify_evidence_domain("Nasdaq Anthropic") == "stock"
+    assert classify_evidence_domain("NYSE Anthropic") == "stock"
 
 
 def test_open_meteo_provider_builds_confirmed_weather_evidence_from_mock():
@@ -699,6 +703,98 @@ def test_finance_research_profile_is_distinct_from_live_quote(tmp_path):
     assert result.status == "needs_profiled_web_research"
     assert "finance_research" in " ".join(result.warnings)
     assert "Issuer Filings" in result.text
+
+
+def test_finance_listing_profile_is_distinct_from_research_and_quote(tmp_path):
+    session_factory = _db(tmp_path)
+    _add_research_provider(
+        session_factory,
+        provider_name="finance_exchange_listing",
+        source_name="Exchange Listing Source",
+        domain="stock",
+        profile_needs="finance_listing",
+        source_type="official_exchange",
+    )
+    _add_research_provider(
+        session_factory,
+        provider_name="finance_filings_research",
+        source_name="Issuer Filings",
+        domain="stock",
+        profile_needs="finance_research",
+        source_type="official_filings",
+    )
+
+    result = WebEvidencePipeline(session_factory=session_factory).evaluate(
+        query="Ist SpaceX an der Börse?",
+        locale="de",
+    )
+
+    assert result.status == "needs_profiled_web_research"
+    assert "finance_listing" in " ".join(result.warnings)
+    assert "finance_research" not in " ".join(result.warnings)
+    assert "Exchange Listing Source" in result.text
+
+
+def test_finance_listing_queries_fail_closed_as_listing_not_finance_research(tmp_path):
+    session_factory = _db(tmp_path)
+    _add_research_provider(
+        session_factory,
+        provider_name="finance_filings_research",
+        source_name="Issuer Filings",
+        domain="stock",
+        profile_needs="finance_research",
+        source_type="official_filings",
+    )
+
+    for query in (
+        "Ist SpaceX an der Börse?",
+        "Kann man SpaceX Aktien kaufen?",
+        "Nasdaq Anthropic",
+        "NYSE Anthropic",
+    ):
+        result = WebEvidencePipeline(session_factory=session_factory).evaluate(query=query, locale="de")
+
+        assert result.status == "unavailable"
+        assert result.text == ""
+        assert result.warnings == ("stock_domain_profile_no_usable_source:finance_listing",)
+
+
+def test_ipo_url_fails_closed_as_listing_not_unknown_stock_entity(tmp_path):
+    session_factory = _db(tmp_path)
+    _add_research_provider(
+        session_factory,
+        provider_name="finance_quote_source",
+        source_name="Quote Source",
+        domain="stock",
+        profile_needs="finance_quote",
+    )
+    url = (
+        "https://www.reutersconnect.com/item/"
+        "spacexs-initial-public-offering-ipo-at-the-nasdaq-marketsite-in-new-york-city/"
+        "dGFnOnJldXRlcnMuY29tLDIwMjY6bmV3c21sX1JDMktTTEFSWE05Vw"
+    )
+
+    for query in (
+        f"Quelle zur Frage, ob SpaceX an der Börse ist: {url}",
+        f"Ist Anthropic an der Nasdaq? Quelle: {url}",
+    ):
+        result = WebEvidencePipeline(session_factory=session_factory).evaluate(query=query, locale="de")
+
+        assert result.status == "unavailable"
+        assert result.text == ""
+        assert result.warnings == ("stock_domain_profile_no_usable_source:finance_listing",)
+
+
+def test_derivative_exchange_queries_route_to_crypto_not_generic():
+    for query in (
+        "Was ist ACMEUSDT auf Bybit?",
+        "Gibt es ExampleCo tokenized exposure auf Bybit?",
+    ):
+        result = WebEvidencePipeline().evaluate(query=query, locale="de")
+
+        assert result.domain == "crypto"
+        assert result.status == "unavailable"
+        assert result.warnings == ("crypto_provider_not_configured",)
 
 
 def test_finance_unknown_entity_fails_closed_without_guessing_ticker(tmp_path):
