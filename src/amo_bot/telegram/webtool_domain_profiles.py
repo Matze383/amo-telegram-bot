@@ -126,6 +126,9 @@ def build_domain_research_profile(*, session_factory, domain: str, query: str) -
 
     matching = tuple(record for record in records if _record_supports_need(record.metadata or {}, need))
     if not matching:
+        built_in = _built_in_profile(domain=normalized_domain, need=need)
+        if built_in is not None:
+            return built_in
         learned = _learned_profile_from_observations(
             session_factory=session_factory,
             domain=normalized_domain,
@@ -180,6 +183,28 @@ def _learned_profile_from_observations(*, session_factory, domain: str, need: st
         source_names=source_names,
         warnings=(f"{domain}_domain_profile_learned_source:{need}", f"learned_sources:{'|'.join(source_names)}"),
     )
+
+
+def _built_in_profile(*, domain: str, need: str) -> DomainResearchProfile | None:
+    if domain == "stock" and need == "finance_listing":
+        return DomainResearchProfile(
+            domain=domain,
+            need=need,
+            strategy="verified_listing_web_research",
+            candidate_count=3,
+            provider_names=(
+                "builtin:company_profile",
+                "builtin:sec_company_tickers",
+                "builtin:exchange_listing_directories",
+            ),
+            source_names=(
+                "Company/official profile source",
+                "SEC company ticker data",
+                "Exchange listing directories",
+            ),
+            warnings=(f"{domain}_domain_profile_builtin_source:{need}", "strategy:verified_listing_web_research"),
+        )
+    return None
 
 
 def _infer_need(domain: str, query: str) -> tuple[str, tuple[str, ...]]:

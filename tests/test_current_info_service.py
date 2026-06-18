@@ -534,6 +534,84 @@ def test_current_info_service_searches_official_source_variant_for_general_topic
     assert answer.evidence.sources[0].source_role == "official_source_candidate"
 
 
+def test_current_info_service_answers_spacex_not_public_with_two_verified_sources():
+    company = SearchResult(
+        title="SpaceX Company Profile",
+        url="https://www.spacex.com/company",
+        snippet="",
+        provider="fake_search",
+        rank=1,
+        host="www.spacex.com",
+        metadata={"source_type": "Official"},
+    )
+    sec = SearchResult(
+        title="SEC Company Tickers",
+        url="https://www.sec.gov/files/company_tickers.json",
+        snippet="",
+        provider="fake_search",
+        rank=2,
+        host="www.sec.gov",
+        metadata={"source_type": "Official"},
+    )
+    documents = {
+        company.url: FetchedDocument(
+            url=company.url,
+            title=company.title,
+            text="SpaceX company information describes SpaceX as a privately held company.",
+            provider="fake_fetch",
+        ),
+        sec.url: FetchedDocument(
+            url=sec.url,
+            title=sec.title,
+            text="SEC company ticker data has no SpaceX public ticker entry.",
+            provider="fake_fetch",
+        ),
+    }
+    chunks = (
+        EvidenceChunk(
+            text="SpaceX company information describes SpaceX as a privately held company.",
+            source_url=company.url,
+            source_title=company.title,
+            relevance=0.95,
+            metadata={"claim_key": "spacex_public_listing", "claim_value": "not_publicly_listed"},
+        ),
+        EvidenceChunk(
+            text="SEC company ticker data has no SpaceX public ticker entry.",
+            source_url=sec.url,
+            source_title=sec.title,
+            relevance=0.9,
+            metadata={"claim_key": "spacex_public_listing", "claim_value": "not_publicly_listed"},
+        ),
+    )
+    search_provider = _FakeSearchProvider((company, sec))
+    service = CurrentInfoService(
+        search_provider=search_provider,
+        fetch_provider=_FakeFetchProvider(documents),
+        retrieval_provider=_FakeRetrievalProvider(chunks),
+    )
+
+    query = "Ist SpaceX an der Börse?"
+    answer = service.answer(
+        CurrentInfoRequest(
+            query=query,
+            locale="de",
+            domain_hint=classify_evidence_domain(query),
+            max_results=3,
+        )
+    )
+
+    assert answer.status == "answered"
+    assert answer.confidence == 0.9
+    assert answer.sources == (company.url, sec.url)
+    assert "finance_listing_requires_verified_sources" not in answer.warnings
+    assert "privately held company" in answer.answer_text
+    assert "no SpaceX public ticker entry" in answer.answer_text
+    assert [call.query for call in search_provider.calls] == [
+        query,
+        f"{query} official source listing derivative exchange",
+    ]
+
+
 def test_current_info_service_routes_derivative_exchange_queries_as_crypto_listing_evidence():
     result = SearchResult(
         title="ACMEUSDT Contract | Bybit",

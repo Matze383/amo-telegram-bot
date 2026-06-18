@@ -168,6 +168,7 @@ def test_domain_classifier_routes_problem_prompts():
     assert classify_evidence_domain("Gibt es ExampleCo tokenized exposure auf Bybit?") == "crypto"
     assert classify_evidence_domain("Nasdaq Anthropic") == "stock"
     assert classify_evidence_domain("NYSE Anthropic") == "stock"
+    assert classify_evidence_domain("Ist Anthropic öffentlich gelistet?") == "stock"
 
 
 def test_open_meteo_provider_builds_confirmed_weather_evidence_from_mock():
@@ -735,7 +736,7 @@ def test_finance_listing_profile_is_distinct_from_research_and_quote(tmp_path):
     assert "Exchange Listing Source" in result.text
 
 
-def test_finance_listing_queries_fail_closed_as_listing_not_finance_research(tmp_path):
+def test_finance_listing_uses_generic_verified_web_research_profile_without_db_source(tmp_path):
     session_factory = _db(tmp_path)
     _add_research_provider(
         session_factory,
@@ -750,16 +751,57 @@ def test_finance_listing_queries_fail_closed_as_listing_not_finance_research(tmp
         "Ist SpaceX an der Börse?",
         "Kann man SpaceX Aktien kaufen?",
         "Nasdaq Anthropic",
+        "Ist Anthropic öffentlich gelistet?",
+    ):
+        result = WebEvidencePipeline(session_factory=session_factory).evaluate(query=query, locale="de")
+
+        assert result.status == "needs_profiled_web_research"
+        assert "stock_domain_profile_builtin_source:finance_listing" in result.warnings
+        assert "SEC company ticker data" in result.text
+
+
+def test_finance_listing_fallback_does_not_use_finance_research_profile(tmp_path):
+    session_factory = _db(tmp_path)
+    _add_research_provider(
+        session_factory,
+        provider_name="finance_filings_research",
+        source_name="Issuer Filings",
+        domain="stock",
+        profile_needs="finance_research",
+        source_type="official_filings",
+    )
+
+    for query in (
+        "Nasdaq Anthropic",
         "NYSE Anthropic",
     ):
         result = WebEvidencePipeline(session_factory=session_factory).evaluate(query=query, locale="de")
 
-        assert result.status == "unavailable"
-        assert result.text == ""
-        assert result.warnings == ("stock_domain_profile_no_usable_source:finance_listing",)
+        assert result.status == "needs_profiled_web_research"
+        assert "stock_domain_profile_builtin_source:finance_listing" in result.warnings
+        assert "finance_research" not in " ".join(result.warnings)
+        assert "Issuer Filings" not in result.text
 
 
-def test_ipo_url_fails_closed_as_listing_not_unknown_stock_entity(tmp_path):
+def test_finance_quote_without_quote_profile_still_fails_closed(tmp_path):
+    session_factory = _db(tmp_path)
+    _add_research_provider(
+        session_factory,
+        provider_name="finance_filings_research",
+        source_name="Issuer Filings",
+        domain="stock",
+        profile_needs="finance_research",
+        source_type="official_filings",
+    )
+
+    result = WebEvidencePipeline(session_factory=session_factory).evaluate(query="NVDA stock price now", locale="en")
+
+    assert result.status == "unavailable"
+    assert result.text == ""
+    assert result.warnings == ("stock_domain_profile_no_usable_source:finance_quote",)
+
+
+def test_ipo_url_routes_to_generic_listing_research_profile_not_unknown_entity(tmp_path):
     session_factory = _db(tmp_path)
     _add_research_provider(
         session_factory,
@@ -780,9 +822,11 @@ def test_ipo_url_fails_closed_as_listing_not_unknown_stock_entity(tmp_path):
     ):
         result = WebEvidencePipeline(session_factory=session_factory).evaluate(query=query, locale="de")
 
-        assert result.status == "unavailable"
-        assert result.text == ""
-        assert result.warnings == ("stock_domain_profile_no_usable_source:finance_listing",)
+        assert result.status == "needs_profiled_web_research"
+        assert result.warnings == (
+            "stock_domain_profile_builtin_source:finance_listing",
+            "strategy:verified_listing_web_research",
+        )
 
 
 def test_derivative_exchange_queries_route_to_crypto_not_generic():

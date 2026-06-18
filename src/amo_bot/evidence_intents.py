@@ -9,7 +9,8 @@ _FINANCE_SECURITY_RE = re.compile(
 )
 _FINANCE_LISTING_RE = re.compile(
     r"\b(?:"
-    r"börsennotiert|boersennotiert|listed|listing|publicly\s+traded|ipo|ticker|"
+    r"börsennotiert|boersennotiert|(?:öffentlich|oeffentlich)\s+gelistet|"
+    r"listed|listing|publicly\s+(?:traded|listed)|ipo|ticker|"
     r"stock\s+exchange|nasdaq|nyse|an\s+der\s+börse|an\s+der\s+boerse|"
     r"private\s+company|privately\s+held"
     r")\b",
@@ -33,14 +34,16 @@ _CRYPTO_RE = re.compile(
 )
 _STOCK_RE = re.compile(
     r"\b(?:aktie|aktien|stock|share|shares|nasdaq|nyse|stock\s+exchange|dax|etf|börse|boerse|ticker|filing|filings|"
-    r"börsennotiert|boersennotiert|listed|publicly\s+traded|ipo|listing|"
+    r"börsennotiert|boersennotiert|(?:öffentlich|oeffentlich)\s+gelistet|"
+    r"listed|publicly\s+(?:traded|listed)|ipo|listing|"
     r"fundamental|fundamentals|research|dividende|dividend|earnings|kgv)\b",
     re.IGNORECASE,
 )
 _NEWS_RE = re.compile(r"\b(?:news|nachrichten|neueste(?:n)?|latest|breaking|was\s+gibt\s+es\s+(?:heute\s+)?neues)\b", re.IGNORECASE)
 _CURRENT_MARKET_RE = re.compile(
     r"\b(?:kurs|price|preis|jetzt|now|aktuell|current|macht|steht|börse|boerse|nasdaq|nyse|stock\s+exchange|"
-    r"börsennotiert|boersennotiert|listed|publicly\s+traded|ipo|listing|derivat|derivative|"
+    r"börsennotiert|boersennotiert|(?:öffentlich|oeffentlich)\s+gelistet|"
+    r"listed|publicly\s+(?:traded|listed)|ipo|listing|derivat|derivative|"
     r"kaufen|buy|trade|traden|handeln|handelbar)\b",
     re.IGNORECASE,
 )
@@ -78,7 +81,9 @@ def classify_evidence_domain(text: str) -> str:
         re.IGNORECASE,
     ):
         if re.search(
-            r"\b(?:aktie|stock|share|shares|börsennotiert|boersennotiert|listed|publicly\s+traded|ipo|nasdaq|nyse|stock\s+exchange)\b",
+            r"\b(?:aktie|stock|share|shares|börsennotiert|boersennotiert|"
+            r"(?:öffentlich|oeffentlich)\s+gelistet|listed|publicly\s+(?:traded|listed)|"
+            r"ipo|nasdaq|nyse|stock\s+exchange)\b",
             raw,
             re.IGNORECASE,
         ):
