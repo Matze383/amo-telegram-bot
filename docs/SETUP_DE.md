@@ -526,6 +526,7 @@ Der Bot unterstützt optional Websearch-Funktionalität über eine SearXNG-Insta
 | Variable | Standard | Beschreibung |
 |----------|----------|--------------|
 | `AMO_WEBSEARCH_SEARXNG_BASE_URL` | *(leer)* | Basis-URL der SearXNG-Instanz (z.B. `http://localhost:8080` oder `https://searx.example.com`) |
+| `SEARXNG_BASE_URL` | *(leer)* | Legacy-Alias für die SearXNG-Basis-URL; hat Vorrang vor `AMO_WEBSEARCH_SEARXNG_BASE_URL` |
 | `AMO_WEBSEARCH_SEARXNG_TIMEOUT_SECONDS` | `30` | Timeout für Suchanfragen in Sekunden |
 | `AMO_WEBSEARCH_MAX_RESULTS` | `10` | Maximale Anzahl der Suchergebnisse |
 | `AMO_WEBSEARCH_SEARXNG_LANGUAGE` | `auto` | Spracheinstellung für Suchergebnisse (z.B. `de-DE`, `en-US`, `auto`) |
@@ -536,13 +537,15 @@ Der Bot unterstützt optional Websearch-Funktionalität über eine SearXNG-Insta
 ```ini
 # Websearch / SearXNG
 AMO_WEBSEARCH_SEARXNG_BASE_URL=http://localhost:8080
+# Legacy-Alias; hat Vorrang, wenn gesetzt:
+# SEARXNG_BASE_URL=http://localhost:8080
 AMO_WEBSEARCH_SEARXNG_TIMEOUT_SECONDS=30
 AMO_WEBSEARCH_MAX_RESULTS=10
 AMO_WEBSEARCH_SEARXNG_LANGUAGE=de-DE
 AMO_WEBSEARCH_SEARXNG_CATEGORIES=general,news
 ```
 
-> **Hinweis:** Wenn `AMO_WEBSEARCH_SEARXNG_BASE_URL` nicht gesetzt ist, ist die Websearch-Funktionalität deaktiviert.
+> **Hinweis:** Legacy-Websearch verwendet `SEARXNG_BASE_URL`, wenn gesetzt, sonst `AMO_WEBSEARCH_SEARXNG_BASE_URL`. Nur wenn beide Variablen fehlen, ist die Legacy-Websearch-Funktionalität deaktiviert. Für neue Current-Info-Setups bevorzugt `AMO_SEARXNG_URL` verwenden.
 
 ---
 
@@ -564,6 +567,7 @@ Für die Extraktion von Ergebnis-Seiten bevorzugt der Dokument-Fetcher Crawlee u
 | Variable | Standard | Beschreibung |
 |----------|----------|--------------|
 | `AMO_SEARXNG_URL` | *(leer)* | Basis-URL der SearXNG-Instanz für Current-Info (z.B. `http://localhost:8080`) |
+| `SEARXNG_BASE_URL` | *(leer)* | Legacy-Alias für `AMO_SEARXNG_URL`; für neue Current-Info-Setups bevorzugt `AMO_SEARXNG_URL` verwenden |
 | `AMO_BRAVE_SEARCH_API_KEY` | *(leer)* | Brave Search API Key für Fallback |
 | `AMO_SEARCH_FALLBACK_PROVIDER` | *(leer)* | Fallback bei SearXNG-Fehler: `brave` oder leer zum Deaktivieren |
 | `AMO_SEARCH_MAX_RESULTS` | `10` | Maximale Anzahl Suchergebnisse |
@@ -608,11 +612,17 @@ Für die Extraktion von Ergebnis-Seiten bevorzugt der Dokument-Fetcher Crawlee u
 Die Current-Info-Cache-Tabellen werden über das bestehende SQLAlchemy-/MariaDB-Datenbanksetup erstellt. Query-Metriken speichern nur einen SHA-256-Hash der Anfrage, nicht den privaten Rohtext.
 Bei aktivierter semantischer Suche bleibt MariaDB die Source of Truth für Dokumente, Metadaten, Cache-TTLs und Pruning. Qdrant speichert nur Vektoren plus Chunk-/Dokument-Pointer und Quellenmetadaten; private Nutzerfragen werden nicht als Vektoren gespeichert.
 
+### Direkte URL-Behandlung
+
+Wenn Current-Info aktiviert und ein SearchBroker konfiguriert ist, behalten Telegram-Nachrichten mit einer `http://`- oder `https://`-URL die vollständige Nachricht als Current-Info-Anfrage. Die URL wird als Request-Metadatum erhalten, als `direct_url_fetch`-Schritt in den Research-Plan aufgenommen und vor normalen Suchergebnissen abgerufen. Dabei gelten dieselben Dokument-Sicherheitslimits: begrenzte Redirects, Größenlimit für Antworten, Blockieren privater/interner Ziele und nur HTML/XHTML/Plain-Text-Extraktion. Wenn ein Suchprovider verfügbar ist, führt Current-Info zusätzlich unabhängige Suchanfragen ohne URL aus, damit die direkt angegebene Quelle gegen bestätigende oder offizielle Quellen geprüft werden kann.
+
 ### Beispiel-Konfiguration (nur SearXNG)
 
 ```ini
 # Current-Info Search — nur SearXNG
 AMO_SEARXNG_URL=http://localhost:8080
+# Legacy-Alias für ältere Deployments:
+# SEARXNG_BASE_URL=http://localhost:8080
 AMO_SEARCH_MAX_RESULTS=10
 AMO_SEARXNG_TIMEOUT_SECONDS=30
 AMO_SEARCH_MIN_HOST_DIVERSITY=3
@@ -641,7 +651,7 @@ AMO_SEARCH_REGION=
 AMO_SEARCH_PROFILES_FILE=
 ```
 
-> **Hinweis:** Wenn `AMO_SEARXNG_URL` nicht gesetzt ist, verwendet Current-Info automatisch den Fallback (sofern konfiguriert). Ohne SearXNG und ohne Fallback ist die Current-Info-Suche deaktiviert.
+> **Hinweis:** Wenn weder `AMO_SEARXNG_URL` noch der Legacy-Alias `SEARXNG_BASE_URL` gesetzt ist, verwendet Current-Info automatisch den Fallback (sofern konfiguriert). Ohne SearXNG und ohne Fallback ist die Current-Info-Suche deaktiviert.
 
 ### Suchprofil-Tuning
 
