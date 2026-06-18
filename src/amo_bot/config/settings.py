@@ -136,7 +136,11 @@ class Settings(BaseSettings):
     amo_plugin_dir: str = Field(default="./plugins", alias="AMO_PLUGIN_DIR")
     plugin_command_sandbox_enabled: bool = Field(default=False, alias="PLUGIN_COMMAND_SANDBOX_ENABLED")
 
-    amo_searxng_url: str = Field(default="", alias="AMO_SEARXNG_URL")
+    amo_searxng_url: str = Field(
+        default="",
+        alias="AMO_SEARXNG_URL",
+        validation_alias=AliasChoices("AMO_SEARXNG_URL", "SEARXNG_BASE_URL"),
+    )
     amo_brave_search_api_key: str | None = Field(default=None, alias="AMO_BRAVE_SEARCH_API_KEY")
     amo_search_fallback_provider: str = Field(default="", alias="AMO_SEARCH_FALLBACK_PROVIDER")
     amo_search_max_results: int = Field(default=10, alias="AMO_SEARCH_MAX_RESULTS", ge=1, le=10)

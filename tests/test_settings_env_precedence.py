@@ -214,6 +214,39 @@ def test_plugin_command_sandbox_enabled_defaults_false_and_can_be_enabled(monkey
     assert settings_enabled.plugin_command_sandbox_enabled is True
 
 
+def test_current_info_searxng_uses_legacy_base_url_alias_without_overriding_primary(monkeypatch, tmp_path) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "\n".join(
+            [
+                "BOT_TOKEN=token-from-dotenv",
+                "WEBUI_PASSWORD=pw-from-dotenv",
+                "WEBUI_SECRET_KEY=dotenv-secret-key-0123456789-abcdefghij",
+                "SEARXNG_BASE_URL=https://legacy-searx.example",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("DOTENV_PATH", str(env_file))
+    monkeypatch.delenv("AMO_ENV_OVERRIDE", raising=False)
+    monkeypatch.delenv("AMO_SEARXNG_URL", raising=False)
+    monkeypatch.delenv("WEBUI_LOGIN_DELAY_BASE_SECONDS", raising=False)
+    monkeypatch.delenv("WEBUI_LOGIN_DELAY_MAX_SECONDS", raising=False)
+
+    settings = get_settings()
+
+    assert settings.amo_searxng_url == "https://legacy-searx.example"
+
+    monkeypatch.setenv("AMO_SEARXNG_URL", "https://current-info-searx.example")
+
+    overridden = get_settings()
+
+    assert overridden.amo_searxng_url == "https://current-info-searx.example"
+
+
 def test_vector_qdrant_env_aliases_are_parsed_without_secret_leak(monkeypatch, tmp_path) -> None:
     env_file = tmp_path / ".env"
     env_file.write_text(

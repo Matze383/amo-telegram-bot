@@ -169,6 +169,8 @@ def test_main_runtime_wires_session_factory_into_web_evidence_pipeline(monkeypat
     monkeypatch.setenv("AMO_PLUGIN_DIR", str(tmp_path / "plugins"))
     monkeypatch.setenv("WEBUI_OWNER_TELEGRAM_ID", "")
     monkeypatch.setenv("AMO_ENV_OVERRIDE", "0")
+    monkeypatch.setenv("WEBUI_LOGIN_DELAY_BASE_SECONDS", "0.25")
+    monkeypatch.setenv("WEBUI_LOGIN_DELAY_MAX_SECONDS", "2.0")
 
     captured: dict[str, object] = {}
 
@@ -208,6 +210,8 @@ def test_main_runtime_wires_current_info_when_enabled(monkeypatch, tmp_path):
     monkeypatch.setenv("AMO_PLUGIN_DIR", str(tmp_path / "plugins"))
     monkeypatch.setenv("WEBUI_OWNER_TELEGRAM_ID", "")
     monkeypatch.setenv("AMO_ENV_OVERRIDE", "0")
+    monkeypatch.setenv("WEBUI_LOGIN_DELAY_BASE_SECONDS", "0.25")
+    monkeypatch.setenv("WEBUI_LOGIN_DELAY_MAX_SECONDS", "2.0")
     monkeypatch.setenv("AMO_CURRENT_INFO_ENABLED", "true")
     monkeypatch.setenv("AMO_CURRENT_INFO_TIMEOUT_SECONDS", "6")
     monkeypatch.setenv("AMO_CURRENT_INFO_MAX_RESULTS", "4")
@@ -224,17 +228,33 @@ def test_main_runtime_wires_current_info_when_enabled(monkeypatch, tmp_path):
 
     monkeypatch.setattr(main_module, "Dispatcher", _DummyDispatcher)
     monkeypatch.setattr(main_module, "run_polling", _fake_run_polling)
+    vector_components = (object(), object(), object())
+
     monkeypatch.setattr(main_module, "build_search_broker_from_settings", lambda settings: object())
     monkeypatch.setattr(main_module, "build_document_fetcher_from_settings", lambda settings: object())
     monkeypatch.setattr(
         main_module,
+        "build_current_info_vector_components_from_settings",
+        lambda settings: vector_components,
+    )
+
+    def _build_cached_fetch_provider(settings, *, session_factory, fetch_provider, vector_indexer=None):
+        captured["cached_fetch_vector_indexer"] = vector_indexer
+        return object()
+
+    def _build_retrieval_provider(settings, *, session_factory, vector_components=None):
+        captured["retrieval_vector_components"] = vector_components
+        return object()
+
+    monkeypatch.setattr(
+        main_module,
         "build_cached_fetch_provider_from_settings",
-        lambda settings, *, session_factory, fetch_provider: object(),
+        _build_cached_fetch_provider,
     )
     monkeypatch.setattr(
         main_module,
         "build_current_info_retrieval_provider_from_settings",
-        lambda settings, *, session_factory: object(),
+        _build_retrieval_provider,
     )
 
     try:
@@ -247,3 +267,5 @@ def test_main_runtime_wires_current_info_when_enabled(monkeypatch, tmp_path):
     assert captured["current_info_timeout_seconds"] == 6
     assert captured["current_info_max_results"] == 4
     assert captured["current_info_max_documents"] == 2
+    assert captured["cached_fetch_vector_indexer"] is vector_components[0]
+    assert captured["retrieval_vector_components"] is vector_components

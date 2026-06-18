@@ -388,7 +388,8 @@ class SearchBroker:
 
 def build_search_broker_from_settings(settings: Any, *, http_client_factory: Any = None) -> SearchBroker | None:
     searxng_url = (getattr(settings, "amo_searxng_url", None) or "").strip()
-    if not searxng_url:
+    brave_key = (getattr(settings, "amo_brave_search_api_key", None) or "").strip()
+    if not searxng_url and not brave_key:
         return None
 
     max_results = int(getattr(settings, "amo_search_max_results", 5))
@@ -404,23 +405,9 @@ def build_search_broker_from_settings(settings: Any, *, http_client_factory: Any
             extra={"reason_code": exc.reason_code, "field": exc.field},
         )
         return None
-    primary = SearxngSearchProvider(
-        SearxngSearchConfig(
-            base_url=searxng_url,
-            timeout_seconds=float(getattr(settings, "amo_searxng_timeout_seconds", 3.0)),
-            max_results=max_results,
-            safesearch=str(getattr(settings, "amo_search_safesearch", "moderate") or "moderate"),
-            region=str(getattr(settings, "amo_search_region", "") or ""),
-            profile_config=profile_config,
-            rate_limit_per_minute=safety_config.provider_rate_limit_per_minute,
-        ),
-        http_client_factory=http_client_factory,
-    )
-
-    fallback: SearchProvider | None = None
-    brave_key = (getattr(settings, "amo_brave_search_api_key", None) or "").strip()
+    brave_provider: SearchProvider | None = None
     if brave_key:
-        fallback = BraveSearchProvider(
+        brave_provider = BraveSearchProvider(
             BraveSearchConfig(
                 api_key=brave_key,
                 timeout_seconds=float(getattr(settings, "amo_brave_search_timeout_seconds", 3.0)),
@@ -433,6 +420,26 @@ def build_search_broker_from_settings(settings: Any, *, http_client_factory: Any
             ),
             http_client_factory=http_client_factory,
         )
+
+    fallback: SearchProvider | None = None
+    if searxng_url:
+        primary = SearxngSearchProvider(
+            SearxngSearchConfig(
+                base_url=searxng_url,
+                timeout_seconds=float(getattr(settings, "amo_searxng_timeout_seconds", 3.0)),
+                max_results=max_results,
+                safesearch=str(getattr(settings, "amo_search_safesearch", "moderate") or "moderate"),
+                region=str(getattr(settings, "amo_search_region", "") or ""),
+                profile_config=profile_config,
+                rate_limit_per_minute=safety_config.provider_rate_limit_per_minute,
+            ),
+            http_client_factory=http_client_factory,
+        )
+        fallback = brave_provider
+    elif brave_provider is not None:
+        primary = brave_provider
+    else:
+        return None
 
     return SearchBroker(
         primary_provider=primary,

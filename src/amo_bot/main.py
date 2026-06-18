@@ -37,6 +37,7 @@ from amo_bot.current_info import (
     build_cached_fetch_provider_from_settings,
     build_current_info_retrieval_provider_from_settings,
     build_current_info_safety_config_from_settings,
+    build_current_info_vector_components_from_settings,
     build_document_fetcher_from_settings,
     build_search_broker_from_settings,
 )
@@ -373,10 +374,15 @@ def run(argv: list[str] | None = None) -> None:
     if settings.amo_current_info_enabled:
         current_info_search_provider = build_search_broker_from_settings(settings)
         if current_info_search_provider is not None:
+            current_info_vector_components = build_current_info_vector_components_from_settings(settings)
+            current_info_vector_indexer = (
+                current_info_vector_components[0] if current_info_vector_components is not None else None
+            )
             current_info_fetch_provider = build_cached_fetch_provider_from_settings(
                 settings,
                 session_factory=session_factory,
                 fetch_provider=build_document_fetcher_from_settings(settings),
+                vector_indexer=current_info_vector_indexer,
             )
             current_info_service = CurrentInfoService(
                 search_provider=current_info_search_provider,
@@ -384,6 +390,7 @@ def run(argv: list[str] | None = None) -> None:
                 retrieval_provider=build_current_info_retrieval_provider_from_settings(
                     settings,
                     session_factory=session_factory,
+                    vector_components=current_info_vector_components,
                 ),
                 safety_config=build_current_info_safety_config_from_settings(settings),
             )

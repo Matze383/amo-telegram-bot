@@ -314,6 +314,58 @@ profiles:
     assert factory.get_calls == []
 
 
+def test_build_search_broker_allows_brave_only_when_searxng_is_missing_without_real_network() -> None:
+    factory = _FakeHttpClientFactory([httpx.Response(200, json={"web": {"results": []}})])
+    broker = build_search_broker_from_settings(
+        SimpleNamespace(
+            amo_searxng_url="",
+            amo_search_max_results=5,
+            amo_searxng_timeout_seconds=1.0,
+            amo_brave_search_api_key="test-key",
+            amo_brave_search_timeout_seconds=2.0,
+            amo_search_fallback_provider="",
+            amo_search_min_host_diversity=0,
+            amo_search_safesearch="moderate",
+            amo_search_region="DE",
+            amo_search_profiles_file="",
+            amo_current_info_provider_rate_limit_per_minute=60,
+            amo_brave_search_quota_per_minute=30,
+        ),
+        http_client_factory=factory,
+    )
+
+    assert broker is not None
+    broker.search(query="latest status", locale="de-DE", max_results=1)
+
+    assert factory.get_calls == [
+        (
+            "https://api.search.brave.com/res/v1/web/search",
+            {
+                "q": "latest status",
+                "count": 1,
+                "search_lang": "de",
+                "ui_lang": "de-DE",
+                "country": "DE",
+                "safesearch": "moderate",
+                "freshness": "pd",
+                "result_filter": "news,web",
+            },
+        )
+    ]
+    assert factory.client_kwargs[0]["headers"]["X-Subscription-Token"] == "test-key"
+
+
+def test_build_search_broker_still_returns_none_without_searxng_or_brave() -> None:
+    broker = build_search_broker_from_settings(
+        SimpleNamespace(
+            amo_searxng_url="",
+            amo_brave_search_api_key="",
+        )
+    )
+
+    assert broker is None
+
+
 def test_searxng_profile_mapping_for_docs_and_config_policy_without_real_network() -> None:
     factory = _FakeHttpClientFactory([httpx.Response(200, json={"results": []})])
     provider = SearxngSearchProvider(

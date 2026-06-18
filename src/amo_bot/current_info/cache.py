@@ -21,7 +21,7 @@ from amo_bot.current_info.candidates import (
 )
 from amo_bot.current_info.models import CurrentInfoRequest, EvidenceChunk, FetchedDocument, SearchResult
 from amo_bot.current_info.ports import CurrentInfoFetchProvider, CurrentInfoRetrievalProvider
-from amo_bot.current_info.vector import CurrentInfoVectorIndexer
+from amo_bot.current_info.vector import CurrentInfoVectorIndexer, EmbeddingProvider, VectorStore
 from amo_bot.db.models import (
     CurrentInfoDocument,
     CurrentInfoDocumentChunk,
@@ -534,6 +534,7 @@ def build_current_info_retrieval_provider_from_settings(
     settings: Any,
     *,
     session_factory: sessionmaker[Session],
+    vector_components: tuple[CurrentInfoVectorIndexer, VectorStore, EmbeddingProvider] | None = None,
 ) -> CurrentInfoRetrievalProvider:
     keyword_provider = DbCurrentInfoRetrievalProvider(
         session_factory=session_factory,
@@ -551,7 +552,7 @@ def build_current_info_retrieval_provider_from_settings(
         build_current_info_vector_components_from_settings,
     )
 
-    components = build_current_info_vector_components_from_settings(settings)
+    components = vector_components or build_current_info_vector_components_from_settings(settings)
     if components is None:
         return keyword_provider
     _indexer, vector_store, embedding_provider = components
