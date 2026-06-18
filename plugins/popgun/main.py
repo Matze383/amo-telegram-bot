@@ -12,6 +12,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from amo_bot.config.settings import get_settings
+from amo_bot.core.logging import include_private_ids, masked_id
 from amo_bot.db.base import create_session_factory
 from amo_bot.db.repositories import PopgunRepository
 
@@ -29,12 +30,49 @@ DEFAULT_TIMEFRAMES = FIXED_TIMEFRAMES
 SYMBOL_RE = re.compile(r"^[A-Z0-9]{2,20}USDT$")
 
 
+def _chat_scope(chat_id: int) -> str:
+    return "group" if chat_id < 0 else "private"
+
+
 def _topic_log_extra(*, chat_id: int, thread_id: int | None, **values: Any) -> dict[str, Any]:
+    if include_private_ids():
+        return {
+            "chat_id": chat_id,
+            "thread_id": thread_id,
+            **values,
+        }
     return {
-        "chat_id": chat_id,
-        "thread_id": thread_id,
+        "chat_scope": _chat_scope(chat_id),
+        "_chat_id_masked": masked_id(chat_id),
+        "_thread_id_masked": masked_id(thread_id),
         **values,
     }
+
+
+def _parse_legacy_topic_key(key: str) -> tuple[int, int | None] | None:
+    try:
+        chat_raw, thread_raw = key.split(":", 1)
+        chat_id = int(chat_raw)
+        thread_id = None if thread_raw == "root" else int(thread_raw)
+    except (TypeError, ValueError):
+        return None
+    return chat_id, thread_id
+
+
+def _legacy_key_shape(key: str) -> dict[str, Any]:
+    parts = key.split(":")
+    return {
+        "key_parts_count": len(parts),
+        "has_root_thread": len(parts) > 1 and parts[1] == "root",
+    }
+
+
+def _legacy_topic_log_extra(key: str, **values: Any) -> dict[str, Any]:
+    parsed = _parse_legacy_topic_key(key)
+    if parsed is None:
+        return {**_legacy_key_shape(key), **values}
+    chat_id, thread_id = parsed
+    return _topic_log_extra(chat_id=chat_id, thread_id=thread_id, **values)
 
 
 @dataclass(slots=True)
@@ -291,7 +329,11 @@ class PopgunStateRepository:
                 if topic is None:
                     LOGGER.debug(
                         "popgun topic state dropped",
-                        extra={"topic_key": str(key), "value_type": type(value).__name__},
+                        extra=_legacy_topic_log_extra(
+                            str(key),
+                            reason="malformed_topic_state",
+                            value_type=type(value).__name__,
+                        ),
                     )
                     continue
                 if not topic.symbols:
@@ -306,12 +348,15 @@ class PopgunStateRepository:
                     "updated_at": topic.updated_at,
                 }
                 if value != normalized_topic:
-                    LOGGER.debug("popgun topic state normalized", extra={"topic_key": str(key)})
+                    LOGGER.debug(
+                        "popgun topic state normalized",
+                        extra=_topic_log_extra(chat_id=topic.chat_id, thread_id=topic.thread_id),
+                    )
                 if repository.get_topic(chat_id=topic.chat_id, thread_id=topic.thread_id) is not None:
                     skipped_topics += 1
                     LOGGER.info(
                         "popgun legacy topic skipped; sql topic already exists",
-                        extra={"topic_key": str(key)},
+                        extra=_topic_log_extra(chat_id=topic.chat_id, thread_id=topic.thread_id),
                     )
                     continue
                 repository.upsert_topic(
@@ -343,16 +388,65 @@ class PopgunStateRepository:
         )
 
     def _import_legacy_alert(self, repository: PopgunRepository, key: str, timestamp: Any) -> int:
+        alert_parts_count = len(key.split(":"))
         try:
             topic_key, symbol_raw, timeframe_raw = key.rsplit(":", 2)
-            chat_raw, thread_raw = topic_key.split(":", 1)
-            chat_id = int(chat_raw)
-            thread_id = None if thread_raw == "root" else int(thread_raw)
+        except (TypeError, ValueError):
+            LOGGER.debug(
+                "popgun legacy alert state dropped",
+                extra={
+                    "reason": "malformed_alert_key",
+                    "key_parts_count": alert_parts_count,
+                },
+            )
+            return 0
+
+        parsed_topic = _parse_legacy_topic_key(topic_key)
+        if parsed_topic is None:
+            LOGGER.debug(
+                "popgun legacy alert state dropped",
+                extra={
+                    **_legacy_key_shape(topic_key),
+                    "reason": "malformed_alert_topic_key",
+                    "alert_key_parts_count": alert_parts_count,
+                },
+            )
+            return 0
+
+        chat_id, thread_id = parsed_topic
+        log_extra = _topic_log_extra(
+            chat_id=chat_id,
+            thread_id=thread_id,
+            alert_key_parts_count=alert_parts_count,
+        )
+        try:
             symbol = normalize_symbol(symbol_raw)
+        except (TypeError, ValueError):
+            LOGGER.debug(
+                "popgun legacy alert state dropped",
+                extra={**log_extra, "reason": "invalid_symbol"},
+            )
+            return 0
+        try:
             timeframe = normalize_timeframe(timeframe_raw)
+        except (TypeError, ValueError):
+            LOGGER.debug(
+                "popgun legacy alert state dropped",
+                extra={**log_extra, "reason": "invalid_timeframe", "symbol": symbol},
+            )
+            return 0
+        try:
             signal_timestamp = int(timestamp)
         except (TypeError, ValueError):
-            LOGGER.debug("popgun legacy alert state dropped", extra={"alert_key": key})
+            LOGGER.debug(
+                "popgun legacy alert state dropped",
+                extra={
+                    **log_extra,
+                    "reason": "invalid_timestamp",
+                    "symbol": symbol,
+                    "timeframe": timeframe,
+                },
+            )
             return 0
 
         return int(

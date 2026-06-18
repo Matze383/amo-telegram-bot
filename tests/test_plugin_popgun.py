@@ -354,8 +354,11 @@ def test_popgun_command_logging_includes_context_and_outcomes(tmp_path, monkeypa
         "unauthorized",
     }
     state_changed = next(record for record in handled if record.outcome == "state_changed")
-    assert state_changed.chat_id == 100
-    assert state_changed.thread_id == 10
+    assert not hasattr(state_changed, "chat_id")
+    assert not hasattr(state_changed, "thread_id")
+    assert state_changed.chat_scope == "private"
+    assert state_changed._chat_id_masked == "***"
+    assert state_changed._thread_id_masked == "***"
     assert state_changed.role == "admin"
     assert state_changed.action == "on"
     assert state_changed.enabled is True
@@ -404,9 +407,9 @@ def test_popgun_state_logging_for_unreadable_and_malformed_topics(tmp_path, monk
                 "default_timeframes": [],
                 "topics": {
                     "bad": "not-a-topic",
-                    "100:10": {
-                        "chat_id": "100",
-                        "thread_id": "10",
+                    "123456789:987654321": {
+                        "chat_id": "123456789",
+                        "thread_id": "987654321",
                         "enabled": True,
                         "symbols": ["btc/usdt", 123],
                         "timeframes": [],
@@ -423,14 +426,59 @@ def test_popgun_state_logging_for_unreadable_and_malformed_topics(tmp_path, monk
     assert len(topics) == 1
     assert topics[0].symbols == ["BTCUSDT"]
     assert topics[0].timeframes == popgun.DEFAULT_TIMEFRAMES
-    assert any(
-        record.msg == "popgun topic state dropped" and record.topic_key == "bad"
-        for record in caplog.records
+    dropped = next(record for record in caplog.records if record.msg == "popgun topic state dropped")
+    assert not hasattr(dropped, "topic_key")
+    assert not hasattr(dropped, "chat_id")
+    assert not hasattr(dropped, "thread_id")
+    assert dropped.reason == "malformed_topic_state"
+    assert dropped.value_type == "str"
+    assert dropped.key_parts_count == 1
+    normalized = next(record for record in caplog.records if record.msg == "popgun topic state normalized")
+    assert not hasattr(normalized, "topic_key")
+    assert not hasattr(normalized, "chat_id")
+    assert not hasattr(normalized, "thread_id")
+    assert normalized.chat_scope == "private"
+    assert normalized._chat_id_masked != "123456789"
+    assert normalized._thread_id_masked != "987654321"
+    assert "123456789" not in normalized.getMessage()
+    assert "987654321" not in normalized.getMessage()
+
+
+def test_popgun_legacy_alert_drop_logging_masks_topic_ids_and_keeps_diagnostics(
+    tmp_path, monkeypatch, caplog
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    db_url = _db_url(tmp_path, "popgun_legacy_alert_logging.sqlite")
+    popgun = _load_popgun_module()
+    state_dir = tmp_path / "data" / "plugin_state" / "popgun"
+    state_dir.mkdir(parents=True)
+    (state_dir / "state.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "topics": {},
+                "alerts": {"123456789:987654321:ETHUSDT:15m": "not-a-timestamp"},
+            }
+        ),
+        encoding="utf-8",
     )
-    assert any(
-        record.msg == "popgun topic state normalized" and record.topic_key == "100:10"
-        for record in caplog.records
-    )
+
+    caplog.set_level(logging.DEBUG, logger="amo.plugins.popgun")
+    popgun.PopgunStateRepository(database_url=db_url)
+
+    dropped = next(record for record in caplog.records if record.msg == "popgun legacy alert state dropped")
+    assert not hasattr(dropped, "alert_key")
+    assert not hasattr(dropped, "chat_id")
+    assert not hasattr(dropped, "thread_id")
+    assert dropped.chat_scope == "private"
+    assert dropped._chat_id_masked != "123456789"
+    assert dropped._thread_id_masked != "987654321"
+    assert dropped.reason == "invalid_timestamp"
+    assert dropped.symbol == "ETHUSDT"
+    assert dropped.timeframe == "15m"
+    assert "123456789:987654321:ETHUSDT:15m" not in dropped.getMessage()
+    assert "123456789" not in dropped.getMessage()
+    assert "987654321" not in dropped.getMessage()
 
 
 def test_popgun_legacy_state_imports_defaults_and_alerts_idempotently(tmp_path, monkeypatch) -> None:
@@ -860,8 +908,11 @@ def test_popgun_worker_logs_signal_alert_failure_and_summary(tmp_path, monkeypat
     assert detected.symbol == "BTCUSDT"
     assert detected.timeframe == "15m"
     alert = next(record for record in caplog.records if record.msg == "popgun alert sent")
-    assert alert.chat_id == 100
-    assert alert.thread_id == 10
+    assert not hasattr(alert, "chat_id")
+    assert not hasattr(alert, "thread_id")
+    assert alert.chat_scope == "private"
+    assert alert._chat_id_masked == "***"
+    assert alert._thread_id_masked == "***"
     failure = next(record for record in caplog.records if record.msg == "popgun scan failed")
     assert failure.symbol == "ETHUSDT"
     assert failure.timeframe == "15m"
