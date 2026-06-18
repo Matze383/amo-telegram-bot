@@ -350,7 +350,7 @@ async def handle_schedule(context: Dict[str, Any], host_api: Any) -> None:
     Raises:
         Jede Ausnahme wird von der Runtime abgefangen und geloggt.
     """
-    logger.info(f"Schedule ausgeführt: {context.get('run_id')}")
+    logger.info("Schedule ausgeführt", extra={"trigger_type": context.get("trigger_type")})
     # In Sandbox-Runtime werden Sendeoperationen über die ops-Liste zurückgegeben
     # Beispiel: return {"ops": [{"op": "send_message", "chat_id": 123, "text": "Report"}]}
 ```
@@ -476,6 +476,66 @@ import os
 plugin_dir = os.path.dirname(os.path.abspath(__file__))
 config_path = os.path.join(plugin_dir, "data.json")
 ```
+
+#### 5. Datenschutzgerechtes Logging (Privacy-Safe Logging)
+
+**VERBOTEN:** Telegram-IDs oder Scope-Keys direkt loggen. Kopierbare Beispiele
+dürfen keine Rohwerte aus `chat_id`, `thread_id`, `message_id`, `user_id`,
+`subscription_key`, `run_id`, `channel_id` oder `group_id` in Log-Ausgaben
+schreiben.
+
+**Korrekter Ansatz:** Maskieren oder Hash verwenden
+
+```python
+# ✅ KORREKT: IDs maskieren
+import hashlib
+
+def mask_id(value: int | str | None, visible_chars: int = 4) -> str:
+    """
+    Maskiert einen Identifier für sicheres Logging.
+    Zeigt nur die letzten visible_chars, rest wird mit *** maskiert.
+    """
+    if value is None:
+        return "None"
+    s = str(value)
+    if len(s) <= visible_chars:
+        return "***"
+    return "***" + s[-visible_chars:]
+
+def hash_id(value: int | str | None, algorithm: str = "sha256") -> str:
+    """
+    Erstellt einen Hash eines Identifiers für sicheres Logging.
+    Gleicher Input ergibt immer gleichen Hash (für Debugging).
+    """
+    if value is None:
+        return "None"
+    h = hashlib.new(algorithm)
+    h.update(str(value).encode())
+    return h.hexdigest()[:16] + "..."
+
+# Verwendung im Plugin:
+logger.info(f"Processing chat: {mask_id(context.get('chat_id'))}")
+logger.debug(f"Subscription: {hash_id(context.get('subscription_key'))}")
+logger.info(f"Schedule executed: {mask_id(context.get('run_id'), 6)}")
+```
+
+**Scope-Keys, die NIEMALS roh geloggt werden dürfen:**
+- `chat_id` - Telegram Chat ID (personenbezogen)
+- `thread_id` - Nachrichten-Thread-ID (personenbezogen)
+- `message_id` - Nachrichten-ID (personenbezogen)
+- `user_id` / `from_id` - User-ID (personenbezogen)
+- `subscription_key` - Abo-Schlüssel (kann personenbezogen sein)
+- `run_id` - Ausführungs-ID (kann personenbezogen sein)
+- `channel_id` / `group_id` - Kanal/Gruppen-ID (personenbezogen)
+
+**Erlaubt zu loggen:**
+- `plugin_id` - Plugin-Name (nicht personenbezogen)
+- `trigger_type` - Auslösertyp (nicht personenbezogen)
+- `command` - Befehlsname (nicht personenbezogen)
+- `role` - Rolle (nicht personenbezogen)
+- Allgemeine Metriken ohne IDs (Zähler, Status, etc.)
+
+**Alternative:** Wenn Debug-Informationen mit IDs benötigt werden, verwende stattdessen strukturierte Logs mit separatem Audit-Trail oder Log-Level `TRACE` das nur in speziellen Debug-Builds aktiviert ist.
 
 ---
 
@@ -1056,7 +1116,7 @@ async def handle_schedule(context: Dict[str, Any], host_api: Any) -> None:
     Raises:
         Any exception is caught and logged by the runtime.
     """
-    logger.info(f"Schedule executed: {context.get('run_id')}")
+    logger.info("Schedule executed", extra={"trigger_type": context.get("trigger_type")})
     # In Sandbox runtime, send operations are returned as ops list
     # Example: return {"ops": [{"op": "send_message", "chat_id": 123, "text": "Report"}]}
 ```
@@ -1186,6 +1246,65 @@ import os
 plugin_dir = os.path.dirname(os.path.abspath(__file__))
 config_path = os.path.join(plugin_dir, "data.json")
 ```
+
+#### 5. Privacy-Safe Logging
+
+**FORBIDDEN:** Logging Telegram IDs or scope keys directly. Copyable examples
+must not write raw values from `chat_id`, `thread_id`, `message_id`, `user_id`,
+`subscription_key`, `run_id`, `channel_id`, or `group_id` to logs.
+
+**Correct approach:** Mask or use hash
+
+```python
+# ✅ CORRECT: Mask identifiers
+import hashlib
+
+def mask_id(value: int | str | None, visible_chars: int = 4) -> str:
+    """
+    Masks an identifier for safe logging.
+    Shows only last visible_chars, rest masked with ***.
+    """
+    if value is None:
+        return "None"
+    s = str(value)
+    if len(s) <= visible_chars:
+        return "***"
+    return "***" + s[-visible_chars:]
+
+def hash_id(value: int | str | None, algorithm: str = "sha256") -> str:
+    """
+    Creates a hash of an identifier for safe logging.
+    Same input always produces same hash (useful for debugging).
+    """
+    if value is None:
+        return "None"
+    h = hashlib.new(algorithm)
+    h.update(str(value).encode())
+    return h.hexdigest()[:16] + "..."
+
+# Usage in plugin:
+logger.info(f"Processing chat: {mask_id(context.get('chat_id'))}")
+logger.debug(f"Subscription: {hash_id(context.get('subscription_key'))}")
+logger.info(f"Schedule executed: {mask_id(context.get('run_id'), 6)}")
+```
+
+**Scope keys that must NEVER be logged raw:**
+- `chat_id` - Telegram Chat ID (personally identifiable)
+- `thread_id` - Message thread ID (personally identifiable)
+- `message_id` - Message ID (personally identifiable)
+- `user_id` / `from_id` - User ID (personally identifiable)
+- `subscription_key` - Subscription key (may be personally identifiable)
+- `run_id` - Execution ID (may be personally identifiable)
+- `channel_id` / `group_id` - Channel/Group ID (personally identifiable)
+
+**Allowed to log:**
+- `plugin_id` - Plugin name (not personally identifiable)
+- `trigger_type` - Trigger type (not personally identifiable)
+- `command` - Command name (not personally identifiable)
+- `role` - Role (not personally identifiable)
+- General metrics without IDs (counters, status, etc.)
+
+**Alternative:** If debug information with IDs is needed, use structured logging with separate audit trail or `TRACE` log level that is only enabled in special debug builds.
 
 ---
 

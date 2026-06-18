@@ -2,6 +2,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from urllib.parse import urlparse
 from datetime import datetime
+import hashlib
 import importlib.util
 import json
 import logging
@@ -22,6 +23,40 @@ def _load_repo_class():
 
 YtRssStateRepository = _load_repo_class()
 LOGGER = logging.getLogger("amo.plugins.yt_rss")
+
+
+def _masked_id(value) -> str:
+    if value is None:
+        return "none"
+    raw = str(value)
+    if len(raw) <= 5:
+        return "***"
+    return f"{raw[:3]}***..{raw[-2:]} [{len(raw)} chars]"
+
+
+def _hashed_id(value) -> str:
+    if value is None:
+        return "none"
+    return hashlib.sha256(str(value).encode("utf-8")).hexdigest()[:16]
+
+
+def _chat_scope(chat_id: int) -> str:
+    return "group" if chat_id < 0 else "private"
+
+
+def _topic_log_extra(
+    *, chat_id: int, thread_id: int | None, channel_key: str, **values
+) -> dict[str, object]:
+    subscription_key = YtRssStateRepository.topic_key_for(chat_id, thread_id, channel_key)
+    return {
+        "subscription_ref": _hashed_id(subscription_key),
+        "chat_scope": _chat_scope(chat_id),
+        "thread_scope": "topic" if thread_id is not None else "root",
+        "_chat_id_masked": _masked_id(chat_id),
+        "_thread_id_masked": _masked_id(thread_id),
+        "channel_key": channel_key,
+        **values,
+    }
 
 
 def _repo_for_context(context) -> YtRssStateRepository:
@@ -570,14 +605,13 @@ async def handle_schedule(context, host_api):
                 continue
             sub = resolved
 
-            sub_key = repo.topic_key_for(sub.chat_id, sub.thread_id, sub.channel_key)
-            sub_key = repo.topic_key_for(sub.chat_id, sub.thread_id, sub.channel_key)
             LOGGER.info(
                 "yt_rss subscription poll start",
-                extra={
-                    "subscription_key": sub_key,
-                    "channel_key": sub.channel_key,
-                },
+                extra=_topic_log_extra(
+                    chat_id=sub.chat_id,
+                    thread_id=sub.thread_id,
+                    channel_key=sub.channel_key,
+                ),
             )
 
             rss_result = await host_api.rss_fetch(sub.rss_url)
@@ -598,17 +632,16 @@ async def handle_schedule(context, host_api):
             latest_cursor = seen_keys[0] if seen_keys else None
             LOGGER.info(
                 "yt_rss subscription feed loaded",
-                extra={
-                    "subscription_key": sub_key,
-                    "chat_id": sub.chat_id,
-                    "thread_id": sub.thread_id,
-                    "channel_key": sub.channel_key,
-                    "item_count": len(ordered_entries),
-                    "seen_key_count": len(seen_keys),
-                    "cursor_before": cursor.cursor,
-                    "latest_feed_key": latest_cursor,
-                    "dedupe_size_before": len(dedupe_seen),
-                },
+                extra=_topic_log_extra(
+                    chat_id=sub.chat_id,
+                    thread_id=sub.thread_id,
+                    channel_key=sub.channel_key,
+                    item_count=len(ordered_entries),
+                    seen_key_count=len(seen_keys),
+                    cursor_before=cursor.cursor,
+                    latest_feed_key=latest_cursor,
+                    dedupe_size_before=len(dedupe_seen),
+                ),
             )
 
             if cursor.cursor is None and not dedupe_seen:
@@ -622,17 +655,18 @@ async def handle_schedule(context, host_api):
                 )
                 LOGGER.info(
                     "yt_rss subscription checked",
-                    extra={
-                        "subscription_key": sub_key,
-                        "channel_key": sub.channel_key,
-                        "success": True,
-                        "feed_entry_count": len(ordered_entries),
-                        "new_count": 0,
-                        "op_count": 0,
-                        "cursor_changed": latest_cursor is not None,
-                        "cursor_before": cursor.cursor,
-                        "cursor_after": latest_cursor,
-                    },
+                    extra=_topic_log_extra(
+                        chat_id=sub.chat_id,
+                        thread_id=sub.thread_id,
+                        channel_key=sub.channel_key,
+                        success=True,
+                        feed_entry_count=len(ordered_entries),
+                        new_count=0,
+                        op_count=0,
+                        cursor_changed=latest_cursor is not None,
+                        cursor_before=cursor.cursor,
+                        cursor_after=latest_cursor,
+                    ),
                 )
                 continue
 
@@ -655,16 +689,15 @@ async def handle_schedule(context, host_api):
 
             LOGGER.info(
                 "yt_rss subscription decision",
-                extra={
-                    "subscription_key": sub_key,
-                    "chat_id": sub.chat_id,
-                    "thread_id": sub.thread_id,
-                    "channel_key": sub.channel_key,
-                    "cursor_before": cursor.cursor,
-                    "candidate_count": len(new_entries),
-                    "stop_reason": stop_reason,
-                    "stop_key": stop_key,
-                },
+                extra=_topic_log_extra(
+                    chat_id=sub.chat_id,
+                    thread_id=sub.thread_id,
+                    channel_key=sub.channel_key,
+                    cursor_before=cursor.cursor,
+                    candidate_count=len(new_entries),
+                    stop_reason=stop_reason,
+                    stop_key=stop_key,
+                ),
             )
 
             posted_count = 0
@@ -682,12 +715,13 @@ async def handle_schedule(context, host_api):
                     text = f"{text}\n{link}"
                 LOGGER.info(
                     "yt_rss send attempt",
-                    extra={
-                        "subscription_key": sub_key,
-                        "channel_key": sub.channel_key,
-                        "entry_key": entry_key,
-                        "label_source": "subscription_label",
-                    },
+                    extra=_topic_log_extra(
+                        chat_id=sub.chat_id,
+                        thread_id=sub.thread_id,
+                        channel_key=sub.channel_key,
+                        entry_key=entry_key,
+                        label_source="subscription_label",
+                    ),
                 )
                 await _send_topic_message(host_api, chat_id=sub.chat_id, thread_id=sub.thread_id, text=text)
                 posted_count += 1
@@ -711,14 +745,15 @@ async def handle_schedule(context, host_api):
                 )
                 LOGGER.info(
                     "yt_rss send success",
-                    extra={
-                        "subscription_key": sub_key,
-                        "channel_key": sub.channel_key,
-                        "entry_key": entry_key,
-                        "op_count": posted_count,
-                        "cursor_changed": cursor_progress != cursor_before_progress,
-                        "dedupe_size_after": len(dedupe_out_progress),
-                    },
+                    extra=_topic_log_extra(
+                        chat_id=sub.chat_id,
+                        thread_id=sub.thread_id,
+                        channel_key=sub.channel_key,
+                        entry_key=entry_key,
+                        op_count=posted_count,
+                        cursor_changed=cursor_progress != cursor_before_progress,
+                        dedupe_size_after=len(dedupe_out_progress),
+                    ),
                 )
 
             posted_total += posted_count
@@ -737,17 +772,18 @@ async def handle_schedule(context, host_api):
                 cursor_after = cursor_progress
             LOGGER.info(
                 "yt_rss subscription checked",
-                extra={
-                    "subscription_key": sub_key,
-                    "channel_key": sub.channel_key,
-                    "success": True,
-                    "feed_entry_count": len(ordered_entries),
-                    "new_count": len(new_entries),
-                    "op_count": posted_count,
-                    "cursor_changed": cursor_after != cursor.cursor,
-                    "cursor_before": cursor.cursor,
-                    "cursor_after": cursor_after,
-                },
+                extra=_topic_log_extra(
+                    chat_id=sub.chat_id,
+                    thread_id=sub.thread_id,
+                    channel_key=sub.channel_key,
+                    success=True,
+                    feed_entry_count=len(ordered_entries),
+                    new_count=len(new_entries),
+                    op_count=posted_count,
+                    cursor_changed=cursor_after != cursor.cursor,
+                    cursor_before=cursor.cursor,
+                    cursor_after=cursor_after,
+                ),
             )
         except ValueError as exc:
             failed_count += 1
@@ -760,13 +796,14 @@ async def handle_schedule(context, host_api):
             )
             LOGGER.info(
                 "yt_rss subscription check failed",
-                extra={
-                    "subscription_key": repo.topic_key_for(original_sub.chat_id, original_sub.thread_id, original_sub.channel_key),
-                    "channel_key": original_sub.channel_key,
-                    "success": False,
-                    "error_class": type(exc).__name__,
-                    "error_reason": str(exc),
-                },
+                extra=_topic_log_extra(
+                    chat_id=original_sub.chat_id,
+                    thread_id=original_sub.thread_id,
+                    channel_key=original_sub.channel_key,
+                    success=False,
+                    error_class=type(exc).__name__,
+                    error_reason=str(exc),
+                ),
             )
         except Exception as exc:
             failed_count += 1
@@ -779,13 +816,14 @@ async def handle_schedule(context, host_api):
             )
             LOGGER.info(
                 "yt_rss subscription check failed",
-                extra={
-                    "subscription_key": repo.topic_key_for(original_sub.chat_id, original_sub.thread_id, original_sub.channel_key),
-                    "channel_key": original_sub.channel_key,
-                    "success": False,
-                    "error_class": type(exc).__name__,
-                    "error_reason": category,
-                },
+                extra=_topic_log_extra(
+                    chat_id=original_sub.chat_id,
+                    thread_id=original_sub.thread_id,
+                    channel_key=original_sub.channel_key,
+                    success=False,
+                    error_class=type(exc).__name__,
+                    error_reason=category,
+                ),
             )
 
     LOGGER.info(

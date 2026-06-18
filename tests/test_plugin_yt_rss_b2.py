@@ -850,6 +850,14 @@ def test_schedule_emits_safe_diagnostic_logs_success_and_error(tmp_path, monkeyp
     rendered = "\n".join(caplog.messages)
     assert "Safe title should not be logged" not in rendered
     assert "token=secret" not in rendered
+    for record in caplog.records:
+        assert not hasattr(record, "subscription_key")
+        assert not hasattr(record, "chat_id")
+        assert not hasattr(record, "thread_id")
+        assert hasattr(record, "subscription_ref") or record.msg in {
+            "yt_rss schedule run start",
+            "yt_rss schedule run end",
+        }
 
 def test_schedule_resolver_failure_records_error_and_retries_later(tmp_path, monkeypatch) -> None:
     plugin_main = _load_plugin_main()
@@ -1261,10 +1269,13 @@ def test_schedule_poll_start_log_excludes_source_url_and_rss_url(tmp_path, monke
     rec = poll_start_logs[0]
 
     # Allowed fields only
-    assert hasattr(rec, "subscription_key"), "poll start must have subscription_key"
+    assert hasattr(rec, "subscription_ref"), "poll start must have subscription_ref"
     assert hasattr(rec, "channel_key"), "poll start must have channel_key"
 
     # Forbidden fields must not exist on the record
+    assert not hasattr(rec, "subscription_key")
+    assert not hasattr(rec, "chat_id")
+    assert not hasattr(rec, "thread_id")
     extra_dict = getattr(rec, "extra", {})
     assert "source_url" not in extra_dict, (
         f"source_url must not appear in poll start log. "
