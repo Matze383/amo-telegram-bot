@@ -81,6 +81,18 @@ class _FakeRetrievalProvider:
         return self.chunks
 
 
+class _PreferenceRepo:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    def list_for_hosts(self, **kwargs) -> dict[str, dict[str, object]]:
+        self.calls.append(dict(kwargs))
+        return {
+            "trusted.example": {"source_preference_signal": "trusted"},
+            "bad.example": {"source_preference_signal": "rejected"},
+        }
+
+
 def test_current_info_models_roundtrip_dict_serialization():
     request = CurrentInfoRequest(
         query="latest AMO news",
@@ -808,6 +820,53 @@ def test_current_info_service_normalizes_ranks_and_dedupes_search_candidates():
     assert answer.search_bundle.results[1].metadata["source_type"] == "Official"
     assert answer.sources == ("https://example.com/news?id=1", "https://example.gov/status")
     assert answer.warnings == ("snippet_only_evidence", "needs_independent_source")
+
+
+def test_current_info_service_uses_source_preference_repository_for_ranking():
+    trusted = SearchResult(
+        title="Trusted",
+        url="https://www.trusted.example/status",
+        snippet="Trusted result",
+        provider="fake",
+        rank=3,
+    )
+    rejected = SearchResult(
+        title="Rejected",
+        url="https://bad.example/status",
+        snippet="Rejected result",
+        provider="fake",
+        rank=1,
+    )
+    preferences = _PreferenceRepo()
+    service = CurrentInfoService(
+        search_provider=_FakeSearchProvider((rejected, trusted)),
+        source_preference_repository=preferences,
+    )
+
+    answer = service.answer(
+        CurrentInfoRequest(
+            query="current info",
+            domain_hint="news",
+            chat_id=-100,
+            topic_id=7,
+            user_id=42,
+            max_results=2,
+        )
+    )
+
+    assert answer.search_bundle is not None
+    assert [result.host for result in answer.search_bundle.results] == ["trusted.example", "bad.example"]
+    assert preferences.calls == [
+        {
+            "source_hosts": ("bad.example", "trusted.example"),
+            "domain": "news",
+            "chat_id": -100,
+            "topic_id": 7,
+            "user_id": 42,
+        }
+    ]
+    assert answer.search_bundle.results[0].metadata["source_preference_signal"] == "trusted"
+    assert answer.search_bundle.results[1].metadata["source_preference_signal"] == "rejected"
 
 
 def test_current_info_service_fails_closed_without_search_provider():

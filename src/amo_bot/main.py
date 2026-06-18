@@ -13,7 +13,12 @@ from amo_bot.config.settings import get_settings
 from amo_bot.core.logging import setup_logging, log_event
 from amo_bot.db.base import create_session_factory
 from amo_bot.db.init_db import init_db
-from amo_bot.db.repositories import ResearchSourceObservationRepository, TopicAgentMemoryRepository, UserRoleRepository
+from amo_bot.db.repositories import (
+    ResearchSourceObservationRepository,
+    ResearchSourcePreferenceRepository,
+    TopicAgentMemoryRepository,
+    UserRoleRepository,
+)
 from amo_bot.plugins.command_runtime import PluginCommandExecutor
 from amo_bot.plugins.loader import PluginLoader
 from amo_bot.plugins.scheduled_runtime import ScheduledPluginExecutor
@@ -161,6 +166,17 @@ class SessionBoundWebtoolCapabilityDispatcher:
             )
             dispatcher = WebtoolCapabilityDispatcher(quota_repo=quota_repo, service=service)
             return dispatcher.execute(request)
+
+
+class SessionBoundSourcePreferenceRepository:
+    """Open a short-lived DB session for each source preference lookup."""
+
+    def __init__(self, *, session_factory) -> None:
+        self._session_factory = session_factory
+
+    def list_for_hosts(self, **kwargs):
+        with self._session_factory() as session:
+            return ResearchSourcePreferenceRepository(session).list_for_hosts(**kwargs)
 
 
 def _build_parser() -> ArgumentParser:
@@ -392,6 +408,7 @@ def run(argv: list[str] | None = None) -> None:
                     session_factory=session_factory,
                     vector_components=current_info_vector_components,
                 ),
+                source_preference_repository=SessionBoundSourcePreferenceRepository(session_factory=session_factory),
                 safety_config=build_current_info_safety_config_from_settings(settings),
             )
 

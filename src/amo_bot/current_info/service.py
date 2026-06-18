@@ -3,9 +3,11 @@ from __future__ import annotations
 import logging
 import re
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from urllib.parse import urlparse
 
+from amo_bot.core.source_hosts import normalize_source_host
 from amo_bot.current_info.candidates import (
     SOURCE_TYPE_DOCS,
     SOURCE_TYPE_NEWS,
@@ -159,6 +161,7 @@ class CurrentInfoService:
         retrieval_provider: CurrentInfoRetrievalProvider | None = None,
         task_planner: CurrentInfoTaskPlanner | None = None,
         query_planner: CurrentInfoQueryPlanner | None = None,
+        source_preference_repository: object | None = None,
         safety_config: CurrentInfoSafetyConfig | None = None,
     ) -> None:
         self._search_provider = search_provider
@@ -166,6 +169,7 @@ class CurrentInfoService:
         self._retrieval_provider = retrieval_provider or SnippetRetrievalProvider()
         self._task_planner = task_planner or DefaultCurrentInfoTaskPlanner()
         self._query_planner = query_planner or DefaultCurrentInfoQueryPlanner()
+        self._source_preference_repository = source_preference_repository
         self._safety_config = safety_config or CurrentInfoSafetyConfig()
 
     def answer(self, request: CurrentInfoRequest) -> CurrentInfoAnswer:
@@ -221,6 +225,11 @@ class CurrentInfoService:
                         normalize_dedupe_and_rank_search_results(
                             direct_url_results,
                             max_results=query_plan.max_results,
+                            source_preferences=self._source_preferences_for_results(
+                                direct_url_results,
+                                request=request,
+                                domain=task.domain,
+                            ),
                         )
                     )
                 )
@@ -440,10 +449,69 @@ class CurrentInfoService:
                 collected.append(item)
         return SearchProviderResponse(
             results=_label_search_results(
-                normalize_dedupe_and_rank_search_results(tuple(collected), max_results=query_plan.max_results)
+                normalize_dedupe_and_rank_search_results(
+                    tuple(collected),
+                    max_results=query_plan.max_results,
+                    source_preferences=self._source_preferences_for_results(
+                        tuple(collected),
+                        request=request,
+                        domain=query_plan.task.domain,
+                    ),
+                )
             ),
             metrics=tuple(metrics),
         )
+
+    def _source_preferences_for_results(
+        self,
+        results: tuple[SearchResult, ...],
+        *,
+        request: CurrentInfoRequest,
+        domain: str,
+    ) -> dict[str, Mapping[str, object]]:
+        if self._source_preference_repository is None:
+            return {}
+        hosts = tuple(dict.fromkeys(_host_from_search_result(result) for result in results if _host_from_search_result(result)))
+        if not hosts:
+            return {}
+        list_for_hosts = getattr(self._source_preference_repository, "list_for_hosts", None)
+        if list_for_hosts is None:
+            return {}
+        try:
+            preferences = list_for_hosts(
+                source_hosts=hosts,
+                domain=domain or request.domain_hint or "generic",
+                chat_id=request.chat_id,
+                topic_id=request.topic_id,
+                user_id=request.user_id,
+            )
+        except Exception as exc:
+            log_current_info_event(
+                logger,
+                event="current_info.SourcePreference",
+                stage="search",
+                query="",
+                chat_id=request.chat_id,
+                user_id=request.user_id,
+                topic_id=request.topic_id,
+                outcome="error",
+                reason_code="source_preference_lookup_failed",
+                extra={"error_class": exc.__class__.__name__},
+            )
+            return {}
+        if not isinstance(preferences, Mapping):
+            return {}
+        mapped: dict[str, Mapping[str, object]] = {}
+        for host, preference in preferences.items():
+            host_key = normalize_source_host(str(host))
+            if not host_key:
+                continue
+            metadata = getattr(preference, "metadata", None)
+            if isinstance(metadata, Mapping):
+                mapped[host_key] = metadata
+            elif isinstance(preference, Mapping):
+                mapped[host_key] = preference
+        return mapped
 
     def _fetch_documents(
         self,
@@ -537,7 +605,7 @@ def _direct_url_search_results(query: str) -> tuple[SearchResult, ...]:
     results: list[SearchResult] = []
     for url in _extract_direct_urls(query):
         parsed = urlparse(url)
-        host = (parsed.hostname or "").lower().rstrip(".")
+        host = normalize_source_host(parsed.hostname)
         results.append(
             SearchResult(
                 title=host or url,
@@ -554,6 +622,10 @@ def _direct_url_search_results(query: str) -> tuple[SearchResult, ...]:
             )
         )
     return tuple(results)
+
+
+def _host_from_search_result(result: SearchResult) -> str:
+    return normalize_source_host(result.host or urlparse(result.url).hostname)
 
 
 def _extract_direct_urls(query: str) -> tuple[str, ...]:

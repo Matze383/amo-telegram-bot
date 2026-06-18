@@ -32,6 +32,7 @@ from amo_bot.current_info import (
     build_search_broker_from_settings,
     canonicalize_url,
     classify_source_type,
+    normalize_dedupe_and_rank_search_results,
     default_search_profile_config,
     load_search_profile_config,
     load_search_profile_config_file,
@@ -581,6 +582,24 @@ def test_normalize_rank_uses_source_observation_metadata_without_network() -> No
     results = normalize_dedupe_and_rank_search_results((weak_observed, confirmed_observed), max_results=2)
 
     assert [result.host for result in results] == ["confirmed.example", "weak.example"]
+
+
+def test_normalize_rank_uses_source_preferences_and_www_normalization() -> None:
+    preferred = _result("https://www.trusted.example/status", rank=3)
+    rejected = _result("https://bad.example/status", rank=1)
+
+    results = normalize_dedupe_and_rank_search_results(
+        (rejected, preferred),
+        max_results=2,
+        source_preferences={
+            "trusted.example": {"source_preference_signal": "trusted"},
+            "www.bad.example": {"source_preference_signal": "rejected"},
+        },
+    )
+
+    assert [result.host for result in results] == ["trusted.example", "bad.example"]
+    assert results[0].metadata["source_preference_signal"] == "trusted"
+    assert results[1].metadata["source_preference_signal"] == "rejected"
 
 
 def test_broker_does_not_call_brave_when_searxng_succeeds() -> None:

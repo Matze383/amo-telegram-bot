@@ -345,6 +345,27 @@ class ResearchSourceObservation(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 
+class ResearchSourcePreference(Base):
+    __tablename__ = "research_source_preferences"
+    __table_args__ = (
+        Index("ix_research_source_preferences_host_domain", "host", "domain"),
+        Index("ix_research_source_preferences_scope", "scope_type", "chat_id", "topic_id", "user_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    host: Mapped[str] = mapped_column(String(255), nullable=False)
+    domain: Mapped[str] = mapped_column(String(64), nullable=False, default="generic", server_default="generic")
+    signal: Mapped[str] = mapped_column(String(32), nullable=False)
+    weight: Mapped[float] = mapped_column(Float, nullable=False, default=0.0, server_default="0")
+    scope_type: Mapped[str] = mapped_column(String(32), nullable=False, default="global", server_default="global")
+    chat_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    topic_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    user_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    source: Mapped[str] = mapped_column(String(32), nullable=False, default="feedback", server_default="feedback")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+
 class ResearchEvalCase(Base):
     __tablename__ = "research_eval_cases"
     __table_args__ = (

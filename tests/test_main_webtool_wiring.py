@@ -8,9 +8,9 @@ from amo_bot.ai.webtool_subagent import create_webtool_subagent_service
 from amo_bot.auth.roles import Role
 from amo_bot.db.base import create_session_factory
 from amo_bot.db.init_db import init_db
-from amo_bot.db.repositories import WebToolRoleQuotaRepository
+from amo_bot.db.repositories import ResearchSourcePreferenceRepository, WebToolRoleQuotaRepository
 import amo_bot.telegram.webtool_evidence as evidence_module
-from amo_bot.main import SessionBoundWebtoolCapabilityDispatcher
+from amo_bot.main import SessionBoundSourcePreferenceRepository, SessionBoundWebtoolCapabilityDispatcher
 
 
 class _StopFlow(RuntimeError):
@@ -71,6 +71,33 @@ def test_runtime_like_webtool_dispatcher_wrapper_uses_fresh_session(tmp_path):
     result = wrapper.execute(req)
 
     assert result.reason != "search_provider_not_configured"
+
+
+def test_session_bound_source_preference_repository_uses_fresh_session(tmp_path):
+    db_path = tmp_path / "source_preferences.sqlite3"
+    database_url = f"sqlite:///{db_path}"
+    init_db(database_url)
+    session_factory = create_session_factory(database_url)
+
+    with session_factory() as session:
+        ResearchSourcePreferenceRepository(session).record_preference(
+            host="www.runtime.example",
+            domain="news",
+            signal="trusted",
+            chat_id=-100,
+            topic_id=7,
+        )
+
+    wrapper = SessionBoundSourcePreferenceRepository(session_factory=session_factory)
+    preferences = wrapper.list_for_hosts(
+        source_hosts=("runtime.example",),
+        domain="news",
+        chat_id=-100,
+        topic_id=7,
+        user_id=42,
+    )
+
+    assert preferences["runtime.example"].signal == "trusted"
 
 
 def test_runtime_like_webscraping_has_real_scrape_provider(tmp_path):

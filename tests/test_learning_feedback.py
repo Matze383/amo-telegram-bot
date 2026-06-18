@@ -11,7 +11,8 @@ from amo_bot.ai.router import AIRouter
 from amo_bot.auth.roles import Role
 from amo_bot.db.base import Base
 from amo_bot.db.init_db import init_db
-from amo_bot.db.repositories import RetrievableMemoryRepository, TopicAgentMemoryRepository
+from amo_bot.db.models import ResearchSourcePreference
+from amo_bot.db.repositories import ResearchSourcePreferenceRepository, RetrievableMemoryRepository, TopicAgentMemoryRepository
 from amo_bot.telegram.commands import create_builtin_registry
 from amo_bot.telegram.dispatcher import Dispatcher
 from amo_bot.telegram.role_resolver import InMemoryRoleResolver
@@ -45,6 +46,49 @@ def test_text_source_preference_creates_scoped_summary_without_raw_leak(caplog) 
     log_text = "\n".join(record.getMessage() for record in caplog.records)
     assert "example.com" not in log_text
     assert "raw-secret-ish-context" not in log_text
+
+
+def test_text_source_preference_writes_metadata_preference_when_host_present() -> None:
+    factory = _factory()
+    with factory() as session:
+        result = LearningFeedbackService(
+            RetrievableMemoryRepository(session),
+            source_preference_writer=ResearchSourcePreferenceRepository(session),
+        ).process_text_feedback(
+            text="Quelle https://www.Good.example/path?query=secret ist besser.",
+            scope=LearningFeedbackScope(chat_id=-100, message_thread_id=7, user_id=42),
+            user_id=42,
+        )
+        row = session.scalar(__import__("sqlalchemy").select(ResearchSourcePreference))
+
+    assert result.stored is True
+    assert row is not None
+    assert row.host == "good.example"
+    assert row.signal == "preferred"
+    assert row.scope_type == "topic"
+    assert row.chat_id == -100
+    assert row.topic_id == 7
+    stored = f"{row.host} {row.domain} {row.source}"
+    assert "query=secret" not in stored
+
+
+def test_text_negative_source_preference_writes_low_quality_signal() -> None:
+    factory = _factory()
+    with factory() as session:
+        LearningFeedbackService(
+            RetrievableMemoryRepository(session),
+            source_preference_writer=ResearchSourcePreferenceRepository(session),
+        ).process_text_feedback(
+            text="Quelle bad.example ist schlecht und falsch.",
+            scope=LearningFeedbackScope(chat_id=-100),
+            user_id=42,
+        )
+        row = session.scalar(__import__("sqlalchemy").select(ResearchSourcePreference))
+
+    assert row is not None
+    assert row.host == "bad.example"
+    assert row.signal == "low_quality"
+    assert row.scope_type == "chat"
 
 
 def test_text_chart_negative_feedback_creates_analysis_warning() -> None:

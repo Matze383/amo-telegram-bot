@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 
 from amo_bot.auth.roles import Role
 from amo_bot.core.context_filters import is_bot_authored_context_record, is_obvious_meta_status_message
+from amo_bot.core.source_hosts import normalize_source_host
 from amo_bot.db.models import (
     AuditEvent,
     BotPeer,
@@ -37,6 +38,7 @@ from amo_bot.db.models import (
     ResearchProvider,
     ResearchProviderHealth,
     ResearchSourceObservation,
+    ResearchSourcePreference,
     RetrievableMemory,
     TelegramChat,
     TelegramTopic,
@@ -535,6 +537,31 @@ class ResearchHostQualityRecord:
     @property
     def usable(self) -> bool:
         return self.success_count > 0 and self.failure_count <= self.success_count + self.warning_count
+
+
+@dataclass(frozen=True, slots=True)
+class ResearchSourcePreferenceRecord:
+    host: str
+    domain: str
+    signal: str
+    weight: float
+    scope_type: str = "global"
+    chat_id: int | None = None
+    topic_id: int | None = None
+    user_id: int | None = None
+    source: str = "feedback"
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+    @property
+    def metadata(self) -> dict[str, object]:
+        return {
+            "source_preference_signal": self.signal,
+            "source_preference_weight": self.weight,
+            "source_preference_scope": self.scope_type,
+            "source_preference_domain": self.domain,
+            "source_preference_source": self.source,
+        }
 
 
 class ResearchProviderRepository:
@@ -1158,17 +1185,7 @@ class ResearchSourceObservationRepository:
 
     @staticmethod
     def _extract_host(value: str) -> str:
-        raw = (value or "").strip()
-        if not raw:
-            return ""
-        candidate = raw if "://" in raw else f"https://{raw}"
-        try:
-            host = (urlparse(candidate).hostname or "").casefold().removeprefix("www.")
-        except Exception:
-            return ""
-        if not host or "/" in host or len(host) > 253:
-            return ""
-        return host
+        return normalize_source_host(value)
 
     @classmethod
     def _safe_metadata_key(cls, key: str) -> str | None:
@@ -1223,6 +1240,270 @@ class ResearchSourceObservationRepository:
         if not raw:
             return False
         return bool(cls._URL_RE.search(raw) or cls._HOSTLIKE_RE.search(raw) or cls._SENSITIVE_VALUE_RE.search(raw))
+
+
+class ResearchSourcePreferenceRepository:
+    """Store metadata-only source preferences and expose ranking hints by host."""
+
+    _SIGNAL_WEIGHTS = {
+        "preferred": -0.75,
+        "trusted": -0.9,
+        "avoid": 1.0,
+        "rejected": 1.35,
+        "low_quality": 0.9,
+        "negative": 1.0,
+    }
+    _POSITIVE_SIGNALS = {"preferred", "trusted"}
+    _NEGATIVE_SIGNALS = {"avoid", "rejected", "low_quality", "negative"}
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def record_preference(
+        self,
+        *,
+        host: str | None = None,
+        source_url: str | None = None,
+        domain: str = "generic",
+        signal: str,
+        weight: float | None = None,
+        chat_id: int | None = None,
+        topic_id: int | None = None,
+        user_id: int | None = None,
+        source: str = "feedback",
+        created_at: datetime | None = None,
+    ) -> ResearchSourcePreferenceRecord:
+        normalized_host = ResearchSourceObservationRepository._extract_host(host or source_url or "")
+        if not normalized_host:
+            raise ValueError("source preference requires a valid host")
+        normalized_domain = ResearchSourceObservationRepository._safe_label(domain, default="generic", max_len=64)
+        normalized_signal = self._safe_signal(signal)
+        normalized_source = ResearchSourceObservationRepository._safe_label(source, default="feedback", max_len=32)
+        normalized_weight = self._safe_weight(weight if weight is not None else self._SIGNAL_WEIGHTS[normalized_signal])
+        scope_type = self._scope_type(chat_id=chat_id, topic_id=topic_id, user_id=user_id)
+        when = created_at or datetime.now(timezone.utc)
+
+        existing = self._find_existing(
+            host=normalized_host,
+            domain=normalized_domain,
+            scope_type=scope_type,
+            chat_id=chat_id,
+            topic_id=topic_id,
+            user_id=user_id,
+        )
+        if existing is None:
+            row = ResearchSourcePreference(
+                host=normalized_host,
+                domain=normalized_domain,
+                signal=normalized_signal,
+                weight=normalized_weight,
+                scope_type=scope_type,
+                chat_id=chat_id,
+                topic_id=topic_id,
+                user_id=user_id,
+                source=normalized_source,
+                created_at=when,
+                updated_at=when,
+            )
+            self._session.add(row)
+        else:
+            row = existing
+            row.signal = normalized_signal
+            row.weight = normalized_weight
+            row.source = normalized_source
+            row.updated_at = when
+        self._session.commit()
+        return self._to_record(row)
+
+    def list_for_hosts(
+        self,
+        *,
+        source_hosts: Sequence[str],
+        domain: str = "generic",
+        chat_id: int | None = None,
+        topic_id: int | None = None,
+        user_id: int | None = None,
+        include_observations: bool = True,
+        observation_since: datetime | None = None,
+    ) -> dict[str, ResearchSourcePreferenceRecord]:
+        hosts = ResearchSourceObservationRepository._safe_hosts(source_hosts)
+        if not hosts:
+            return {}
+        normalized_domain = ResearchSourceObservationRepository._safe_label(domain, default="generic", max_len=64)
+        rows = self._session.scalars(
+            select(ResearchSourcePreference)
+            .where(
+                and_(
+                    ResearchSourcePreference.host.in_(hosts),
+                    ResearchSourcePreference.domain.in_((normalized_domain, "generic")),
+                    self._scope_filter(chat_id=chat_id, topic_id=topic_id, user_id=user_id),
+                )
+            )
+            .order_by(ResearchSourcePreference.updated_at.desc(), ResearchSourcePreference.created_at.desc())
+        ).all()
+
+        by_host: dict[str, ResearchSourcePreferenceRecord] = {}
+        best_keys: dict[str, tuple[int, int, float]] = {}
+        for row in rows:
+            record = self._to_record(row)
+            key = (
+                1 if record.domain == normalized_domain else 0,
+                self._specificity(record),
+                (record.updated_at or record.created_at or datetime.min).timestamp(),
+            )
+            if key > best_keys.get(record.host, (-1, -1, float("-inf"))):
+                by_host[record.host] = record
+                best_keys[record.host] = key
+
+        if include_observations:
+            observation_records = self._observation_preferences(
+                hosts=hosts,
+                domain=normalized_domain,
+                since=observation_since,
+            )
+            for host, record in observation_records.items():
+                by_host.setdefault(host, record)
+        return by_host
+
+    def _observation_preferences(
+        self,
+        *,
+        hosts: Sequence[str],
+        domain: str,
+        since: datetime | None,
+    ) -> dict[str, ResearchSourcePreferenceRecord]:
+        qualities = ResearchSourceObservationRepository(self._session).assess_recent_hosts(
+            domain=domain,
+            source_hosts=hosts,
+            since=since,
+        )
+        result: dict[str, ResearchSourcePreferenceRecord] = {}
+        for quality in qualities:
+            if quality.success_count <= 0 and quality.failure_count <= 0 and quality.warning_count <= 0:
+                continue
+            if quality.failure_count > quality.success_count or quality.conflict_count > 0:
+                signal = "low_quality"
+                weight = min(1.1, 0.35 + quality.failure_count * 0.2 + quality.conflict_count * 0.3)
+            elif quality.success_count > quality.failure_count + quality.warning_count:
+                signal = "trusted"
+                weight = -min(0.45, 0.2 + quality.success_count * 0.08)
+            else:
+                continue
+            result[quality.host] = ResearchSourcePreferenceRecord(
+                host=quality.host,
+                domain=domain,
+                signal=signal,
+                weight=weight,
+                source="observation",
+            )
+        return result
+
+    def _find_existing(
+        self,
+        *,
+        host: str,
+        domain: str,
+        scope_type: str,
+        chat_id: int | None,
+        topic_id: int | None,
+        user_id: int | None,
+    ) -> ResearchSourcePreference | None:
+        return self._session.scalar(
+            select(ResearchSourcePreference).where(
+                and_(
+                    ResearchSourcePreference.host == host,
+                    ResearchSourcePreference.domain == domain,
+                    ResearchSourcePreference.scope_type == scope_type,
+                    ResearchSourcePreference.chat_id.is_(None)
+                    if chat_id is None
+                    else ResearchSourcePreference.chat_id == chat_id,
+                    ResearchSourcePreference.topic_id.is_(None)
+                    if topic_id is None
+                    else ResearchSourcePreference.topic_id == topic_id,
+                    ResearchSourcePreference.user_id.is_(None)
+                    if user_id is None
+                    else ResearchSourcePreference.user_id == user_id,
+                )
+            )
+        )
+
+    @staticmethod
+    def _scope_filter(*, chat_id: int | None, topic_id: int | None, user_id: int | None):  # noqa: ANN205
+        filters = [
+            ResearchSourcePreference.scope_type == "global",
+        ]
+        if user_id is not None:
+            filters.append(and_(ResearchSourcePreference.scope_type == "user", ResearchSourcePreference.user_id == user_id))
+        if chat_id is not None:
+            filters.append(and_(ResearchSourcePreference.scope_type == "chat", ResearchSourcePreference.chat_id == chat_id))
+        if chat_id is not None and topic_id is not None:
+            filters.append(
+                and_(
+                    ResearchSourcePreference.scope_type == "topic",
+                    ResearchSourcePreference.chat_id == chat_id,
+                    ResearchSourcePreference.topic_id == topic_id,
+                )
+            )
+        return or_(*filters)
+
+    @staticmethod
+    def _scope_type(*, chat_id: int | None, topic_id: int | None, user_id: int | None) -> str:
+        if chat_id is not None and topic_id is not None:
+            return "topic"
+        if chat_id is not None:
+            return "chat"
+        if user_id is not None:
+            return "user"
+        return "global"
+
+    @classmethod
+    def _safe_signal(cls, signal: str) -> str:
+        normalized = ResearchSourceObservationRepository._safe_label(signal, default="preferred", max_len=32).casefold()
+        aliases = {
+            "prefer": "preferred",
+            "good": "preferred",
+            "trust": "trusted",
+            "trusted": "trusted",
+            "avoid": "avoid",
+            "bad": "low_quality",
+            "weak": "low_quality",
+            "mull": "low_quality",
+            "trash": "low_quality",
+            "reject": "rejected",
+            "rejected": "rejected",
+            "negative": "negative",
+        }
+        normalized = aliases.get(normalized, normalized)
+        if normalized not in cls._POSITIVE_SIGNALS | cls._NEGATIVE_SIGNALS:
+            return "preferred"
+        return normalized
+
+    @staticmethod
+    def _safe_weight(value: float) -> float:
+        try:
+            return max(-2.0, min(2.0, float(value)))
+        except (TypeError, ValueError):
+            return 0.0
+
+    @staticmethod
+    def _specificity(record: ResearchSourcePreferenceRecord) -> int:
+        return {"global": 0, "user": 1, "chat": 2, "topic": 3}.get(record.scope_type, 0)
+
+    @staticmethod
+    def _to_record(row: ResearchSourcePreference) -> ResearchSourcePreferenceRecord:
+        return ResearchSourcePreferenceRecord(
+            host=row.host,
+            domain=row.domain,
+            signal=row.signal,
+            weight=float(row.weight),
+            scope_type=row.scope_type,
+            chat_id=row.chat_id,
+            topic_id=row.topic_id,
+            user_id=row.user_id,
+            source=row.source,
+            created_at=_ensure_aware_utc(row.created_at),
+            updated_at=_ensure_aware_utc(row.updated_at),
+        )
 
 
 class ResearchEvalCaseRepository:

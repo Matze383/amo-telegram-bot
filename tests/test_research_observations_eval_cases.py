@@ -10,10 +10,11 @@ from amo_bot.ai.webtool_subagent import WebtoolOperationType, WebtoolSubagentReq
 from amo_bot.auth.roles import Role
 from amo_bot.db.base import create_session_factory
 from amo_bot.db.init_db import init_db
-from amo_bot.db.models import ResearchEvalCase, ResearchSourceObservation
+from amo_bot.db.models import ResearchEvalCase, ResearchSourceObservation, ResearchSourcePreference
 from amo_bot.db.repositories import (
     ResearchEvalCaseRepository,
     ResearchSourceObservationRepository,
+    ResearchSourcePreferenceRepository,
     RetrievableMemoryRepository,
     WebToolRoleQuotaRepository,
 )
@@ -99,6 +100,55 @@ def test_observation_repository_stores_metadata_only_and_reduces_urls_to_hosts(t
     assert "https://api.example.com/path" not in stored
     assert "token=abc123" not in stored
     assert "custom_status" in stored
+
+
+def test_source_preference_repository_persists_sanitizes_scopes_and_normalizes_www(tmp_path):
+    session_factory = _session_factory(tmp_path)
+
+    with session_factory() as session:
+        repo = ResearchSourcePreferenceRepository(session)
+        global_record = repo.record_preference(host="https://www.Example.com/path?q=raw", domain="news", signal="trusted")
+        repo.record_preference(host="www.example.com", domain="news", signal="avoid", chat_id=-100)
+        topic_record = repo.record_preference(
+            host="example.com",
+            domain="news",
+            signal="preferred",
+            chat_id=-100,
+            topic_id=7,
+            source="feedback url=https://leak.example",
+        )
+        prefs = repo.list_for_hosts(source_hosts=("www.example.com",), domain="news", chat_id=-100, topic_id=7)
+        chat_prefs = repo.list_for_hosts(source_hosts=("example.com",), domain="news", chat_id=-100)
+        rows = session.scalars(select(ResearchSourcePreference)).all()
+
+    assert global_record.host == "example.com"
+    assert topic_record.scope_type == "topic"
+    assert topic_record.source == "feedback"
+    assert prefs["example.com"].signal == "preferred"
+    assert chat_prefs["example.com"].signal == "avoid"
+    assert all(row.host == "example.com" for row in rows)
+    assert all("raw" not in f"{row.host} {row.source}" for row in rows)
+
+
+def test_source_preference_repository_resolves_global_user_chat_topic_scope(tmp_path):
+    session_factory = _session_factory(tmp_path)
+
+    with session_factory() as session:
+        repo = ResearchSourcePreferenceRepository(session)
+        repo.record_preference(host="scope.example", domain="generic", signal="trusted")
+        repo.record_preference(host="scope.example", domain="generic", signal="avoid", user_id=42)
+        repo.record_preference(host="scope.example", domain="generic", signal="low_quality", chat_id=-100)
+        repo.record_preference(host="scope.example", domain="generic", signal="preferred", chat_id=-100, topic_id=7)
+
+        global_pref = repo.list_for_hosts(source_hosts=("scope.example",), domain="generic")["scope.example"]
+        user_pref = repo.list_for_hosts(source_hosts=("scope.example",), domain="generic", user_id=42)["scope.example"]
+        chat_pref = repo.list_for_hosts(source_hosts=("scope.example",), domain="generic", chat_id=-100)["scope.example"]
+        topic_pref = repo.list_for_hosts(source_hosts=("scope.example",), domain="generic", chat_id=-100, topic_id=7)["scope.example"]
+
+    assert global_pref.scope_type == "global"
+    assert user_pref.scope_type == "user"
+    assert chat_pref.scope_type == "chat"
+    assert topic_pref.scope_type == "topic"
 
 
 def test_recent_source_observations_mark_conflicting_news_host_as_unusable(tmp_path):

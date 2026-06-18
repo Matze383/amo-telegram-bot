@@ -6,9 +6,9 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from enum import Enum
 from typing import Any, Iterable, Protocol
-from urllib.parse import urlparse
 
 from amo_bot.core.logging import log_event
+from amo_bot.core.source_hosts import normalize_source_host
 from amo_bot.db.repositories import RetrievableMemoryRecord, RetrievableMemoryRepository
 
 logger = logging.getLogger(__name__)
@@ -43,6 +43,9 @@ class LearningFeedbackCandidate:
     user_id: int | None = None
     learning_type: str = "feedback"
     confidence_bucket: str = "medium"
+    source_host: str | None = None
+    source_signal: str | None = None
+    source_domain: str = "generic"
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,6 +91,23 @@ class ResearchEvalCaseWriter(Protocol):
         ...
 
 
+class ResearchSourcePreferenceWriter(Protocol):
+    def record_preference(
+        self,
+        *,
+        host: str | None = None,
+        source_url: str | None = None,
+        domain: str = "generic",
+        signal: str,
+        weight: float | None = None,
+        chat_id: int | None = None,
+        topic_id: int | None = None,
+        user_id: int | None = None,
+        source: str = "feedback",
+    ):
+        ...
+
+
 class LearningFeedbackService:
     """Detect and store scoped, summarized learning signals without raw chat retention."""
 
@@ -113,9 +133,15 @@ class LearningFeedbackService:
     _POSITIVE_TEXT_RE = re.compile(r"\b(?:genau\s+so|das\s+war\s+richtig|richtig|passt|gut\s+so|korrekt|works?|helpful)\b", re.I)
     _NEGATIVE_TEXT_RE = re.compile(r"\b(?:das\s+war\s+falsch|falsch|nicht\s+korrekt|stimmt\s+nicht|das\s+reicht\s+nicht|zu\s+oberflächlich|oberflaechlich|wrong|incorrect|not\s+enough)\b", re.I)
 
-    def __init__(self, repository: LearningMemoryRepository, eval_case_writer: ResearchEvalCaseWriter | None = None) -> None:
+    def __init__(
+        self,
+        repository: LearningMemoryRepository,
+        eval_case_writer: ResearchEvalCaseWriter | None = None,
+        source_preference_writer: ResearchSourcePreferenceWriter | None = None,
+    ) -> None:
         self._repository = repository
         self._eval_case_writer = eval_case_writer
+        self._source_preference_writer = source_preference_writer
 
     def process_text_feedback(self, *, text: str, scope: LearningFeedbackScope, user_id: int | None = None) -> LearningFeedbackResult:
         candidate = self.detect_text_candidate(text=text, scope=scope, user_id=user_id)
@@ -161,9 +187,12 @@ class LearningFeedbackService:
 
         if is_source:
             preferred, avoided = self._extract_source_hints(cleaned)
+            source_host = preferred or avoided
             topic = "current topic"
+            domain = "generic"
             if is_chart:
                 topic = "chart analysis"
+                domain = "analysis"
             if preferred:
                 summary = f"Learning feedback/source_preference: for {topic}, prefer source/domain '{preferred}' when live verification supports it. Treat as untrusted scoped preference."
             elif avoided:
@@ -181,6 +210,9 @@ class LearningFeedbackService:
                 user_id=target_user_id,
                 learning_type="source_preference",
                 confidence_bucket="high",
+                source_host=source_host,
+                source_signal="low_quality" if avoided else "preferred" if preferred else None,
+                source_domain=domain,
             )
 
         if is_chart:
@@ -302,11 +334,13 @@ class LearningFeedbackService:
     def _extract_source_hints(cls, text: str) -> tuple[str | None, str | None]:
         candidates: list[str] = []
         for url in cls._URL_RE.findall(text):
-            parsed = urlparse(url)
-            if parsed.netloc:
-                candidates.append(parsed.netloc.casefold().removeprefix("www."))
+            host = normalize_source_host(url)
+            if host:
+                candidates.append(host)
         for domain in cls._DOMAIN_RE.findall(text):
-            candidates.append(domain.casefold().removeprefix("www."))
+            host = normalize_source_host(domain)
+            if host:
+                candidates.append(host)
         source = next((item for item in candidates if item), None)
         lower = text.casefold()
         is_avoid = any(marker in lower for marker in ("avoid", "meide", "schlecht", "falsch", "not use", "nicht nutzen"))
@@ -353,6 +387,7 @@ class LearningFeedbackService:
                 confidence_bucket=candidate.confidence_bucket,
                 learning_type=candidate.learning_type,
             )
+            self._maybe_write_source_preference(candidate)
             self._maybe_write_research_eval_case(candidate)
             return LearningFeedbackResult(stored=True, candidate=candidate, record=record)
         except Exception as exc:
@@ -368,6 +403,34 @@ class LearningFeedbackService:
                 error_class=exc.__class__.__name__,
             )
             return LearningFeedbackResult(stored=False, candidate=candidate, skipped_reason=LearningFeedbackSkipReason.STORE_ERROR, error_class=exc.__class__.__name__)
+
+    def _maybe_write_source_preference(self, candidate: LearningFeedbackCandidate) -> None:
+        if self._source_preference_writer is None:
+            return
+        if candidate.learning_type != "source_preference" or not candidate.source_host or not candidate.source_signal:
+            return
+        try:
+            self._source_preference_writer.record_preference(
+                host=candidate.source_host,
+                domain=candidate.source_domain or "generic",
+                signal=candidate.source_signal,
+                chat_id=candidate.chat_id,
+                topic_id=candidate.message_thread_id,
+                user_id=candidate.user_id,
+                source="feedback",
+            )
+        except Exception as exc:
+            self._log_decision(
+                event="learning_feedback.source_preference",
+                decision="error",
+                scope_type=candidate.visibility,
+                memory_type=candidate.memory_type,
+                source=candidate.source,
+                confidence_bucket=candidate.confidence_bucket,
+                learning_type=candidate.learning_type,
+                skipped_reason=LearningFeedbackSkipReason.STORE_ERROR.value,
+                error_class=exc.__class__.__name__,
+            )
 
     def _maybe_write_research_eval_case(self, candidate: LearningFeedbackCandidate) -> None:
         if self._eval_case_writer is None or not self._is_negative_research_signal(candidate):

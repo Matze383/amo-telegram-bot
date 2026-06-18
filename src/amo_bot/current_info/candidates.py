@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import replace
 from datetime import UTC, datetime
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
+from amo_bot.core.source_hosts import normalize_source_host
 from amo_bot.current_info.models import SearchResult
 
 
@@ -139,9 +141,19 @@ def classify_source_type(result: SearchResult) -> str:
     return SOURCE_TYPE_UNKNOWN
 
 
-def normalize_dedupe_and_rank_search_results(results: tuple[SearchResult, ...], *, max_results: int) -> tuple[SearchResult, ...]:
+def normalize_dedupe_and_rank_search_results(
+    results: tuple[SearchResult, ...],
+    *,
+    max_results: int,
+    source_preferences: Mapping[str, Mapping[str, object]] | None = None,
+) -> tuple[SearchResult, ...]:
     normalized: list[SearchResult] = []
     seen_canonical_urls: set[str] = set()
+    normalized_source_preferences = {
+        normalized_host: preference
+        for raw_host, preference in (source_preferences or {}).items()
+        if (normalized_host := normalize_source_host(str(raw_host)))
+    }
     for result in results:
         canonical_url = canonicalize_url(result.url)
         dedupe_key = canonical_url.casefold()
@@ -150,11 +162,13 @@ def normalize_dedupe_and_rank_search_results(results: tuple[SearchResult, ...], 
         seen_canonical_urls.add(dedupe_key)
 
         parsed = urlparse(canonical_url)
-        host = (parsed.hostname or result.host or "").lower().rstrip(".")
+        host = normalize_source_host(parsed.hostname or result.host)
         source_type = classify_source_type(replace(result, url=canonical_url, host=host))
         metadata = dict(result.metadata)
         metadata["canonical_url"] = canonical_url
         metadata["source_type"] = source_type
+        if host in normalized_source_preferences:
+            metadata.update(_source_preference_metadata(normalized_source_preferences[host]))
         normalized.append(replace(result, url=canonical_url, host=host, metadata=metadata))
 
     ranked = _rank_candidates(normalized)
@@ -176,6 +190,7 @@ def _rank_candidates(results: list[SearchResult]) -> list[SearchResult]:
             float(host_occurrence) * 0.75,
             -_source_type_score(source_type) * 0.1,
             _source_observation_penalty(result.metadata),
+            _source_preference_penalty(result.metadata),
             -freshness * 0.0000000001,
         )
         ranked.append(((sum(score), index, result.url), result))
@@ -226,6 +241,30 @@ def _source_observation_penalty(metadata: dict[str, object]) -> float:
     if explicit_penalty is not None:
         penalty += explicit_penalty
     return penalty
+
+
+def _source_preference_metadata(preference: Mapping[str, object]) -> dict[str, object]:
+    allowed = {
+        "source_preference_signal",
+        "source_preference_weight",
+        "source_preference_scope",
+        "source_preference_domain",
+        "source_preference_source",
+    }
+    return {key: preference[key] for key in allowed if key in preference}
+
+
+def _source_preference_penalty(metadata: dict[str, object]) -> float:
+    raw_signal = metadata.get("source_preference_signal") or metadata.get("source_preference")
+    signal = str(raw_signal or "").strip().lower()
+    explicit_weight = _metadata_float(metadata.get("source_preference_weight"))
+    if explicit_weight is not None:
+        return max(-2.0, min(2.0, explicit_weight))
+    if signal in {"preferred", "trusted"}:
+        return -0.75 if signal == "preferred" else -0.9
+    if signal in {"avoid", "rejected", "low_quality", "negative"}:
+        return 1.35 if signal == "rejected" else 0.9
+    return 0.0
 
 
 def _metadata_tuple(value: object) -> tuple[str, ...]:

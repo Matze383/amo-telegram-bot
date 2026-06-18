@@ -14,6 +14,7 @@ from amo_bot.db.models import (
     ResearchProvider,
     ResearchProviderHealth,
     ResearchSourceObservation,
+    ResearchSourcePreference,
 )
 
 
@@ -21,6 +22,7 @@ RESEARCH_TABLES = (
     ResearchProvider.__table__,
     ResearchProviderHealth.__table__,
     ResearchSourceObservation.__table__,
+    ResearchSourcePreference.__table__,
     ResearchEvalCase.__table__,
 )
 RESEARCH_TABLE_NAMES = tuple(table.name for table in RESEARCH_TABLES)
