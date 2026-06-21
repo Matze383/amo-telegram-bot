@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from unittest.mock import patch
 
 from amo_bot.ai.router import AIRouterContextV1, AIRouterDecision, AIRouterReasonCode
@@ -905,6 +906,88 @@ def test_reply_to_persisted_bot_message_includes_reply_context(tmp_path) -> None
     assert "@AmoBot" not in prompt
     assert "Bot sample answer for reply context" in prompt
     assert "User message:\nWas meinst du damit?" in prompt
+
+
+def test_autoreply_writes_context_snapshot_audit_for_topic_2246_fixture(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'ai_context_snapshot_topic_2246.db'}"
+    init_db(db_url)
+    _seed_user(
+        db_url,
+        user_id=224601,
+        role="vip",
+        consent="accepted",
+        group_chat_id=-1003997137641,
+        group_role="vip",
+    )
+
+    sf = create_session_factory(db_url)
+    with sf() as session:
+        repo = TopicAgentMemoryRepository(session)
+        repo.upsert_config(
+            scope_type="topic",
+            chat_id=-1003997137641,
+            topic_id=2246,
+            ai_enabled=True,
+            recent_context_window_size=10,
+        )
+        repo.add_message(
+            scope_type="topic",
+            chat_id=-1003997137641,
+            topic_id=2246,
+            message_text="Die Taverne ist voller Orks und Magie.",
+            telegram_author_user_id=224601,
+            source="user",
+        )
+        repo.add_message(
+            scope_type="topic",
+            chat_id=-1003997137641,
+            topic_id=2246,
+            message_text="Unser Fantasy-Charakter sucht eine Quest im Koenigreich.",
+            telegram_author_user_id=224601,
+            source="user",
+        )
+        session.commit()
+
+    ai = FakeAIService(answer="ai-answer")
+    sender = Sender()
+    dispatcher = _mk_dispatcher(db_url, ai, sender)
+
+    asyncio.run(
+        dispatcher.handle_raw_update(
+            _mk_update(
+                uid=224601,
+                chat_id=-1003997137641,
+                chat_type="supergroup",
+                text="@AmoBot Was ist der aktuelle echte Kurs von BTC?",
+                update_id=2246,
+                message_thread_id=2246,
+            )
+        )
+    )
+
+    assert sender.sent == [(-1003997137641, "ai-answer", 2246)]
+    assert len(ai.prompts) == 1
+    assert "Structured runtime context snapshot" in ai.prompts[0]
+    assert '"schema_version": "context_snapshot_v1"' in ai.prompts[0]
+    assert '"frame": "current_turn"' in ai.prompts[0]
+    assert '"frame": "recent_chat_context"' in ai.prompts[0]
+
+    with sf() as session:
+        snapshot_event = (
+            session.query(AuditEvent)
+            .filter(AuditEvent.event_type == "ai_context_snapshot")
+            .one()
+        )
+        payload = json.loads(snapshot_event.payload_json)
+
+    snapshot = payload["context_snapshot"]
+    assert snapshot["schema_version"] == "context_snapshot_v1"
+    assert snapshot["requires_current_info"] is True
+    frames = {candidate["frame"] for candidate in snapshot["frame_candidates"]}
+    assert {"current_turn", "recent_chat_context"} <= frames
+    assert [conflict["conflict_type"] for conflict in snapshot["conflicts"]] == ["source_frame_boundary"]
+    assert snapshot["conflicts"][0]["frames"] == ["current_turn", "background_context"]
+    assert "source_frame_boundary_needs_resolution" in snapshot["uncertainty"]
 
 
 def test_reply_to_user_message_uses_safe_inline_quote_context(tmp_path) -> None:

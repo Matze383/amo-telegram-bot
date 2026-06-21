@@ -10,6 +10,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any, Awaitable, Callable, Protocol
 
 from amo_bot.ai.current_time_context import DEFAULT_AI_PROMPT_TIMEZONE
+from amo_bot.ai.context_snapshot import build_context_snapshot
 from amo_bot.ai.learning_feedback import LearningFeedbackScope, LearningFeedbackService
 from amo_bot.ai.prompt_language import DEFAULT_RESPONSE_LANGUAGE_RULE
 from amo_bot.ai.router import AIRouter, AIRouterReasonCode
@@ -1369,6 +1370,19 @@ class Dispatcher:
         if recall_memory_text:
             background_sections.append(f"Retrieved memory context:\n{recall_memory_text}")
 
+        auto_research_decision = decide_auto_research(normalized_text)
+        context_snapshot = build_context_snapshot(
+            current_message=text,
+            normalized_current_message=normalized_text,
+            router_context=decision.context,
+            reply_context_text=reply_context_block,
+            existing_current_info_signal=auto_research_decision.enabled,
+        )
+        prompt_sections.append(
+            "Structured runtime context snapshot (diagnostic; use it to resolve frame conflicts, do not quote it):\n"
+            f"{context_snapshot.to_prompt_text()}"
+        )
+
         if background_sections:
             prompt_sections.append("Background context:")
             prompt_sections.extend(background_sections)
@@ -1486,6 +1500,40 @@ class Dispatcher:
         if auto_note:
             llm_prompt = f"{auto_note}\n\n{llm_prompt}"
 
+        log_event(
+            logger,
+            logging.INFO,
+            event="ai.context_snapshot",
+            component=_COMPONENT,
+            chat_id=message.chat.id,
+            message_id=message.message_id,
+            message_thread_id=message.message_thread_id,
+            user_id=message.from_user.id,
+            extra={
+                "router_reason": decision.reason_code.value,
+                "current_user_intent": context_snapshot.current_user_intent,
+                "active_subject": context_snapshot.active_subject,
+                "frame_candidates": [candidate.frame for candidate in context_snapshot.frame_candidates],
+                "conflict_count": len(context_snapshot.conflicts),
+                "requires_current_info": context_snapshot.requires_current_info,
+            },
+        )
+        if self.database_url is not None:
+            with create_session_factory(self.database_url)() as session:
+                self._write_ai_audit(
+                    session=session,
+                    actor_user_id=message.from_user.id,
+                    chat_id=message.chat.id,
+                    message_id=message.message_id,
+                    message_thread_id=message.message_thread_id,
+                    event_type="ai_context_snapshot",
+                    payload={
+                        "router_reason": decision.reason_code.value,
+                        "context_snapshot": context_snapshot.to_dict(),
+                    },
+                )
+                session.commit()
+
         # Structured log: AI autoreply attempt
         timing: dict[str, Any] = {}
         with duration_timer(timing):
@@ -1507,7 +1555,11 @@ class Dispatcher:
                             message_id=message.message_id,
                             message_thread_id=message.message_thread_id,
                             event_type="ai_autoreply_error",
-                            payload={"reason": "ai_error", "router_reason": decision.reason_code.value},
+                            payload={
+                                "reason": "ai_error",
+                                "router_reason": decision.reason_code.value,
+                                "context_snapshot": context_snapshot.to_dict(),
+                            },
                         )
                         session.commit()
 
@@ -1577,6 +1629,8 @@ class Dispatcher:
                 "router_reason": decision.reason_code.value,
                 "mention_removed": mention_removed,
                 "duration_ms": timing.get("duration_ms"),
+                "context_snapshot_conflicts": len(context_snapshot.conflicts),
+                "context_snapshot_requires_current_info": context_snapshot.requires_current_info,
             },
         )
 
@@ -1592,6 +1646,7 @@ class Dispatcher:
                     payload={
                         "router_reason": decision.reason_code.value,
                         "mention_removed": mention_removed,
+                        "context_snapshot": context_snapshot.to_dict(),
                     },
                 )
                 session.commit()
