@@ -4,7 +4,7 @@ from amo_bot.ai.context_snapshot import build_context_snapshot
 from amo_bot.ai.router import AIRouterContextV1, AIRouterReasonCode
 
 
-def test_topic_2246_fixture_structures_current_turn_background_boundary() -> None:
+def test_mixed_context_incident_fixture_structures_current_turn_background_boundary() -> None:
     router_context = AIRouterContextV1(
         scope_type="topic",
         scope_chat_id=-1003997137641,

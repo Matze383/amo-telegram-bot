@@ -97,9 +97,9 @@ The snapshot records schema version, detected current intent, extracted active s
 
 Important limitation: this is diagnostic metadata, not a resolver. It can flag a low-overlap boundary between the current turn and background context, but it does not remove, reorder, or suppress context sections.
 
-## 6) Topic 2246 Diagnostic Fixture
+## 6) Mixed-Context Incident Fixture
 
-The observed failure case is:
+The original incident example was observed with these provenance values:
 
 - Chat: `-1003997137641`.
 - Topic/message thread: `2246`.
@@ -107,15 +107,17 @@ The observed failure case is:
 - Bot answer: `14777`.
 - Failure shape: current user asks for a current real fact, while recent topic context contains Fantasy/simulation content. The answer can blend the current factual question with background roleplay/simulation framing.
 
+These values are sample/provenance identifiers only; the fixture targets the general mixed-context failure shape where the current turn asks for a factual answer while recent topic context carries unrelated simulation framing.
+
 Reproduction fixture shape:
 
-1. Enable AI for scope `topic`, `chat_id=-1003997137641`, `topic_id=2246`.
+1. Enable AI for a topic scope, for example `chat_id=-1003997137641`, `topic_id=2246`.
 2. Store recent topic messages containing unrelated Fantasy/simulation content, for example tavern, orcs, magic, quest, kingdom.
 3. Send a mention-triggered current-fact message such as `@AmoBot Was ist der aktuelle echte Kurs von BTC?`.
 4. Keep Current-Info/Websearch unavailable, disabled, or falling back to normal answer synthesis if the aim is to exercise the mixed-context LLM path.
 5. Observe that the prompt includes the current BTC question plus recent Fantasy context. Current code also includes a context snapshot with `source_frame_boundary` when lexical overlap is low.
 
-Existing fixture: `tests/test_context_snapshot.py::test_topic_2246_fixture_structures_current_turn_background_boundary` covers the diagnostic boundary behavior for this shape. It does not replay Telegram update `14776` against production databases or assert final LLM answer content.
+Existing fixture: `tests/test_context_snapshot.py::test_mixed_context_incident_fixture_structures_current_turn_background_boundary` covers the diagnostic boundary behavior for this shape. It does not replay Telegram update `14776` against production databases or assert final LLM answer content.
 
 ## 7) Logging Coverage
 

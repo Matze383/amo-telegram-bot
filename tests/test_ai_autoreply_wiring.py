@@ -908,8 +908,8 @@ def test_reply_to_persisted_bot_message_includes_reply_context(tmp_path) -> None
     assert "User message:\nWas meinst du damit?" in prompt
 
 
-def test_autoreply_writes_context_snapshot_audit_for_topic_2246_fixture(tmp_path) -> None:
-    db_url = f"sqlite:///{tmp_path / 'ai_context_snapshot_topic_2246.db'}"
+def test_autoreply_writes_context_snapshot_audit_for_mixed_context_incident_fixture(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'ai_context_snapshot_mixed_context.db'}"
     init_db(db_url)
     _seed_user(
         db_url,
