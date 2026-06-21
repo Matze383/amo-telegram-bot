@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 from sqlalchemy import select
 
-from amo_bot.ai.router import AIRouterDecision, AIRouterReasonCode
+from amo_bot.ai.router import AIRouterContextV1, AIRouterDecision, AIRouterReasonCode
 from amo_bot.auth.roles import Role
 from amo_bot.db.base import create_session_factory
 from amo_bot.db.init_db import init_db
@@ -136,7 +136,7 @@ def _allowing_router_decision() -> AIRouterDecision:
         passthrough=True,
         eligible=True,
         reason_code=AIRouterReasonCode.MENTION_IN_ACTIVE_SCOPE,
-        context=SimpleNamespace(
+        context=AIRouterContextV1(
             scope_type="group_topic",
             flag_bot_mention=True,
             flag_reply_to_bot=True,
