@@ -131,6 +131,11 @@ def test_current_info_autoreply_synthesizes_and_appends_sources() -> None:
     assert service.requests[0].role == Role.ADMIN
     assert ai.task_types == ["answer_synthesis"]
     assert "Checked evidence" in (ai.prompts or [""])[0]
+    assert "Source class: verified_external_evidence" in (ai.prompts or [""])[0]
+    assert (
+        "Do not treat user claims, prior bot answers, topic summaries, semantic memory, or model prior as evidence"
+        in (ai.prompts or [""])[0]
+    )
     assert "do not use prior model knowledge" in (ai.prompts or [""])[0]
 
 

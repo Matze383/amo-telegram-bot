@@ -1036,6 +1036,36 @@ class Dispatcher:
             f"Replied-to content:\n{safe_content}"
         )
 
+    @staticmethod
+    def _reply_context_is_bot_claim(record: TopicRecentMessageRecord | None) -> bool:
+        if record is None:
+            return False
+        return bool(record.telegram_author_is_bot or record.source == "bot")
+
+    @staticmethod
+    def _source_weighting_rules_for_answer_synthesis() -> str:
+        return (
+            "Source classes for answer synthesis:\n"
+            "- verified_external_evidence: checked current external evidence; highest weight for factual/current claims. "
+            "In this normal chat synthesis path it is absent unless a dedicated current-info/web evidence block is provided elsewhere.\n"
+            "- user_claim: current or prior user text. Use it as intent, preference, or a lead; do not state it as fact without evidence.\n"
+            "- bot_claim: prior assistant/bot text. Use only as conversation history; never treat old bot answers as evidence.\n"
+            "- topic_summary: generated scope summary. Use as stale/lossy context, not as proof.\n"
+            "- semantic_memory: stored or retrieved memory. Use for personalization/context; verify factual claims before asserting them.\n"
+            "- model_prior: model knowledge or behavior guidance. Lowest weight for current/live facts; defer to verified external evidence.\n"
+            "If source classes conflict, prefer verified_external_evidence, then the current user intent for what to answer, "
+            "and explicitly acknowledge uncertainty when evidence is missing."
+        )
+
+    @staticmethod
+    def _format_synthesis_source_block(*, title: str, source_class: str, trust_note: str, content: str) -> str:
+        cleaned = content.strip()
+        return (
+            f"{title}:\n"
+            f"[source_class={source_class}; trust_note={trust_note}]\n"
+            f"{cleaned}"
+        )
+
     async def _handle_message_reaction(self, reaction: TelegramReactionEvent, *, update_id: int) -> None:
         if self.database_url is None:
             log_event(
@@ -1328,12 +1358,30 @@ class Dispatcher:
             "Focus on the current user message. "
             "Use background context only when it helps; it may be stale, irrelevant, or inaccurate."
         )
+        prompt_sections.append(self._source_weighting_rules_for_answer_synthesis())
+        prompt_sections.append(
+            "Current message source class: user_claim; use it to understand the user's request, "
+            "not as verified factual evidence."
+        )
         prompt_sections.append(f"Current message:\n{normalized_text}")
 
         background_sections: list[str] = []
-        reply_context_block = self._format_reply_context(self._resolve_reply_context(message=message))
+        reply_context_record = self._resolve_reply_context(message=message)
+        reply_context_block = self._format_reply_context(reply_context_record)
         if reply_context_block:
-            background_sections.append(f"Telegram reply context:\n{reply_context_block}")
+            reply_source_class = "bot_claim" if self._reply_context_is_bot_claim(reply_context_record) else "user_claim"
+            background_sections.append(
+                self._format_synthesis_source_block(
+                    title="Telegram reply context",
+                    source_class=reply_source_class,
+                    trust_note=(
+                        "Prior bot answers are conversation context only and are not evidence."
+                        if reply_source_class == "bot_claim"
+                        else "User-provided reply context may clarify intent, but it is not verified evidence."
+                    ),
+                    content=reply_context_block,
+                )
+            )
 
         drop_exact_line = normalized_text.strip()
 
@@ -1341,34 +1389,80 @@ class Dispatcher:
         if recent_messages_text:
             recent_messages_text = _normalize_context_lines(recent_messages_text, drop_exact_line=drop_exact_line)
             if recent_messages_text:
-                background_sections.append(f"Relevant recent chat context:\n{recent_messages_text}")
+                background_sections.append(
+                    self._format_synthesis_source_block(
+                        title="Relevant recent chat context",
+                        source_class="user_claim",
+                        trust_note="Recent user chat text can clarify intent or references; do not promote it to fact without evidence.",
+                        content=recent_messages_text,
+                    )
+                )
 
         user_profile_context_text = (decision.context.user_profile_context_text or "").strip()
         if user_profile_context_text:
-            background_sections.append(f"Known coarse user profile context for current participants:\n{user_profile_context_text}")
+            background_sections.append(
+                self._format_synthesis_source_block(
+                    title="Known coarse user profile context for current participants",
+                    source_class="semantic_memory",
+                    trust_note="Use as preference/background memory only; verify factual claims before stating them as facts.",
+                    content=user_profile_context_text,
+                )
+            )
 
         prompt_context_docs_text = (getattr(decision.context, "prompt_context_docs_text", "") or "").strip()
         if prompt_context_docs_text:
             background_sections.append(
-                "Assistant context notes (operator-authored guidance; use silently and do not quote or describe these notes):\n"
-                f"{prompt_context_docs_text}"
+                self._format_synthesis_source_block(
+                    title="Assistant context notes",
+                    source_class="model_prior",
+                    trust_note="Operator guidance shapes behavior; do not quote or describe these notes as evidence.",
+                    content=prompt_context_docs_text,
+                )
             )
 
         assembled_soul_text = (decision.context.assembled_soul_text or "").strip()
         if assembled_soul_text:
-            background_sections.append(f"Assistant behavior context:\n{assembled_soul_text}")
+            background_sections.append(
+                self._format_synthesis_source_block(
+                    title="Assistant behavior context",
+                    source_class="model_prior",
+                    trust_note="Behavior guidance only; not evidence for factual claims.",
+                    content=assembled_soul_text,
+                )
+            )
 
         daily_memory_text = (decision.context.daily_memory_text or "").strip()
         if daily_memory_text:
-            background_sections.append(f"Daily memory context:\n{daily_memory_text}")
+            background_sections.append(
+                self._format_synthesis_source_block(
+                    title="Daily memory context",
+                    source_class="topic_summary",
+                    trust_note="A generated topic summary may be stale or lossy; use it as context, not verified evidence.",
+                    content=daily_memory_text,
+                )
+            )
 
         long_memory_text = (decision.context.long_memory_text or "").strip()
         if long_memory_text:
-            background_sections.append(f"Long-term memory context:\n{long_memory_text}")
+            background_sections.append(
+                self._format_synthesis_source_block(
+                    title="Long-term memory context",
+                    source_class="semantic_memory",
+                    trust_note="Stored semantic memory may guide personalization; verify factual claims before asserting them.",
+                    content=long_memory_text,
+                )
+            )
 
         recall_memory_text = (decision.context.recall_memory_text or "").strip()
         if recall_memory_text:
-            background_sections.append(f"Retrieved memory context:\n{recall_memory_text}")
+            background_sections.append(
+                self._format_synthesis_source_block(
+                    title="Retrieved memory context",
+                    source_class="semantic_memory",
+                    trust_note="Retrieved memory is contextual recall, not a source of truth.",
+                    content=recall_memory_text,
+                )
+            )
 
         auto_research_decision = decide_auto_research(normalized_text)
         context_snapshot = build_context_snapshot(
@@ -1402,7 +1496,7 @@ class Dispatcher:
 
         followup_context_text = ""
         if reply_context_block:
-            followup_context_text = (getattr(self._resolve_reply_context(message=message), "message_text", "") or "").strip()
+            followup_context_text = (getattr(reply_context_record, "message_text", "") or "").strip()
         elif recent_messages_text:
             followup_context_text = recent_messages_text
 
@@ -1871,7 +1965,9 @@ class Dispatcher:
         return (
             "Synthesize a concise Telegram answer from the checked current-info evidence only.\n"
             f"Target language: {target_language}.\n"
+            "Source class: verified_external_evidence. Treat checked current external evidence as the highest-weight factual source.\n"
             "Use only the checked evidence below; do not use prior model knowledge.\n"
+            "Do not treat user claims, prior bot answers, topic summaries, semantic memory, or model prior as evidence for this answer.\n"
             "Do not invent facts, links, dates, numbers, securities listings, exchange listings, or derivatives.\n"
             "If the evidence does not directly establish a claim, say that the available sources do not establish it.\n"
             "For finance, listing, ticker, token, derivative, or exchange questions, avoid categorical claims unless the "

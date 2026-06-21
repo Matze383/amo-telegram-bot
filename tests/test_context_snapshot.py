@@ -30,6 +30,8 @@ def test_mixed_context_incident_fixture_structures_current_turn_background_bound
     frames = {candidate.frame for candidate in snapshot.frame_candidates}
     assert "current_turn" in frames
     assert "recent_chat_context" in frames
+    assert snapshot.source_classes["current_message"] == "user_claim"
+    assert snapshot.source_classes["recent_messages"] == "user_claim"
     assert snapshot.requires_current_info is True
     assert snapshot.current_user_intent == "answer_question"
     assert snapshot.active_subject == "aktuelle echte Kurs BTC"
@@ -64,5 +66,28 @@ def test_context_snapshot_mixed_context_without_conflict_marks_sources() -> None
     assert "recent_chat_context_available" in snapshot.relevant_assumptions
     assert "telegram_reply_context_available" in snapshot.relevant_assumptions
     assert "retrieved_memory_available" in snapshot.relevant_assumptions
+    assert snapshot.source_classes["reply_context"] == "user_claim_or_bot_claim"
+    assert snapshot.source_classes["recent_messages"] == "user_claim"
+    assert snapshot.source_classes["retrieved_memory"] == "semantic_memory"
     assert snapshot.context_source_counts["current_message"] == 1
     assert snapshot.context_source_counts["reply_context"] == 1
+
+
+def test_context_snapshot_marks_bot_reply_context_as_bot_claim() -> None:
+    snapshot = build_context_snapshot(
+        current_message="Was meinst du damit?",
+        router_context=AIRouterContextV1(
+            scope_type="topic",
+            route_reason=AIRouterReasonCode.REPLY_TO_BOT_IN_ACTIVE_SCOPE,
+            flag_ai_scope_active=True,
+            flag_reply_to_bot=True,
+        ),
+        reply_context_text=(
+            "The current user message is a Telegram reply to a prior Telegram message.\n"
+            "Replied-to source type: bot\n"
+            "Replied-to content:\nFalsche alte Bot-Antwort"
+        ),
+    )
+
+    assert snapshot.source_classes["reply_context"] == "bot_claim"
+    assert "routed_by_reply_to_bot" in snapshot.relevant_assumptions

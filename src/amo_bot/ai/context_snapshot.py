@@ -72,6 +72,7 @@ class ContextSnapshotV1:
     current_user_intent: str
     active_subject: str
     frame_candidates: tuple[ContextFrameCandidate, ...]
+    source_classes: dict[str, str]
     relevant_assumptions: tuple[str, ...]
     conflicts: tuple[ContextConflict, ...]
     uncertainty: tuple[str, ...]
@@ -127,6 +128,7 @@ def build_context_snapshot(
         current_user_intent=_detect_intent(current),
         active_subject=_extract_active_subject(current),
         frame_candidates=tuple(frames),
+        source_classes=_build_source_classes(sources=sources),
         relevant_assumptions=tuple(_build_assumptions(router_context=router_context, sources=sources)),
         conflicts=tuple(conflicts),
         uncertainty=tuple(uncertainty),
@@ -200,6 +202,29 @@ def _build_frame_candidates(*, sources: dict[str, str]) -> list[ContextFrameCand
     if not frames:
         frames.append(ContextFrameCandidate(frame="open_conversation", source="current_message", evidence_count=0, confidence="low"))
     return frames
+
+
+def _build_source_classes(*, sources: dict[str, str]) -> dict[str, str]:
+    """Expose synthesis trust classes without turning context into facts."""
+    configured = {
+        "current_message": "user_claim",
+        "reply_context": _reply_context_source_class(sources.get("reply_context", "")),
+        "recent_messages": "user_claim",
+        "daily_memory": "topic_summary",
+        "long_memory": "semantic_memory",
+        "retrieved_memory": "semantic_memory",
+        "user_profile": "semantic_memory",
+        "prompt_context_docs": "model_prior",
+    }
+    return {source: source_class for source, source_class in configured.items() if sources.get(source)}
+
+
+def _reply_context_source_class(value: str) -> str:
+    if "Replied-to source type: bot" in value:
+        return "bot_claim"
+    if "Replied-to source type: user" in value:
+        return "user_claim"
+    return "user_claim_or_bot_claim"
 
 
 def _detect_conflicts(

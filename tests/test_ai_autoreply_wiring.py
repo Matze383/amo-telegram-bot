@@ -765,16 +765,27 @@ def test_ai_prompt_includes_router_context_sections_and_deduplicates_current_mes
 
     prompt = ai.prompts[0]
     assert "Current message:\naktuelle frage" in prompt
+    assert "Source classes for answer synthesis:" in prompt
+    assert "verified_external_evidence: checked current external evidence" in prompt
+    assert "Current message source class: user_claim" in prompt
     assert "Current date: 2026-06-03" in prompt
     assert "Timezone: Europe/Berlin" in prompt
     assert "may be stale, irrelevant, or inaccurate" in prompt
     assert "Antworte standardmäßig auf Deutsch" in prompt
     assert "Relevant recent chat context:" in prompt
+    assert "[source_class=user_claim;" in prompt
+    assert "do not promote it to fact without evidence" in prompt
     assert "u1: vorherige relevante nachricht" in prompt
     assert "u1: aktuelle frage" not in prompt
-    assert "Assistant behavior context:\nSei präzise." in prompt
-    assert "Daily memory context:\nHeute: wichtige Info." in prompt
-    assert "Long-term memory context:\nLangzeit: Präferenz X." in prompt
+    assert "Assistant behavior context:" in prompt
+    assert "Sei präzise." in prompt
+    assert "[source_class=model_prior;" in prompt
+    assert "Daily memory context:" in prompt
+    assert "Heute: wichtige Info." in prompt
+    assert "[source_class=topic_summary;" in prompt
+    assert "Long-term memory context:" in prompt
+    assert "Langzeit: Präferenz X." in prompt
+    assert "[source_class=semantic_memory;" in prompt
     assert "User message:\naktuelle frage" in prompt
     assert prompt.index("Current message:\naktuelle frage") < prompt.index("Relevant recent chat context")
 
@@ -903,6 +914,8 @@ def test_reply_to_persisted_bot_message_includes_reply_context(tmp_path) -> None
     prompt = ai.prompts[0]
     assert "Telegram reply context:" in prompt
     assert "Replied-to source type: bot" in prompt
+    assert "[source_class=bot_claim;" in prompt
+    assert "Prior bot answers are conversation context only and are not evidence." in prompt
     assert "@AmoBot" not in prompt
     assert "Bot sample answer for reply context" in prompt
     assert "User message:\nWas meinst du damit?" in prompt
@@ -1032,6 +1045,8 @@ def test_reply_to_user_message_uses_safe_inline_quote_context(tmp_path) -> None:
     prompt = ai.prompts[0]
     assert "Telegram reply context:" in prompt
     assert "Replied-to source type: user" in prompt
+    assert "[source_class=user_claim;" in prompt
+    assert "not verified evidence" in prompt
     assert "@other" not in prompt
     assert "User sample statement for reply context" in prompt
 
