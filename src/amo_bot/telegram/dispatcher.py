@@ -1465,24 +1465,6 @@ class Dispatcher:
             )
 
         auto_research_decision = decide_auto_research(normalized_text)
-        context_snapshot = build_context_snapshot(
-            current_message=text,
-            normalized_current_message=normalized_text,
-            router_context=decision.context,
-            reply_context_text=reply_context_block,
-            existing_current_info_signal=auto_research_decision.enabled,
-        )
-        prompt_sections.append(
-            "Structured runtime context snapshot (diagnostic; use it to resolve frame conflicts, do not quote it):\n"
-            f"{context_snapshot.to_prompt_text()}"
-        )
-
-        if background_sections:
-            prompt_sections.append("Background context:")
-            prompt_sections.extend(background_sections)
-
-        prompt_sections.append(f"User message:\n{normalized_text}")
-        llm_prompt = "\n\n".join(prompt_sections)
 
         explicit_trigger_reason_codes = {
             AIRouterReasonCode.MENTION_IN_ACTIVE_SCOPE,
@@ -1592,7 +1574,32 @@ class Dispatcher:
                 return
 
         if auto_note:
-            llm_prompt = f"{auto_note}\n\n{llm_prompt}"
+            prompt_sections.insert(0, auto_note)
+
+        context_snapshot = build_context_snapshot(
+            current_message=text,
+            normalized_current_message=normalized_text,
+            router_context=decision.context,
+            reply_context_text=reply_context_block,
+            existing_current_info_signal=auto_research_decision.enabled,
+            verified_external_evidence_available=_auto_note_has_verified_external_evidence(auto_note),
+        )
+        prompt_sections.append(
+            "Structured runtime context snapshot (diagnostic; use it to resolve frame conflicts, do not quote it):\n"
+            f"{context_snapshot.to_prompt_text()}"
+        )
+        if context_snapshot.current_info_decision.fail_closed_instruction:
+            prompt_sections.append(
+                "Current-info decision before synthesis:\n"
+                f"{context_snapshot.current_info_decision.fail_closed_instruction}"
+            )
+
+        if background_sections:
+            prompt_sections.append("Background context:")
+            prompt_sections.extend(background_sections)
+
+        prompt_sections.append(f"User message:\n{normalized_text}")
+        llm_prompt = "\n\n".join(prompt_sections)
 
         log_event(
             logger,
@@ -2223,3 +2230,23 @@ def _current_info_source_landscape(answer: CurrentInfoAnswer) -> str:
     if answer.warnings:
         lines.append("Evidence gaps: " + ", ".join(answer.warnings))
     return "\n".join(lines)
+
+
+def _auto_note_has_verified_external_evidence(auto_note: str) -> bool:
+    note = (auto_note or "").strip()
+    if not note:
+        return False
+    upper = note.upper()
+    no_usable_markers = (
+        "NO USABLE RESULT",
+        "SOURCE CHECK INCONCLUSIVE",
+        "NO USABLE LIVE RESULT",
+        "NO ADDITIONAL USABLE CONFIRMATION",
+    )
+    if any(marker in upper for marker in no_usable_markers):
+        return False
+    return "AUTO-RESEARCH" in upper and (
+        "LIVE WEB" in upper
+        or "WEB TOOL RESULT IS AVAILABLE" in upper
+        or "CHECKED SOURCE EVIDENCE" in upper
+    )

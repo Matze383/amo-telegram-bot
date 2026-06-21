@@ -89,7 +89,7 @@ _SCHEDULE_RESULTS_RE = re.compile(
     r"\b(?:"
     r"spiel(?:t|en)?|match(?:es)?|game(?:s)?|fixture(?:s)?|schedule|spielplan|termin(?:e)?|"
     r"wann|when|kino|cinema|filme?|movies?|läuft|laeuft|running|"
-    r"tabelle|tabellenf(?:ü|ue)hrer|standing(?:s)?|leader|leaderboard|ergebnis(?:se)?|result(?:s)?|score(?:s)?|"
+    r"stehen|steht|stand|gruppe(?:n)?|tabelle|tabellenf(?:ü|ue)hrer|standing(?:s)?|leader|leaderboard|ergebnis(?:se)?|result(?:s)?|score(?:s)?|"
     r"umfrage(?:n)?|poll(?:s)?|prognose(?:n)?|forecast(?:s)?"
     r")\b",
     re.IGNORECASE,

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from unittest.mock import patch
 
 from amo_bot.ai.router import AIRouterContextV1, AIRouterDecision, AIRouterReasonCode
@@ -38,6 +39,12 @@ class Sender:
     async def send_text(self, chat_id: int, text: str, message_thread_id: int | None = None) -> object:
         self.sent.append((chat_id, text, message_thread_id))
         return {"ok": True}
+
+
+class SlowCurrentInfoService:
+    def answer(self, request) -> None:
+        time.sleep(0.05)
+        return None
 
 
 def _mk_update(*, uid: int, chat_id: int, chat_type: str, text: str, update_id: int, message_thread_id: int | None = None, reply_to_is_bot: bool = False, reply_to_message_id: int | None = None, reply_to_bot_username: str = "AmoBot", reply_to_text: str = "") -> dict[str, object]:
@@ -1001,6 +1008,69 @@ def test_autoreply_writes_context_snapshot_audit_for_mixed_context_incident_fixt
     assert [conflict["conflict_type"] for conflict in snapshot["conflicts"]] == ["source_frame_boundary"]
     assert snapshot["conflicts"][0]["frames"] == ["current_turn", "background_context"]
     assert "source_frame_boundary_needs_resolution" in snapshot["uncertainty"]
+
+
+def test_autoreply_current_info_timeout_fails_closed_before_synthesis_for_live_wm_question(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'ai_context_snapshot_current_info_timeout.db'}"
+    init_db(db_url)
+    _seed_user(
+        db_url,
+        user_id=224602,
+        role="vip",
+        consent="accepted",
+        group_chat_id=-1002,
+        group_role="vip",
+    )
+
+    sf = create_session_factory(db_url)
+    with sf() as session:
+        repo = TopicAgentMemoryRepository(session)
+        repo.upsert_config(
+            scope_type="topic",
+            chat_id=-1002,
+            topic_id=77,
+            ai_enabled=True,
+            recent_context_window_size=10,
+        )
+        repo.add_message(
+            scope_type="topic",
+            chat_id=-1002,
+            topic_id=77,
+            message_text="Die Taverne ist voller Orks und Magie.",
+            telegram_author_user_id=224602,
+            source="user",
+        )
+        session.commit()
+
+    ai = FakeAIService(answer="Ich habe dafür gerade keine geprüfte externe Evidenz.")
+    sender = Sender()
+    dispatcher = _mk_dispatcher(db_url, ai, sender)
+    dispatcher.current_info_enabled = True
+    dispatcher.current_info_service = SlowCurrentInfoService()
+    dispatcher.current_info_timeout_seconds = 0.01
+
+    asyncio.run(
+        dispatcher.handle_raw_update(
+            _mk_update(
+                uid=224602,
+                chat_id=-1002,
+                chat_type="supergroup",
+                text="@AmoBot Wie stehen die Gruppen der Fußball WM?",
+                update_id=2247,
+                message_thread_id=77,
+            )
+        )
+    )
+
+    assert sender.sent == [(-1002, "Ich habe dafür gerade keine geprüfte externe Evidenz.", 77)]
+    assert len(ai.prompts) == 1
+    prompt = ai.prompts[0]
+    assert "Current-info decision before synthesis:" in prompt
+    assert "Verified external evidence is required" in prompt
+    assert "Do not assert current facts from model_prior" in prompt
+    assert "semantic_memory, topic_summary, user_claim, or bot_claim" in prompt
+    assert '"requires_external_evidence": true' in prompt
+    assert '"evidence_available": false' in prompt
 
 
 def test_reply_to_user_message_uses_safe_inline_quote_context(tmp_path) -> None:

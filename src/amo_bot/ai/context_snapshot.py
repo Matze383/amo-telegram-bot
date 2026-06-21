@@ -5,6 +5,7 @@ import json
 import re
 from typing import Any
 
+from amo_bot.ai.current_data_classifier import classify_current_data
 from amo_bot.ai.router import AIRouterContextV1
 
 
@@ -67,6 +68,15 @@ class ContextConflict:
 
 
 @dataclass(frozen=True, slots=True)
+class CurrentInfoDecision:
+    requires_external_evidence: bool
+    evidence_available: bool
+    decision_basis: str
+    signals: tuple[str, ...]
+    fail_closed_instruction: str
+
+
+@dataclass(frozen=True, slots=True)
 class ContextSnapshotV1:
     schema_version: str
     current_user_intent: str
@@ -77,6 +87,7 @@ class ContextSnapshotV1:
     conflicts: tuple[ContextConflict, ...]
     uncertainty: tuple[str, ...]
     requires_current_info: bool
+    current_info_decision: CurrentInfoDecision
     context_source_counts: dict[str, int]
 
     def to_dict(self) -> dict[str, Any]:
@@ -93,6 +104,7 @@ def build_context_snapshot(
     reply_context_text: str = "",
     normalized_current_message: str | None = None,
     existing_current_info_signal: bool | None = None,
+    verified_external_evidence_available: bool = False,
 ) -> ContextSnapshotV1:
     """Build a deterministic runtime snapshot for diagnostic autoreply context.
 
@@ -116,6 +128,11 @@ def build_context_snapshot(
 
     frames = _build_frame_candidates(sources=sources)
     conflicts = _detect_conflicts(current=current, sources=sources, frame_candidates=frames)
+    current_info_decision = _build_current_info_decision(
+        current=current,
+        existing_current_info_signal=existing_current_info_signal,
+        verified_external_evidence_available=verified_external_evidence_available,
+    )
     uncertainty = _detect_uncertainty(
         router_context=router_context,
         conflicts=conflicts,
@@ -132,7 +149,8 @@ def build_context_snapshot(
         relevant_assumptions=tuple(_build_assumptions(router_context=router_context, sources=sources)),
         conflicts=tuple(conflicts),
         uncertainty=tuple(uncertainty),
-        requires_current_info=bool(existing_current_info_signal),
+        requires_current_info=current_info_decision.requires_external_evidence,
+        current_info_decision=current_info_decision,
         context_source_counts={key: _line_count(value) for key, value in sources.items()},
     )
 
@@ -260,6 +278,49 @@ def _detect_conflicts(
             )
         ]
     return []
+
+
+def _build_current_info_decision(
+    *,
+    current: str,
+    existing_current_info_signal: bool | None,
+    verified_external_evidence_available: bool,
+) -> CurrentInfoDecision:
+    classifier_decision = classify_current_data(current)
+    requires_external_evidence = bool(existing_current_info_signal) or classifier_decision.should_research
+    signals: list[str] = list(classifier_decision.signals)
+    if existing_current_info_signal is True and "auto_research_signal" not in signals:
+        signals.append("auto_research_signal")
+    if verified_external_evidence_available:
+        signals.append("verified_external_evidence_available")
+
+    fail_closed_instruction = ""
+    if requires_external_evidence and not verified_external_evidence_available:
+        fail_closed_instruction = (
+            "Verified external evidence is required for the current/live factual part of this request, "
+            "but no verified_external_evidence source is available in this synthesis context. "
+            "Do not assert current facts from model_prior, semantic_memory, topic_summary, user_claim, or bot_claim; "
+            "state that current external evidence is unavailable."
+        )
+
+    return CurrentInfoDecision(
+        requires_external_evidence=requires_external_evidence,
+        evidence_available=verified_external_evidence_available,
+        decision_basis=classifier_decision.reason,
+        signals=_dedupe_strings(signals),
+        fail_closed_instruction=fail_closed_instruction,
+    )
+
+
+def _dedupe_strings(values: list[str]) -> tuple[str, ...]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for value in values:
+        if value in seen:
+            continue
+        result.append(value)
+        seen.add(value)
+    return tuple(result)
 
 
 def _has_low_context_overlap(*, current: str, background: str) -> bool:

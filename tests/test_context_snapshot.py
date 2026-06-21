@@ -41,6 +41,35 @@ def test_mixed_context_incident_fixture_structures_current_turn_background_bound
     assert "routed_by_bot_mention" in snapshot.relevant_assumptions
 
 
+def test_mixed_context_live_football_wm_fixture_requires_external_evidence() -> None:
+    router_context = AIRouterContextV1(
+        scope_type="private_user",
+        scope_user_id=42,
+        user_id=42,
+        message_text="Wie stehen die Gruppen der Fußball WM?",
+        route_reason=AIRouterReasonCode.SCOPE_ENABLED,
+        flag_ai_scope_active=True,
+        recent_messages_text=(
+            "Die Taverne ist voller Orks und Magie.\n"
+            "Unser Fantasy-Charakter sucht eine Quest im Koenigreich."
+        ),
+    )
+
+    snapshot = build_context_snapshot(
+        current_message="Wie stehen die Gruppen der Fußball WM?",
+        router_context=router_context,
+        verified_external_evidence_available=False,
+    )
+
+    assert snapshot.requires_current_info is True
+    assert snapshot.current_info_decision.requires_external_evidence is True
+    assert snapshot.current_info_decision.evidence_available is False
+    assert "schedule_results_polls" in snapshot.current_info_decision.signals
+    assert "question_intent" in snapshot.current_info_decision.signals
+    assert "Verified external evidence is required" in snapshot.current_info_decision.fail_closed_instruction
+    assert "Do not assert current facts from model_prior" in snapshot.current_info_decision.fail_closed_instruction
+
+
 def test_context_snapshot_mixed_context_without_conflict_marks_sources() -> None:
     router_context = AIRouterContextV1(
         scope_type="private_user",

@@ -9,6 +9,7 @@ def test_classifier_requires_current_data_for_category_prompts():
         "Was kostet das iPhone 16 aktuell?",
         "Ist die neue Version von Python schon draußen?",
         "Wann spielt Deutschland das nächste Mal?",
+        "Wie stehen die Gruppen der Fußball WM?",
         "Wie ist das Wetter morgen in Berlin?",
         "Gibt es heute Störungen bei Vodafone?",
         "Was sagen die neuesten Umfragen?",
