@@ -127,3 +127,7 @@ Audit requirements:
 ## 8) Internal maintenance: retrievable memory backfill
 
 `python -m amo_bot.db.retrievable_memory_backfill --dry-run` reports a metadata-only preview for seeding `retrievable_memories` from existing summarized stores (`topic_daily_memories`, `topic_long_memories`). Use `--apply` to write rows. The backfill must not read or import `topic_recent_messages`, and output must remain counts/scopes/types only, never memory text.
+
+## 9) Current-state autoreply audit
+
+See [CURRENT_AUTOREPLY_CONTEXT_PIPELINE_AUDIT.md](CURRENT_AUTOREPLY_CONTEXT_PIPELINE_AUDIT.md) for the current implementation audit of the autoreply context pipeline, including the Topic 2246 diagnostic fixture and known logging gaps. That document is descriptive only and does not change the architecture contract above.
