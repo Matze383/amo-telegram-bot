@@ -128,12 +128,12 @@ def build_context_snapshot(
     sources = {
         "current_message": current,
         "reply_context": _clean_text(reply_context_text),
-        "recent_messages": _clean_text(router_context.recent_messages_text),
-        "daily_memory": _clean_text(router_context.daily_memory_text),
-        "long_memory": _clean_text(router_context.long_memory_text),
-        "retrieved_memory": _clean_text(router_context.recall_memory_text),
-        "user_profile": _clean_text(router_context.user_profile_context_text),
-        "prompt_context_docs": _clean_text(router_context.prompt_context_docs_text),
+        "recent_messages": _clean_text(getattr(router_context, "recent_messages_text", "")),
+        "daily_memory": _clean_text(getattr(router_context, "daily_memory_text", "")),
+        "long_memory": _clean_text(getattr(router_context, "long_memory_text", "")),
+        "retrieved_memory": _clean_text(getattr(router_context, "recall_memory_text", "")),
+        "user_profile": _clean_text(getattr(router_context, "user_profile_context_text", "")),
+        "prompt_context_docs": _clean_text(getattr(router_context, "prompt_context_docs_text", "")),
     }
 
     frames = _build_frame_candidates(sources=sources)
@@ -383,11 +383,13 @@ def _detect_uncertainty(
     uncertainty: list[str] = []
     if conflicts:
         uncertainty.append("source_frame_boundary_needs_resolution")
-    if router_context.context_error:
+    if getattr(router_context, "context_error", ""):
         uncertainty.append("context_read_error")
     if len(frame_candidates) > 1:
         uncertainty.append("multiple_context_sources")
-    if not router_context.recent_messages_text and not router_context.recall_memory_text:
+    if not getattr(router_context, "recent_messages_text", "") and not getattr(
+        router_context, "recall_memory_text", ""
+    ):
         uncertainty.append("limited_background_context")
     if existing_current_info_signal is None:
         uncertainty.append("current_info_need_not_resolved_by_snapshot")
@@ -396,9 +398,9 @@ def _detect_uncertainty(
 
 def _build_assumptions(*, router_context: AIRouterContextV1, sources: dict[str, str]) -> list[str]:
     assumptions: list[str] = []
-    if router_context.flag_bot_mention:
+    if getattr(router_context, "flag_bot_mention", False):
         assumptions.append("routed_by_bot_mention")
-    if router_context.flag_reply_to_bot:
+    if getattr(router_context, "flag_reply_to_bot", False):
         assumptions.append("routed_by_reply_to_bot")
     if sources.get("recent_messages"):
         assumptions.append("recent_chat_context_available")

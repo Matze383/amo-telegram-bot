@@ -177,21 +177,32 @@ class _CorepluginSearchProviderAdapter:
 
 
 def _resolve_searxng_config(*, locale: str, max_results: int) -> _SearxngConfig | None:
-    base_url = (
-        os.getenv("SEARXNG_BASE_URL")
-        or os.getenv("AMO_WEBSEARCH_SEARXNG_BASE_URL")
-        or os.getenv("AMO_SEARXNG_URL")
-        or ""
-    ).strip()
+    base_url = (os.getenv("SEARXNG_BASE_URL") or "").strip()
+    config_family = "primary"
+    if not base_url:
+        base_url = (os.getenv("AMO_WEBSEARCH_SEARXNG_BASE_URL") or "").strip()
+        config_family = "websearch"
+    if not base_url:
+        base_url = (os.getenv("AMO_SEARXNG_URL") or "").strip()
+        config_family = "current_info"
     if not base_url:
         return None
 
     validated_base_url = _validate_search_endpoint_base_url(base_url)
-    timeout_raw = (
-        os.getenv("AMO_WEBSEARCH_SEARXNG_TIMEOUT_SECONDS")
-        or os.getenv("AMO_SEARXNG_TIMEOUT_SECONDS")
-        or ""
-    ).strip()
+    if config_family == "current_info":
+        timeout_raw = (
+            os.getenv("AMO_SEARXNG_TIMEOUT_SECONDS") or os.getenv("AMO_WEBSEARCH_SEARXNG_TIMEOUT_SECONDS") or ""
+        ).strip()
+        max_results_raw = (
+            os.getenv("AMO_SEARCH_MAX_RESULTS") or os.getenv("AMO_WEBSEARCH_MAX_RESULTS") or ""
+        ).strip()
+    else:
+        timeout_raw = (
+            os.getenv("AMO_WEBSEARCH_SEARXNG_TIMEOUT_SECONDS") or os.getenv("AMO_SEARXNG_TIMEOUT_SECONDS") or ""
+        ).strip()
+        max_results_raw = (
+            os.getenv("AMO_WEBSEARCH_MAX_RESULTS") or os.getenv("AMO_SEARCH_MAX_RESULTS") or ""
+        ).strip()
     timeout_seconds = 3.0
     if timeout_raw:
         try:
@@ -200,11 +211,6 @@ def _resolve_searxng_config(*, locale: str, max_results: int) -> _SearxngConfig 
             timeout_seconds = 3.0
     timeout_seconds = min(max(timeout_seconds, 0.5), 12.0)
 
-    max_results_raw = (
-        os.getenv("AMO_WEBSEARCH_MAX_RESULTS")
-        or os.getenv("AMO_SEARCH_MAX_RESULTS")
-        or ""
-    ).strip()
     configured_max_results = max_results
     if max_results_raw:
         try:

@@ -2249,7 +2249,7 @@ def _format_auto_research_success_note(
         "AUTO-RESEARCH (LIVE WEB) — STRICT INSTRUCTION:\n"
         f"{_target_answer_language_instruction(locale)}\n"
         f"A live {capability}/web tool result is available in this turn. Treat this fresh web context as primary evidence for current facts.\n"
-        "Do NOT claim or imply that the bot has no web tools, no live data capability, or cannot search the web.\n"
+        "Do NOT claim or imply that the bot has no web tools, no live data capability, or cannot search the web; do not say no webtools.\n"
         "Use the supplied web result text as primary evidence, cite or mention the source hosts when relevant, summarize compactly, do NOT reproduce raw tool output, and do NOT override it with stale memory/priors.\n"
         f"{relevance_instruction}"
         "Telegram formatting: use short paragraphs or bullet lists; do not use Markdown tables.\n"
@@ -2283,8 +2283,8 @@ def _exact_value_absence_instruction(*, listing_instruction: str) -> str:
             "direct listing evidence.\n"
         )
     return (
-        "Strict anti-hallucination: do NOT invent exact prices, rates, dates, levels, or news not supported by the "
-        "supplied evidence. If exact values are absent, say the live evidence does not confirm the exact value.\n"
+        "Strict anti-hallucination: do NOT invent dates, prices, levels, rates, or news not supported by the "
+        "supplied evidence. If exact values are absent, say the available live sources do not confirm that exact value.\n"
     )
 
 

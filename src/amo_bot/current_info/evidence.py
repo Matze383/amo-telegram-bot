@@ -40,10 +40,12 @@ def assemble_evidence_package(
 
     domain = _evidence_domain(request=request, task=task, search_results=search_results)
     max_age_seconds = _max_source_age_seconds(request=request, domain=domain)
+    now = _request_now(request)
     sources = _package_sources(
         documents=documents,
         search_results=search_results,
         max_age_seconds=max_age_seconds,
+        now=now,
     )
     fetched_urls = frozenset(document.url for document in documents if document.url)
     fetched_hosts = tuple(dict.fromkeys(source.host for source in sources if source.fetched and source.host))
@@ -129,6 +131,7 @@ def _package_sources(
     documents: tuple[FetchedDocument, ...],
     search_results: tuple[SearchResult, ...],
     max_age_seconds: int,
+    now: datetime,
 ) -> tuple[EvidencePackageSource, ...]:
     by_url: dict[str, EvidencePackageSource] = {}
     for result in search_results:
@@ -157,12 +160,13 @@ def _package_sources(
             source_role=_fetched_source_role(existing.source_role if existing is not None else ""),
             quality_label=_fetched_quality_label(
                 existing.quality_label if existing is not None else "",
-                stale=_is_stale(fetched_at, max_age_seconds=max_age_seconds)
+                stale=_is_stale(fetched_at, max_age_seconds=max_age_seconds, now=now)
                 or _metadata_truthy(document.metadata.get("stale")),
             ),
             fetched=True,
             fetched_at=document.fetched_at,
-            stale=_is_stale(fetched_at, max_age_seconds=max_age_seconds) or _metadata_truthy(document.metadata.get("stale")),
+            stale=_is_stale(fetched_at, max_age_seconds=max_age_seconds, now=now)
+            or _metadata_truthy(document.metadata.get("stale")),
         )
         by_url[document.url] = source
     return tuple(by_url.values())
@@ -391,10 +395,16 @@ def _timestamp_from_document(document: FetchedDocument) -> datetime | None:
     return None
 
 
-def _is_stale(value: datetime | None, *, max_age_seconds: int) -> bool:
+def _request_now(request: CurrentInfoRequest) -> datetime:
+    parsed = _parse_timestamp((request.metadata or {}).get("now"))
+    return parsed or datetime.now(UTC)
+
+
+def _is_stale(value: datetime | None, *, max_age_seconds: int, now: datetime | None = None) -> bool:
     if value is None or max_age_seconds <= 0:
         return False
-    return datetime.now(UTC) - value > timedelta(seconds=max_age_seconds)
+    current = now or datetime.now(UTC)
+    return current - value > timedelta(seconds=max_age_seconds)
 
 
 def _parse_timestamp(value: Any) -> datetime | None:

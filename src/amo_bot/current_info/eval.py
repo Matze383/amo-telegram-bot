@@ -3,7 +3,8 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
@@ -282,13 +283,14 @@ class _FixtureRetrievalProvider:
 
 
 def _run_case(case: CurrentInfoEvalCase, *, clock: Clock) -> CurrentInfoEvalResult:
+    request = _request_with_eval_now(case)
     service = CurrentInfoService(
         search_provider=_FixtureSearchProvider(case),
         fetch_provider=_FixtureFetchProvider(case.documents),
         retrieval_provider=_FixtureRetrievalProvider(case.chunks),
     )
     start = clock()
-    answer = service.answer(case.request)
+    answer = service.answer(request)
     latency_ms = max(0.0, (clock() - start) * 1000.0)
     metrics = _measure(case=case, answer=answer, latency_ms=latency_ms)
     failed_checks = _failed_checks(case=case, metrics=metrics)
@@ -325,6 +327,29 @@ def _measure(*, case: CurrentInfoEvalCase, answer: CurrentInfoAnswer, latency_ms
         warning_count=len(answer.warnings),
         confidence=answer.confidence,
     )
+
+
+def _request_with_eval_now(case: CurrentInfoEvalCase) -> CurrentInfoRequest:
+    if case.request.metadata.get("now") is not None:
+        return case.request
+    timestamps = [_parse_eval_timestamp(document.fetched_at) for document in case.documents]
+    latest = max((value for value in timestamps if value is not None), default=None)
+    if latest is None:
+        return case.request
+    metadata = dict(case.request.metadata)
+    metadata["now"] = latest.isoformat()
+    return replace(case.request, metadata=metadata)
+
+
+def _parse_eval_timestamp(value: Any) -> datetime | None:
+    candidate = str(value or "").strip()
+    if not candidate:
+        return None
+    try:
+        parsed = datetime.fromisoformat(candidate.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed.astimezone(UTC) if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
 
 def _failed_checks(*, case: CurrentInfoEvalCase, metrics: CurrentInfoEvalMetrics) -> list[str]:
