@@ -13,6 +13,14 @@ _QUESTION_RE = re.compile(r"\?|^(?:was|wie|wer|wann|wo|warum|wieso|welche[rsn]?|
 _ACTION_RE = re.compile(r"^(?:bitte|please|mach|make|build|erstelle|create|zeige|show|such|search|finde|find)\b", re.IGNORECASE)
 _MENTION_RE = re.compile(r"@\w+")
 _TOKEN_RE = re.compile(r"[A-Za-z0-9ÄÖÜäöüß_+-]+")
+_REAL_CURRENT_FRAME_RE = re.compile(
+    r"\b(?:aktuell(?:e[rsn]?)?|heute|jetzt|live|echt(?:e[rsn]?)?|real(?:e[rsn]?)?|current|today|now|latest|real[- ]world|wirklich(?:e[rsn]?)?)\b",
+    re.IGNORECASE,
+)
+_FICTIONAL_SIMULATION_FRAME_RE = re.compile(
+    r"\b(?:fantasy|simulation|simuliert(?:e[rsn]?)?|rollenspiel|roleplay|fictional|fiktiv(?:e[rsn]?)?|charakter|character|quest|magie|magic|ork(?:s)?|orcs?|taverne|kingdom|koenigreich|königreich)\b",
+    re.IGNORECASE,
+)
 
 _STOPWORDS = {
     "amo",
@@ -266,8 +274,23 @@ def _detect_conflicts(
     if sources.get("reply_context"):
         return []
 
+    semantic_conflicts: list[ContextConflict] = []
+    background_text = "\n".join(sources[key] for key in background_sources)
+    if _REAL_CURRENT_FRAME_RE.search(current) and _FICTIONAL_SIMULATION_FRAME_RE.search(background_text):
+        semantic_conflicts.append(
+            ContextConflict(
+                conflict_type="semantic_frame_conflict",
+                frames=("real_world_current_fact", "fictional_or_simulated_context"),
+                description=(
+                    "Current turn asks from a real/current factual frame while background context carries "
+                    "fictional, roleplay, or simulated framing. Keep these frames separate and do not merge "
+                    "old simulation context into real-world claims."
+                ),
+            )
+        )
+
     if _has_low_context_overlap(current=current, background="\n".join(sources[key] for key in background_sources)):
-        return [
+        semantic_conflicts.append(
             ContextConflict(
                 conflict_type="source_frame_boundary",
                 frames=("current_turn", "background_context"),
@@ -276,8 +299,8 @@ def _detect_conflicts(
                     "Treat this as a diagnostic boundary and prefer the current turn unless the model can connect them."
                 ),
             )
-        ]
-    return []
+        )
+    return semantic_conflicts
 
 
 def _build_current_info_decision(

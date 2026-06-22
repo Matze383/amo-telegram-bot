@@ -45,6 +45,7 @@ from amo_bot.db.models import (
     TelegramTopic,
     TopicAgentConfig,
     TopicAiSession,
+    TopicCompactState,
     TopicDailyMemory,
     UserMemoryProfile,
     TopicLongMemory,
@@ -3346,6 +3347,160 @@ class ClaimRecord:
     verification_status: str
     confidence: float
     evidence_ref: str | None
+
+
+@dataclass(slots=True)
+class TopicCompactStateRecord:
+    schema_version: str
+    scope: str
+    scope_type: str
+    chat_id: int | None
+    topic_id: int | None
+    user_id: int | None
+    active_subjects: list[dict[str, object]]
+    frames: list[dict[str, object]]
+    conflicts: list[dict[str, object]]
+    verified_facts: list[dict[str, object]]
+    discarded_assumptions: list[dict[str, object]]
+    last_snapshot: dict[str, object]
+    updated_from_message_id: int | None
+    updated_at: datetime | None = None
+
+
+class TopicCompactStateRepository:
+    SCHEMA_VERSION = "topic_compact_state_v1"
+    _MAX_ITEMS = 20
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def get_state(
+        self,
+        *,
+        scope_type: str,
+        chat_id: int | None = None,
+        topic_id: int | None = None,
+        user_id: int | None = None,
+    ) -> TopicCompactStateRecord | None:
+        scope = self._scope_key(scope_type=scope_type, chat_id=chat_id, topic_id=topic_id, user_id=user_id)
+        row = self._get_row(scope=scope)
+        return self._to_record(row) if row is not None else None
+
+    def upsert_state(
+        self,
+        *,
+        scope_type: str,
+        active_subjects: list[dict[str, object]],
+        frames: list[dict[str, object]],
+        conflicts: list[dict[str, object]],
+        verified_facts: list[dict[str, object]],
+        discarded_assumptions: list[dict[str, object]],
+        last_snapshot: dict[str, object] | None = None,
+        chat_id: int | None = None,
+        topic_id: int | None = None,
+        user_id: int | None = None,
+        updated_from_message_id: int | None = None,
+        auto_commit: bool = True,
+    ) -> TopicCompactStateRecord:
+        scope = self._scope_key(scope_type=scope_type, chat_id=chat_id, topic_id=topic_id, user_id=user_id)
+        row = self._get_row(scope=scope)
+        if row is None:
+            row = TopicCompactState(scope=scope)
+            self._session.add(row)
+
+        row.schema_version = self.SCHEMA_VERSION
+        row.scope = scope
+        row.scope_type = (scope_type or "").strip().lower()
+        row.chat_id = chat_id
+        row.topic_id = topic_id
+        row.user_id = user_id
+        row.active_subjects_json = self._dump_list(active_subjects)
+        row.frames_json = self._dump_list(frames)
+        row.conflicts_json = self._dump_list(conflicts)
+        row.verified_facts_json = self._dump_list(verified_facts)
+        row.discarded_assumptions_json = self._dump_list(discarded_assumptions)
+        row.last_snapshot_json = json.dumps(last_snapshot or {}, ensure_ascii=False, sort_keys=True)
+        row.updated_from_message_id = updated_from_message_id
+
+        if auto_commit:
+            self._session.commit()
+            self._session.refresh(row)
+        else:
+            self._session.flush()
+        return self._to_record(row)
+
+    def _get_row(
+        self,
+        *,
+        scope: str,
+    ) -> TopicCompactState | None:
+        return self._session.scalar(
+            select(TopicCompactState).where(TopicCompactState.scope == scope)
+        )
+
+    @staticmethod
+    def _scope_key(
+        *,
+        scope_type: str,
+        chat_id: int | None,
+        topic_id: int | None,
+        user_id: int | None,
+    ) -> str:
+        normalized_scope = (scope_type or "").strip().lower()
+        if normalized_scope == "topic":
+            if chat_id is None or topic_id is None:
+                raise ValueError("chat_id and topic_id are required for topic compact state")
+            return f"topic:{chat_id}:{topic_id}"
+        if normalized_scope == "group_chat":
+            if chat_id is None:
+                raise ValueError("chat_id is required for group compact state")
+            return f"group_chat:{chat_id}"
+        if normalized_scope == "private_user":
+            if user_id is None:
+                raise ValueError("user_id is required for private compact state")
+            return f"private_user:{user_id}"
+        raise ValueError("invalid compact state scope_type")
+
+    @classmethod
+    def _dump_list(cls, values: list[dict[str, object]]) -> str:
+        return json.dumps(values[: cls._MAX_ITEMS], ensure_ascii=False, sort_keys=True)
+
+    @staticmethod
+    def _load_list(value: str | None) -> list[dict[str, object]]:
+        try:
+            parsed = json.loads(value or "[]")
+        except json.JSONDecodeError:
+            return []
+        if not isinstance(parsed, list):
+            return []
+        return [item for item in parsed if isinstance(item, dict)]
+
+    @staticmethod
+    def _load_dict(value: str | None) -> dict[str, object]:
+        try:
+            parsed = json.loads(value or "{}")
+        except json.JSONDecodeError:
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+
+    @classmethod
+    def _to_record(cls, row: TopicCompactState) -> TopicCompactStateRecord:
+        return TopicCompactStateRecord(
+            schema_version=row.schema_version,
+            scope=row.scope,
+            scope_type=row.scope_type,
+            chat_id=row.chat_id,
+            topic_id=row.topic_id,
+            user_id=row.user_id,
+            active_subjects=cls._load_list(row.active_subjects_json),
+            frames=cls._load_list(row.frames_json),
+            conflicts=cls._load_list(row.conflicts_json),
+            verified_facts=cls._load_list(row.verified_facts_json),
+            discarded_assumptions=cls._load_list(row.discarded_assumptions_json),
+            last_snapshot=cls._load_dict(row.last_snapshot_json),
+            updated_from_message_id=row.updated_from_message_id,
+            updated_at=row.updated_at,
+        )
 
 
 class ClaimRepository:

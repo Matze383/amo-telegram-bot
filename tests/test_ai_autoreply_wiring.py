@@ -13,7 +13,7 @@ from amo_bot.db.base import create_session_factory
 from amo_bot.db.init_db import init_db
 from amo_bot.auth.roles import Role
 from amo_bot.db.models import AuditEvent, DbRole, User
-from amo_bot.db.repositories import ChatScopedRoleRepository, PrivateChatPolicyRepository, TopicAgentMemoryRepository
+from amo_bot.db.repositories import ChatScopedRoleRepository, PrivateChatPolicyRepository, TopicAgentMemoryRepository, TopicCompactStateRepository
 from amo_bot.telegram.commands import create_builtin_registry
 from amo_bot.telegram.dispatcher import Dispatcher
 from amo_bot.telegram.role_resolver import DBRoleResolver
@@ -793,6 +793,8 @@ def test_ai_prompt_includes_router_context_sections_and_deduplicates_current_mes
     assert "Long-term memory context:" in prompt
     assert "Langzeit: Präferenz X." in prompt
     assert "[source_class=semantic_memory;" in prompt
+    assert "Compact topic state:" in prompt
+    assert "[source_class=compact_topic_state;" in prompt
     assert "User message:\naktuelle frage" in prompt
     assert prompt.index("Current message:\naktuelle frage") < prompt.index("Relevant recent chat context")
 
@@ -1005,9 +1007,26 @@ def test_autoreply_writes_context_snapshot_audit_for_mixed_context_incident_fixt
     assert snapshot["requires_current_info"] is True
     frames = {candidate["frame"] for candidate in snapshot["frame_candidates"]}
     assert {"current_turn", "recent_chat_context"} <= frames
-    assert [conflict["conflict_type"] for conflict in snapshot["conflicts"]] == ["source_frame_boundary"]
-    assert snapshot["conflicts"][0]["frames"] == ["current_turn", "background_context"]
+    assert [conflict["conflict_type"] for conflict in snapshot["conflicts"]] == [
+        "semantic_frame_conflict",
+        "source_frame_boundary",
+    ]
+    assert snapshot["conflicts"][0]["frames"] == ["real_world_current_fact", "fictional_or_simulated_context"]
+    assert snapshot["conflicts"][1]["frames"] == ["current_turn", "background_context"]
     assert "source_frame_boundary_needs_resolution" in snapshot["uncertainty"]
+
+    with sf() as session:
+        state = TopicCompactStateRepository(session).get_state(
+            scope_type="topic",
+            chat_id=-1003997137641,
+            topic_id=2246,
+        )
+    assert state is not None
+    assert any(item["subject"] == "aktuelle echte Kurs BTC" for item in state.active_subjects)
+    assert any(item["conflict_type"] == "semantic_frame_conflict" for item in state.conflicts)
+    assert any(item["assumption"] == "background_context_shares_current_frame" for item in state.discarded_assumptions)
+    assert "Compact topic state:" in ai.prompts[0]
+    assert "fictional_or_simulated_context" in ai.prompts[0]
 
 
 def test_autoreply_current_info_timeout_fails_closed_before_synthesis_for_live_wm_question(tmp_path) -> None:

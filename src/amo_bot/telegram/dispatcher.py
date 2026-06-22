@@ -10,6 +10,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any, Awaitable, Callable, Protocol
 
 from amo_bot.ai.current_time_context import DEFAULT_AI_PROMPT_TIMEZONE
+from amo_bot.ai.compact_topic_state import build_compact_topic_state_payload, format_compact_topic_state_prompt
 from amo_bot.ai.context_snapshot import build_context_snapshot
 from amo_bot.ai.learning_feedback import LearningFeedbackScope, LearningFeedbackService
 from amo_bot.ai.prompt_language import DEFAULT_RESPONSE_LANGUAGE_RULE
@@ -29,11 +30,13 @@ from amo_bot.current_info.models import CurrentInfoAnswer, CurrentInfoRequest
 from amo_bot.db.base import create_session_factory
 from amo_bot.db.repositories import (
     BotPeerRepository,
+    ClaimRepository,
     PrivateChatPolicyRepository,
     PromptContextDocRepository,
     ResearchEvalCaseRepository,
     ResearchSourcePreferenceRepository,
     RetrievableMemoryRepository,
+    TopicCompactStateRepository,
     TopicAgentMemoryRepository,
     TopicRecentMessageRecord,
     UserMemoryProfileRepository,
@@ -1051,6 +1054,7 @@ class Dispatcher:
             "- user_claim: current or prior user text. Use it as intent, preference, or a lead; do not state it as fact without evidence.\n"
             "- bot_claim: prior assistant/bot text. Use only as conversation history; never treat old bot answers as evidence.\n"
             "- topic_summary: generated scope summary. Use as stale/lossy context, not as proof.\n"
+            "- compact_topic_state: persisted scoped state from snapshots and claim records. Use it to separate active frames and conflicts; only its verified_facts entries are evidence.\n"
             "- semantic_memory: stored or retrieved memory. Use for personalization/context; verify factual claims before asserting them.\n"
             "- model_prior: model knowledge or behavior guidance. Lowest weight for current/live facts; defer to verified external evidence.\n"
             "If source classes conflict, prefer verified_external_evidence, then the current user intent for what to answer, "
@@ -1592,6 +1596,58 @@ class Dispatcher:
             prompt_sections.append(
                 "Current-info decision before synthesis:\n"
                 f"{context_snapshot.current_info_decision.fail_closed_instruction}"
+            )
+
+        compact_state_text = ""
+        compact_state_record = None
+        if self.database_url is not None and decision.context.scope_type in {"topic", "group_chat", "private_user"}:
+            with create_session_factory(self.database_url)() as session:
+                compact_repo = TopicCompactStateRepository(session)
+                existing_state = compact_repo.get_state(
+                    scope_type=decision.context.scope_type,
+                    chat_id=decision.context.scope_chat_id,
+                    topic_id=decision.context.scope_topic_id,
+                    user_id=decision.context.scope_user_id,
+                )
+                claims = ClaimRepository(session).list_claims(
+                    scope_type=decision.context.scope_type,
+                    chat_id=decision.context.scope_chat_id,
+                    topic_id=decision.context.scope_topic_id,
+                    user_id=decision.context.scope_user_id,
+                    limit=100,
+                )
+                compact_payload = build_compact_topic_state_payload(
+                    snapshot=context_snapshot,
+                    claims=claims,
+                    existing=existing_state,
+                )
+                compact_state_record = compact_repo.upsert_state(
+                    scope_type=decision.context.scope_type,
+                    chat_id=decision.context.scope_chat_id,
+                    topic_id=decision.context.scope_topic_id,
+                    user_id=decision.context.scope_user_id,
+                    active_subjects=compact_payload.active_subjects,
+                    frames=compact_payload.frames,
+                    conflicts=compact_payload.conflicts,
+                    verified_facts=compact_payload.verified_facts,
+                    discarded_assumptions=compact_payload.discarded_assumptions,
+                    last_snapshot=compact_payload.last_snapshot,
+                    updated_from_message_id=message.message_id,
+                )
+            compact_state_text = format_compact_topic_state_prompt(compact_state_record)
+
+        if compact_state_text:
+            background_sections.insert(
+                0,
+                self._format_synthesis_source_block(
+                    title="Compact topic state",
+                    source_class="compact_topic_state",
+                    trust_note=(
+                        "Persisted scoped state separates active subjects, frames, conflicts, verified facts, and discarded assumptions. "
+                        "Only verified_facts are factual evidence."
+                    ),
+                    content=compact_state_text,
+                ),
             )
 
         if background_sections:

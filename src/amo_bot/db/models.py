@@ -410,6 +410,30 @@ class Claim(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
 
 
+class TopicCompactState(Base):
+    __tablename__ = "topic_compact_states"
+    __table_args__ = (
+        Index("ux_topic_compact_states_scope", "scope", unique=True),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    schema_version: Mapped[str] = mapped_column(String(32), nullable=False, default="topic_compact_state_v1", server_default="topic_compact_state_v1")
+    scope: Mapped[str] = mapped_column(String(128), nullable=False, default="", server_default="")
+    scope_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    chat_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    topic_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    user_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    active_subjects_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]", server_default="[]")
+    frames_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]", server_default="[]")
+    conflicts_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]", server_default="[]")
+    verified_facts_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]", server_default="[]")
+    discarded_assumptions_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]", server_default="[]")
+    last_snapshot_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}", server_default="{}")
+    updated_from_message_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+
 DEFAULT_ROLES: list[tuple[Role, int]] = [
     (Role.OWNER, 0),
     (Role.ADMIN, 10),

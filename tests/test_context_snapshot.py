@@ -35,10 +35,35 @@ def test_mixed_context_incident_fixture_structures_current_turn_background_bound
     assert snapshot.requires_current_info is True
     assert snapshot.current_user_intent == "answer_question"
     assert snapshot.active_subject == "aktuelle echte Kurs BTC"
-    assert [conflict.conflict_type for conflict in snapshot.conflicts] == ["source_frame_boundary"]
-    assert snapshot.conflicts[0].frames == ("current_turn", "background_context")
+    assert [conflict.conflict_type for conflict in snapshot.conflicts] == [
+        "semantic_frame_conflict",
+        "source_frame_boundary",
+    ]
+    assert snapshot.conflicts[0].frames == ("real_world_current_fact", "fictional_or_simulated_context")
+    assert snapshot.conflicts[1].frames == ("current_turn", "background_context")
     assert "source_frame_boundary_needs_resolution" in snapshot.uncertainty
     assert "routed_by_bot_mention" in snapshot.relevant_assumptions
+
+
+def test_context_snapshot_keeps_fantasy_background_separate_from_real_world_cup_question() -> None:
+    snapshot = build_context_snapshot(
+        current_message="Wie stehen aktuell die Gruppen der echten Fußball WM?",
+        router_context=AIRouterContextV1(
+            scope_type="topic",
+            route_reason=AIRouterReasonCode.MENTION_IN_ACTIVE_SCOPE,
+            flag_ai_scope_active=True,
+            flag_bot_mention=True,
+            recent_messages_text="Fantasy WM Simulation: Die Orks gewinnen ihre Quest im Koenigreich.",
+        ),
+    )
+
+    conflicts = {conflict.conflict_type: conflict for conflict in snapshot.conflicts}
+    assert "semantic_frame_conflict" in conflicts
+    assert conflicts["semantic_frame_conflict"].frames == (
+        "real_world_current_fact",
+        "fictional_or_simulated_context",
+    )
+    assert "do not merge old simulation context into real-world claims" in conflicts["semantic_frame_conflict"].description
 
 
 def test_mixed_context_live_football_wm_fixture_requires_external_evidence() -> None:

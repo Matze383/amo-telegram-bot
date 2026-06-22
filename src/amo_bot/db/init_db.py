@@ -16,6 +16,24 @@ from amo_bot.db.models import (
 )
 
 
+def _topic_compact_scope_key(
+    *,
+    row_id: int,
+    scope_type: str | None,
+    chat_id: int | None,
+    topic_id: int | None,
+    user_id: int | None,
+) -> str:
+    normalized_scope = (scope_type or "").strip().lower()
+    if normalized_scope == "topic" and chat_id is not None and topic_id is not None:
+        return f"topic:{chat_id}:{topic_id}"
+    if normalized_scope == "group_chat" and chat_id is not None:
+        return f"group_chat:{chat_id}"
+    if normalized_scope == "private_user" and user_id is not None:
+        return f"private_user:{user_id}"
+    return f"legacy:{row_id}"
+
+
 def init_db(database_url: str) -> None:
     session_factory = create_session_factory(database_url)
     engine = session_factory.kw["bind"]
@@ -238,6 +256,27 @@ def init_db(database_url: str) -> None:
                 updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
         """,
+        "topic_compact_states": """
+            CREATE TABLE topic_compact_states (
+                id INTEGER NOT NULL PRIMARY KEY,
+                schema_version VARCHAR(32) NOT NULL DEFAULT 'topic_compact_state_v1',
+                scope VARCHAR(128) NOT NULL DEFAULT '',
+                scope_type VARCHAR(32) NOT NULL,
+                chat_id BIGINT,
+                topic_id BIGINT,
+                user_id BIGINT,
+                active_subjects_json TEXT NOT NULL DEFAULT '[]',
+                frames_json TEXT NOT NULL DEFAULT '[]',
+                conflicts_json TEXT NOT NULL DEFAULT '[]',
+                verified_facts_json TEXT NOT NULL DEFAULT '[]',
+                discarded_assumptions_json TEXT NOT NULL DEFAULT '[]',
+                last_snapshot_json TEXT NOT NULL DEFAULT '{}',
+                updated_from_message_id BIGINT,
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                CONSTRAINT uq_topic_compact_states_scope UNIQUE (scope)
+            )
+        """,
         "webtool_role_quotas": """
             CREATE TABLE webtool_role_quotas (
                 id INTEGER NOT NULL PRIMARY KEY,
@@ -355,6 +394,9 @@ def init_db(database_url: str) -> None:
         },
         "claims": {
             "scope": "ALTER TABLE claims ADD COLUMN scope VARCHAR(128) NOT NULL DEFAULT ''",
+        },
+        "topic_compact_states": {
+            "scope": "ALTER TABLE topic_compact_states ADD COLUMN scope VARCHAR(128) NOT NULL DEFAULT ''",
         },
     }
 
@@ -605,6 +647,47 @@ def init_db(database_url: str) -> None:
             for column_name, ddl in migrations.items():
                 if column_name not in existing_columns:
                     connection.execute(text(ddl))
+
+        if "topic_compact_states" in existing_tables:
+            rows = connection.execute(
+                text(
+                    """
+                    SELECT id, scope, scope_type, chat_id, topic_id, user_id
+                    FROM topic_compact_states
+                    ORDER BY id
+                    """
+                )
+            ).mappings()
+            keep_by_scope: dict[str, int] = {}
+            duplicate_ids: list[int] = []
+            for row in rows:
+                scope = (row["scope"] or "").strip() or _topic_compact_scope_key(
+                    row_id=int(row["id"]),
+                    scope_type=row["scope_type"],
+                    chat_id=row["chat_id"],
+                    topic_id=row["topic_id"],
+                    user_id=row["user_id"],
+                )
+                row_id = int(row["id"])
+                previous_id = keep_by_scope.get(scope)
+                if previous_id is not None:
+                    duplicate_ids.append(previous_id)
+                keep_by_scope[scope] = row_id
+                connection.execute(
+                    text("UPDATE topic_compact_states SET scope = :scope WHERE id = :id"),
+                    {"scope": scope, "id": row_id},
+                )
+            for duplicate_id in duplicate_ids:
+                connection.execute(
+                    text("DELETE FROM topic_compact_states WHERE id = :id"),
+                    {"id": duplicate_id},
+                )
+
+            existing_indexes = {index["name"] for index in inspect(connection).get_indexes("topic_compact_states")}
+            if "ux_topic_compact_states_scope" not in existing_indexes:
+                connection.execute(
+                    text("CREATE UNIQUE INDEX ux_topic_compact_states_scope ON topic_compact_states (scope)")
+                )
 
         if "retrievable_memories" in existing_tables:
             existing_indexes = {index["name"] for index in inspector.get_indexes("retrievable_memories")}
