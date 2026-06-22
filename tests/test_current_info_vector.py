@@ -128,7 +128,28 @@ def test_vector_retrieval_resolves_qdrant_chunk_ids_through_mariadb_rows() -> No
     assert chunks[0].text == "Vector retrieval should return this stored MariaDB chunk."
     assert chunks[0].source_url == "https://example.com/semantic"
     assert chunks[0].metadata["retrieval"] == "vector"
+    assert chunks[0].metadata["pointer_status"] == "verified_mariadb_pointer"
     assert store.searches == [(0.1, 0.2, 0.3)]
+
+
+def test_vector_retrieval_ignores_qdrant_hits_without_mariadb_pointers(caplog) -> None:
+    factory = _factory()
+    store = _FakeVectorStore((VectorSearchResult(chunk_id=987654, score=0.99, metadata={"title": "orphan"}),))
+    provider = VectorCurrentInfoRetrievalProvider(
+        session_factory=factory,
+        vector_store=store,
+        embedding_provider=_FakeEmbeddingProvider(),
+        fallback_provider=DbCurrentInfoRetrievalProvider(session_factory=factory),
+    )
+
+    chunks = provider.retrieve(
+        request=CurrentInfoRequest(query="orphan vector memory"),
+        documents=(),
+        search_results=(),
+    )
+
+    assert chunks == ()
+    assert "current_info_vector_unresolved_mariadb_pointers: count=1" in caplog.text
 
 
 def test_vector_retrieval_falls_back_to_keyword_when_vector_store_fails() -> None:

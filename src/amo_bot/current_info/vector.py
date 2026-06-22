@@ -325,6 +325,13 @@ class VectorCurrentInfoRetrievalProvider:
             if hosts := filters.get("host"):
                 query = query.where(CurrentInfoDocumentChunk.host.in_(hosts))
             rows = list(session.scalars(query))
+        resolved_ids = {int(row.id) for row in rows}
+        missing_ids = tuple(chunk_id for chunk_id in chunk_ids if chunk_id not in resolved_ids)
+        if missing_ids:
+            logger.warning(
+                "current_info_vector_unresolved_mariadb_pointers: count=%s",
+                len(missing_ids),
+            )
         rows.sort(key=lambda row: order_by_id.get(int(row.id), len(order_by_id)))
         chunks: list[EvidenceChunk] = []
         for row in rows[: max(1, int(limit))]:
@@ -348,6 +355,7 @@ class VectorCurrentInfoRetrievalProvider:
                         "expires_at": _iso(row.expires_at),
                         "cache": "current_info_documents",
                         "retrieval": "vector",
+                        "pointer_status": "verified_mariadb_pointer",
                     },
                 )
             )

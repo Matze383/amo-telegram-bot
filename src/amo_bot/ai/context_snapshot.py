@@ -91,6 +91,8 @@ class ContextSnapshotV1:
     active_subject: str
     frame_candidates: tuple[ContextFrameCandidate, ...]
     source_classes: dict[str, str]
+    semantic_memory_sources: tuple[str, ...]
+    verified_evidence_sources: tuple[str, ...]
     relevant_assumptions: tuple[str, ...]
     conflicts: tuple[ContextConflict, ...]
     uncertainty: tuple[str, ...]
@@ -148,12 +150,15 @@ def build_context_snapshot(
         existing_current_info_signal=existing_current_info_signal,
     )
 
+    source_classes = _build_source_classes(sources=sources)
     return ContextSnapshotV1(
         schema_version="context_snapshot_v1",
         current_user_intent=_detect_intent(current),
         active_subject=_extract_active_subject(current),
         frame_candidates=tuple(frames),
-        source_classes=_build_source_classes(sources=sources),
+        source_classes=source_classes,
+        semantic_memory_sources=_sources_by_class(source_classes, "semantic_memory"),
+        verified_evidence_sources=("verified_external_evidence",) if verified_external_evidence_available else (),
         relevant_assumptions=tuple(_build_assumptions(router_context=router_context, sources=sources)),
         conflicts=tuple(conflicts),
         uncertainty=tuple(uncertainty),
@@ -243,6 +248,10 @@ def _build_source_classes(*, sources: dict[str, str]) -> dict[str, str]:
         "prompt_context_docs": "model_prior",
     }
     return {source: source_class for source, source_class in configured.items() if sources.get(source)}
+
+
+def _sources_by_class(source_classes: dict[str, str], source_class: str) -> tuple[str, ...]:
+    return tuple(source for source, value in source_classes.items() if value == source_class)
 
 
 def _reply_context_source_class(value: str) -> str:

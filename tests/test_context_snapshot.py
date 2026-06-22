@@ -123,6 +123,8 @@ def test_context_snapshot_mixed_context_without_conflict_marks_sources() -> None
     assert snapshot.source_classes["reply_context"] == "user_claim_or_bot_claim"
     assert snapshot.source_classes["recent_messages"] == "user_claim"
     assert snapshot.source_classes["retrieved_memory"] == "semantic_memory"
+    assert snapshot.semantic_memory_sources == ("retrieved_memory",)
+    assert snapshot.verified_evidence_sources == ()
     assert snapshot.context_source_counts["current_message"] == 1
     assert snapshot.context_source_counts["reply_context"] == 1
 
@@ -145,3 +147,45 @@ def test_context_snapshot_marks_bot_reply_context_as_bot_claim() -> None:
 
     assert snapshot.source_classes["reply_context"] == "bot_claim"
     assert "routed_by_reply_to_bot" in snapshot.relevant_assumptions
+
+
+def test_context_snapshot_marks_stale_semantic_memory_as_context_not_evidence() -> None:
+    snapshot = build_context_snapshot(
+        current_message="Was ist heute der echte Status des Dienstes?",
+        router_context=AIRouterContextV1(
+            scope_type="group_chat",
+            route_reason=AIRouterReasonCode.MENTION_IN_ACTIVE_SCOPE,
+            flag_ai_scope_active=True,
+            flag_bot_mention=True,
+            recall_memory_text="Alte Simulation: Der Dienst ist im Fantasy-Rollenspiel wegen Magie offline.",
+        ),
+        existing_current_info_signal=True,
+        verified_external_evidence_available=False,
+    )
+
+    assert snapshot.source_classes["retrieved_memory"] == "semantic_memory"
+    assert snapshot.semantic_memory_sources == ("retrieved_memory",)
+    assert snapshot.verified_evidence_sources == ()
+    assert snapshot.current_info_decision.evidence_available is False
+    assert "semantic_frame_conflict" in {conflict.conflict_type for conflict in snapshot.conflicts}
+    assert "Do not assert current facts from model_prior, semantic_memory" in snapshot.current_info_decision.fail_closed_instruction
+
+
+def test_context_snapshot_keeps_contradictory_semantic_memory_separate_from_verified_evidence() -> None:
+    snapshot = build_context_snapshot(
+        current_message="Wie ist der aktuelle Status des Dienstes?",
+        router_context=AIRouterContextV1(
+            scope_type="private_user",
+            route_reason=AIRouterReasonCode.SCOPE_ENABLED,
+            flag_ai_scope_active=True,
+            recall_memory_text="Alte Erinnerung: Der Dienst war offline.",
+        ),
+        existing_current_info_signal=True,
+        verified_external_evidence_available=True,
+    )
+
+    assert snapshot.source_classes["retrieved_memory"] == "semantic_memory"
+    assert snapshot.semantic_memory_sources == ("retrieved_memory",)
+    assert snapshot.verified_evidence_sources == ("verified_external_evidence",)
+    assert snapshot.current_info_decision.evidence_available is True
+    assert snapshot.current_info_decision.fail_closed_instruction == ""
