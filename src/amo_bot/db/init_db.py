@@ -218,6 +218,26 @@ def init_db(database_url: str) -> None:
                 CONSTRAINT uq_image_analyze_role_quota_role UNIQUE (role)
             )
         """,
+        "claims": """
+            CREATE TABLE claims (
+                id INTEGER NOT NULL PRIMARY KEY,
+                text TEXT NOT NULL,
+                normalized_subject VARCHAR(255) NOT NULL DEFAULT '',
+                source_type VARCHAR(32) NOT NULL,
+                source_message_id BIGINT,
+                scope VARCHAR(128) NOT NULL DEFAULT '',
+                scope_type VARCHAR(32) NOT NULL,
+                chat_id BIGINT,
+                topic_id BIGINT,
+                user_id BIGINT,
+                timestamp DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                verification_status VARCHAR(32) NOT NULL DEFAULT 'unverified',
+                confidence FLOAT NOT NULL DEFAULT 0,
+                evidence_ref VARCHAR(2048),
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+        """,
         "webtool_role_quotas": """
             CREATE TABLE webtool_role_quotas (
                 id INTEGER NOT NULL PRIMARY KEY,
@@ -332,6 +352,9 @@ def init_db(database_url: str) -> None:
             "worker_next_restart_at": "ALTER TABLE plugins ADD COLUMN worker_next_restart_at DATETIME",
             "worker_last_error": "ALTER TABLE plugins ADD COLUMN worker_last_error TEXT",
             "activation_status": "ALTER TABLE plugins ADD COLUMN activation_status VARCHAR(32) NOT NULL DEFAULT 'activation_pending'",
+        },
+        "claims": {
+            "scope": "ALTER TABLE claims ADD COLUMN scope VARCHAR(128) NOT NULL DEFAULT ''",
         },
     }
 
@@ -558,6 +581,22 @@ def init_db(database_url: str) -> None:
             existing_indexes = {index["name"] for index in inspector.get_indexes("bot_peers")}
             if "ix_bot_peers_telegram_bot_id" not in existing_indexes:
                 connection.execute(text("CREATE INDEX ix_bot_peers_telegram_bot_id ON bot_peers (telegram_bot_id)"))
+
+        if "claims" in existing_tables:
+            existing_indexes = {index["name"] for index in inspector.get_indexes("claims")}
+            if "ix_claims_scope_subject" not in existing_indexes:
+                connection.execute(
+                    text(
+                        "CREATE INDEX ix_claims_scope_subject "
+                        "ON claims (scope_type, chat_id, topic_id, user_id, normalized_subject)"
+                    )
+                )
+            if "ix_claims_source" not in existing_indexes:
+                connection.execute(text("CREATE INDEX ix_claims_source ON claims (source_type, source_message_id)"))
+            if "ix_claims_verification_status" not in existing_indexes:
+                connection.execute(
+                    text("CREATE INDEX ix_claims_verification_status ON claims (verification_status, updated_at)")
+                )
 
         for table_name, migrations in table_column_migrations.items():
             if table_name not in existing_tables:

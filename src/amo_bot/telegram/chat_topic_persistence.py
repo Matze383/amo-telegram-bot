@@ -6,9 +6,10 @@ import re
 
 from sqlalchemy.orm import sessionmaker
 
+from amo_bot.ai.claims import extract_claims
 from amo_bot.ai.memory_c2_service import MemoryC2Service, MemoryScope
 from amo_bot.db.models import GROUP_CHAT_TYPES, AuditEvent
-from amo_bot.db.repositories import ChatSeenUserRepository, ChatTopicRepository, TopicAgentMemoryRepository, UserMemoryProfileRepository, UserRoleRepository
+from amo_bot.db.repositories import ClaimRepository, ChatSeenUserRepository, ChatTopicRepository, TopicAgentMemoryRepository, UserMemoryProfileRepository, UserRoleRepository
 from amo_bot.telegram.owner_notify import OwnerNotifier
 from amo_bot.telegram.update_parser import TelegramMessage, TelegramUser
 
@@ -282,6 +283,44 @@ class ChatTopicPersistenceService:
             telegram_author_is_bot=bool(author and author.is_bot),
             source=source,
         )
+        self._persist_claims_from_text(
+            session=session,
+            scope_type=scope_type,
+            chat_id=scope_chat_id,
+            topic_id=topic_id,
+            user_id=user_id,
+            source_message_id=message_id,
+            source=source,
+            text=text,
+        )
+
+    @staticmethod
+    def _persist_claims_from_text(
+        *,
+        session,
+        scope_type: str,
+        chat_id: int | None,
+        topic_id: int | None,
+        user_id: int | None,
+        source_message_id: int,
+        source: str,
+        text: str,
+    ) -> None:
+        source_type = "bot_claim" if source == "bot" else "user_claim"
+        claim_repo = ClaimRepository(session)
+        for claim in extract_claims(text):
+            claim_repo.create_claim(
+                text=claim.text,
+                normalized_subject=claim.normalized_subject,
+                source_type=source_type,
+                source_message_id=source_message_id,
+                scope_type=scope_type,
+                chat_id=chat_id,
+                topic_id=topic_id,
+                user_id=user_id,
+                confidence=claim.confidence,
+                auto_commit=False,
+            )
 
     async def persist_bot_sent_message(
         self,

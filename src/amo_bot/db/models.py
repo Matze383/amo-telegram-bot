@@ -384,6 +384,32 @@ class ResearchEvalCase(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
 
 
+class Claim(Base):
+    __tablename__ = "claims"
+    __table_args__ = (
+        Index("ix_claims_scope_subject", "scope_type", "chat_id", "topic_id", "user_id", "normalized_subject"),
+        Index("ix_claims_source", "source_type", "source_message_id"),
+        Index("ix_claims_verification_status", "verification_status", "updated_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    normalized_subject: Mapped[str] = mapped_column(String(255), nullable=False, default="", server_default="")
+    source_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    source_message_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    scope: Mapped[str] = mapped_column(String(128), nullable=False, default="", server_default="")
+    scope_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    chat_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    topic_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    user_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    verification_status: Mapped[str] = mapped_column(String(32), nullable=False, default="unverified", server_default="unverified")
+    confidence: Mapped[float] = mapped_column(Float, nullable=False, default=0.0, server_default="0")
+    evidence_ref: Mapped[str | None] = mapped_column(String(2048), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+
 DEFAULT_ROLES: list[tuple[Role, int]] = [
     (Role.OWNER, 0),
     (Role.ADMIN, 10),

@@ -22,6 +22,7 @@ from amo_bot.db.models import (
     BotPeer,
     ChatSeenUser,
     ChatUserRole,
+    Claim,
     DbRole,
     ImageAnalyzeRoleQuota,
     Plugin,
@@ -3327,6 +3328,201 @@ class TopicRecentMessageRecord:
     telegram_author_is_bot: bool = False
     source: str = "user"
     created_at: datetime | None = None
+
+
+@dataclass(slots=True)
+class ClaimRecord:
+    id: int
+    text: str
+    normalized_subject: str
+    source_type: str
+    source_message_id: int | None
+    scope: str
+    scope_type: str
+    chat_id: int | None
+    topic_id: int | None
+    user_id: int | None
+    timestamp: datetime | None
+    verification_status: str
+    confidence: float
+    evidence_ref: str | None
+
+
+class ClaimRepository:
+    ALLOWED_SOURCE_TYPES = {"user_claim", "bot_claim", "websearch_evidence", "verified_external_evidence"}
+    ALLOWED_VERIFICATION_STATUSES = {"unverified", "supported", "refuted"}
+    UNVERIFIED_SOURCE_TYPES = {"user_claim", "bot_claim"}
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def create_claim(
+        self,
+        *,
+        text: str,
+        normalized_subject: str,
+        source_type: str,
+        scope_type: str,
+        source_message_id: int | None = None,
+        chat_id: int | None = None,
+        topic_id: int | None = None,
+        user_id: int | None = None,
+        timestamp: datetime | None = None,
+        verification_status: str = "unverified",
+        confidence: float = 0.0,
+        evidence_ref: str | None = None,
+        auto_commit: bool = True,
+    ) -> ClaimRecord:
+        normalized_source_type = self._normalize_source_type(source_type)
+        normalized_status = self._normalize_status(verification_status)
+        normalized_scope_type = (scope_type or "").strip()
+        if normalized_source_type in self.UNVERIFIED_SOURCE_TYPES:
+            normalized_status = "unverified"
+            evidence_ref = None
+
+        row = Claim(
+            text=(text or "").strip(),
+            normalized_subject=(normalized_subject or "").strip()[:255],
+            source_type=normalized_source_type,
+            source_message_id=source_message_id,
+            scope=self._build_scope_key(
+                scope_type=normalized_scope_type,
+                chat_id=chat_id,
+                topic_id=topic_id,
+                user_id=user_id,
+            ),
+            scope_type=normalized_scope_type,
+            chat_id=chat_id,
+            topic_id=topic_id,
+            user_id=user_id,
+            timestamp=_ensure_aware_utc(timestamp) or datetime.now(timezone.utc),
+            verification_status=normalized_status,
+            confidence=max(0.0, min(float(confidence), 1.0)),
+            evidence_ref=(evidence_ref or None),
+        )
+        if not row.text:
+            raise ValueError("claim text is required")
+        if not row.scope_type:
+            raise ValueError("claim scope_type is required")
+
+        self._session.add(row)
+        if auto_commit:
+            self._session.commit()
+            self._session.refresh(row)
+        else:
+            self._session.flush()
+        return self._to_claim_record(row)
+
+    def set_verification_status(
+        self,
+        *,
+        claim_id: int,
+        verification_status: str,
+        confidence: float | None = None,
+        evidence_ref: str | None = None,
+    ) -> ClaimRecord | None:
+        normalized_status = self._normalize_status(verification_status)
+        if normalized_status == "unverified" and evidence_ref:
+            evidence_ref = None
+
+        row = self._session.scalar(select(Claim).where(Claim.id == claim_id))
+        if row is None:
+            return None
+
+        row.verification_status = normalized_status
+        if confidence is not None:
+            row.confidence = max(0.0, min(float(confidence), 1.0))
+        row.evidence_ref = evidence_ref
+        self._session.commit()
+        self._session.refresh(row)
+        return self._to_claim_record(row)
+
+    def mark_supported(self, *, claim_id: int, evidence_ref: str, confidence: float | None = None) -> ClaimRecord | None:
+        return self.set_verification_status(
+            claim_id=claim_id,
+            verification_status="supported",
+            confidence=confidence,
+            evidence_ref=evidence_ref,
+        )
+
+    def mark_refuted(self, *, claim_id: int, evidence_ref: str, confidence: float | None = None) -> ClaimRecord | None:
+        return self.set_verification_status(
+            claim_id=claim_id,
+            verification_status="refuted",
+            confidence=confidence,
+            evidence_ref=evidence_ref,
+        )
+
+    def list_claims(
+        self,
+        *,
+        scope_type: str,
+        chat_id: int | None = None,
+        topic_id: int | None = None,
+        user_id: int | None = None,
+        verification_status: str | None = None,
+        limit: int = 100,
+    ) -> list[ClaimRecord]:
+        safe_limit = max(1, min(int(limit), 1000))
+        query = select(Claim).where(
+            Claim.scope_type == scope_type,
+            Claim.chat_id == chat_id,
+            Claim.topic_id == topic_id,
+            Claim.user_id == user_id,
+        )
+        if verification_status is not None:
+            query = query.where(Claim.verification_status == self._normalize_status(verification_status))
+        rows = self._session.scalars(query.order_by(Claim.id.desc()).limit(safe_limit)).all()
+        return [self._to_claim_record(row) for row in rows]
+
+    @classmethod
+    def _normalize_source_type(cls, value: str) -> str:
+        normalized = (value or "").strip().lower()
+        if normalized not in cls.ALLOWED_SOURCE_TYPES:
+            raise ValueError("invalid claim source_type")
+        return normalized
+
+    @classmethod
+    def _normalize_status(cls, value: str) -> str:
+        normalized = (value or "").strip().lower()
+        if normalized not in cls.ALLOWED_VERIFICATION_STATUSES:
+            raise ValueError("invalid claim verification_status")
+        return normalized
+
+    @staticmethod
+    def _to_claim_record(row: Claim) -> ClaimRecord:
+        return ClaimRecord(
+            id=row.id,
+            text=row.text,
+            normalized_subject=row.normalized_subject,
+            source_type=row.source_type,
+            source_message_id=row.source_message_id,
+            scope=row.scope,
+            scope_type=row.scope_type,
+            chat_id=row.chat_id,
+            topic_id=row.topic_id,
+            user_id=row.user_id,
+            timestamp=row.timestamp,
+            verification_status=row.verification_status,
+            confidence=float(row.confidence),
+            evidence_ref=row.evidence_ref,
+        )
+
+    @staticmethod
+    def _build_scope_key(
+        *,
+        scope_type: str,
+        chat_id: int | None,
+        topic_id: int | None,
+        user_id: int | None,
+    ) -> str:
+        if scope_type == "topic":
+            return f"topic:{chat_id}:{topic_id}"
+        if scope_type == "group_chat":
+            return f"group_chat:{chat_id}"
+        if scope_type == "private_user":
+            return f"private_user:{user_id}"
+        return scope_type
 
 
 @dataclass(slots=True)
