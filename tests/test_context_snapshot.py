@@ -7,8 +7,8 @@ from amo_bot.ai.router import AIRouterContextV1, AIRouterReasonCode
 def test_mixed_context_incident_fixture_structures_current_turn_background_boundary() -> None:
     router_context = AIRouterContextV1(
         scope_type="topic",
-        scope_chat_id=-1003997137641,
-        scope_topic_id=2246,
+        scope_chat_id=-9001,
+        scope_topic_id=77,
         user_id=42,
         message_text="@AmoBot Was ist der aktuelle echte Kurs von BTC?",
         route_reason=AIRouterReasonCode.MENTION_IN_ACTIVE_SCOPE,

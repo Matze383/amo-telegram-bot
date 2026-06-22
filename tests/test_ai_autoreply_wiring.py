@@ -935,10 +935,10 @@ def test_autoreply_writes_context_snapshot_audit_for_mixed_context_incident_fixt
     init_db(db_url)
     _seed_user(
         db_url,
-        user_id=224601,
+        user_id=2701,
         role="vip",
         consent="accepted",
-        group_chat_id=-1003997137641,
+        group_chat_id=-1603,
         group_role="vip",
     )
 
@@ -947,25 +947,25 @@ def test_autoreply_writes_context_snapshot_audit_for_mixed_context_incident_fixt
         repo = TopicAgentMemoryRepository(session)
         repo.upsert_config(
             scope_type="topic",
-            chat_id=-1003997137641,
-            topic_id=2246,
+            chat_id=-1603,
+            topic_id=33,
             ai_enabled=True,
             recent_context_window_size=10,
         )
         repo.add_message(
             scope_type="topic",
-            chat_id=-1003997137641,
-            topic_id=2246,
+            chat_id=-1603,
+            topic_id=33,
             message_text="Die Taverne ist voller Orks und Magie.",
-            telegram_author_user_id=224601,
+            telegram_author_user_id=2701,
             source="user",
         )
         repo.add_message(
             scope_type="topic",
-            chat_id=-1003997137641,
-            topic_id=2246,
+            chat_id=-1603,
+            topic_id=33,
             message_text="Unser Fantasy-Charakter sucht eine Quest im Koenigreich.",
-            telegram_author_user_id=224601,
+            telegram_author_user_id=2701,
             source="user",
         )
         session.commit()
@@ -977,17 +977,17 @@ def test_autoreply_writes_context_snapshot_audit_for_mixed_context_incident_fixt
     asyncio.run(
         dispatcher.handle_raw_update(
             _mk_update(
-                uid=224601,
-                chat_id=-1003997137641,
+                uid=2701,
+                chat_id=-1603,
                 chat_type="supergroup",
                 text="@AmoBot Was ist der aktuelle echte Kurs von BTC?",
-                update_id=2246,
-                message_thread_id=2246,
+                update_id=73,
+                message_thread_id=33,
             )
         )
     )
 
-    assert sender.sent == [(-1003997137641, "ai-answer", 2246)]
+    assert sender.sent == [(-1603, "ai-answer", 33)]
     assert len(ai.prompts) == 1
     assert "Structured runtime context snapshot" in ai.prompts[0]
     assert '"schema_version": "context_snapshot_v1"' in ai.prompts[0]
@@ -1018,8 +1018,8 @@ def test_autoreply_writes_context_snapshot_audit_for_mixed_context_incident_fixt
     with sf() as session:
         state = TopicCompactStateRepository(session).get_state(
             scope_type="topic",
-            chat_id=-1003997137641,
-            topic_id=2246,
+            chat_id=-1603,
+            topic_id=33,
         )
     assert state is not None
     assert any(item["subject"] == "aktuelle echte Kurs BTC" for item in state.active_subjects)
@@ -1034,7 +1034,7 @@ def test_autoreply_current_info_timeout_fails_closed_before_synthesis_for_live_w
     init_db(db_url)
     _seed_user(
         db_url,
-        user_id=224602,
+        user_id=2702,
         role="vip",
         consent="accepted",
         group_chat_id=-1002,
@@ -1056,7 +1056,7 @@ def test_autoreply_current_info_timeout_fails_closed_before_synthesis_for_live_w
             chat_id=-1002,
             topic_id=77,
             message_text="Die Taverne ist voller Orks und Magie.",
-            telegram_author_user_id=224602,
+            telegram_author_user_id=2702,
             source="user",
         )
         session.commit()
@@ -1071,7 +1071,7 @@ def test_autoreply_current_info_timeout_fails_closed_before_synthesis_for_live_w
     asyncio.run(
         dispatcher.handle_raw_update(
             _mk_update(
-                uid=224602,
+                uid=2702,
                 chat_id=-1002,
                 chat_type="supergroup",
                 text="@AmoBot Wie stehen die Gruppen der Fußball WM?",

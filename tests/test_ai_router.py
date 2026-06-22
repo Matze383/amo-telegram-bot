@@ -887,13 +887,13 @@ def test_recent_context_excludes_obvious_meta_status_rows_but_keeps_normal_conte
 
 def test_recent_context_regression_chatgpt_prompt_excludes_prior_nvidia_and_workflow_noise(tmp_path) -> None:
     repo = _mk_repo(tmp_path)
-    repo.upsert_config(scope_type="topic", chat_id=-1003997137641, topic_id=872, ai_enabled=True, recent_context_window_size=10)
-    repo.append_message(scope_type="topic", chat_id=-1003997137641, topic_id=872, message_text="Nvidia earnings analysis remains bullish", source="assistant", telegram_author_is_bot=True)
-    repo.append_message(scope_type="topic", chat_id=-1003997137641, topic_id=872, message_text="local commit 5fb83d9 fix: reduce off-topic memory recall drift", source="user")
-    repo.append_message(scope_type="topic", chat_id=-1003997137641, topic_id=872, message_text="What is ChatGPT?", source="user")
+    repo.upsert_config(scope_type="topic", chat_id=-9001, topic_id=77, ai_enabled=True, recent_context_window_size=10)
+    repo.append_message(scope_type="topic", chat_id=-9001, topic_id=77, message_text="Nvidia earnings analysis remains bullish", source="assistant", telegram_author_is_bot=True)
+    repo.append_message(scope_type="topic", chat_id=-9001, topic_id=77, message_text="local commit 5fb83d9 fix: reduce off-topic memory recall drift", source="user")
+    repo.append_message(scope_type="topic", chat_id=-9001, topic_id=77, message_text="What is ChatGPT?", source="user")
 
     router = _mk_router(topic_agent_memory_repository=repo)
-    decision = router.decide(prompt="@AmoBot What is ChatGPT?", chat_id=-1003997137641, topic_id=872, user_id=42, chat_type="supergroup", bot_username="AmoBot")
+    decision = router.decide(prompt="@AmoBot What is ChatGPT?", chat_id=-9001, topic_id=77, user_id=42, chat_type="supergroup", bot_username="AmoBot")
 
     assert "What is ChatGPT?" in decision.context.recent_messages_text
     assert "Nvidia" not in decision.context.recent_messages_text

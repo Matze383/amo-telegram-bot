@@ -308,7 +308,7 @@ def test_dispatcher_handles_test_command_in_forum_supergroup_by_sending_private_
 
     dispatcher = Dispatcher(
         command_registry=create_builtin_registry(),
-        role_resolver=InMemoryRoleResolver({900000001: Role.ADMIN}),
+        role_resolver=InMemoryRoleResolver({501: Role.ADMIN}),
         send_text=fake_send,
         send_markup=None,
         send_private_markup=fake_send_private_markup,
@@ -319,9 +319,9 @@ def test_dispatcher_handles_test_command_in_forum_supergroup_by_sending_private_
         "update_id": 8011,
         "message": {
             "message_id": 12,
-            "message_thread_id": 872,
-            "from": {"id": 900000001, "is_bot": False, "first_name": "Example User", "username": "example_user"},
-            "chat": {"id": -1003997137641, "type": "supergroup"},
+            "message_thread_id": 77,
+            "from": {"id": 501, "is_bot": False, "first_name": "Example User", "username": "example_user"},
+            "chat": {"id": -9001, "type": "supergroup"},
             "text": "/test",
         },
     }
@@ -330,12 +330,12 @@ def test_dispatcher_handles_test_command_in_forum_supergroup_by_sending_private_
 
     assert sent_private_markup == [
         (
-            900000001,
+            501,
             "Inline-Button-Test: Bitte klicken.",
             {"inline_keyboard": [[{"text": "✅ Test Button", "callback_data": "test:ok"}]]},
         )
     ]
-    assert sent_text == [(-1003997137641, "Ich habe dir den Button-Test privat geschickt.", 872)]
+    assert sent_text == [(-9001, "Ich habe dir den Button-Test privat geschickt.", 77)]
 
 
 def test_dispatcher_handles_test_command_in_group_when_private_dm_fails() -> None:
@@ -1317,16 +1317,16 @@ def test_dispatcher_passes_message_thread_id_to_send() -> None:
         "update_id": 13,
         "message": {
             "message_id": 17,
-            "message_thread_id": 872,
+            "message_thread_id": 77,
             "from": {"id": 42, "is_bot": False, "first_name": "T", "username": "tester"},
-            "chat": {"id": -1003997137641, "type": "supergroup"},
+            "chat": {"id": -9001, "type": "supergroup"},
             "text": "/ping",
         },
     }
 
     asyncio.run(dispatcher.handle_raw_update(raw_update))
 
-    assert sent == [(-1003997137641, "pong", 872)]
+    assert sent == [(-9001, "pong", 77)]
 
 def test_dispatcher_ignores_messages_from_bot_users() -> None:
     sent: list[tuple[int, str]] = []
@@ -1764,16 +1764,16 @@ def test_group_builtin_command_unaffected_by_private_min_general_role_threshold(
         "update_id": 1704,
         "message": {
             "message_id": 94,
-            "message_thread_id": 872,
+            "message_thread_id": 77,
             "from": {"id": 42, "is_bot": False, "first_name": "T", "username": "tester", "language_code": "de"},
-            "chat": {"id": -1003997137641, "type": "supergroup"},
+            "chat": {"id": -9001, "type": "supergroup"},
             "text": "/ping",
         },
     }
 
     asyncio.run(dispatcher.handle_raw_update(raw_update))
 
-    assert sent == [(-1003997137641, "pong", 872)]
+    assert sent == [(-9001, "pong", 77)]
 
 
 def test_plugin_commands_unaffected_by_private_min_general_role_threshold() -> None:
