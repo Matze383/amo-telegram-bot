@@ -290,6 +290,60 @@ def test_evidence_validator_allows_checked_sports_source_evidence_for_synthesis(
     assert "Germany beat Scotland 5-1" in synthesis.auto_note
 
 
+def test_answer_synthesizer_frames_finance_listing_evidence_without_requiring_price() -> None:
+    search_stage = SearchExecutionStageOutput(
+        result=_search_result(
+            text="Snippet says Siemens-Aktie WKN 723610 ticker SIE; no current price shown.",
+            sources=("https://www.boerse.example/aktien/Siemens-Aktie/DE0007236101",),
+            hosts=("boerse.example",),
+        ),
+        capability="websearch",
+        reason="market_current_info_signal",
+    )
+    extraction_stage = build_extraction_browser_stage(
+        request_text="Ist Siemens an der Börse?",
+        capability="websearch",
+        reason="market_current_info_signal",
+        search_text=search_stage.result.text,
+        source_hosts=search_stage.result.hosts,
+        source_urls=search_stage.result.sources,
+        extracts=(
+            (
+                "webscraping",
+                "boerse.example",
+                "Die Seite nennt Siemens-Aktie, WKN 723610 und Ticker SIE, aber keinen aktuellen Kurs.",
+            ),
+            (
+                "webscraping",
+                "siemens.com",
+                "Siemens AG Investor Relations enthält Bereiche zu financial results und Stocks/Bonds/Rating.",
+            ),
+        ),
+    )
+
+    validation = validate_research_evidence(
+        request_text="Ist Siemens an der Börse?",
+        search_execution=search_stage,
+        extraction=extraction_stage,
+    )
+    synthesis = synthesize_research_answer(
+        request_text="Ist Siemens an der Börse?",
+        validation=validation,
+        capability="websearch",
+        locale="de",
+    )
+
+    assert validation.can_synthesize is True
+    assert "Finance-listing framing" in synthesis.auto_note
+    assert "answer the listing status directly" in synthesis.auto_note
+    assert "missing exact price data" in synthesis.auto_note
+    assert "absence of an exact current price is not by itself a reason to reject direct listing evidence" in synthesis.auto_note
+    assert "If exact values are absent, say the live evidence does not confirm the exact value" not in synthesis.auto_note
+    assert "Siemens-Aktie" in synthesis.auto_note
+    assert "WKN 723610" in synthesis.auto_note
+    assert "Ticker SIE" in synthesis.auto_note
+
+
 def test_answer_synthesizer_omits_search_snippet_when_checked_evidence_exists() -> None:
     search_stage = SearchExecutionStageOutput(
         result=_search_result(

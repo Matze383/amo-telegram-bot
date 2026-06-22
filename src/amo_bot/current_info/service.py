@@ -396,7 +396,7 @@ class CurrentInfoService:
         self._log_synthesis(request=request, task=task, started=started, status="answered", budget=budget)
         return CurrentInfoAnswer(
             status="answered",
-            answer_text=_format_answer_text(chunks),
+            answer_text=_format_answer_text(chunks, request=request, task=task),
             confidence=evidence.confidence,
             request=request,
             task=task,
@@ -592,13 +592,100 @@ class CurrentInfoService:
         )
 
 
-def _format_answer_text(chunks: tuple[EvidenceChunk, ...]) -> str:
+def _format_answer_text(
+    chunks: tuple[EvidenceChunk, ...],
+    *,
+    request: CurrentInfoRequest | None = None,
+    task: TaskSpec | None = None,
+) -> str:
+    listing_answer = _format_finance_listing_answer_text(chunks, request=request, task=task)
+    if listing_answer:
+        return listing_answer
     lines: list[str] = []
     for chunk in chunks[:3]:
         text = " ".join(chunk.text.split())
         if text:
             lines.append(text)
     return "\n\n".join(lines)
+
+
+def _format_finance_listing_answer_text(
+    chunks: tuple[EvidenceChunk, ...],
+    *,
+    request: CurrentInfoRequest | None,
+    task: TaskSpec | None,
+) -> str:
+    if request is None or task is None or not _is_finance_listing_query(request=request, task=task):
+        return ""
+    indicators = _finance_listing_indicators(chunks)
+    if not indicators:
+        return ""
+    target = _finance_listing_answer_subject(request.query) or _finance_listing_answer_subject(task.query)
+    values = {
+        str(chunk.metadata.get("claim_value") or chunk.metadata.get("fact_value") or "").casefold()
+        for chunk in chunks
+    }
+    not_listed = any(value in {"not_listed", "not_publicly_listed", "private", "privately_held"} for value in values)
+    if not_listed:
+        return ""
+    if (request.locale or task.locale or "en").lower().startswith("en"):
+        subject = target or "the company"
+        return f"Yes, checked sources indicate {subject} is publicly listed: {', '.join(indicators)}."
+    subject = target or "das Unternehmen"
+    return f"Ja, die geprüften Quellen zeigen {subject} als börsennotiert: {', '.join(indicators)}."
+
+
+def _finance_listing_answer_subject(text: str) -> str:
+    compact = re.sub(r"https?://\S+", " ", text or "")
+    compact = re.sub(r"\s+", " ", compact).strip()
+    match = re.search(
+        r"\b(?:ist|is|kann\s+man|can\s+i|can\s+you|are)\s+([A-ZÄÖÜ][\wÄÖÜäöüß&.-]*(?:\s+[A-ZÄÖÜ][\wÄÖÜäöüß&.-]*){0,3})",
+        compact,
+        re.IGNORECASE,
+    )
+    if not match:
+        return ""
+    subject = match.group(1).strip(" ?.,;:")
+    subject = re.sub(
+        r"\s+(?:an|börsennotiert|boersennotiert|listed|publicly|stock|aktien?|shares?|kaufen|buy).*$",
+        "",
+        subject,
+        flags=re.IGNORECASE,
+    ).strip(" ?.,;:")
+    return subject
+
+
+_FINANCE_LISTING_INDICATOR_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"\bAktie\b", re.IGNORECASE), "Aktie"),
+    (re.compile(r"\bWKN[:\s]+([A-Z0-9]{3,12})\b", re.IGNORECASE), "WKN {value}"),
+    (re.compile(r"\bISIN[:\s]+([A-Z]{2}[A-Z0-9]{9}[0-9])\b", re.IGNORECASE), "ISIN {value}"),
+    (re.compile(r"\b(?:ticker|symbol)[:\s]+([A-Z0-9.:-]{1,12})\b", re.IGNORECASE), "Ticker {value}"),
+    (
+        re.compile(r"\b(?:börsennotiert|boersennotiert|publicly\s+listed|publicly\s+traded|listed)\b", re.IGNORECASE),
+        "Listing-Hinweis",
+    ),
+    (
+        re.compile(r"\b(?:investor relations|stocks?/bonds?/rating|shareholder|aktieninformationen)\b", re.IGNORECASE),
+        "Investor-Relations-Aktienbereich",
+    ),
+)
+
+
+def _finance_listing_indicators(chunks: tuple[EvidenceChunk, ...]) -> list[str]:
+    indicators: list[str] = []
+    for chunk in chunks:
+        text = " ".join(" ".join((chunk.source_title or "", chunk.text)).split())
+        for pattern, label in _FINANCE_LISTING_INDICATOR_PATTERNS:
+            match = pattern.search(text)
+            if not match:
+                continue
+            value = match.group(1).upper() if match.groups() else ""
+            indicator = label.format(value=value) if value else label
+            if indicator not in indicators:
+                indicators.append(indicator)
+        if len(indicators) >= 4:
+            break
+    return indicators[:4]
 
 
 def _direct_url_search_results(query: str) -> tuple[SearchResult, ...]:

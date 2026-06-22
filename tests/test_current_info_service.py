@@ -686,6 +686,122 @@ def test_current_info_service_answers_spacex_not_public_with_two_verified_source
     ]
 
 
+def test_current_info_service_answers_siemens_listing_from_wkn_and_ticker_without_price():
+    boerse = SearchResult(
+        title="Siemens-Aktie - WKN 723610, Ticker SIE",
+        url="https://www.boerse.example/aktien/Siemens-Aktie/DE0007236101",
+        provider="fake_search",
+        rank=1,
+        host="www.boerse.example",
+    )
+    investor_relations = SearchResult(
+        title="Siemens AG Investor Relations - Stocks/Bonds/Rating",
+        url="https://www.siemens.com/global/en/company/investor-relations.html",
+        provider="fake_search",
+        rank=2,
+        host="www.siemens.com",
+        metadata={"source_type": "Official"},
+    )
+    documents = {
+        boerse.url: FetchedDocument(
+            url=boerse.url,
+            title=boerse.title,
+            text="Die Seite nennt die Siemens-Aktie mit WKN 723610 und Ticker SIE; aktuelle Kurse stehen nicht im Fragment.",
+        ),
+        investor_relations.url: FetchedDocument(
+            url=investor_relations.url,
+            title=investor_relations.title,
+            text="Siemens AG Investor Relations bietet Bereiche zu Stocks/Bonds/Rating und Finanzberichten.",
+        ),
+    }
+    chunks = (
+        EvidenceChunk(
+            text=documents[boerse.url].text,
+            source_url=boerse.url,
+            source_title=boerse.title,
+            metadata={"claim_key": "siemens_ag_listing", "claim_value": "listed"},
+        ),
+        EvidenceChunk(
+            text=documents[investor_relations.url].text,
+            source_url=investor_relations.url,
+            source_title=investor_relations.title,
+            metadata={"claim_key": "siemens_ag_listing", "claim_value": "listed"},
+        ),
+    )
+    service = CurrentInfoService(
+        search_provider=_FakeSearchProvider((boerse, investor_relations)),
+        fetch_provider=_FakeFetchProvider(documents),
+        retrieval_provider=_FakeRetrievalProvider(chunks),
+    )
+
+    query = "Ist Siemens an der Börse?"
+    answer = service.answer(CurrentInfoRequest(query=query, locale="de", domain_hint="stock", max_results=3))
+
+    assert answer.status == "answered"
+    assert "finance_listing_requires_verified_sources" not in answer.warnings
+    assert answer.sources == (boerse.url, investor_relations.url)
+    assert answer.answer_text.startswith("Ja,")
+    assert "Siemens" in answer.answer_text
+    assert "WKN 723610" in answer.answer_text
+    assert "Ticker SIE" in answer.answer_text
+    assert "aktuelle Kurse" not in answer.answer_text
+
+
+def test_current_info_service_does_not_use_siemens_energy_as_siemens_ag_listing_proof():
+    boerse = SearchResult(
+        title="Siemens Energy AG Aktie",
+        url="https://www.boerse.example/aktien/Siemens-Energy-Aktie/DE000ENER6Y0",
+        provider="fake_search",
+        rank=1,
+        host="www.boerse.example",
+    )
+    exchange = SearchResult(
+        title="Siemens Energy AG stock listing",
+        url="https://live.deutsche-boerse.example/instrument/siemens-energy-ag",
+        provider="fake_search",
+        rank=2,
+        host="live.deutsche-boerse.example",
+    )
+    documents = {
+        boerse.url: FetchedDocument(
+            url=boerse.url,
+            title=boerse.title,
+            text="Siemens Energy AG Aktie mit WKN ENER6Y und Ticker ENR.",
+        ),
+        exchange.url: FetchedDocument(
+            url=exchange.url,
+            title=exchange.title,
+            text="Siemens Energy AG is listed; ticker ENR.",
+        ),
+    }
+    chunks = (
+        EvidenceChunk(
+            text=documents[boerse.url].text,
+            source_url=boerse.url,
+            source_title=boerse.title,
+            metadata={"claim_key": "siemens_energy_listing", "claim_value": "listed"},
+        ),
+        EvidenceChunk(
+            text=documents[exchange.url].text,
+            source_url=exchange.url,
+            source_title=exchange.title,
+            metadata={"claim_key": "siemens_energy_listing", "claim_value": "listed"},
+        ),
+    )
+    service = CurrentInfoService(
+        search_provider=_FakeSearchProvider((boerse, exchange)),
+        fetch_provider=_FakeFetchProvider(documents),
+        retrieval_provider=_FakeRetrievalProvider(chunks),
+    )
+
+    answer = service.answer(CurrentInfoRequest(query="Ist Siemens an der Börse?", locale="de", domain_hint="stock"))
+
+    assert answer.status == "unverified_evidence"
+    assert answer.answer_text == ""
+    assert "irrelevant_source" in answer.warnings
+    assert answer.metadata["reason"] == "irrelevant_source"
+
+
 def test_current_info_service_routes_derivative_exchange_queries_as_crypto_listing_evidence():
     result = SearchResult(
         title="ACMEUSDT Contract | Bybit",

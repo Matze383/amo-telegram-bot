@@ -547,6 +547,7 @@ class WebResearchOrchestrator:
                 extraction=final_extraction_stage,
             )
             synthesis_stage = synthesize_research_answer(
+                request_text=request.normalized_text,
                 validation=validation_stage,
                 capability=decision_auto.capability,
                 followup=is_followup_research,
@@ -577,6 +578,7 @@ class WebResearchOrchestrator:
                 extraction=extraction_stage,
             )
             synthesis_stage = synthesize_research_answer(
+                request_text=request.normalized_text,
                 validation=validation_stage,
                 capability=decision_auto.capability,
                 locale=request.locale,
@@ -601,6 +603,7 @@ class WebResearchOrchestrator:
                 extraction=extraction_stage,
             )
             synthesis_stage = synthesize_research_answer(
+                request_text=request.normalized_text,
                 validation=validation_stage,
                 capability=decision_auto.capability,
                 locale=request.locale,
@@ -1415,6 +1418,7 @@ def validate_research_evidence(
 
 def synthesize_research_answer(
     *,
+    request_text: str = "",
     validation: EvidenceValidationStageOutput,
     capability: str,
     locale: str,
@@ -1431,6 +1435,7 @@ def synthesize_research_answer(
     if validation.checked_extracts:
         return AnswerSynthesisStageOutput(
             auto_note=_format_auto_research_chained_success_note(
+                request_text=request_text,
                 capability=capability,
                 search_text=validation.search_text,
                 search_hosts=validation.search_hosts,
@@ -1441,6 +1446,7 @@ def synthesize_research_answer(
         )
     return AnswerSynthesisStageOutput(
         auto_note=_format_auto_research_success_note(
+            request_text=request_text,
             capability=capability,
             text=validation.search_text,
             hosts=validation.search_hosts,
@@ -2155,6 +2161,7 @@ def _target_answer_language_instruction(locale: str) -> str:
 
 def _format_auto_research_chained_success_note(
     *,
+    request_text: str = "",
     capability: str,
     search_text: str,
     search_hosts: tuple[str, ...],
@@ -2176,6 +2183,8 @@ def _format_auto_research_chained_success_note(
         "This is a bounded follow-up because user feedback requested more/different sources after a prior web/AI answer. "
         if followup else ""
     )
+    listing_instruction = _finance_listing_answer_framing_instruction(request_text)
+    exact_value_instruction = _exact_value_absence_instruction(listing_instruction=listing_instruction)
     return (
         f"{heading} — STRICT INSTRUCTION:\n"
         f"{_target_answer_language_instruction(locale)}\n"
@@ -2184,7 +2193,8 @@ def _format_auto_research_chained_success_note(
         "Use the checked source evidence; mention source hosts when relevant. The search-result snippet is discovery context only and must not be used as a factual source. Summarize compactly and do not reproduce raw page/tool output. Do NOT override it with stale memory/priors.\n"
         "Telegram formatting: use short paragraphs or bullet lists; do not use Markdown tables.\n"
         "User-facing wording: describe only the available web evidence and source certainty; do not expose retrieval pipeline details or diagnostic labels.\n"
-        "Strict anti-hallucination: do NOT invent exact prices, rates, dates, levels, or news not supported by the supplied evidence. If exact values are absent, say the live evidence does not confirm the exact value.\n"
+        f"{listing_instruction}"
+        f"{exact_value_instruction}"
         f"Operation: {capability}\n"
         f"Search source hosts: {host_text}\n"
         f"Checked source evidence:\n{evidence}"
@@ -2222,10 +2232,19 @@ def _format_auto_research_chain_no_confirmation_note(
     )
 
 
-def _format_auto_research_success_note(*, capability: str, text: str, hosts: tuple[str, ...], locale: str = "de") -> str:
+def _format_auto_research_success_note(
+    *,
+    request_text: str = "",
+    capability: str,
+    text: str,
+    hosts: tuple[str, ...],
+    locale: str = "de",
+) -> str:
     compact_text = compact_webtool_result_text(text, max_chars=_AUTO_RESEARCH_SEARCH_SUMMARY_CAP)
     host_text = ", ".join(hosts[:5])
     relevance_instruction = _sports_result_relevance_instruction(compact_text)
+    listing_instruction = _finance_listing_answer_framing_instruction(request_text)
+    exact_value_instruction = _exact_value_absence_instruction(listing_instruction=listing_instruction)
     return (
         "AUTO-RESEARCH (LIVE WEB) — STRICT INSTRUCTION:\n"
         f"{_target_answer_language_instruction(locale)}\n"
@@ -2235,12 +2254,37 @@ def _format_auto_research_success_note(*, capability: str, text: str, hosts: tup
         f"{relevance_instruction}"
         "Telegram formatting: use short paragraphs or bullet lists; do not use Markdown tables.\n"
         "User-facing wording: describe only the available web evidence and source certainty; do not expose retrieval pipeline details or diagnostic labels.\n"
-        "Strict anti-hallucination: do NOT invent dates, prices, levels, or news not supported by the supplied live summary. "
-        "If exact values are not in the supplied summary, state that the available live sources do not confirm that exact value; do not say no webtools.\n"
+        f"{listing_instruction}"
+        f"{exact_value_instruction}"
         "If sources conflict, say so transparently.\n"
         f"Operation: {capability}\n"
         f"Web result text: {compact_text}\n"
         f"Source hosts: {host_text}"
+    )
+
+
+def _finance_listing_answer_framing_instruction(request_text: str) -> str:
+    if not is_finance_listing_query(request_text or ""):
+        return ""
+    return (
+        "Finance-listing framing: the user is asking whether the company/security is listed, not necessarily for a "
+        "current quote. If checked evidence contains direct listing indicators such as Aktie, WKN, ISIN, ticker/symbol, "
+        "exchange/listing pages, or official investor-relations share/stock areas for the requested entity, answer the "
+        "listing status directly. Mention missing current prices only as a secondary limitation if relevant; do not make "
+        "missing exact price data the conclusion for a listing question.\n"
+    )
+
+
+def _exact_value_absence_instruction(*, listing_instruction: str) -> str:
+    if listing_instruction:
+        return (
+            "Strict anti-hallucination: do NOT invent dates, prices, levels, or news not supported by the supplied "
+            "evidence. For this listing question, absence of an exact current price is not by itself a reason to reject "
+            "direct listing evidence.\n"
+        )
+    return (
+        "Strict anti-hallucination: do NOT invent exact prices, rates, dates, levels, or news not supported by the "
+        "supplied evidence. If exact values are absent, say the live evidence does not confirm the exact value.\n"
     )
 
 

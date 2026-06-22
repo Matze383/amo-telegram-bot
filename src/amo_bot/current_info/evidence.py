@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
+import re
 from typing import Any
 from urllib.parse import urlparse
 
@@ -77,6 +78,9 @@ def assemble_evidence_package(
         if len(fetched_hosts) < 2:
             warnings.append("finance_listing_requires_verified_sources")
             confidence = min(confidence, 0.58)
+        if chunks and _all_finance_listing_chunks_entity_mismatch(request.query, chunks):
+            warnings.append("irrelevant_source")
+            confidence = min(confidence, 0.0)
 
     if _has_source_conflict(chunks):
         warnings.append("source_conflict")
@@ -235,6 +239,108 @@ def _claim_values_by_key(chunks: tuple[EvidenceChunk, ...]) -> dict[str, set[str
         if key and value:
             values_by_key[key].add(value.casefold())
     return values_by_key
+
+
+_FINANCE_QUERY_STOPWORDS = {
+    "ag",
+    "aktie",
+    "aktien",
+    "an",
+    "boerse",
+    "börse",
+    "boersennotiert",
+    "börsennotiert",
+    "buy",
+    "der",
+    "die",
+    "exchange",
+    "ist",
+    "kann",
+    "kaufen",
+    "listed",
+    "man",
+    "nasdaq",
+    "nyse",
+    "stock",
+    "ticker",
+}
+_ENTITY_COMPANY_FOLLOWERS = {
+    "ag",
+    "aktie",
+    "aktien",
+    "company",
+    "corp",
+    "corporation",
+    "gmbh",
+    "inc",
+    "incorporated",
+    "investor",
+    "isin",
+    "ltd",
+    "nv",
+    "plc",
+    "profile",
+    "public",
+    "sa",
+    "se",
+    "share",
+    "shares",
+    "stock",
+    "ticker",
+    "wkn",
+}
+
+
+def _all_finance_listing_chunks_entity_mismatch(query: str, chunks: tuple[EvidenceChunk, ...]) -> bool:
+    subject_tokens = _finance_query_subject_tokens(query)
+    if len(subject_tokens) != 1:
+        return False
+    target = subject_tokens[0]
+    saw_listing_evidence = False
+    saw_matching_entity = False
+    for chunk in chunks:
+        text = " ".join((chunk.source_title or "", chunk.text or "")).casefold()
+        if not _has_finance_listing_indicator(text):
+            continue
+        saw_listing_evidence = True
+        if not _chunk_mentions_different_entity(text, target=target):
+            saw_matching_entity = True
+            break
+    return saw_listing_evidence and not saw_matching_entity
+
+
+def _finance_query_subject_tokens(query: str) -> tuple[str, ...]:
+    without_urls = re.sub(r"https?://\S+", " ", query or "")
+    tokens = []
+    for token in re.findall(r"[A-Za-zÄÖÜäöüß][\wÄÖÜäöüß.-]*", without_urls.casefold()):
+        normalized = token.strip(".-")
+        if len(normalized) < 2 or normalized in _FINANCE_QUERY_STOPWORDS:
+            continue
+        tokens.append(normalized)
+    return tuple(dict.fromkeys(tokens[:4]))
+
+
+def _has_finance_listing_indicator(text: str) -> bool:
+    return bool(
+        re.search(
+            r"\b(?:aktie|wkn|isin|ticker|symbol|börsennotiert|boersennotiert|publicly\s+listed|publicly\s+traded|listed)\b",
+            text,
+            re.IGNORECASE,
+        )
+    )
+
+
+def _chunk_mentions_different_entity(text: str, *, target: str) -> bool:
+    tokens = [token for token in re.findall(r"[a-zäöüß]+", text.casefold())]
+    for index, token in enumerate(tokens):
+        if token != target:
+            continue
+        next_token = tokens[index + 1] if index + 1 < len(tokens) else ""
+        following_token = tokens[index + 2] if index + 2 < len(tokens) else ""
+        if next_token and next_token not in _ENTITY_COMPANY_FOLLOWERS and following_token in _ENTITY_COMPANY_FOLLOWERS:
+            return True
+        return False
+    return True
 
 
 def _metadata_warning_codes(chunks: tuple[EvidenceChunk, ...]) -> tuple[str, ...]:
