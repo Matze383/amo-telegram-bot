@@ -2,7 +2,7 @@
 
 ---
 
-## [Unreleased] – PostgreSQL pgvector Migration Readiness (PR #95)
+## [2026.06.23] – PostgreSQL pgvector Migration Readiness (PR #95)
 
 **Datum / Date:** 2026-06-23
 
