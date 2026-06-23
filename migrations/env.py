@@ -1,11 +1,11 @@
 from __future__ import annotations
 
+import os
 from logging.config import fileConfig
 
 from alembic import context
 from sqlalchemy import engine_from_config, pool
 
-from amo_bot.config.settings import get_settings
 from amo_bot.db.base import Base
 from amo_bot.db import models  # noqa: F401 - imported for metadata registration
 
@@ -21,6 +21,10 @@ def _database_url() -> str:
     configured = config.get_main_option("sqlalchemy.url")
     if configured:
         return configured
+    if database_url := os.environ.get("DATABASE_URL"):
+        return database_url
+    from amo_bot.config.settings import get_settings
+
     return get_settings().database_url
 
 

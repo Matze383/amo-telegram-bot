@@ -81,7 +81,11 @@ class CachedCurrentInfoFetchProvider:
 
     def fetch(self, *, url: str, locale: str) -> FetchedDocument | None:
         with self._session_factory() as session:
-            repo = CurrentInfoDocumentCacheRepository(session, config=self._config)
+            repo = CurrentInfoDocumentCacheRepository(
+                session,
+                config=self._config,
+                vector_indexer=self._vector_indexer,
+            )
             lookup = repo.get_by_url(url, now=_utcnow())
             if lookup.fresh_hit:
                 repo.record_fetch_run(
@@ -124,11 +128,6 @@ class CachedCurrentInfoFetchProvider:
                 return lookup.document if lookup.status == CACHE_STATUS_EXPIRED_HIT else None
 
             stored = repo.store_document(document, language=locale)
-            if self._vector_indexer is not None:
-                try:
-                    self._vector_indexer.upsert_chunks(tuple(stored.chunks))
-                except Exception as exc:
-                    logger.warning("current_info_vector_upsert_failed: %s", exc.__class__.__name__)
             repo.record_fetch_run(
                 requested_url=url,
                 canonical_url=document.url,
@@ -256,9 +255,10 @@ class CurrentInfoDocumentCacheRepository:
         self._session.flush()
         if self._vector_indexer is not None:
             try:
-                self._vector_indexer.upsert_chunks(tuple(row.chunks))
+                self._vector_indexer.upsert_chunks(tuple(row.chunks), session=self._session)
             except Exception as exc:
                 logger.warning("current_info_vector_upsert_failed: %s", exc.__class__.__name__)
+                raise
         return row
 
     def retrieve_chunks(

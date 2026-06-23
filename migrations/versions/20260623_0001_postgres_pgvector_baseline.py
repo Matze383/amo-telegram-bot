@@ -18,6 +18,54 @@ down_revision = None
 branch_labels = None
 depends_on = None
 
+REVISION_OWNED_TABLES = (
+    "chat_user_roles",
+    "users",
+    "telegram_topics",
+    "plugin_policy_allowed_topics",
+    "plugin_policy_allowed_groups",
+    "current_info_fetch_runs",
+    "current_info_document_chunks",
+    "chat_seen_users",
+    "webui_access_window",
+    "webtool_role_quotas",
+    "webtool_quota_counters",
+    "webtool_audit_events",
+    "user_memory_profiles",
+    "update_offsets",
+    "topic_recent_messages",
+    "topic_long_memories",
+    "topic_daily_memories",
+    "topic_compact_states",
+    "topic_ai_sessions",
+    "topic_agent_configs",
+    "telegram_chats",
+    "roles",
+    "retrievable_memories",
+    "research_source_preferences",
+    "research_source_observations",
+    "research_providers",
+    "research_provider_health",
+    "research_eval_cases",
+    "prompt_context_docs",
+    "private_chat_policies",
+    "popgun_topic_settings",
+    "popgun_settings",
+    "popgun_alert_states",
+    "plugins",
+    "plugin_policy_overrides",
+    "plugin_activation_requests",
+    "image_analyze_topic_policies",
+    "image_analyze_role_quotas",
+    "image_analyze_quota_counters",
+    "image_analyze_audit_events",
+    "current_info_query_runs",
+    "current_info_documents",
+    "claims",
+    "bot_peers",
+    "audit_events",
+)
+
 
 def upgrade() -> None:
     bind = op.get_bind()
@@ -30,4 +78,6 @@ def downgrade() -> None:
     bind = op.get_bind()
     if bind.dialect.name == "postgresql":
         op.execute("DROP TABLE IF EXISTS current_info_chunk_vectors")
-    Base.metadata.drop_all(bind=bind)
+    for table_name in REVISION_OWNED_TABLES:
+        table = Base.metadata.tables[table_name]
+        table.drop(bind=bind, checkfirst=True)

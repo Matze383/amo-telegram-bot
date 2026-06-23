@@ -43,11 +43,13 @@ class _FakeVectorStore:
     def __init__(self, search_results: tuple[VectorSearchResult, ...] = ()) -> None:
         self.search_results = search_results
         self.upserts: list[tuple[VectorChunk, ...]] = []
+        self.upsert_sessions: list[Session | None] = []
         self.searches: list[tuple[float, ...]] = []
         self.deleted_document_ids: list[tuple[int, ...]] = []
 
-    def upsert_chunks(self, chunks: tuple[VectorChunk, ...]) -> None:
+    def upsert_chunks(self, chunks: tuple[VectorChunk, ...], *, session: Session | None = None) -> None:
         self.upserts.append(chunks)
+        self.upsert_sessions.append(session)
 
     def search(self, *, vector: tuple[float, ...], limit: int) -> tuple[VectorSearchResult, ...]:
         del limit
@@ -61,6 +63,12 @@ class _FakeVectorStore:
 class _FailingVectorStore(_FakeVectorStore):
     def search(self, *, vector: tuple[float, ...], limit: int) -> tuple[VectorSearchResult, ...]:
         del vector, limit
+        raise RuntimeError("vector store unavailable")
+
+
+class _FailingUpsertVectorStore(_FakeVectorStore):
+    def upsert_chunks(self, chunks: tuple[VectorChunk, ...], *, session: Session | None = None) -> None:
+        del chunks, session
         raise RuntimeError("vector store unavailable")
 
 
@@ -96,6 +104,58 @@ def test_vector_indexer_upserts_chunk_pointers_without_text_payload() -> None:
     assert vector_chunk.metadata["canonical_url"] == "https://example.com/status"
     assert "text" not in vector_chunk.metadata
     assert "text_excerpt" not in vector_chunk.metadata
+    assert store.upsert_sessions == [session]
+
+
+def test_vector_indexer_forwards_active_session_to_vector_store() -> None:
+    factory = _factory()
+    store = _FakeVectorStore()
+    indexer = CurrentInfoVectorIndexer(vector_store=store, embedding_provider=_FakeEmbeddingProvider())
+    now = datetime(2026, 6, 16, 10, 0, tzinfo=UTC)
+
+    with factory() as session:
+        repo = CurrentInfoDocumentCacheRepository(session, vector_indexer=indexer)
+        repo.store_document(
+            FetchedDocument(
+                url="https://example.com/session",
+                title="Session",
+                text="The vector store should receive the repository session.",
+                metadata={"source_type": "Official"},
+            ),
+            language="en",
+            now=now,
+        )
+
+        assert store.upsert_sessions == [session]
+
+
+def test_vector_upsert_failure_rolls_back_document_cache_write() -> None:
+    factory = _factory()
+    indexer = CurrentInfoVectorIndexer(
+        vector_store=_FailingUpsertVectorStore(),
+        embedding_provider=_FakeEmbeddingProvider(),
+    )
+
+    with factory() as session:
+        repo = CurrentInfoDocumentCacheRepository(session, vector_indexer=indexer)
+        try:
+            repo.store_document(
+                FetchedDocument(
+                    url="https://example.com/fail",
+                    title="Fail",
+                    text="This document must not commit without its vector rows.",
+                    metadata={"source_type": "Official"},
+                ),
+                language="en",
+            )
+        except RuntimeError:
+            session.rollback()
+        else:  # pragma: no cover - defensive assertion shape
+            raise AssertionError("expected vector upsert failure")
+
+    with factory() as session:
+        assert session.scalar(select(CurrentInfoDocument)) is None
+        assert session.scalar(select(CurrentInfoDocumentChunk)) is None
 
 
 def test_vector_retrieval_resolves_chunk_ids_through_database_rows() -> None:
