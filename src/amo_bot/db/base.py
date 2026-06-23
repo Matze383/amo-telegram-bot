@@ -22,6 +22,8 @@ def _engine_kwargs_for_url(database_url: str) -> dict[str, Any]:
         # avoids handing stale pooled connections to callers; recycle keeps long
         # lived bot processes below typical server wait_timeout defaults.
         kwargs.update(pool_pre_ping=True, pool_recycle=3600)
+    elif backend == "postgresql":
+        kwargs.update(pool_pre_ping=True)
 
     return kwargs
 

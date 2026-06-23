@@ -262,7 +262,7 @@ AI_PROVIDER=ollama  # ollama (Standard), openai, anthropic, google, openrouter, 
 
 # Optional: Ollama (für /ask Kommando)
 OLLAMA_URL=http://127.0.0.1:11434
-OLLAMA_MODEL=llama3.1
+OLLAMA_MODEL=kimi-k2.6
 OLLAMA_TIMEOUT_SECONDS=20
 OLLAMA_MAX_PROMPT_CHARS=4000
 OLLAMA_MAX_PREDICT_TOKENS=512
@@ -281,11 +281,11 @@ OLLAMA_MAX_RESPONSE_CHARS=1500
 # OLLAMA_THINKING_BUDGET_MAX_PROMPT_CHARS=      # optional; Standard: OLLAMA_MAX_PROMPT_CHARS
 # OLLAMA_NON_THINKING_BUDGET_MAX_PROMPT_CHARS=  # optional; Standard: OLLAMA_MAX_PROMPT_CHARS
 
-# Optional: Datenbank (Standard: SQLite)
-DATABASE_URL=sqlite:///./data/amo_bot.db
+# Datenbank fuer Produktion: PostgreSQL
+DATABASE_URL=postgresql+psycopg://amo_bot:<password>@<postgres-host>:5432/amo_bot
 
-# Optional: MariaDB/MySQL (statt SQLite)
-# DATABASE_URL=mysql+pymysql://amo_bot:<password>@<mariadb-host>:3306/amo_bot?charset=utf8mb4
+# Lokale Tests/Dev koennen weiterhin SQLite verwenden:
+# DATABASE_URL=sqlite:///./data/amo_bot.db
 
 # Optional: Plugin-Verzeichnis
 AMO_PLUGIN_DIR=./plugins
@@ -601,16 +601,16 @@ Für die Extraktion von Ergebnis-Seiten bevorzugt der Dokument-Fetcher Crawlee u
 | `AMO_CURRENT_INFO_CACHE_MAX_CHUNK_CHARS` | `1200` | Maximale Textlänge pro Keyword-Retrieval-Chunk |
 | `AMO_CURRENT_INFO_CACHE_MAX_CHUNKS_PER_DOCUMENT` | `12` | Maximale Retrieval-Chunks pro Dokument |
 | `AMO_VECTOR_ENABLED` | `false` | Optionale semantische Suche für Current-Info-Dokumentchunks aktivieren |
-| `AMO_VECTOR_PROVIDER` | `qdrant` | Vector-DB-Provider; aktuell `qdrant` |
-| `AMO_VECTOR_URL` | *(leer)* | Qdrant-Basis-URL; `QDRANT_URL` wird als Alias akzeptiert |
-| `AMO_VECTOR_API_KEY` | *(leer)* | Optionaler Qdrant-API-Key; `QDRANT_API_KEY` wird als Alias akzeptiert. Nur in Env/Secrets speichern, nie in Code oder Doku |
-| `AMO_VECTOR_COLLECTION` | `current_info_chunks` | Qdrant-Collection für Current-Info-Chunk-Vektoren |
+| `AMO_VECTOR_PROVIDER` | `postgres` | Vector-DB-Provider: `postgres` fuer pgvector oder Legacy `qdrant` |
+| `AMO_VECTOR_URL` | *(leer)* | Nur fuer Legacy `qdrant`; `QDRANT_URL` wird als Alias akzeptiert |
+| `AMO_VECTOR_API_KEY` | *(leer)* | Nur fuer Legacy `qdrant`; `QDRANT_API_KEY` wird als Alias akzeptiert. Nur in Env/Secrets speichern, nie in Code oder Doku |
+| `AMO_VECTOR_COLLECTION` | `current_info_chunks` | Nur fuer Legacy `qdrant` |
 | `AMO_VECTOR_EMBEDDING_PROVIDER` | `ollama` | Embedding-Provider für Chunk-/Query-Vektoren: `ollama` oder `openai` |
-| `AMO_VECTOR_EMBEDDING_MODEL` | `nomic-embed-text` | Embedding-Modell für Current-Info-Vektoren |
+| `AMO_VECTOR_EMBEDDING_MODEL` | `nomic-embed-text-v2-moe:latest` | Embedding-Modell für Current-Info-Vektoren |
 | `AMO_VECTOR_TIMEOUT_SECONDS` | `3` | Timeout für Vector-DB- und Embedding-Anfragen |
 
-Die Current-Info-Cache-Tabellen werden über das bestehende SQLAlchemy-/MariaDB-Datenbanksetup erstellt. Query-Metriken speichern nur einen SHA-256-Hash der Anfrage, nicht den privaten Rohtext.
-Bei aktivierter semantischer Suche bleibt MariaDB die Source of Truth für Dokumente, Metadaten, Cache-TTLs und Pruning. Qdrant speichert nur Vektoren plus Chunk-/Dokument-Pointer und Quellenmetadaten; private Nutzerfragen werden nicht als Vektoren gespeichert.
+Die Current-Info-Cache-Tabellen werden über SQLAlchemy/Alembic im PostgreSQL-Datenbanksetup erstellt. Query-Metriken speichern nur einen SHA-256-Hash der Anfrage, nicht den privaten Rohtext.
+Bei aktivierter semantischer Suche bleibt PostgreSQL die Source of Truth für Dokumente, Metadaten, Cache-TTLs und Pruning. pgvector speichert nur Vektoren plus Chunk-/Dokument-Pointer und Quellenmetadaten; private Nutzerfragen werden nicht als Vektoren gespeichert.
 
 ### Direkte URL-Behandlung
 
@@ -985,45 +985,75 @@ chmod 755 data
 
 ---
 
-## Datenbank: MariaDB-Unterstützung (optional)
+## Datenbank: PostgreSQL-Unterstützung
 
-Neben SQLite unterstützt AMO auch MariaDB/MySQL über SQLAlchemy.
+Produktiv läuft AMO auf PostgreSQL über SQLAlchemy. SQLite bleibt für lokale Tests/Dev nutzbar; MariaDB/MySQL wird nur noch als Legacy-Quelle für Migrationen unterstützt.
 
 ### Konfiguration
 
 ```ini
-DATABASE_URL=mysql+pymysql://amo_bot:<password>@<mariadb-host>:3306/amo_bot?charset=utf8mb4
+DATABASE_URL=postgresql+psycopg://amo_bot:<password>@<postgres-host>:5432/amo_bot
+
+# Lokale Tests/Dev koennen weiterhin SQLite verwenden, wenn PostgreSQL nicht verfuegbar ist:
+# DATABASE_URL=sqlite:///./data/amo_bot.db
 ```
 
-### Voraussetzungen vor Cutover
+Für einmalige Migrationsbefehle bevorzugt `DATABASE_URL` nur für diesen Prozess setzen, statt die normale `.env` zu ändern:
+
+```bash
+DATABASE_URL='postgresql+psycopg://amo_bot:<password>@<postgres-host>:5432/amo_bot' alembic upgrade head
+```
+
+### PostgreSQL-/pgvector-Runbook
 
 1. **Abhängigkeiten installieren** (im venv):
    ```bash
-   pip install pymysql
+   pip install -r requirements.txt
    ```
 
-2. **Datenbank und User anlegen** (empfohlene Rechte: nur database-scoped, nicht global):
+2. **Datenbank, User und Extensions vorbereiten** (empfohlene Rechte: nur database-scoped, nicht global). Pflicht-Extensions sind `vector`, `pg_trgm` und `pgcrypto`; TimescaleDB ist optional und AMO startet weiter, wenn sie nicht verfügbar ist.
    ```sql
-   CREATE DATABASE amo_bot CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-   CREATE USER 'amo_bot'@'%' IDENTIFIED BY '<strong-password>';
-   GRANT ALL PRIVILEGES ON amo_bot.* TO 'amo_bot'@'%';
-   FLUSH PRIVILEGES;
+   CREATE DATABASE amo_bot;
+   CREATE USER amo_bot WITH PASSWORD '<strong-password>';
+   GRANT ALL PRIVILEGES ON DATABASE amo_bot TO amo_bot;
+   -- In der Ziel-DB:
+   CREATE EXTENSION IF NOT EXISTS vector;
+   CREATE EXTENSION IF NOT EXISTS pg_trgm;
+   CREATE EXTENSION IF NOT EXISTS pgcrypto;
+   -- Optional, nur wenn im PostgreSQL-Cluster verfuegbar:
+   CREATE EXTENSION IF NOT EXISTS timescaledb;
    ```
 
-3. **Daten migrieren/verifizieren** vor dem Cutover (SQLite-DB nicht löschen außer zu Testzwecken):
+3. **Alembic-Migrationen** gegen das PostgreSQL-Ziel ausführen:
+   ```bash
+   DATABASE_URL='postgresql+psycopg://amo_bot:<password>@<postgres-host>:5432/amo_bot' alembic upgrade head
+   ```
+   Alembic liest `DATABASE_URL` direkt und benötigt nicht die vollständige Bot-Konfiguration. `alembic downgrade` nur mit geprüftem Backup und getesteter Rollback-Planung verwenden: Der Baseline-Downgrade löscht AMO-eigene Tabellen und ist destruktiv für Anwendungsdaten.
+
+4. **Legacy-Daten migrieren/verifizieren**, falls von MariaDB/MySQL gewechselt wird:
    ```bash
    python -m amo_bot.db.migrate \
-     --source-url sqlite:///./data/amo_bot.db \
-     --target-url 'mysql+pymysql://amo_bot:<password>@<mariadb-host>:3306/amo_bot?charset=utf8mb4' \
+     --source-url 'mysql+pymysql://amo_bot:<password>@<mariadb-host>:3306/amo_bot?charset=utf8mb4' \
+     --target-url 'postgresql+psycopg://amo_bot:<password>@<postgres-host>:5432/amo_bot' \
      --dry-run
    ```
    Das Migrationstool gibt nur Tabellennamen, Zeilenzahlen und Status aus. Nach geprüftem Backup und Dry-Run `--dry-run` entfernen, um in eine leere Target-DB zu kopieren. Standardmäßig verweigert es gleiche Source/Target-URLs und nicht-leere Targets, außer `--allow-nonempty-target` wird explizit gesetzt.
 
+5. **Current-Info-Vektoren neu indexieren**, nachdem Schema und Dokument-Chunks vorhanden sind:
+   ```bash
+   AMO_VECTOR_ENABLED=true \
+   AMO_VECTOR_PROVIDER=postgres \
+   AMO_VECTOR_EMBEDDING_PROVIDER=ollama \
+   AMO_VECTOR_EMBEDDING_MODEL=nomic-embed-text-v2-moe:latest \
+   python -m amo_bot.current_info.reindex_vectors
+   ```
+
 ### Hinweise
 
-- SQLite bleibt der Standard und wird empfohlen für lokale Instanzen.
-- MariaDB ist für zukünftige Produktions-Deployments vorbereitet.
-- Die SQLite-Datei (`data/amo_bot.db`) nicht löschen vor erfolgreicher Migration.
+- SQLite bleibt für lokale Tests/Dev nutzbar.
+- MariaDB bleibt nur als Legacy-Migrationsquelle dokumentiert.
+- PostgreSQL ist die Source of Truth für Current-Info-Dokumente und Chunks. pgvector speichert nur Embeddings, Chunk-Zeiger und Quellenmetadaten.
+- Qdrant-Punkte aus älteren Deployments sind keine Restore-Quelle; Vektoren werden aus den gespeicherten PostgreSQL-Chunks neu erzeugt.
 
 ### Retrievable Memory Backfill
 

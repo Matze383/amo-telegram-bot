@@ -287,7 +287,7 @@ def test_vector_evidence_requires_verified_database_pointer_before_it_can_become
     )
 
     assert unresolved_chunks == ()
-    assert "current_info_vector_unresolved_mariadb_pointers: count=1" in caplog.text
+    assert "current_info_vector_unresolved_db_pointers: count=1" in caplog.text
 
     now = datetime(2026, 6, 22, 10, 0, tzinfo=UTC)
     with factory() as session:
@@ -320,4 +320,4 @@ def test_vector_evidence_requires_verified_database_pointer_before_it_can_become
     assert len(verified_chunks) == 1
     assert verified_chunks[0].text == "Der Dienst ist online."
     assert verified_chunks[0].metadata["retrieval"] == "vector"
-    assert verified_chunks[0].metadata["pointer_status"] == "verified_mariadb_pointer"
+    assert verified_chunks[0].metadata["pointer_status"] == "verified_db_pointer"

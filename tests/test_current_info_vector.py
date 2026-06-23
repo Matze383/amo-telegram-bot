@@ -12,6 +12,7 @@ from amo_bot.current_info import (
     DbCurrentInfoRetrievalProvider,
     EvidenceChunk,
     FetchedDocument,
+    PostgresVectorStore,
     VectorChunk,
     VectorCurrentInfoRetrievalProvider,
     VectorSearchResult,
@@ -42,11 +43,13 @@ class _FakeVectorStore:
     def __init__(self, search_results: tuple[VectorSearchResult, ...] = ()) -> None:
         self.search_results = search_results
         self.upserts: list[tuple[VectorChunk, ...]] = []
+        self.upsert_sessions: list[Session | None] = []
         self.searches: list[tuple[float, ...]] = []
         self.deleted_document_ids: list[tuple[int, ...]] = []
 
-    def upsert_chunks(self, chunks: tuple[VectorChunk, ...]) -> None:
+    def upsert_chunks(self, chunks: tuple[VectorChunk, ...], *, session: Session | None = None) -> None:
         self.upserts.append(chunks)
+        self.upsert_sessions.append(session)
 
     def search(self, *, vector: tuple[float, ...], limit: int) -> tuple[VectorSearchResult, ...]:
         del limit
@@ -60,7 +63,13 @@ class _FakeVectorStore:
 class _FailingVectorStore(_FakeVectorStore):
     def search(self, *, vector: tuple[float, ...], limit: int) -> tuple[VectorSearchResult, ...]:
         del vector, limit
-        raise RuntimeError("qdrant unavailable")
+        raise RuntimeError("vector store unavailable")
+
+
+class _FailingUpsertVectorStore(_FakeVectorStore):
+    def upsert_chunks(self, chunks: tuple[VectorChunk, ...], *, session: Session | None = None) -> None:
+        del chunks, session
+        raise RuntimeError("vector store unavailable")
 
 
 def test_vector_indexer_upserts_chunk_pointers_without_text_payload() -> None:
@@ -95,9 +104,61 @@ def test_vector_indexer_upserts_chunk_pointers_without_text_payload() -> None:
     assert vector_chunk.metadata["canonical_url"] == "https://example.com/status"
     assert "text" not in vector_chunk.metadata
     assert "text_excerpt" not in vector_chunk.metadata
+    assert store.upsert_sessions == [session]
 
 
-def test_vector_retrieval_resolves_qdrant_chunk_ids_through_mariadb_rows() -> None:
+def test_vector_indexer_forwards_active_session_to_vector_store() -> None:
+    factory = _factory()
+    store = _FakeVectorStore()
+    indexer = CurrentInfoVectorIndexer(vector_store=store, embedding_provider=_FakeEmbeddingProvider())
+    now = datetime(2026, 6, 16, 10, 0, tzinfo=UTC)
+
+    with factory() as session:
+        repo = CurrentInfoDocumentCacheRepository(session, vector_indexer=indexer)
+        repo.store_document(
+            FetchedDocument(
+                url="https://example.com/session",
+                title="Session",
+                text="The vector store should receive the repository session.",
+                metadata={"source_type": "Official"},
+            ),
+            language="en",
+            now=now,
+        )
+
+        assert store.upsert_sessions == [session]
+
+
+def test_vector_upsert_failure_rolls_back_document_cache_write() -> None:
+    factory = _factory()
+    indexer = CurrentInfoVectorIndexer(
+        vector_store=_FailingUpsertVectorStore(),
+        embedding_provider=_FakeEmbeddingProvider(),
+    )
+
+    with factory() as session:
+        repo = CurrentInfoDocumentCacheRepository(session, vector_indexer=indexer)
+        try:
+            repo.store_document(
+                FetchedDocument(
+                    url="https://example.com/fail",
+                    title="Fail",
+                    text="This document must not commit without its vector rows.",
+                    metadata={"source_type": "Official"},
+                ),
+                language="en",
+            )
+        except RuntimeError:
+            session.rollback()
+        else:  # pragma: no cover - defensive assertion shape
+            raise AssertionError("expected vector upsert failure")
+
+    with factory() as session:
+        assert session.scalar(select(CurrentInfoDocument)) is None
+        assert session.scalar(select(CurrentInfoDocumentChunk)) is None
+
+
+def test_vector_retrieval_resolves_chunk_ids_through_database_rows() -> None:
     factory = _factory()
     now = datetime(2026, 6, 16, 10, 0, tzinfo=UTC)
     with factory() as session:
@@ -105,12 +166,13 @@ def test_vector_retrieval_resolves_qdrant_chunk_ids_through_mariadb_rows() -> No
             FetchedDocument(
                 url="https://example.com/semantic",
                 title="Semantic result",
-                text="Vector retrieval should return this stored MariaDB chunk.",
+                text="Vector retrieval should return this stored database chunk.",
                 metadata={"source_type": "Docs"},
             ),
             language="en",
             now=now,
         )
+        row.chunks[0].expires_at = datetime(2026, 7, 16, 10, 0, tzinfo=UTC)
         chunk_id = int(row.chunks[0].id)
         session.commit()
 
@@ -125,14 +187,14 @@ def test_vector_retrieval_resolves_qdrant_chunk_ids_through_mariadb_rows() -> No
     chunks = provider.retrieve(request=CurrentInfoRequest(query="semantic query"), documents=(), search_results=())
 
     assert len(chunks) == 1
-    assert chunks[0].text == "Vector retrieval should return this stored MariaDB chunk."
+    assert chunks[0].text == "Vector retrieval should return this stored database chunk."
     assert chunks[0].source_url == "https://example.com/semantic"
     assert chunks[0].metadata["retrieval"] == "vector"
-    assert chunks[0].metadata["pointer_status"] == "verified_mariadb_pointer"
+    assert chunks[0].metadata["pointer_status"] == "verified_db_pointer"
     assert store.searches == [(0.1, 0.2, 0.3)]
 
 
-def test_vector_retrieval_ignores_qdrant_hits_without_mariadb_pointers(caplog) -> None:
+def test_vector_retrieval_ignores_hits_without_database_pointers(caplog) -> None:
     factory = _factory()
     store = _FakeVectorStore((VectorSearchResult(chunk_id=987654, score=0.99, metadata={"title": "orphan"}),))
     provider = VectorCurrentInfoRetrievalProvider(
@@ -149,7 +211,7 @@ def test_vector_retrieval_ignores_qdrant_hits_without_mariadb_pointers(caplog) -
     )
 
     assert chunks == ()
-    assert "current_info_vector_unresolved_mariadb_pointers: count=1" in caplog.text
+    assert "current_info_vector_unresolved_db_pointers: count=1" in caplog.text
 
 
 def test_vector_retrieval_falls_back_to_keyword_when_vector_store_fails() -> None:
@@ -159,7 +221,7 @@ def test_vector_retrieval_falls_back_to_keyword_when_vector_store_fails() -> Non
             FetchedDocument(
                 url="https://example.com/fallback",
                 title="Fallback status",
-                text="Keyword fallback keeps retrieval working when Qdrant is down.",
+                text="Keyword fallback keeps retrieval working when vector search is down.",
                 metadata={"source_type": "Official"},
             ),
             language="en",
@@ -174,7 +236,7 @@ def test_vector_retrieval_falls_back_to_keyword_when_vector_store_fails() -> Non
     )
 
     chunks = provider.retrieve(
-        request=CurrentInfoRequest(query="fallback Qdrant down"),
+        request=CurrentInfoRequest(query="fallback vector down"),
         documents=(),
         search_results=(),
     )
@@ -185,7 +247,7 @@ def test_vector_retrieval_falls_back_to_keyword_when_vector_store_fails() -> Non
     assert chunks[0].metadata.get("retrieval") != "vector"
 
 
-def test_vector_prune_hook_deletes_qdrant_points_by_document_id() -> None:
+def test_vector_prune_hook_deletes_points_by_document_id() -> None:
     factory = _factory()
     store = _FakeVectorStore()
     indexer = CurrentInfoVectorIndexer(vector_store=store, embedding_provider=_FakeEmbeddingProvider())
@@ -207,4 +269,11 @@ def test_vector_prune_hook_deletes_qdrant_points_by_document_id() -> None:
 
         assert removed == 1
         assert session.scalar(select(CurrentInfoDocument)) is None
-        assert store.deleted_document_ids == [(document_id,)]
+    assert store.deleted_document_ids == [(document_id,)]
+
+
+def test_postgres_vector_store_builds_with_session_factory() -> None:
+    factory = _factory()
+    store = PostgresVectorStore(session_factory=factory)
+
+    assert store is not None

@@ -34,6 +34,12 @@ def test_mariadb_pymysql_url_gets_mysql_pool_safety_options() -> None:
     assert kwargs == {"future": True, "pool_pre_ping": True, "pool_recycle": 3600}
 
 
+def test_postgresql_psycopg_url_gets_pre_ping() -> None:
+    kwargs = _engine_kwargs_for_url("postgresql+psycopg://amo_user:password@example.invalid:5432/amo")
+
+    assert kwargs == {"future": True, "pool_pre_ping": True}
+
+
 def test_create_session_factory_for_mariadb_url_passes_mysql_options(monkeypatch) -> None:
     captured: dict[str, object] = {}
 

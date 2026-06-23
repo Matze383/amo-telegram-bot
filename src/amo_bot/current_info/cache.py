@@ -81,7 +81,11 @@ class CachedCurrentInfoFetchProvider:
 
     def fetch(self, *, url: str, locale: str) -> FetchedDocument | None:
         with self._session_factory() as session:
-            repo = CurrentInfoDocumentCacheRepository(session, config=self._config)
+            repo = CurrentInfoDocumentCacheRepository(
+                session,
+                config=self._config,
+                vector_indexer=self._vector_indexer,
+            )
             lookup = repo.get_by_url(url, now=_utcnow())
             if lookup.fresh_hit:
                 repo.record_fetch_run(
@@ -124,11 +128,6 @@ class CachedCurrentInfoFetchProvider:
                 return lookup.document if lookup.status == CACHE_STATUS_EXPIRED_HIT else None
 
             stored = repo.store_document(document, language=locale)
-            if self._vector_indexer is not None:
-                try:
-                    self._vector_indexer.upsert_chunks(tuple(stored.chunks))
-                except Exception as exc:
-                    logger.warning("current_info_vector_upsert_failed: %s", exc.__class__.__name__)
             repo.record_fetch_run(
                 requested_url=url,
                 canonical_url=document.url,
@@ -256,9 +255,10 @@ class CurrentInfoDocumentCacheRepository:
         self._session.flush()
         if self._vector_indexer is not None:
             try:
-                self._vector_indexer.upsert_chunks(tuple(row.chunks))
+                self._vector_indexer.upsert_chunks(tuple(row.chunks), session=self._session)
             except Exception as exc:
                 logger.warning("current_info_vector_upsert_failed: %s", exc.__class__.__name__)
+                raise
         return row
 
     def retrieve_chunks(
@@ -287,6 +287,26 @@ class CurrentInfoDocumentCacheRepository:
                             f"WHERE {'expires_at > :now AND ' if not include_expired else ''}"
                             "MATCH(title, text_excerpt) AGAINST (:terms IN NATURAL LANGUAGE MODE) "
                             "ORDER BY MATCH(title, text_excerpt) AGAINST (:terms IN NATURAL LANGUAGE MODE) DESC "
+                            "LIMIT :limit"
+                        ),
+                        {"now": current, "terms": terms, "limit": safe_limit * 5},
+                    ).scalars()
+                ]
+                query = query.where(CurrentInfoDocumentChunk.id.in_(ids or [-1]))
+            except Exception:
+                pass
+        elif tokens and self._is_postgresql_backend():
+            try:
+                terms = " ".join(sorted(tokens))
+                where_prefix = "expires_at > :now AND " if not include_expired else ""
+                ids = [
+                    int(row_id)
+                    for row_id in self._session.execute(
+                        text(
+                            "SELECT id FROM current_info_document_chunks "
+                            f"WHERE {where_prefix}"
+                            "(coalesce(title, '') || ' ' || coalesce(text_excerpt, '')) % :terms "
+                            "ORDER BY similarity((coalesce(title, '') || ' ' || coalesce(text_excerpt, '')), :terms) DESC "
                             "LIMIT :limit"
                         ),
                         {"now": current, "terms": terms, "limit": safe_limit * 5},
@@ -476,6 +496,10 @@ class CurrentInfoDocumentCacheRepository:
         bind = self._session.get_bind()
         return bind.dialect.name in {"mysql", "mariadb"}
 
+    def _is_postgresql_backend(self) -> bool:
+        bind = self._session.get_bind()
+        return bind.dialect.name == "postgresql"
+
 
 class DbCurrentInfoRetrievalProvider:
     def __init__(self, *, session_factory: sessionmaker[Session], config: CurrentInfoCacheConfig | None = None) -> None:
@@ -552,7 +576,10 @@ def build_current_info_retrieval_provider_from_settings(
         build_current_info_vector_components_from_settings,
     )
 
-    components = vector_components or build_current_info_vector_components_from_settings(settings)
+    components = vector_components or build_current_info_vector_components_from_settings(
+        settings,
+        session_factory=session_factory,
+    )
     if components is None:
         return keyword_provider
     _indexer, vector_store, embedding_provider = components

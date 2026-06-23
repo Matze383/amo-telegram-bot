@@ -119,6 +119,9 @@ def test_ollama_retry_and_fallback_env_values_are_parsed(monkeypatch, tmp_path) 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("DOTENV_PATH", str(env_file))
     monkeypatch.delenv("AMO_ENV_OVERRIDE", raising=False)
+    monkeypatch.delenv("AMO_VECTOR_PROVIDER", raising=False)
+    monkeypatch.delenv("AMO_VECTOR_EMBEDDING_PROVIDER", raising=False)
+    monkeypatch.delenv("AMO_VECTOR_EMBEDDING_MODEL", raising=False)
     monkeypatch.delenv("WEBUI_LOGIN_DELAY_BASE_SECONDS", raising=False)
     monkeypatch.delenv("WEBUI_LOGIN_DELAY_MAX_SECONDS", raising=False)
 
@@ -280,6 +283,37 @@ def test_vector_qdrant_env_aliases_are_parsed_without_secret_leak(monkeypatch, t
     assert settings.amo_vector_provider == "qdrant"
     assert settings.amo_vector_url == "http://qdrant.local:6333"
     assert settings.amo_vector_api_key == "super-secret-qdrant-key"
+
+
+def test_vector_postgres_defaults_use_ollama_nomic_embedding_model(monkeypatch, tmp_path) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "\n".join(
+            [
+                "BOT_TOKEN=token-from-dotenv",
+                "WEBUI_PASSWORD=pw-from-dotenv",
+                "WEBUI_SECRET_KEY=dotenv-secret-key-0123456789-abcdefghij",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("DOTENV_PATH", str(env_file))
+    monkeypatch.delenv("AMO_ENV_OVERRIDE", raising=False)
+    monkeypatch.delenv("AMO_VECTOR_PROVIDER", raising=False)
+    monkeypatch.delenv("AMO_VECTOR_EMBEDDING_PROVIDER", raising=False)
+    monkeypatch.delenv("AMO_VECTOR_EMBEDDING_MODEL", raising=False)
+    monkeypatch.delenv("WEBUI_LOGIN_DELAY_BASE_SECONDS", raising=False)
+    monkeypatch.delenv("WEBUI_LOGIN_DELAY_MAX_SECONDS", raising=False)
+
+    settings = get_settings()
+
+    assert settings.ollama_model == "kimi-k2.6"
+    assert settings.amo_vector_provider == "postgres"
+    assert settings.amo_vector_embedding_provider == "ollama"
+    assert settings.amo_vector_embedding_model == "nomic-embed-text-v2-moe:latest"
 
 
 def test_current_info_release_defaults_and_issue_76_env_values_are_parsed(monkeypatch, tmp_path) -> None:
