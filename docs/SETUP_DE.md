@@ -993,16 +993,25 @@ Produktiv läuft AMO auf PostgreSQL über SQLAlchemy. SQLite bleibt für lokale 
 
 ```ini
 DATABASE_URL=postgresql+psycopg://amo_bot:<password>@<postgres-host>:5432/amo_bot
+
+# Lokale Tests/Dev koennen weiterhin SQLite verwenden, wenn PostgreSQL nicht verfuegbar ist:
+# DATABASE_URL=sqlite:///./data/amo_bot.db
 ```
 
-### Voraussetzungen vor Cutover
+Für einmalige Migrationsbefehle bevorzugt `DATABASE_URL` nur für diesen Prozess setzen, statt die normale `.env` zu ändern:
+
+```bash
+DATABASE_URL='postgresql+psycopg://amo_bot:<password>@<postgres-host>:5432/amo_bot' alembic upgrade head
+```
+
+### PostgreSQL-/pgvector-Runbook
 
 1. **Abhängigkeiten installieren** (im venv):
    ```bash
    pip install -r requirements.txt
    ```
 
-2. **Datenbank, User und Extensions vorbereiten** (empfohlene Rechte: nur database-scoped, nicht global):
+2. **Datenbank, User und Extensions vorbereiten** (empfohlene Rechte: nur database-scoped, nicht global). Pflicht-Extensions sind `vector`, `pg_trgm` und `pgcrypto`; TimescaleDB ist optional und AMO startet weiter, wenn sie nicht verfügbar ist.
    ```sql
    CREATE DATABASE amo_bot;
    CREATE USER amo_bot WITH PASSWORD '<strong-password>';
@@ -1011,10 +1020,17 @@ DATABASE_URL=postgresql+psycopg://amo_bot:<password>@<postgres-host>:5432/amo_bo
    CREATE EXTENSION IF NOT EXISTS vector;
    CREATE EXTENSION IF NOT EXISTS pg_trgm;
    CREATE EXTENSION IF NOT EXISTS pgcrypto;
+   -- Optional, nur wenn im PostgreSQL-Cluster verfuegbar:
    CREATE EXTENSION IF NOT EXISTS timescaledb;
    ```
 
-3. **Daten migrieren/verifizieren** vor dem Cutover:
+3. **Alembic-Migrationen** gegen das PostgreSQL-Ziel ausführen:
+   ```bash
+   DATABASE_URL='postgresql+psycopg://amo_bot:<password>@<postgres-host>:5432/amo_bot' alembic upgrade head
+   ```
+   Alembic liest `DATABASE_URL` direkt und benötigt nicht die vollständige Bot-Konfiguration. `alembic downgrade` nur mit geprüftem Backup und getesteter Rollback-Planung verwenden: Der Baseline-Downgrade löscht AMO-eigene Tabellen und ist destruktiv für Anwendungsdaten.
+
+4. **Legacy-Daten migrieren/verifizieren**, falls von MariaDB/MySQL gewechselt wird:
    ```bash
    python -m amo_bot.db.migrate \
      --source-url 'mysql+pymysql://amo_bot:<password>@<mariadb-host>:3306/amo_bot?charset=utf8mb4' \
@@ -1023,7 +1039,7 @@ DATABASE_URL=postgresql+psycopg://amo_bot:<password>@<postgres-host>:5432/amo_bo
    ```
    Das Migrationstool gibt nur Tabellennamen, Zeilenzahlen und Status aus. Nach geprüftem Backup und Dry-Run `--dry-run` entfernen, um in eine leere Target-DB zu kopieren. Standardmäßig verweigert es gleiche Source/Target-URLs und nicht-leere Targets, außer `--allow-nonempty-target` wird explizit gesetzt.
 
-4. **Current-Info-Vektoren neu indexieren**:
+5. **Current-Info-Vektoren neu indexieren**, nachdem Schema und Dokument-Chunks vorhanden sind:
    ```bash
    AMO_VECTOR_ENABLED=true \
    AMO_VECTOR_PROVIDER=postgres \
@@ -1036,7 +1052,8 @@ DATABASE_URL=postgresql+psycopg://amo_bot:<password>@<postgres-host>:5432/amo_bo
 
 - SQLite bleibt für lokale Tests/Dev nutzbar.
 - MariaDB bleibt nur als Legacy-Migrationsquelle dokumentiert.
-- Qdrant-Punkte sind keine Restore-Quelle; Vektoren werden aus den gespeicherten PostgreSQL-Chunks neu erzeugt.
+- PostgreSQL ist die Source of Truth für Current-Info-Dokumente und Chunks. pgvector speichert nur Embeddings, Chunk-Zeiger und Quellenmetadaten.
+- Qdrant-Punkte aus älteren Deployments sind keine Restore-Quelle; Vektoren werden aus den gespeicherten PostgreSQL-Chunks neu erzeugt.
 
 ### Retrievable Memory Backfill
 

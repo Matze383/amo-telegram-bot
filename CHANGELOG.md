@@ -2,6 +2,34 @@
 
 ---
 
+## [Unreleased] – PostgreSQL pgvector Migration Readiness (PR #95)
+
+**Datum / Date:** 2026-06-23
+
+### 🇩🇪 Deutsch
+
+#### Übersicht
+PR #95 stellt die produktive Datenbank-Basis auf PostgreSQL mit pgvector um. SQLite bleibt für lokale Tests/Dev möglich; MariaDB/MySQL ist nur noch als Legacy-Migrationsquelle dokumentiert.
+
+#### Upgrade-Hinweis
+- Vor dem Cutover muss die Ziel-Datenbank die Extensions `vector`, `pg_trgm` und `pgcrypto` bereitstellen. TimescaleDB ist optional.
+- Admins sollten `DATABASE_URL=postgresql+psycopg://...` setzen und `alembic upgrade head` gegen die Ziel-Datenbank ausführen.
+- Downgrades sind destruktiv für AMO-eigene Tabellen und dürfen nur mit geprüftem Backup/Rollback-Plan erfolgen.
+- Current-Info-Vektoren werden nach der Migration aus den PostgreSQL-Dokumentchunks neu indexiert; ältere Qdrant-Punkte sind keine Restore-Quelle.
+
+### 🇬🇧 English
+
+#### Overview
+PR #95 moves the production database baseline to PostgreSQL with pgvector. SQLite remains available for local tests/dev; MariaDB/MySQL is documented only as a legacy migration source.
+
+#### Upgrade Note
+- Before cutover, the target database must provide `vector`, `pg_trgm`, and `pgcrypto`. TimescaleDB is optional.
+- Admins should set `DATABASE_URL=postgresql+psycopg://...` and run `alembic upgrade head` against the target database.
+- Downgrades are destructive for AMO-owned tables and must only be used with a verified backup/rollback plan.
+- Current-Info vectors are reindexed from PostgreSQL document chunks after migration; older Qdrant points are not a restore source.
+
+---
+
 ## [Unreleased] – Current-Info Eval Harness (Issue #75)
 
 **Datum / Date:** 2026-06-17

@@ -27,3 +27,67 @@ jobs:
 
       - name: Run tests
         run: pytest -q
+
+  postgres-readiness:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_DB: amo_bot
+          POSTGRES_USER: amo_bot
+          POSTGRES_PASSWORD: amo_bot
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U amo_bot -d amo_bot"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql+psycopg://amo_bot:amo_bot@127.0.0.1:5432/amo_bot
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+          pip install -e .
+
+      - name: Run PostgreSQL migrations
+        run: python -m alembic upgrade head
+
+      - name: Verify PostgreSQL extensions and pgvector table
+        run: |
+          python - <<'PY'
+          from sqlalchemy import create_engine, text
+          import os
+
+          engine = create_engine(os.environ["DATABASE_URL"], future=True)
+          with engine.connect() as connection:
+              extensions = {
+                  row[0]
+                  for row in connection.execute(
+                      text("SELECT extname FROM pg_extension WHERE extname IN ('vector', 'pg_trgm', 'pgcrypto')")
+                  )
+              }
+              missing = {"vector", "pg_trgm", "pgcrypto"} - extensions
+              if missing:
+                  raise SystemExit(f"missing PostgreSQL extensions: {sorted(missing)}")
+              table_exists = connection.execute(
+                  text("SELECT to_regclass('public.current_info_chunk_vectors') IS NOT NULL")
+              ).scalar_one()
+              if not table_exists:
+                  raise SystemExit("missing current_info_chunk_vectors table")
+          PY
+
+      - name: Run focused PostgreSQL readiness tests
+        run: pytest -q tests/test_alembic_migrations.py tests/test_current_info_vector.py
