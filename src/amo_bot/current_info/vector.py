@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import logging
+import json
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timezone
 from typing import Any, Protocol
 
 import httpx
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from amo_bot.current_info.models import CurrentInfoRequest, EvidenceChunk, FetchedDocument, SearchResult
@@ -161,6 +162,139 @@ class QdrantVectorStore:
         if not self._config.api_key:
             return {}
         return {"api-key": self._config.api_key}
+
+
+@dataclass(frozen=True, slots=True)
+class PostgresVectorStoreConfig:
+    table_name: str = "current_info_chunk_vectors"
+
+
+class PostgresVectorStore:
+    def __init__(self, *, session_factory: sessionmaker[Session], config: PostgresVectorStoreConfig | None = None) -> None:
+        self._session_factory = session_factory
+        self._config = config or PostgresVectorStoreConfig()
+
+    def upsert_chunks(self, chunks: tuple[VectorChunk, ...]) -> None:
+        if not chunks:
+            return
+        dimension = len(chunks[0].vector)
+        if dimension <= 0:
+            raise ValueError("vector dimension must be > 0")
+        if any(len(chunk.vector) != dimension for chunk in chunks):
+            raise ValueError("all vectors in one upsert must have the same dimension")
+
+        with self._session_factory() as session:
+            existing_dimensions = {
+                int(value)
+                for value in session.execute(
+                    text(
+                        """
+                        SELECT DISTINCT embedding_dimension
+                        FROM current_info_chunk_vectors
+                        WHERE embedding_dimension IS NOT NULL
+                        """
+                    )
+                ).scalars()
+            }
+            if existing_dimensions and existing_dimensions != {dimension}:
+                raise RuntimeError(
+                    "postgres vector store already contains embeddings with a different dimension"
+                )
+            for chunk in chunks:
+                session.execute(
+                    text(
+                        """
+                        INSERT INTO current_info_chunk_vectors (
+                            point_id,
+                            chunk_id,
+                            document_id,
+                            chunk_index,
+                            embedding,
+                            embedding_dimension,
+                            metadata_json,
+                            updated_at
+                        )
+                        VALUES (
+                            CAST(:point_id AS uuid),
+                            :chunk_id,
+                            :document_id,
+                            :chunk_index,
+                            CAST(:embedding AS vector),
+                            :embedding_dimension,
+                            :metadata_json,
+                            now()
+                        )
+                        ON CONFLICT (chunk_id) DO UPDATE SET
+                            point_id = EXCLUDED.point_id,
+                            document_id = EXCLUDED.document_id,
+                            chunk_index = EXCLUDED.chunk_index,
+                            embedding = EXCLUDED.embedding,
+                            embedding_dimension = EXCLUDED.embedding_dimension,
+                            metadata_json = EXCLUDED.metadata_json,
+                            updated_at = now()
+                        """
+                    ),
+                    {
+                        "point_id": chunk.point_id,
+                        "chunk_id": int(chunk.chunk_id),
+                        "document_id": int(chunk.document_id),
+                        "chunk_index": int(chunk.chunk_index),
+                        "embedding": _vector_literal(chunk.vector),
+                        "embedding_dimension": dimension,
+                        "metadata_json": json.dumps(chunk.metadata, ensure_ascii=False, sort_keys=True),
+                    },
+                )
+            session.commit()
+
+    def search(self, *, vector: tuple[float, ...], limit: int) -> tuple[VectorSearchResult, ...]:
+        if not vector:
+            return ()
+        dimension = len(vector)
+        with self._session_factory() as session:
+            rows = session.execute(
+                text(
+                    """
+                    SELECT
+                        chunk_id,
+                        metadata_json,
+                        1 - (embedding <=> CAST(:embedding AS vector)) AS score
+                    FROM current_info_chunk_vectors
+                    WHERE embedding_dimension = :embedding_dimension
+                    ORDER BY embedding <=> CAST(:embedding AS vector)
+                    LIMIT :limit
+                    """
+                ),
+                {
+                    "embedding": _vector_literal(vector),
+                    "embedding_dimension": dimension,
+                    "limit": max(1, int(limit)),
+                },
+            ).mappings()
+            parsed: list[VectorSearchResult] = []
+            for row in rows:
+                try:
+                    metadata = json.loads(str(row.get("metadata_json") or "{}"))
+                except json.JSONDecodeError:
+                    metadata = {}
+                parsed.append(
+                    VectorSearchResult(
+                        chunk_id=int(row["chunk_id"]),
+                        score=float(row.get("score") or 0.0),
+                        metadata=metadata if isinstance(metadata, dict) else {},
+                    )
+                )
+            return tuple(parsed)
+
+    def delete_document_ids(self, document_ids: tuple[int, ...]) -> None:
+        ids = tuple(dict.fromkeys(int(item) for item in document_ids))
+        if not ids:
+            return
+        with self._session_factory() as session:
+            session.execute(
+                text("DELETE FROM current_info_chunk_vectors WHERE document_id = ANY(:document_ids)"),
+                {"document_ids": list(ids)},
+            )
+            session.commit()
 
 
 @dataclass(frozen=True, slots=True)
@@ -329,7 +463,7 @@ class VectorCurrentInfoRetrievalProvider:
         missing_ids = tuple(chunk_id for chunk_id in chunk_ids if chunk_id not in resolved_ids)
         if missing_ids:
             logger.warning(
-                "current_info_vector_unresolved_mariadb_pointers: count=%s",
+                "current_info_vector_unresolved_db_pointers: count=%s",
                 len(missing_ids),
             )
         rows.sort(key=lambda row: order_by_id.get(int(row.id), len(order_by_id)))
@@ -355,7 +489,7 @@ class VectorCurrentInfoRetrievalProvider:
                         "expires_at": _iso(row.expires_at),
                         "cache": "current_info_documents",
                         "retrieval": "vector",
-                        "pointer_status": "verified_mariadb_pointer",
+                        "pointer_status": "verified_db_pointer",
                     },
                 )
             )
@@ -364,20 +498,27 @@ class VectorCurrentInfoRetrievalProvider:
 
 def build_current_info_vector_components_from_settings(
     settings: Any,
+    *,
+    session_factory: sessionmaker[Session] | None = None,
 ) -> tuple[CurrentInfoVectorIndexer, VectorStore, EmbeddingProvider] | None:
     if not bool(getattr(settings, "amo_vector_enabled", False)):
         return None
-    provider = str(getattr(settings, "amo_vector_provider", "qdrant")).strip().casefold()
-    if provider != "qdrant":
-        return None
-    vector_store = QdrantVectorStore(
-        QdrantVectorStoreConfig(
-            url=str(getattr(settings, "amo_vector_url", "")).strip().rstrip("/"),
-            collection=str(getattr(settings, "amo_vector_collection", "current_info_chunks") or "current_info_chunks"),
-            api_key=getattr(settings, "amo_vector_api_key", None),
-            timeout_seconds=float(getattr(settings, "amo_vector_timeout_seconds", 3.0)),
+    provider = str(getattr(settings, "amo_vector_provider", "postgres")).strip().casefold()
+    if provider == "postgres":
+        if session_factory is None:
+            return None
+        vector_store: VectorStore = PostgresVectorStore(session_factory=session_factory)
+    elif provider == "qdrant":
+        vector_store = QdrantVectorStore(
+            QdrantVectorStoreConfig(
+                url=str(getattr(settings, "amo_vector_url", "")).strip().rstrip("/"),
+                collection=str(getattr(settings, "amo_vector_collection", "current_info_chunks") or "current_info_chunks"),
+                api_key=getattr(settings, "amo_vector_api_key", None),
+                timeout_seconds=float(getattr(settings, "amo_vector_timeout_seconds", 3.0)),
+            )
         )
-    )
+    else:
+        return None
     embedding_provider = build_embedding_provider_from_settings(settings)
     return CurrentInfoVectorIndexer(vector_store=vector_store, embedding_provider=embedding_provider), vector_store, embedding_provider
 
@@ -405,6 +546,10 @@ def _coerce_vector(value: Any) -> tuple[float, ...]:
     if not vector:
         raise RuntimeError("embedding response vector is empty")
     return vector
+
+
+def _vector_literal(vector: tuple[float, ...]) -> str:
+    return "[" + ",".join(str(float(item)) for item in vector) + "]"
 
 
 def _point_id(*, document_id: int, chunk_index: int) -> str:

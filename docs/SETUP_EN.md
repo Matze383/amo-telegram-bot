@@ -262,7 +262,7 @@ AI_PROVIDER=ollama  # ollama (default), openai, anthropic, google, openrouter, g
 
 # Optional: Ollama (for /ask command)
 OLLAMA_URL=http://127.0.0.1:11434
-OLLAMA_MODEL=llama3.1
+OLLAMA_MODEL=kimi-k2.6
 OLLAMA_TIMEOUT_SECONDS=20
 OLLAMA_MAX_PROMPT_CHARS=4000
 OLLAMA_MAX_PREDICT_TOKENS=512
@@ -281,11 +281,11 @@ OLLAMA_MAX_RESPONSE_CHARS=1500
 # OLLAMA_THINKING_BUDGET_MAX_PROMPT_CHARS=      # optional; default: OLLAMA_MAX_PROMPT_CHARS
 # OLLAMA_NON_THINKING_BUDGET_MAX_PROMPT_CHARS=  # optional; default: OLLAMA_MAX_PROMPT_CHARS
 
-# Optional: Database (defaults to SQLite)
-DATABASE_URL=sqlite:///./data/amo_bot.db
+# Production database: PostgreSQL
+DATABASE_URL=postgresql+psycopg://amo_bot:<password>@<postgres-host>:5432/amo_bot
 
-# Optional: MariaDB/MySQL (instead of SQLite)
-# DATABASE_URL=mysql+pymysql://amo_bot:<password>@<mariadb-host>:3306/amo_bot?charset=utf8mb4
+# Local tests/dev can still use SQLite:
+# DATABASE_URL=sqlite:///./data/amo_bot.db
 
 # Optional: Plugin directory
 AMO_PLUGIN_DIR=./plugins
@@ -601,16 +601,16 @@ For result-page extraction, the document fetcher prefers Crawlee and falls back 
 | `AMO_CURRENT_INFO_CACHE_MAX_CHUNK_CHARS` | `1200` | Maximum text length per keyword-retrieval chunk |
 | `AMO_CURRENT_INFO_CACHE_MAX_CHUNKS_PER_DOCUMENT` | `12` | Maximum retrieval chunks stored per document |
 | `AMO_VECTOR_ENABLED` | `false` | Enable optional semantic retrieval for Current-Info document chunks |
-| `AMO_VECTOR_PROVIDER` | `qdrant` | Vector database provider; currently `qdrant` |
-| `AMO_VECTOR_URL` | *(empty)* | Qdrant base URL; `QDRANT_URL` is accepted as an alias |
-| `AMO_VECTOR_API_KEY` | *(empty)* | Optional Qdrant API key; `QDRANT_API_KEY` is accepted as an alias. Store only in env/secrets, never in code or docs |
-| `AMO_VECTOR_COLLECTION` | `current_info_chunks` | Qdrant collection for Current-Info chunk vectors |
+| `AMO_VECTOR_PROVIDER` | `postgres` | Vector database provider: `postgres` for pgvector or legacy `qdrant` |
+| `AMO_VECTOR_URL` | *(empty)* | Only for legacy `qdrant`; `QDRANT_URL` is accepted as an alias |
+| `AMO_VECTOR_API_KEY` | *(empty)* | Only for legacy `qdrant`; `QDRANT_API_KEY` is accepted as an alias. Store only in env/secrets, never in code or docs |
+| `AMO_VECTOR_COLLECTION` | `current_info_chunks` | Only for legacy `qdrant` |
 | `AMO_VECTOR_EMBEDDING_PROVIDER` | `ollama` | Embedding provider for chunk/query vectors: `ollama` or `openai` |
-| `AMO_VECTOR_EMBEDDING_MODEL` | `nomic-embed-text` | Embedding model used for Current-Info vectors |
+| `AMO_VECTOR_EMBEDDING_MODEL` | `nomic-embed-text-v2-moe:latest` | Embedding model used for Current-Info vectors |
 | `AMO_VECTOR_TIMEOUT_SECONDS` | `3` | Timeout for vector DB and embedding requests |
 
-Current-Info cache tables are created through the existing SQLAlchemy/MariaDB database setup. Query metrics store only a SHA-256 query hash, not the raw private user query text.
-When semantic retrieval is enabled, MariaDB remains the source of truth for documents, metadata, cache TTLs, and pruning. Qdrant stores vectors plus chunk/document pointers and source metadata only; private user questions are not stored as vectors.
+Current-Info cache tables are created through the SQLAlchemy/Alembic PostgreSQL database setup. Query metrics store only a SHA-256 query hash, not the raw private user query text.
+When semantic retrieval is enabled, PostgreSQL remains the source of truth for documents, metadata, cache TTLs, and pruning. pgvector stores vectors plus chunk/document pointers and source metadata only; private user questions are not stored as vectors.
 
 ### Direct URL Handling
 
@@ -985,45 +985,58 @@ chmod 755 data
 
 ---
 
-## Database: MariaDB Support (Optional)
+## Database: PostgreSQL Support
 
-In addition to SQLite, AMO also supports MariaDB/MySQL via SQLAlchemy.
+AMO runs on PostgreSQL in production through SQLAlchemy. SQLite remains usable for local tests/dev; MariaDB/MySQL is now treated as a legacy migration source only.
 
 ### Configuration
 
 ```ini
-DATABASE_URL=mysql+pymysql://amo_bot:<password>@<mariadb-host>:3306/amo_bot?charset=utf8mb4
+DATABASE_URL=postgresql+psycopg://amo_bot:<password>@<postgres-host>:5432/amo_bot
 ```
 
 ### Prerequisites Before Cutover
 
 1. **Install dependencies** (in venv):
    ```bash
-   pip install pymysql
+   pip install -r requirements.txt
    ```
 
-2. **Create database and user** (recommended rights: database-scoped only, not global):
+2. **Prepare database, user, and extensions** (recommended rights: database-scoped only, not global):
    ```sql
-   CREATE DATABASE amo_bot CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-   CREATE USER 'amo_bot'@'%' IDENTIFIED BY '<strong-password>';
-   GRANT ALL PRIVILEGES ON amo_bot.* TO 'amo_bot'@'%';
-   FLUSH PRIVILEGES;
+   CREATE DATABASE amo_bot;
+   CREATE USER amo_bot WITH PASSWORD '<strong-password>';
+   GRANT ALL PRIVILEGES ON DATABASE amo_bot TO amo_bot;
+   -- In the target DB:
+   CREATE EXTENSION IF NOT EXISTS vector;
+   CREATE EXTENSION IF NOT EXISTS pg_trgm;
+   CREATE EXTENSION IF NOT EXISTS pgcrypto;
+   CREATE EXTENSION IF NOT EXISTS timescaledb;
    ```
 
-3. **Migrate/verify data** before cutover (do not delete SQLite DB except for testing):
+3. **Migrate/verify data** before cutover:
    ```bash
    python -m amo_bot.db.migrate \
-     --source-url sqlite:///./data/amo_bot.db \
-     --target-url 'mysql+pymysql://amo_bot:<password>@<mariadb-host>:3306/amo_bot?charset=utf8mb4' \
+     --source-url 'mysql+pymysql://amo_bot:<password>@<mariadb-host>:3306/amo_bot?charset=utf8mb4' \
+     --target-url 'postgresql+psycopg://amo_bot:<password>@<postgres-host>:5432/amo_bot' \
      --dry-run
    ```
    The migration tool prints table names, row counts, and status only. After a verified backup and dry-run, remove `--dry-run` to copy into an empty target database. By default it refuses same source/target URLs and refuses non-empty targets unless `--allow-nonempty-target` is explicitly supplied.
 
+4. **Reindex Current-Info vectors**:
+   ```bash
+   AMO_VECTOR_ENABLED=true \
+   AMO_VECTOR_PROVIDER=postgres \
+   AMO_VECTOR_EMBEDDING_PROVIDER=ollama \
+   AMO_VECTOR_EMBEDDING_MODEL=nomic-embed-text-v2-moe:latest \
+   python -m amo_bot.current_info.reindex_vectors
+   ```
+
 ### Notes
 
-- SQLite remains the default and is recommended for local instances.
-- MariaDB is prepared for future production deployments.
-- Do not delete the SQLite file (`data/amo_bot.db`) before successful migration.
+- SQLite remains usable for local tests/dev.
+- MariaDB remains documented only as a legacy migration source.
+- Qdrant points are not a restore source; vectors are regenerated from stored PostgreSQL chunks.
 
 ### Retrievable Memory Backfill
 

@@ -4412,6 +4412,27 @@ class RetrievableMemoryRepository:
             except Exception:
                 # Fallback below keeps SQLite/tests and non-FULLTEXT MariaDB schemas usable.
                 pass
+        elif tokens and self._is_postgresql_backend():
+            try:
+                raw_terms = " ".join(sorted(tokens))
+                ids = [
+                    int(row_id)
+                    for row_id in self._session.execute(
+                        text(
+                            "SELECT id FROM retrievable_memories "
+                            "WHERE (coalesce(summary, '') || ' ' || coalesce(content, '')) % :terms "
+                            "ORDER BY similarity((coalesce(summary, '') || ' ' || coalesce(content, '')), :terms) DESC "
+                            "LIMIT :limit"
+                        ),
+                        {"terms": raw_terms, "limit": safe_limit * 5},
+                    ).scalars()
+                ]
+                if ids:
+                    query = query.where(RetrievableMemory.id.in_(ids))
+                else:
+                    query = query.where(RetrievableMemory.id.in_([]))
+            except Exception:
+                pass
 
         rows = list(self._session.scalars(query.limit(200)).all())
         scored = [self._score_record(self._to_retrievable_record(row), tokens=tokens, now=current) for row in rows]
@@ -4607,6 +4628,10 @@ class RetrievableMemoryRepository:
     def _is_mysql_backend(self) -> bool:
         bind = self._session.get_bind()
         return bind.dialect.name in {"mysql", "mariadb"}
+
+    def _is_postgresql_backend(self) -> bool:
+        bind = self._session.get_bind()
+        return bind.dialect.name == "postgresql"
 
     @classmethod
     def _normalize_visibility(cls, value: str) -> str:

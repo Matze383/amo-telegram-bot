@@ -390,7 +390,10 @@ def run(argv: list[str] | None = None) -> None:
     if settings.amo_current_info_enabled:
         current_info_search_provider = build_search_broker_from_settings(settings)
         if current_info_search_provider is not None:
-            current_info_vector_components = build_current_info_vector_components_from_settings(settings)
+            current_info_vector_components = build_current_info_vector_components_from_settings(
+                settings,
+                session_factory=session_factory,
+            )
             current_info_vector_indexer = (
                 current_info_vector_components[0] if current_info_vector_components is not None else None
             )

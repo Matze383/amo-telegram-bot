@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 
 from sqlalchemy import inspect, select, text
+from sqlalchemy.exc import SQLAlchemyError
 
 from amo_bot.db.base import Base, create_session_factory
 from amo_bot.db.models import (
@@ -14,6 +15,88 @@ from amo_bot.db.models import (
     UpdateOffset,
     WebToolRoleQuota,
 )
+
+
+POSTGRES_VECTOR_TABLE = "current_info_chunk_vectors"
+
+
+def _is_postgresql_backend(engine) -> bool:  # noqa: ANN001 - SQLAlchemy engine is runtime-typed
+    return engine.dialect.name == "postgresql"
+
+
+def _init_postgresql_extensions_and_indexes(engine) -> None:  # noqa: ANN001 - SQLAlchemy engine is runtime-typed
+    with engine.begin() as connection:
+        for extension in ("vector", "pg_trgm", "pgcrypto"):
+            connection.execute(text(f"CREATE EXTENSION IF NOT EXISTS {extension}"))
+
+    try:
+        with engine.begin() as connection:
+            connection.execute(text("CREATE EXTENSION IF NOT EXISTS timescaledb"))
+    except SQLAlchemyError:
+        # TimescaleDB is useful for future telemetry/time-series work, but AMO
+        # must stay bootable on PostgreSQL clusters without it enabled.
+        pass
+
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS current_info_chunk_vectors (
+                    id BIGSERIAL PRIMARY KEY,
+                    point_id UUID NOT NULL UNIQUE,
+                    chunk_id INTEGER NOT NULL UNIQUE
+                        REFERENCES current_info_document_chunks(id) ON DELETE CASCADE,
+                    document_id INTEGER NOT NULL
+                        REFERENCES current_info_documents(id) ON DELETE CASCADE,
+                    chunk_index INTEGER NOT NULL,
+                    embedding vector NOT NULL,
+                    embedding_dimension INTEGER NOT NULL,
+                    metadata_json TEXT NOT NULL DEFAULT '{}',
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                )
+                """
+            )
+        )
+        connection.execute(
+            text(
+                """
+                CREATE INDEX IF NOT EXISTS ix_current_info_chunk_vectors_document
+                ON current_info_chunk_vectors (document_id, chunk_index)
+                """
+            )
+        )
+        connection.execute(
+            text(
+                """
+                CREATE INDEX IF NOT EXISTS ix_current_info_document_chunks_text_trgm
+                ON current_info_document_chunks
+                USING gin ((coalesce(title, '') || ' ' || coalesce(text_excerpt, '')) gin_trgm_ops)
+                """
+            )
+        )
+        connection.execute(
+            text(
+                """
+                CREATE INDEX IF NOT EXISTS ix_retrievable_memories_text_trgm
+                ON retrievable_memories
+                USING gin ((coalesce(summary, '') || ' ' || coalesce(content, '')) gin_trgm_ops)
+                """
+            )
+        )
+
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    """
+                    CREATE INDEX IF NOT EXISTS ix_current_info_chunk_vectors_embedding
+                    ON current_info_chunk_vectors USING hnsw (embedding vector_cosine_ops)
+                    """
+                )
+            )
+    except SQLAlchemyError:
+        pass
 
 
 def _topic_compact_scope_key(
@@ -38,6 +121,8 @@ def init_db(database_url: str) -> None:
     session_factory = create_session_factory(database_url)
     engine = session_factory.kw["bind"]
     Base.metadata.create_all(bind=engine)
+    if _is_postgresql_backend(engine):
+        _init_postgresql_extensions_and_indexes(engine)
 
     inspector = inspect(engine)
 

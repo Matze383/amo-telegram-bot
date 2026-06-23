@@ -262,7 +262,7 @@ def test_main_runtime_wires_current_info_when_enabled(monkeypatch, tmp_path):
     monkeypatch.setattr(
         main_module,
         "build_current_info_vector_components_from_settings",
-        lambda settings: vector_components,
+        lambda settings, **kwargs: vector_components,
     )
 
     def _build_cached_fetch_provider(settings, *, session_factory, fetch_provider, vector_indexer=None):

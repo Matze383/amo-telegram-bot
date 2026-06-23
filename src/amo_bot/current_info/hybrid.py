@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 
 class HybridCurrentInfoRetrievalProvider:
-    """Fuse MariaDB keyword retrieval with optional semantic vector retrieval."""
+    """Fuse database keyword retrieval with optional semantic vector retrieval."""
 
     def __init__(
         self,

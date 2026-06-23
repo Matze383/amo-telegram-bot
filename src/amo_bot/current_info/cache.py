@@ -295,6 +295,26 @@ class CurrentInfoDocumentCacheRepository:
                 query = query.where(CurrentInfoDocumentChunk.id.in_(ids or [-1]))
             except Exception:
                 pass
+        elif tokens and self._is_postgresql_backend():
+            try:
+                terms = " ".join(sorted(tokens))
+                where_prefix = "expires_at > :now AND " if not include_expired else ""
+                ids = [
+                    int(row_id)
+                    for row_id in self._session.execute(
+                        text(
+                            "SELECT id FROM current_info_document_chunks "
+                            f"WHERE {where_prefix}"
+                            "(coalesce(title, '') || ' ' || coalesce(text_excerpt, '')) % :terms "
+                            "ORDER BY similarity((coalesce(title, '') || ' ' || coalesce(text_excerpt, '')), :terms) DESC "
+                            "LIMIT :limit"
+                        ),
+                        {"now": current, "terms": terms, "limit": safe_limit * 5},
+                    ).scalars()
+                ]
+                query = query.where(CurrentInfoDocumentChunk.id.in_(ids or [-1]))
+            except Exception:
+                pass
 
         rows = list(self._session.scalars(query.order_by(CurrentInfoDocumentChunk.fetched_at.desc()).limit(200)).all())
         scored = [(self._score_chunk(row, tokens=tokens, now=current), row) for row in rows]
@@ -476,6 +496,10 @@ class CurrentInfoDocumentCacheRepository:
         bind = self._session.get_bind()
         return bind.dialect.name in {"mysql", "mariadb"}
 
+    def _is_postgresql_backend(self) -> bool:
+        bind = self._session.get_bind()
+        return bind.dialect.name == "postgresql"
+
 
 class DbCurrentInfoRetrievalProvider:
     def __init__(self, *, session_factory: sessionmaker[Session], config: CurrentInfoCacheConfig | None = None) -> None:
@@ -552,7 +576,10 @@ def build_current_info_retrieval_provider_from_settings(
         build_current_info_vector_components_from_settings,
     )
 
-    components = vector_components or build_current_info_vector_components_from_settings(settings)
+    components = vector_components or build_current_info_vector_components_from_settings(
+        settings,
+        session_factory=session_factory,
+    )
     if components is None:
         return keyword_provider
     _indexer, vector_store, embedding_provider = components
