@@ -24,79 +24,86 @@ def _is_postgresql_backend(engine) -> bool:  # noqa: ANN001 - SQLAlchemy engine 
     return engine.dialect.name == "postgresql"
 
 
-def _init_postgresql_extensions_and_indexes(engine) -> None:  # noqa: ANN001 - SQLAlchemy engine is runtime-typed
-    with engine.begin() as connection:
-        for extension in ("vector", "pg_trgm", "pgcrypto"):
-            connection.execute(text(f"CREATE EXTENSION IF NOT EXISTS {extension}"))
-
+def _execute_optional_postgresql_ddl(connection, statement: str) -> None:  # noqa: ANN001 - runtime SQLAlchemy type
     try:
-        with engine.begin() as connection:
-            connection.execute(text("CREATE EXTENSION IF NOT EXISTS timescaledb"))
-    except SQLAlchemyError:
-        # TimescaleDB is useful for future telemetry/time-series work, but AMO
-        # must stay bootable on PostgreSQL clusters without it enabled.
-        pass
-
-    with engine.begin() as connection:
-        connection.execute(
-            text(
-                """
-                CREATE TABLE IF NOT EXISTS current_info_chunk_vectors (
-                    id BIGSERIAL PRIMARY KEY,
-                    point_id UUID NOT NULL UNIQUE,
-                    chunk_id INTEGER NOT NULL UNIQUE
-                        REFERENCES current_info_document_chunks(id) ON DELETE CASCADE,
-                    document_id INTEGER NOT NULL
-                        REFERENCES current_info_documents(id) ON DELETE CASCADE,
-                    chunk_index INTEGER NOT NULL,
-                    embedding vector NOT NULL,
-                    embedding_dimension INTEGER NOT NULL,
-                    metadata_json TEXT NOT NULL DEFAULT '{}',
-                    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-                    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-                )
-                """
-            )
-        )
-        connection.execute(
-            text(
-                """
-                CREATE INDEX IF NOT EXISTS ix_current_info_chunk_vectors_document
-                ON current_info_chunk_vectors (document_id, chunk_index)
-                """
-            )
-        )
-        connection.execute(
-            text(
-                """
-                CREATE INDEX IF NOT EXISTS ix_current_info_document_chunks_text_trgm
-                ON current_info_document_chunks
-                USING gin ((coalesce(title, '') || ' ' || coalesce(text_excerpt, '')) gin_trgm_ops)
-                """
-            )
-        )
-        connection.execute(
-            text(
-                """
-                CREATE INDEX IF NOT EXISTS ix_retrievable_memories_text_trgm
-                ON retrievable_memories
-                USING gin ((coalesce(summary, '') || ' ' || coalesce(content, '')) gin_trgm_ops)
-                """
-            )
-        )
-
-    try:
-        with engine.begin() as connection:
-            connection.execute(
-                text(
-                    """
-                    CREATE INDEX IF NOT EXISTS ix_current_info_chunk_vectors_embedding
-                    ON current_info_chunk_vectors USING hnsw (embedding vector_cosine_ops)
-                    """
-                )
-            )
+        with connection.begin_nested():
+            connection.execute(text(statement))
     except SQLAlchemyError:
         pass
+
+
+def _execute_postgresql_extensions_and_indexes(connection) -> None:  # noqa: ANN001 - SQLAlchemy connection is runtime-typed
+    for extension in ("vector", "pg_trgm", "pgcrypto"):
+        connection.execute(text(f"CREATE EXTENSION IF NOT EXISTS {extension}"))
+
+    # TimescaleDB is useful for future telemetry/time-series work, but AMO
+    # must stay bootable on PostgreSQL clusters without it enabled. A savepoint
+    # keeps optional DDL failures from aborting Alembic's enclosing transaction.
+    _execute_optional_postgresql_ddl(connection, "CREATE EXTENSION IF NOT EXISTS timescaledb")
+
+    connection.execute(
+        text(
+            """
+            CREATE TABLE IF NOT EXISTS current_info_chunk_vectors (
+                id BIGSERIAL PRIMARY KEY,
+                point_id UUID NOT NULL UNIQUE,
+                chunk_id INTEGER NOT NULL UNIQUE
+                    REFERENCES current_info_document_chunks(id) ON DELETE CASCADE,
+                document_id INTEGER NOT NULL
+                    REFERENCES current_info_documents(id) ON DELETE CASCADE,
+                chunk_index INTEGER NOT NULL,
+                embedding vector NOT NULL,
+                embedding_dimension INTEGER NOT NULL,
+                metadata_json TEXT NOT NULL DEFAULT '{}',
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+            """
+        )
+    )
+    connection.execute(
+        text(
+            """
+            CREATE INDEX IF NOT EXISTS ix_current_info_chunk_vectors_document
+            ON current_info_chunk_vectors (document_id, chunk_index)
+            """
+        )
+    )
+    connection.execute(
+        text(
+            """
+            CREATE INDEX IF NOT EXISTS ix_current_info_document_chunks_text_trgm
+            ON current_info_document_chunks
+            USING gin ((coalesce(title, '') || ' ' || coalesce(text_excerpt, '')) gin_trgm_ops)
+            """
+        )
+    )
+    connection.execute(
+        text(
+            """
+            CREATE INDEX IF NOT EXISTS ix_retrievable_memories_text_trgm
+            ON retrievable_memories
+            USING gin ((coalesce(summary, '') || ' ' || coalesce(content, '')) gin_trgm_ops)
+            """
+        )
+    )
+
+    _execute_optional_postgresql_ddl(
+        connection,
+        """
+        CREATE INDEX IF NOT EXISTS ix_current_info_chunk_vectors_embedding
+        ON current_info_chunk_vectors USING hnsw (embedding vector_cosine_ops)
+        """,
+    )
+
+
+def _init_postgresql_extensions_and_indexes(bind) -> None:  # noqa: ANN001 - SQLAlchemy bind is runtime-typed
+    if hasattr(bind, "execute"):
+        _execute_postgresql_extensions_and_indexes(bind)
+        return
+
+    with bind.begin() as connection:
+        _execute_postgresql_extensions_and_indexes(connection)
 
 
 def _topic_compact_scope_key(
