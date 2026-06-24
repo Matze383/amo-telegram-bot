@@ -226,6 +226,8 @@ def run(argv: list[str] | None = None) -> None:
     offset_store = OffsetStore(settings.offset_state_file)
 
     role_resolver = DBRoleResolver(session_factory)
+    if hasattr(role_resolver, "set_telegram_client"):
+        role_resolver.set_telegram_client(tg)
     ai_service = build_ai_provider(settings)
     message_persistence: ChatTopicPersistenceService | None = None
 

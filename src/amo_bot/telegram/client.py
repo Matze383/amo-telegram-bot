@@ -121,6 +121,10 @@ class TelegramClient:
         result = await self._call("getUpdates", payload)
         return result if isinstance(result, list) else []
 
+    async def get_chat_member(self, *, chat_id: int, user_id: int) -> dict[str, Any]:
+        result = await self._call("getChatMember", {"chat_id": chat_id, "user_id": user_id})
+        return result if isinstance(result, dict) else {}
+
     async def send_message(
         self,
         chat_id: int,

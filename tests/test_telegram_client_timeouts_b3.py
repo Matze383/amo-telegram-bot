@@ -63,6 +63,42 @@ def test_non_poll_calls_keep_shared_timeout_float(monkeypatch) -> None:
     assert seen == [7.0]
 
 
+def test_get_chat_member_calls_telegram_api(monkeypatch) -> None:
+    seen: list[dict[str, object]] = []
+
+    class _MemberResponse:
+        status_code = 200
+
+        @staticmethod
+        def json() -> dict[str, object]:
+            return {"ok": True, "result": {"status": "administrator", "user": {"id": 42}}}
+
+    class _CaptureMemberClient:
+        def __init__(self, *, timeout) -> None:  # noqa: ANN001
+            self._timeout = timeout
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):  # noqa: ANN001
+            return None
+
+        async def post(self, url: str, json: dict[str, object]) -> _MemberResponse:  # noqa: ARG002
+            seen.append(dict(json))
+            return _MemberResponse()
+
+    def _factory(*, timeout):  # noqa: ANN001, ARG001
+        return _CaptureMemberClient(timeout=timeout)
+
+    monkeypatch.setattr(httpx, "AsyncClient", _factory)
+
+    client = TelegramClient(token="t")
+    result = asyncio.run(client.get_chat_member(chat_id=-100, user_id=42))
+
+    assert seen == [{"chat_id": -100, "user_id": 42}]
+    assert result["status"] == "administrator"
+
+
 class _MessageResponse:
     status_code = 200
 
