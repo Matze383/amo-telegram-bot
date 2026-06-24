@@ -2,13 +2,15 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+import pytest
 from sqlalchemy import create_engine, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
 from amo_bot.db.base import Base
 from amo_bot.db.init_db import init_db
 from amo_bot.auth.roles import Role
-from amo_bot.db.models import AuditEvent, ChatUserRole, TelegramChat, TelegramTopic
+from amo_bot.db.models import AuditEvent, ChatUserRole, TelegramChat, TelegramTopic, User
 from amo_bot.db.repositories import ChatScopedRoleRepository, ChatTopicRepository, UserRoleRepository
 
 
@@ -80,6 +82,119 @@ def test_upsert_topic_create_update_no_duplicate() -> None:
 
         count = session.query(TelegramTopic).count()
         assert count == 1
+
+
+def test_upsert_topic_recovers_once_when_postgres_topic_sequence_lags(monkeypatch) -> None:
+    factory = _session_factory()
+    with factory() as session:
+        repo = ChatTopicRepository(session)
+        repo.upsert_chat(chat_id=1, chat_type="supergroup")
+
+        original_commit = session.commit
+        commit_calls = 0
+        sync_calls: list[tuple[str, str]] = []
+
+        def _commit_with_first_topic_integrity_error() -> None:
+            nonlocal commit_calls
+            commit_calls += 1
+            if commit_calls == 1:
+                raise IntegrityError(
+                    "INSERT INTO telegram_topics ...",
+                    {},
+                    Exception('duplicate key value violates unique constraint "telegram_topics_pkey"'),
+                )
+            original_commit()
+
+        monkeypatch.setattr(session, "commit", _commit_with_first_topic_integrity_error)
+        monkeypatch.setattr(repo, "_can_recover_topic_sequence_integrity_error", lambda _exc: True)
+        monkeypatch.setattr(
+            repo,
+            "_sync_postgresql_topic_id_sequence",
+            lambda: sync_calls.append(("telegram_topics", "id")),
+        )
+
+        topic = repo.upsert_topic(chat_id=1, message_thread_id=104305, telegram_topic_name=None)
+
+        assert topic.chat_id == 1
+        assert topic.message_thread_id == 104305
+        assert sync_calls == [("telegram_topics", "id")]
+        assert commit_calls == 2
+        assert session.query(TelegramTopic).count() == 1
+
+
+def test_upsert_discovered_user_recovers_once_when_postgres_user_sequence_lags(monkeypatch) -> None:
+    factory = _session_factory()
+    with factory() as session:
+        repo = UserRoleRepository(session)
+
+        original_commit = session.commit
+        commit_calls = 0
+        sync_calls: list[tuple[str, str]] = []
+
+        def _commit_with_first_user_integrity_error() -> None:
+            nonlocal commit_calls
+            commit_calls += 1
+            if commit_calls == 1:
+                raise IntegrityError(
+                    "INSERT INTO users ...",
+                    {},
+                    Exception('duplicate key value violates unique constraint "users_pkey"'),
+                )
+            original_commit()
+
+        monkeypatch.setattr(session, "commit", _commit_with_first_user_integrity_error)
+        monkeypatch.setattr(repo, "_can_recover_user_sequence_integrity_error", lambda _exc: True)
+        monkeypatch.setattr(
+            repo,
+            "_sync_postgresql_user_id_sequence",
+            lambda: sync_calls.append(("users", "id")),
+        )
+
+        user = repo.upsert_discovered_user(
+            telegram_user_id=7402724955,
+            username=None,
+            first_name="T",
+            last_name=None,
+        )
+
+        assert user.telegram_user_id == 7402724955
+        assert user.first_name == "T"
+        assert user.role.name == Role.NORMAL.value
+        assert sync_calls == [("users", "id")]
+        assert commit_calls == 2
+        assert session.query(User).count() == 1
+
+
+def test_upsert_discovered_user_does_not_recover_other_integrity_errors(monkeypatch) -> None:
+    factory = _session_factory()
+    with factory() as session:
+        repo = UserRoleRepository(session)
+        sync_calls: list[tuple[str, str]] = []
+
+        def _commit_with_non_sequence_integrity_error() -> None:
+            raise IntegrityError(
+                "INSERT INTO users ...",
+                {},
+                Exception('duplicate key value violates unique constraint "users_telegram_user_id_key"'),
+            )
+
+        monkeypatch.setattr(session, "commit", _commit_with_non_sequence_integrity_error)
+        monkeypatch.setattr(repo, "_can_recover_user_sequence_integrity_error", lambda _exc: False)
+        monkeypatch.setattr(
+            repo,
+            "_sync_postgresql_user_id_sequence",
+            lambda: sync_calls.append(("users", "id")),
+        )
+
+        with pytest.raises(IntegrityError):
+            repo.upsert_discovered_user(
+                telegram_user_id=7402724955,
+                username=None,
+                first_name="T",
+                last_name=None,
+            )
+
+        assert sync_calls == []
 
 
 def test_list_chats_and_topics() -> None:

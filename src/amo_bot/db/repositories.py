@@ -2127,31 +2127,111 @@ class UserRoleRepository:
         seen_at: datetime | None = None,
     ) -> User:
         seen = seen_at or datetime.now(timezone.utc)
-        user = self._session.scalar(select(User).where(User.telegram_user_id == telegram_user_id))
-        is_new_user = user is None
-
+        user = self._get_user(telegram_user_id=telegram_user_id)
         if user is None:
-            normal_role = self._session.scalar(select(DbRole).where(DbRole.name == Role.NORMAL.value))
-            if normal_role is None:
-                raise ValueError("role not found in db: normal")
-            user = User(
+            user = self._new_discovered_user(
                 telegram_user_id=telegram_user_id,
                 username=username,
                 first_name=first_name,
                 last_name=last_name,
-                first_seen_at=seen,
-                last_seen_at=seen,
-                role_id=normal_role.id,
+                seen_at=seen,
             )
-            self._session.add(user)
         else:
-            user.username = username
-            user.first_name = first_name
-            user.last_name = last_name
-            user.last_seen_at = seen
+            self._refresh_discovered_user(
+                user=user,
+                username=username,
+                first_name=first_name,
+                last_name=last_name,
+                seen_at=seen,
+            )
 
-        self._session.commit()
+        try:
+            self._session.commit()
+        except IntegrityError as exc:
+            if not self._can_recover_user_sequence_integrity_error(exc):
+                raise
+            self._session.rollback()
+            self._sync_postgresql_user_id_sequence()
+            user = self._get_user(telegram_user_id=telegram_user_id)
+            if user is None:
+                user = self._new_discovered_user(
+                    telegram_user_id=telegram_user_id,
+                    username=username,
+                    first_name=first_name,
+                    last_name=last_name,
+                    seen_at=seen,
+                )
+            else:
+                self._refresh_discovered_user(
+                    user=user,
+                    username=username,
+                    first_name=first_name,
+                    last_name=last_name,
+                    seen_at=seen,
+                )
+            self._session.commit()
         return user
+
+    def _get_user(self, *, telegram_user_id: int) -> User | None:
+        return self._session.scalar(select(User).where(User.telegram_user_id == telegram_user_id))
+
+    def _new_discovered_user(
+        self,
+        *,
+        telegram_user_id: int,
+        username: str | None,
+        first_name: str | None,
+        last_name: str | None,
+        seen_at: datetime,
+    ) -> User:
+        normal_role = self._session.scalar(select(DbRole).where(DbRole.name == Role.NORMAL.value))
+        if normal_role is None:
+            raise ValueError("role not found in db: normal")
+        user = User(
+            telegram_user_id=telegram_user_id,
+            username=username,
+            first_name=first_name,
+            last_name=last_name,
+            first_seen_at=seen_at,
+            last_seen_at=seen_at,
+            role_id=normal_role.id,
+        )
+        self._session.add(user)
+        return user
+
+    @staticmethod
+    def _refresh_discovered_user(
+        *,
+        user: User,
+        username: str | None,
+        first_name: str | None,
+        last_name: str | None,
+        seen_at: datetime,
+    ) -> None:
+        user.username = username
+        user.first_name = first_name
+        user.last_name = last_name
+        user.last_seen_at = seen_at
+
+    def _can_recover_user_sequence_integrity_error(self, exc: IntegrityError) -> bool:
+        bind = self._session.get_bind()
+        if bind.dialect.name != "postgresql":
+            return False
+        message = str(getattr(exc, "orig", exc)).lower()
+        return "duplicate key" in message and "users_pkey" in message
+
+    def _sync_postgresql_user_id_sequence(self) -> None:
+        self._session.execute(
+            text(
+                """
+                SELECT setval(
+                    pg_get_serial_sequence('users', 'id'),
+                    GREATEST(COALESCE((SELECT max(id) FROM users), 0), 1),
+                    COALESCE((SELECT max(id) FROM users), 0) <> 0
+                )
+                """
+            )
+        )
 
     def bootstrap_owner_from_settings(self, *, owner_telegram_user_id: int | None) -> bool:
         """Ensure configured owner exists and has owner role.
@@ -2455,31 +2535,91 @@ class ChatTopicRepository:
         seen_at: datetime | None = None,
     ) -> TelegramTopic:
         seen = seen_at or datetime.now(timezone.utc)
-        row = self._session.scalar(
+        row = self._get_topic(chat_id=chat_id, message_thread_id=message_thread_id)
+        if row is None:
+            row = self._new_topic(
+                chat_id=chat_id,
+                message_thread_id=message_thread_id,
+                telegram_topic_name=telegram_topic_name,
+                seen_at=seen,
+            )
+        else:
+            self._refresh_topic_seen(row=row, telegram_topic_name=telegram_topic_name, seen_at=seen)
+
+        try:
+            self._session.commit()
+        except IntegrityError as exc:
+            if not self._can_recover_topic_sequence_integrity_error(exc):
+                raise
+            self._session.rollback()
+            self._sync_postgresql_topic_id_sequence()
+            row = self._get_topic(chat_id=chat_id, message_thread_id=message_thread_id)
+            if row is None:
+                row = self._new_topic(
+                    chat_id=chat_id,
+                    message_thread_id=message_thread_id,
+                    telegram_topic_name=telegram_topic_name,
+                    seen_at=seen,
+                )
+            else:
+                self._refresh_topic_seen(row=row, telegram_topic_name=telegram_topic_name, seen_at=seen)
+            self._session.commit()
+        return row
+
+    def _get_topic(self, *, chat_id: int, message_thread_id: int) -> TelegramTopic | None:
+        return self._session.scalar(
             select(TelegramTopic).where(
                 TelegramTopic.chat_id == chat_id,
                 TelegramTopic.message_thread_id == message_thread_id,
             )
         )
-        if row is None:
-            row = TelegramTopic(
-                chat_id=chat_id,
-                message_thread_id=message_thread_id,
-                telegram_topic_name=telegram_topic_name,
-                first_seen_at=seen,
-                last_seen_at=seen,
-                updated_at=seen,
-            )
-            self._session.add(row)
-        else:
-            cleaned_name = telegram_topic_name.strip() if isinstance(telegram_topic_name, str) else None
-            if cleaned_name:
-                row.telegram_topic_name = cleaned_name
-            row.last_seen_at = seen
-            row.updated_at = seen
 
-        self._session.commit()
+    def _new_topic(
+        self,
+        *,
+        chat_id: int,
+        message_thread_id: int,
+        telegram_topic_name: str | None,
+        seen_at: datetime,
+    ) -> TelegramTopic:
+        row = TelegramTopic(
+            chat_id=chat_id,
+            message_thread_id=message_thread_id,
+            telegram_topic_name=telegram_topic_name,
+            first_seen_at=seen_at,
+            last_seen_at=seen_at,
+            updated_at=seen_at,
+        )
+        self._session.add(row)
         return row
+
+    @staticmethod
+    def _refresh_topic_seen(*, row: TelegramTopic, telegram_topic_name: str | None, seen_at: datetime) -> None:
+        cleaned_name = telegram_topic_name.strip() if isinstance(telegram_topic_name, str) else None
+        if cleaned_name:
+            row.telegram_topic_name = cleaned_name
+        row.last_seen_at = seen_at
+        row.updated_at = seen_at
+
+    def _can_recover_topic_sequence_integrity_error(self, exc: IntegrityError) -> bool:
+        bind = self._session.get_bind()
+        if bind.dialect.name != "postgresql":
+            return False
+        message = str(getattr(exc, "orig", exc)).lower()
+        return "duplicate key" in message and "telegram_topics_pkey" in message
+
+    def _sync_postgresql_topic_id_sequence(self) -> None:
+        self._session.execute(
+            text(
+                """
+                SELECT setval(
+                    pg_get_serial_sequence('telegram_topics', 'id'),
+                    GREATEST(COALESCE((SELECT max(id) FROM telegram_topics), 0), 1),
+                    COALESCE((SELECT max(id) FROM telegram_topics), 0) <> 0
+                )
+                """
+            )
+        )
 
     def list_chats(self) -> list[TelegramChat]:
         return self._session.scalars(select(TelegramChat).order_by(TelegramChat.chat_id.asc())).all()
@@ -2939,7 +3079,10 @@ class PluginRepository:
         for row in rows:
             if not row.enabled:
                 continue
-            if row.next_run_at is not None and row.next_run_at > now_naive:
+            next_run_at = row.next_run_at
+            if next_run_at is not None and next_run_at.tzinfo is not None:
+                next_run_at = next_run_at.replace(tzinfo=None)
+            if next_run_at is not None and next_run_at > now_naive:
                 continue
             due.append(row)
         return due
