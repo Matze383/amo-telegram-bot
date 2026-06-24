@@ -250,6 +250,9 @@ class _Host:
     async def answer_callback(self, callback_query_id, text: str):
         self.callback_answers.append((callback_query_id, text))
 
+    async def answer_callback_query(self, callback_query_id, text: str | None = None):
+        self.callback_answers.append((callback_query_id, text or ""))
+
     async def rss_fetch(self, rss_url: str):
         value = self.feed_map[rss_url]
         if isinstance(value, Exception):
@@ -284,6 +287,97 @@ def test_command_add_delete_duplicate_and_topic_isolation(tmp_path, monkeypatch)
 
     remaining_t2 = test_repo.list_subscriptions(chat_id=1, thread_id=2)
     assert [x.channel_key for x in remaining_t2] == ["UC111"]
+
+
+def test_command_delyt_without_argument_lists_topic_subscriptions(tmp_path, monkeypatch) -> None:
+    plugin_main = _load_plugin_main()
+    repo_module = _load_repo_module()
+    test_repo = repo_module.YtRssStateRepository(tmp_path / "state")
+    monkeypatch.setattr(plugin_main, "_repo_for_context", lambda context: test_repo)
+
+    test_repo.add_subscription(
+        chat_id=-100,
+        thread_id=10,
+        channel_key="UC111",
+        source_url="https://www.youtube.com/@one",
+        canonical_channel_url="https://www.youtube.com/channel/UC111",
+        rss_url="rss://one",
+        added_by_user_id=99,
+    )
+    test_repo.add_subscription(
+        chat_id=-100,
+        thread_id=10,
+        channel_key="UC222",
+        source_url="https://www.youtube.com/channel/UC222",
+        canonical_channel_url="https://www.youtube.com/channel/UC222",
+        rss_url="rss://two",
+        added_by_user_id=99,
+    )
+    test_repo.add_subscription(
+        chat_id=-100,
+        thread_id=11,
+        channel_key="UC333",
+        source_url="https://www.youtube.com/channel/UC333",
+        canonical_channel_url="https://www.youtube.com/channel/UC333",
+        rss_url="rss://three",
+        added_by_user_id=99,
+    )
+
+    host = _Host()
+    ctx = _Context(command_name="delyt", argument=None, chat_id=-100, message_thread_id=10)
+    asyncio.run(plugin_main.handle_command(ctx, host))
+
+    payload = host.replies[-1][2]
+    assert isinstance(payload, dict)
+    assert payload["text"] == "Welchen YouTube-RSS-Kanal moechtest du aus diesem Topic entfernen?"
+    rows = payload["reply_markup"]["inline_keyboard"]
+    assert rows == [
+        [{"text": "Entfernen: one", "callback_data": "yt_rss:delyt:UC111"}],
+        [{"text": "Entfernen: UC222", "callback_data": "yt_rss:delyt:UC222"}],
+    ]
+
+
+def test_command_delyt_without_argument_reports_empty_topic(tmp_path, monkeypatch) -> None:
+    plugin_main = _load_plugin_main()
+    repo_module = _load_repo_module()
+    test_repo = repo_module.YtRssStateRepository(tmp_path / "state")
+    monkeypatch.setattr(plugin_main, "_repo_for_context", lambda context: test_repo)
+
+    host = _Host()
+    ctx = _Context(command_name="delyt", argument="", chat_id=-100, message_thread_id=10)
+    asyncio.run(plugin_main.handle_command(ctx, host))
+
+    assert host.replies[-1][2] == "No active YouTube-RSS subscriptions found in this topic."
+
+
+def test_delyt_callback_removes_subscription_only_from_current_topic(tmp_path, monkeypatch) -> None:
+    plugin_main = _load_plugin_main()
+    repo_module = _load_repo_module()
+    test_repo = repo_module.YtRssStateRepository(tmp_path / "state")
+    monkeypatch.setattr(plugin_main, "_repo_for_context", lambda context: test_repo)
+
+    for thread_id in (10, 11):
+        test_repo.add_subscription(
+            chat_id=-100,
+            thread_id=thread_id,
+            channel_key="UC111",
+            source_url="https://www.youtube.com/channel/UC111",
+            canonical_channel_url="https://www.youtube.com/channel/UC111",
+            rss_url=f"rss://{thread_id}",
+            added_by_user_id=99,
+        )
+
+    host = _Host()
+    ctx = _Context(command_name="callback", argument=None, chat_id=-100, message_id=55, message_thread_id=10)
+    ctx.callback_data = "yt_rss:delyt:UC111"
+    ctx.callback_query_id = "cb-1"
+    handled = asyncio.run(plugin_main.handle_callback(ctx, host))
+
+    assert handled is True
+    assert host.callback_answers == [("cb-1", "Subscription removed")]
+    assert host.replies[-1][2] == "Removed channel UC111 from this topic."
+    assert test_repo.list_subscriptions(chat_id=-100, thread_id=10) == []
+    assert [item.channel_key for item in test_repo.list_subscriptions(chat_id=-100, thread_id=11)] == ["UC111"]
 
 
 def test_command_add_delete_resolved_inputs_and_failures(tmp_path, monkeypatch) -> None:

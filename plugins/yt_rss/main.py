@@ -382,6 +382,39 @@ def webui_set_poll_interval_seconds(context, value: int) -> int:
     return repo.set_poll_interval_seconds(value)
 
 
+def _subscription_label(sub) -> str:
+    source_url = getattr(sub, "source_url", "") or ""
+    parsed = urlparse(source_url)
+    parts = [part for part in (parsed.path or "").split("/") if part]
+    if parts:
+        if parts[0].startswith("@"):
+            return parts[0].lstrip("@") or getattr(sub, "channel_key", "")
+        if len(parts) >= 2 and parts[0] in {"c", "user"}:
+            return parts[1]
+    return getattr(sub, "channel_key", "")
+
+
+def _build_delete_menu(subscriptions: list) -> dict[str, object]:
+    rows = []
+    for sub in subscriptions:
+        channel_key = getattr(sub, "channel_key", "")
+        if not isinstance(channel_key, str) or not channel_key.strip():
+            continue
+        label = _subscription_label(sub) or channel_key
+        rows.append(
+            [
+                {
+                    "text": f"Entfernen: {label}",
+                    "callback_data": f"yt_rss:delyt:{channel_key.strip()}",
+                }
+            ]
+        )
+    return {
+        "text": "Welchen YouTube-RSS-Kanal moechtest du aus diesem Topic entfernen?",
+        "reply_markup": {"inline_keyboard": rows},
+    }
+
+
 async def handle_command(context, host_api):
     repo = _repo_for_context(context)
     command = (context.command_name or "").strip().lower()
@@ -396,6 +429,13 @@ async def handle_command(context, host_api):
 
     arg = (context.argument or "").strip()
     if not arg:
+        if command == "delyt":
+            subscriptions = repo.list_subscriptions(chat_id=context.chat_id, thread_id=context.message_thread_id)
+            if not subscriptions:
+                await host_api.reply(context.chat_id, context.message_id, "No active YouTube-RSS subscriptions found in this topic.")
+                return
+            await host_api.reply(context.chat_id, context.message_id, _build_delete_menu(subscriptions))
+            return
         await host_api.reply(context.chat_id, context.message_id, f"Usage: /{command} <https://www.youtube.com/channel/UC...>")
         return
 
@@ -432,6 +472,45 @@ async def handle_command(context, host_api):
         await host_api.reply(context.chat_id, context.message_id, "No matching subscription found in this topic.")
 
 
+async def handle_callback(context, host_api):
+    data = (getattr(context, "callback_data", None) or "").strip()
+    prefix = "yt_rss:delyt:"
+    if not data.startswith(prefix):
+        return False
+
+    callback_query_id = getattr(context, "callback_query_id", None)
+    if not _user_can_manage(context):
+        if callback_query_id:
+            await host_api.answer_callback_query(callback_query_id, "Permission denied")
+        return True
+
+    channel_key = data[len(prefix):].strip()
+    if not channel_key:
+        if callback_query_id:
+            await host_api.answer_callback_query(callback_query_id, "Invalid subscription")
+        return True
+
+    repo = _repo_for_context(context)
+    deleted = repo.delete_subscription(
+        chat_id=context.chat_id,
+        thread_id=context.message_thread_id,
+        channel_key=channel_key,
+    )
+    if callback_query_id:
+        await host_api.answer_callback_query(
+            callback_query_id,
+            "Subscription removed" if deleted else "Subscription not found",
+        )
+    if getattr(context, "message_id", None) is not None:
+        text = (
+            f"Removed channel {channel_key} from this topic."
+            if deleted
+            else "No matching subscription found in this topic."
+        )
+        await host_api.reply(context.chat_id, context.message_id, text)
+    return True
+
+
 def _entry_key(entry: dict) -> str | None:
     for key in ("dedupe_key", "id", "link"):
         value = entry.get(key)
@@ -460,18 +539,6 @@ def _entry_channel_title(entry: dict) -> str:
     if isinstance(value, str) and value.strip():
         return value.strip()
     return ""
-
-
-def _subscription_label(sub) -> str:
-    source_url = getattr(sub, "source_url", "") or ""
-    parsed = urlparse(source_url)
-    parts = [part for part in (parsed.path or "").split("/") if part]
-    if parts:
-        if parts[0].startswith("@"):
-            return parts[0].lstrip("@") or getattr(sub, "channel_key", "")
-        if len(parts) >= 2 and parts[0] in {"c", "user"}:
-            return parts[1]
-    return getattr(sub, "channel_key", "")
 
 
 def _entry_channel_key(entry: dict) -> str:

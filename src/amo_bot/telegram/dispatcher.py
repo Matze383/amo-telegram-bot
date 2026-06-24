@@ -487,7 +487,6 @@ class Dispatcher:
                     extra={"outcome": "handled"},
                 )
                 return
-            await self._send_text(message.chat.id, self._unknown_command_message(message=message, command_name=command.name), message.message_thread_id)
             return
 
         if message.chat.type == "private" and self.database_url is not None:

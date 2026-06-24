@@ -58,18 +58,23 @@ Subscribe the current topic to a YouTube channel.
 - `Permission denied. Only owner/admin can manage YT subscriptions.` — Insufficient role
 - Resolver/network error messages for URL resolution failures
 
-### `/delyt <channel_url>`
+### `/delyt [channel_url]`
 
 Remove a YouTube channel subscription from the current topic.
 
+Without an argument, `/delyt` lists the active YouTube-RSS subscriptions for the current topic as inline buttons. Selecting a button removes that channel only from the topic where the menu was opened.
+
 **Usage:**
 ```
+/delyt
 /delyt https://www.youtube.com/channel/UC...
 /delyt @handle
 /delyt UC...
 ```
 
 **Responses:**
+- `Welchen YouTube-RSS-Kanal moechtest du aus diesem Topic entfernen?` — Inline delete menu shown for active subscriptions in this topic
+- `No active YouTube-RSS subscriptions found in this topic.` — No subscriptions exist in the current topic
 - `Removed channel UC... from this topic.` — Subscription removed
 - `No matching subscription found in this topic.` — Channel was not subscribed
 - `Permission denied...` — Insufficient role
@@ -128,6 +133,7 @@ The default poll interval is 300 seconds (5 minutes). This can be adjusted via t
 
 - Subscriptions are **strictly scoped** to the topic/thread where they were added
 - The same channel can be subscribed independently in different topics
+- The `/delyt` inline delete menu lists and removes subscriptions only for the current topic
 - Each topic has its own cursor and deduplication state
 - Private chats (no `message_thread_id`) use `None` as the thread identifier
 

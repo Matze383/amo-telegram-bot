@@ -1478,7 +1478,7 @@ def test_dispatcher_help_supports_explicit_locale_override() -> None:
     assert "/ping - Check bot health" in sent[1][1]
 
 
-def test_dispatcher_sends_bilingual_unknown_command_reply() -> None:
+def test_dispatcher_stays_silent_for_unknown_command() -> None:
     sent: list[tuple[int, str, int | None]] = []
 
     async def fake_send(chat_id: int, text: str, message_thread_id: int | None = None) -> object:
@@ -1514,10 +1514,7 @@ def test_dispatcher_sends_bilingual_unknown_command_reply() -> None:
     asyncio.run(dispatcher.handle_raw_update(raw_update_de))
     asyncio.run(dispatcher.handle_raw_update(raw_update_en))
 
-    assert sent == [
-        (99, "Unbekannter Befehl: /doesnotexist. Nutze /help für verfügbare Befehle.", None),
-        (100, "Unknown command: /doesnotexist. Use /help for available commands.", None),
-    ]
+    assert sent == []
 
 
 def test_dispatcher_does_not_send_unknown_fallback_for_handled_plugin_command() -> None:
@@ -1565,7 +1562,7 @@ def test_dispatcher_does_not_send_unknown_fallback_for_handled_plugin_command() 
     assert sent == []
 
 
-def test_dispatcher_sends_unknown_fallback_for_falsey_plugin_result() -> None:
+def test_dispatcher_stays_silent_for_falsey_plugin_result() -> None:
     sent: list[tuple[int, str, int | None]] = []
 
     async def fake_send(chat_id: int, text: str, message_thread_id: int | None = None) -> object:
@@ -1596,7 +1593,7 @@ def test_dispatcher_sends_unknown_fallback_for_falsey_plugin_result() -> None:
 
     asyncio.run(dispatcher.handle_raw_update(raw_update))
 
-    assert sent == [(101, "Unknown command: /plugincmd. Use /help for available commands.", None)]
+    assert sent == []
 
 
 def test_private_builtin_command_respects_min_general_role_threshold() -> None:
