@@ -19,6 +19,14 @@ def test_classifier_requires_current_data_for_category_prompts():
         "Was ist die aktuelle stabile Django Version laut offiziellen Docs?",
         "Ist die Playstation Portal gerade bei MediaMarkt lieferbar?",
         "Welche Termine gibt es heute im Kino in Berlin?",
+        "Welche Relevanz hat die Robert Bosch GmbH am Finanzmarkt, welche Partner hat sie und wie ist die Rating-/Anleihe-Situation?",
+        "Welche Änderungen gab es in der Telegram Bot API?",
+        "Welche Lieferanten hat Apple Inc?",
+        "Welche Ratings hat Volkswagen AG?",
+        "Welche Änderungen gab es in der Discord API?",
+        "What changed in the Stripe API?",
+        "What is the CEO of OpenAI?",
+        "Was ist die Umsatzentwicklung von SAP SE?",
     ]
     for prompt in prompts:
         decision = classify_current_data(prompt)
@@ -30,6 +38,24 @@ def test_classifier_requires_current_data_for_category_prompts():
         assert decision.signals
 
 
+def test_classifier_requires_current_data_for_real_world_entity_mutable_facts_without_explicit_current_word():
+    prompts = [
+        "Welche Relevanz hat die Robert Bosch GmbH am Finanzmarkt, welche Partner hat sie und wie ist die Rating-/Anleihe-Situation?",
+        "Welche Änderungen gab es in der Telegram Bot API?",
+        "Welche Lieferanten hat Apple Inc?",
+        "Welche Ratings hat Volkswagen AG?",
+        "Welche Änderungen gab es in der Discord API?",
+        "What changed in the Stripe API?",
+        "What is the CEO of OpenAI?",
+        "Was ist die Umsatzentwicklung von SAP SE?",
+    ]
+    for prompt in prompts:
+        decision = classify_current_data(prompt)
+        assert decision.should_research is True, prompt
+        assert decision.label == "requires_current_data"
+        assert "question_intent" in decision.signals
+
+
 def test_classifier_does_not_require_current_data_for_timeless_prompts():
     prompts = [
         "Erklär mir was eine Vorrunde ist",
@@ -39,6 +65,9 @@ def test_classifier_does_not_require_current_data_for_timeless_prompts():
         "Wie kann ich besser schlafen?",
         "Schreib mir eine Dokumentation für meine Beispiel-API",
         "Was bedeutet local im Python Scope?",
+        "Schreib mir einen kurzen freundlichen Geburtstagsgruß",
+        "Erkläre mir was ein Bond ist",
+        "Was ist ein Partner in einer Beziehung?",
     ]
     for prompt in prompts:
         decision = classify_current_data(prompt)

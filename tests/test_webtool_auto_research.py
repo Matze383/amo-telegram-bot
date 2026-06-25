@@ -198,6 +198,14 @@ def test_auto_research_uses_generic_current_data_classifier_for_category_prompts
         "Ist die Playstation Portal heute bei Saturn lieferbar?",
         "Welche Bürgeramt Termine gibt es heute in Berlin?",
         "What is the current OpenAI API status?",
+        "Welche Relevanz hat die Robert Bosch GmbH am Finanzmarkt, welche Partner hat sie und wie ist die Rating-/Anleihe-Situation?",
+        "Welche Änderungen gab es in der Telegram Bot API?",
+        "Welche Lieferanten hat Apple Inc?",
+        "Welche Ratings hat Volkswagen AG?",
+        "Welche Änderungen gab es in der Discord API?",
+        "What changed in the Stripe API?",
+        "What is the CEO of OpenAI?",
+        "Was ist die Umsatzentwicklung von SAP SE?",
     ]
     for prompt in prompts:
         d = decide_auto_research(prompt)
@@ -219,6 +227,8 @@ def test_auto_research_classifier_does_not_trigger_timeless_prompts():
         "Wie kann ich besser schlafen?",
         "Schreib mir eine API-Dokumentation für mein Hobbyprojekt",
         "Was bedeutet local variable scope in Python?",
+        "Erkläre mir was ein Bond ist",
+        "Was ist ein Partner in einer Beziehung?",
     ]
     for prompt in prompts:
         d = decide_auto_research(prompt)

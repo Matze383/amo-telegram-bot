@@ -81,8 +81,35 @@ _STATUS_RE = re.compile(
 )
 _VERSION_RE = re.compile(
     r"\b(?:version(?:en)?|release(?:s|d)?|erschienen|drau(?:ß|ss)en|changelog|update(?:s)?|"
+    r"(?:ver)?(?:ä|ae)nderung(?:en)?|change(?:s|d)?|"
     r"verf(?:ü|ue)gbar|available|published|launched|stable|beta|rc|"
     r"npm|pypi|github\s+release|release\s+notes)\b",
+    re.IGNORECASE,
+)
+_FINANCE_MARKET_RE = re.compile(
+    r"\b(?:"
+    r"finanz(?:markt|e|en)?|financial(?:\s+market)?|markt(?:relevanz|umfeld)?|market(?:s|place| context)?|"
+    r"b(?:ö|oe)rse|stock(?:s)?|share(?:s)?|aktie(?:n)?|equity|valuation|bewertung|"
+    r"rating(?:s)?|bonit(?:ä|ae)t|anleihe(?:n)?|bond(?:s)?|credit|debt|"
+    r"umsatz\w*|revenue|gewinn\w*|profit|ebit|ebitda|bilanz|earnings|quarterly|annual\s+report|"
+    r"investor(?:en)?|investment|finanzierung|funding"
+    r")\b",
+    re.IGNORECASE,
+)
+_ORG_ROLE_RE = re.compile(
+    r"\b(?:"
+    r"ceo|cfo|cto|coo|chief\s+executive|chief\s+financial|chief\s+technology|"
+    r"vorstand(?:svorsitzende[rn]?)?|geschäftsführer(?:in)?|geschaeftsfuehrer(?:in)?|"
+    r"chef(?:in)?|leiter(?:in)?|president|chair(?:man|woman|person)?"
+    r")\b",
+    re.IGNORECASE,
+)
+_ORG_RELATION_RE = re.compile(
+    r"\b(?:"
+    r"partner(?:s|n|schaften)?|partners?|kunden?|customers?|lieferant(?:en)?|suppliers?|"
+    r"zuliefer(?:er)?|kooperation(?:en)?|allianz(?:en)?|alliance(?:s)?|joint\s+venture(?:s)?|"
+    r"konkurrent(?:en)?|competitor(?:s)?|wettbewerb(?:er)?|subsidiar(?:y|ies)|tochter(?:firma|gesellschaft)?"
+    r")\b",
     re.IGNORECASE,
 )
 _SCHEDULE_RESULTS_RE = re.compile(
@@ -109,8 +136,21 @@ _LOCAL_REGION_RE = re.compile(
 _EXTERNAL_NOUN_RE = re.compile(
     r"\b(?:dienst|service|anbieter|provider|vodafone|telekom|o2|python|iphone|kino|berlin|"
     r"deutschland|germany|markt|market|produkt|product|app|website|server|"
-    r"api|sdk|library|bibliothek|package|paket|github|npm|pypi|docker|openai|anthropic)\b",
+    r"unternehmen|firma|company|organisation|organization|konzern|group|"
+    r"gmbh|ag|se|kg|ohg|inc|corp|corporation|ltd|llc|plc|s\.?a\.?|sarl|nv|bv|"
+    r"person|ceo|cfo|cto|vorstand|geschäftsführer|geschaeftsfuehrer|"
+    r"api|sdk|library|bibliothek|package|paket|github|npm|pypi|docker|telegram\s+bot\s+api|openai|anthropic)\b",
     re.IGNORECASE,
+)
+_NAMED_ENTITY_RE = re.compile(
+    r"\b[A-ZÄÖÜ][\w&.-]*(?:\s+[A-ZÄÖÜ][\w&.-]*){0,4}\s+"
+    r"(?:GmbH|AG|SE|KG|OHG|Inc|Corp|Corporation|Ltd|LLC|PLC|S\.?A\.?|SARL|NV|BV)\b|"
+    r"\b[A-Z][A-Za-z0-9&.-]*(?:\s+[A-Z][A-Za-z0-9&.-]*){0,3}\s+API\b|"
+    r"\b[A-Z][a-z]+[A-Z][A-Za-z0-9&.-]*\b",
+)
+_ENTITY_CONTEXT_RE = re.compile(
+    r"\b(?:von|bei|for|of|hat|has)\s+(?:der\s+|die\s+|das\s+)?"
+    r"[A-ZÄÖÜ][A-Za-zÄÖÜäöüß0-9&.-]{2,}(?:\s+[A-ZÄÖÜ][A-Za-zÄÖÜäöüß0-9&.-]{2,}){0,3}\b"
 )
 
 
@@ -149,6 +189,12 @@ class HeuristicCurrentDataClassifier:
             signals.append("service_status")
         if _VERSION_RE.search(raw):
             signals.append("version_or_release")
+        if _FINANCE_MARKET_RE.search(raw):
+            signals.append("finance_or_market")
+        if _ORG_ROLE_RE.search(raw):
+            signals.append("organization_role")
+        if _ORG_RELATION_RE.search(raw):
+            signals.append("organization_relationship")
         if _SCHEDULE_RESULTS_RE.search(raw):
             signals.append("schedule_results_polls")
         if _WEATHER_RE.search(raw):
@@ -161,6 +207,8 @@ class HeuristicCurrentDataClassifier:
             signals.append("local_or_region")
         if _EXTERNAL_NOUN_RE.search(raw):
             signals.append("external_entity")
+        if _NAMED_ENTITY_RE.search(raw) or _ENTITY_CONTEXT_RE.search(raw):
+            signals.append("named_entity")
         if _QUESTION_RE.search(raw):
             signals.append("question_intent")
 
@@ -171,6 +219,9 @@ class HeuristicCurrentDataClassifier:
                 "price_or_availability",
                 "service_status",
                 "version_or_release",
+                "finance_or_market",
+                "organization_role",
+                "organization_relationship",
                 "schedule_results_polls",
                 "weather",
                 "news",
@@ -193,6 +244,19 @@ class HeuristicCurrentDataClassifier:
                 "requires_current_data", "semantic_current_data_required", _dedupe(signals), True
             )
         if "version_or_release" in signal_set and ("question_intent" in signal_set or "external_entity" in signal_set):
+            return CurrentDataDecision(
+                "requires_current_data", "semantic_current_data_required", _dedupe(signals), True
+            )
+        mutable_named_entity_question = "question_intent" in signal_set and "named_entity" in signal_set
+        if "organization_role" in signal_set and mutable_named_entity_question:
+            return CurrentDataDecision(
+                "requires_current_data", "semantic_current_data_required", _dedupe(signals), True
+            )
+        if "finance_or_market" in signal_set and mutable_named_entity_question:
+            return CurrentDataDecision(
+                "requires_current_data", "semantic_current_data_required", _dedupe(signals), True
+            )
+        if "organization_relationship" in signal_set and mutable_named_entity_question:
             return CurrentDataDecision(
                 "requires_current_data", "semantic_current_data_required", _dedupe(signals), True
             )
@@ -222,7 +286,32 @@ class HeuristicCurrentDataClassifier:
         # Timeless explanatory/creative requests may mention domains that often
         # have live data (sports, software, health) but do not need lookup unless
         # the user also asks for current status, schedules, prices, etc.
-        if _TIMELESS_CREATIVE_RE.search(raw) and "temporal_current" not in signal_set:
+        if (
+            _TIMELESS_CREATIVE_RE.search(raw)
+            and "temporal_current" not in signal_set
+            and not (
+                "question_intent" in signal_set
+                and (
+                    signal_set
+                    & {
+                        "price_or_availability",
+                        "service_status",
+                        "version_or_release",
+                        "news",
+                        "docs_or_official",
+                    }
+                    or (
+                        "named_entity" in signal_set
+                        and signal_set
+                        & {
+                            "finance_or_market",
+                            "organization_role",
+                            "organization_relationship",
+                        }
+                    )
+                )
+            )
+        ):
             return CurrentDataDecision("does_not_require_current_data", "timeless_explanatory", _dedupe(signals), False)
 
         if external_lookup and "question_intent" in signal_set:

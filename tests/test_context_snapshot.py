@@ -95,6 +95,32 @@ def test_mixed_context_live_football_wm_fixture_requires_external_evidence() -> 
     assert "Do not assert current facts from model_prior" in snapshot.current_info_decision.fail_closed_instruction
 
 
+def test_context_snapshot_requires_current_info_for_company_finance_question_without_current_word() -> None:
+    snapshot = build_context_snapshot(
+        current_message=(
+            "Welche Relevanz hat die Robert Bosch GmbH am Finanzmarkt, welche Partner hat sie "
+            "und wie ist die Rating-/Anleihe-Situation?"
+        ),
+        router_context=AIRouterContextV1(
+            scope_type="private_user",
+            scope_user_id=42,
+            user_id=42,
+            message_text=(
+                "Welche Relevanz hat die Robert Bosch GmbH am Finanzmarkt, welche Partner hat sie "
+                "und wie ist die Rating-/Anleihe-Situation?"
+            ),
+            route_reason=AIRouterReasonCode.SCOPE_ENABLED,
+            flag_ai_scope_active=True,
+        ),
+        verified_external_evidence_available=False,
+    )
+
+    assert snapshot.requires_current_info is True
+    assert snapshot.current_info_decision.requires_external_evidence is True
+    assert "finance_or_market" in snapshot.current_info_decision.signals
+    assert "organization_relationship" in snapshot.current_info_decision.signals
+
+
 def test_context_snapshot_mixed_context_without_conflict_marks_sources() -> None:
     router_context = AIRouterContextV1(
         scope_type="private_user",
