@@ -26,6 +26,7 @@ from amo_bot.current_info.observability import (
     HostConcurrencyLimiter,
     InMemoryRateLimiter,
     query_hash,
+    safe_error_message,
 )
 from amo_bot.current_info.legacy_webtool import LegacyWebtoolCurrentInfoService
 from amo_bot.current_info.search import SearchProviderRateLimited
@@ -63,6 +64,26 @@ class _FakeFetchProvider:
     def fetch(self, *, url: str, locale: str) -> FetchedDocument | None:
         self.calls.append((url, locale))
         return self.documents.get(url)
+
+
+class _FailingThenSuccessfulFetchProvider:
+    def __init__(self, *, failing_url: str, successful_url: str, document: FetchedDocument) -> None:
+        self.failing_url = failing_url
+        self.successful_url = successful_url
+        self.document = document
+        self.calls: list[tuple[str, str]] = []
+
+    def fetch(self, *, url: str, locale: str) -> FetchedDocument | None:
+        self.calls.append((url, locale))
+        if url == self.failing_url:
+            raise RuntimeError(
+                "Stream is already consumed for "
+                "https://upstream.example/path?token=leaky-token-123&safe=1 "
+                "Authorization=Bearer live-fetch-token"
+            )
+        if url == self.successful_url:
+            return self.document
+        return None
 
 
 class _FakeRetrievalProvider:
@@ -257,6 +278,74 @@ def test_current_info_service_rejects_snippet_only_evidence_for_current_facts():
     assert answer.evidence.freshness == "snippet_only"
     assert answer.evidence.chunks[0].source_url == result.url
     assert answer.warnings == ("snippet_only_evidence",)
+
+
+def test_current_info_service_treats_single_fetch_exception_as_non_fatal(caplog):
+    first = SearchResult(
+        title="Broken result",
+        url="https://broken.example/status",
+        provider="fake_search",
+        rank=1,
+        host="broken.example",
+    )
+    second = SearchResult(
+        title="Working result",
+        url="https://working.example/status",
+        provider="fake_search",
+        rank=2,
+        host="working.example",
+    )
+    document = FetchedDocument(url=second.url, title=second.title, text="Current status is green.")
+    chunk = EvidenceChunk(text=document.text, source_url=second.url, source_title=second.title)
+    fetch_provider = _FailingThenSuccessfulFetchProvider(
+        failing_url=first.url,
+        successful_url=second.url,
+        document=document,
+    )
+    service = CurrentInfoService(
+        search_provider=_FakeSearchProvider((first, second)),
+        fetch_provider=fetch_provider,
+        retrieval_provider=_FakeRetrievalProvider((chunk,)),
+    )
+
+    with caplog.at_level(logging.INFO, logger="amo_bot.current_info.service"):
+        answer = service.answer(CurrentInfoRequest(query="current status", max_results=2, max_documents=1))
+
+    assert answer.status == "answered"
+    assert answer.sources == (second.url,)
+    assert fetch_provider.calls == [(first.url, "en"), (f"{first.url}/", "en"), (second.url, "en")]
+    payloads = [ast.literal_eval(record.getMessage()) for record in caplog.records]
+    fetch_errors = [
+        payload
+        for payload in payloads
+        if payload["event"] == "current_info.FetchRun" and payload["outcome"] == "error"
+    ]
+    assert fetch_errors
+    assert fetch_errors[-1]["reason_code"] == "fetch_provider_error"
+    assert fetch_errors[-1]["error_class"] == "RuntimeError"
+    assert "leaky-token-123" not in fetch_errors[-1]["error_message"]
+    assert "live-fetch-token" not in fetch_errors[-1]["error_message"]
+    assert "token=***REDACTED***&safe=1" in fetch_errors[-1]["error_message"]
+    assert "Authorization=Bearer ***REDACTED***" in fetch_errors[-1]["error_message"]
+
+
+def test_current_info_safe_error_message_redacts_common_secret_patterns() -> None:
+    message = safe_error_message(
+        RuntimeError(
+            "failed with password=hunter2 secret:abc123 key=public-but-sensitive "
+            "https://api.telegram.org/bot123456:ABCDEF/getMe?api_key=sk-secret123456&ok=1"
+        )
+    )
+
+    assert "hunter2" not in message
+    assert "abc123" not in message
+    assert "public-but-sensitive" not in message
+    assert "123456:ABCDEF" not in message
+    assert "sk-secret123456" not in message
+    assert "password=***REDACTED***" in message
+    assert "secret:***REDACTED***" in message
+    assert "key=***REDACTED***" in message
+    assert "/bot***REDACTED***/getMe?api_key=***REDACTED***&ok=1" in message
 
 
 def test_current_info_service_rejects_chunks_without_fetched_source_even_when_other_docs_fetched():
@@ -1319,6 +1408,245 @@ def test_current_info_service_uses_source_preference_repository_for_ranking():
     ]
     assert answer.search_bundle.results[0].metadata["source_preference_signal"] == "trusted"
     assert answer.search_bundle.results[1].metadata["source_preference_signal"] == "rejected"
+
+
+def test_current_info_service_prefers_authoritative_api_docs_for_docs_queries():
+    third_party = SearchResult(
+        title="Acme API changelog summary",
+        url="https://blog.example/acme-api-changelog",
+        snippet="A third-party summary of Acme API updates.",
+        provider="fake",
+        rank=1,
+        host="blog.example",
+    )
+    official = SearchResult(
+        title="Acme API changelog",
+        url="https://docs.acme.example/api/changelog",
+        snippet="Official Acme API changelog and reference.",
+        provider="fake",
+        rank=4,
+        host="docs.acme.example",
+    )
+    service = CurrentInfoService(
+        search_provider=_FakeSearchProvider((third_party, official)),
+        fetch_provider=_FakeFetchProvider(
+            {
+                official.url: FetchedDocument(
+                    url=official.url,
+                    title=official.title,
+                    text="Acme API changelog: webhook retries changed in version 2026-06.",
+                ),
+                third_party.url: FetchedDocument(
+                    url=third_party.url,
+                    title=third_party.title,
+                    text="Blog post repeating an older Acme API changelog summary.",
+                ),
+            }
+        ),
+    )
+
+    answer = service.answer(
+        CurrentInfoRequest(query="Acme API changelog webhook retries", locale="en", max_results=2, max_documents=1)
+    )
+
+    assert answer.status == "answered"
+    assert answer.search_bundle is not None
+    assert [result.host for result in answer.search_bundle.results] == ["docs.acme.example", "blog.example"]
+    assert answer.search_bundle.results[0].metadata["source_preference_source"] == "inferred_authoritative_primary"
+    assert answer.sources == (official.url,)
+
+
+def test_current_info_service_prefers_query_matching_docs_over_unrelated_docs_with_tight_fetch_budget():
+    unrelated_docs = SearchResult(
+        title="Other Platform API changelog",
+        url="https://docs.other.example/api/changelog",
+        snippet="Official docs for a different product.",
+        provider="fake",
+        rank=1,
+        host="docs.other.example",
+    )
+    primary_docs = SearchResult(
+        title="ExampleProduct API webhook retries changelog",
+        url="https://docs.exampleproduct.example/api/webhooks/changelog",
+        snippet="Official ExampleProduct API changelog for webhook retries.",
+        provider="fake",
+        rank=2,
+        host="docs.exampleproduct.example",
+    )
+    fetch_provider = _FakeFetchProvider(
+        {
+            unrelated_docs.url: FetchedDocument(
+                url=unrelated_docs.url,
+                title=unrelated_docs.title,
+                text="Other Platform API changelog describes authentication pagination only.",
+            ),
+            primary_docs.url: FetchedDocument(
+                url=primary_docs.url,
+                title=primary_docs.title,
+                text="ExampleProduct API changelog: webhook retries now use exponential backoff.",
+            ),
+        }
+    )
+    service = CurrentInfoService(
+        search_provider=_FakeSearchProvider((unrelated_docs, primary_docs)),
+        fetch_provider=fetch_provider,
+    )
+
+    answer = service.answer(
+        CurrentInfoRequest(
+            query="ExampleProduct API webhook retries changelog",
+            locale="en",
+            max_results=2,
+            max_documents=1,
+        )
+    )
+
+    assert answer.status == "answered"
+    assert answer.search_bundle is not None
+    assert [result.host for result in answer.search_bundle.results] == [
+        "docs.exampleproduct.example",
+        "docs.other.example",
+    ]
+    assert answer.search_bundle.results[0].metadata["source_preference_source"] == "inferred_authoritative_primary"
+    assert "source_preference_source" not in answer.search_bundle.results[1].metadata
+    assert fetch_provider.calls == [(primary_docs.url, "en")]
+    assert answer.sources == (primary_docs.url,)
+    assert "irrelevant_source" not in answer.warnings
+
+
+def test_current_info_service_keeps_fresh_authoritative_docs_ahead_of_unfetched_cached_chunks():
+    stale_cached = SearchResult(
+        title="Old ad-hoc Acme API summary",
+        url="https://cache.example/acme-api-webhooks",
+        snippet="Old third-party Acme API notes.",
+        provider="fake",
+        rank=1,
+        host="cache.example",
+    )
+    official = SearchResult(
+        title="Acme API webhook reference",
+        url="https://docs.acme.example/api/webhooks",
+        snippet="Official Acme API documentation.",
+        provider="fake",
+        rank=2,
+        host="docs.acme.example",
+    )
+    official_doc = FetchedDocument(
+        url=official.url,
+        title=official.title,
+        text="Acme API webhook reference documents retry limits and delivery status fields.",
+        fetched_at="2026-06-25T10:00:00+00:00",
+    )
+    stale_chunk = EvidenceChunk(
+        text="Old cached third-party notes claim webhook retry limits are unknown.",
+        source_url=stale_cached.url,
+        source_title=stale_cached.title,
+        relevance=0.99,
+        metadata={"fetched_at": "2025-01-01T00:00:00+00:00", "source_type": "Unknown"},
+    )
+    service = CurrentInfoService(
+        search_provider=_FakeSearchProvider((stale_cached, official)),
+        fetch_provider=_FakeFetchProvider({official.url: official_doc}),
+        retrieval_provider=_FakeRetrievalProvider((stale_chunk,)),
+    )
+
+    answer = service.answer(
+        CurrentInfoRequest(
+            query="Acme API webhook retry limits",
+            locale="en",
+            max_results=2,
+            max_documents=1,
+            metadata={"now": "2026-06-25T12:00:00+00:00"},
+        )
+    )
+
+    assert answer.status == "answered"
+    assert answer.sources[0] == official.url
+    assert stale_cached.url in answer.sources
+    assert answer.evidence is not None
+    assert answer.evidence.chunks[0].source_url == official.url
+    assert "unfetched_chunk_evidence" in answer.warnings
+
+
+def test_current_info_service_regression_prefers_fresh_telegram_docs_without_telegram_special_case():
+    stale_cached = SearchResult(
+        title="Old ad-hoc Telegram summary",
+        url="https://ad-hoc-news.example/telegram-bot-api",
+        snippet="Old third-party Bot API notes.",
+        provider="fake",
+        rank=1,
+        host="ad-hoc-news.example",
+    )
+    official = SearchResult(
+        title="Telegram Bot API",
+        url="https://core.telegram.org/bots/api",
+        snippet="Official Telegram Bot API documentation.",
+        provider="fake",
+        rank=2,
+        host="core.telegram.org",
+    )
+    official_doc = FetchedDocument(
+        url=official.url,
+        title=official.title,
+        text="Telegram Bot API documentation describes paid media methods for bots.",
+        fetched_at="2026-06-25T10:00:00+00:00",
+    )
+    stale_chunk = EvidenceChunk(
+        text="Old cached third-party notes claim paid media details are unknown.",
+        source_url=stale_cached.url,
+        source_title=stale_cached.title,
+        relevance=0.99,
+        metadata={"fetched_at": "2025-01-01T00:00:00+00:00", "source_type": "Unknown"},
+    )
+    service = CurrentInfoService(
+        search_provider=_FakeSearchProvider((stale_cached, official)),
+        fetch_provider=_FakeFetchProvider({official.url: official_doc}),
+        retrieval_provider=_FakeRetrievalProvider((stale_chunk,)),
+    )
+
+    answer = service.answer(
+        CurrentInfoRequest(
+            query="Telegram Bot API paid media",
+            locale="en",
+            max_results=2,
+            max_documents=1,
+            metadata={"now": "2026-06-25T12:00:00+00:00"},
+        )
+    )
+
+    assert answer.status == "answered"
+    assert answer.sources[0] == official.url
+    assert answer.evidence is not None
+    assert answer.evidence.chunks[0].source_url == official.url
+    assert answer.search_bundle is not None
+    assert answer.search_bundle.results[0].metadata["source_preference_source"] == "inferred_authoritative_primary"
+
+
+def test_current_info_service_fails_closed_for_irrelevant_authoritative_doc():
+    official = SearchResult(
+        title="Acme API overview",
+        url="https://docs.acme.example/api/overview",
+        snippet="Official Acme API documentation.",
+        provider="fake",
+        rank=1,
+        host="docs.acme.example",
+    )
+    document = FetchedDocument(
+        url=official.url,
+        title=official.title,
+        text="Acme API overview explains authentication and pagination basics.",
+    )
+    service = CurrentInfoService(
+        search_provider=_FakeSearchProvider((official,)),
+        fetch_provider=_FakeFetchProvider({official.url: document}),
+    )
+
+    answer = service.answer(CurrentInfoRequest(query="Acme API webhook retry limits", locale="en", max_results=1))
+
+    assert answer.status == "unverified_evidence"
+    assert answer.answer_text == ""
+    assert "irrelevant_source" in answer.warnings
+    assert answer.metadata["reason"] == "irrelevant_source"
 
 
 def test_current_info_service_fails_closed_without_search_provider():

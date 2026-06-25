@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from typing import Any, Iterator
 from urllib.parse import urlparse
 
-from amo_bot.core.logging import log_event
+from amo_bot.core.logging import log_event, redact_sensitive_text
 from amo_bot.current_info.models import JsonDict
 
 
@@ -146,6 +146,12 @@ def safe_query_fields(query: str) -> JsonDict:
     }
 
 
+def safe_error_message(exc: BaseException, *, max_chars: int = 240) -> str:
+    normalized = " ".join(str(exc).split())
+    redacted = redact_sensitive_text(normalized)
+    return redacted[:max_chars]
+
+
 def log_current_info_event(
     logger: logging.Logger,
     *,
@@ -185,6 +191,9 @@ def _redact_log_payload(payload: JsonDict) -> JsonDict:
     redacted: JsonDict = {}
     for key, value in payload.items():
         if "query" in key.casefold() and key not in {"query_hash", "query_length"}:
+            continue
+        if key == "error_message" and isinstance(value, str):
+            redacted[key] = redact_sensitive_text(value)
             continue
         redacted[key] = value
     return redacted

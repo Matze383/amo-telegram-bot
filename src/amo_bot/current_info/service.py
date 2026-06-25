@@ -12,6 +12,7 @@ from amo_bot.current_info.candidates import (
     SOURCE_TYPE_DOCS,
     SOURCE_TYPE_NEWS,
     SOURCE_TYPE_OFFICIAL,
+    classify_source_type,
     normalize_dedupe_and_rank_search_results,
 )
 from amo_bot.current_info.evidence import assemble_evidence_package
@@ -35,6 +36,7 @@ from amo_bot.current_info.observability import (
     CurrentInfoRunBudget,
     CurrentInfoSafetyConfig,
     log_current_info_event,
+    safe_error_message,
 )
 from amo_bot.current_info.ports import (
     CurrentInfoFetchProvider,
@@ -248,13 +250,18 @@ class CurrentInfoService:
 
         try:
             if self._search_provider is None:
+                annotated_direct_results = _annotate_authoritative_search_results(
+                    direct_url_results,
+                    request=request,
+                    task=query_plan.task,
+                )
                 search_response = SearchProviderResponse(
                     results=_label_search_results(
                         normalize_dedupe_and_rank_search_results(
-                            direct_url_results,
+                            annotated_direct_results,
                             max_results=query_plan.max_results,
                             source_preferences=self._source_preferences_for_results(
-                                direct_url_results,
+                                annotated_direct_results,
                                 request=request,
                                 domain=task.domain,
                             ),
@@ -330,6 +337,12 @@ class CurrentInfoService:
             request=request,
             documents=documents,
             search_results=search_results,
+        )
+        chunks = _prepare_evidence_chunks_for_request(
+            chunks,
+            documents=documents,
+            request=request,
+            task=task,
         )
         evidence = assemble_evidence_package(
             request=request,
@@ -446,7 +459,11 @@ class CurrentInfoService:
         direct_url_results: tuple[SearchResult, ...] = (),
     ) -> SearchProviderResponse:
         assert self._search_provider is not None
-        collected: list[SearchResult] = list(direct_url_results)
+        collected: list[SearchResult] = list(_annotate_authoritative_search_results(
+            direct_url_results,
+            request=request,
+            task=query_plan.task,
+        ))
         metrics: list[SearchProviderMetric] = []
         seen_urls: set[str] = {item.url for item in direct_url_results if item.url}
         for query in query_plan.queries:
@@ -475,13 +492,18 @@ class CurrentInfoService:
                     continue
                 seen_urls.add(item.url)
                 collected.append(item)
+        annotated = _annotate_authoritative_search_results(
+            tuple(collected),
+            request=request,
+            task=query_plan.task,
+        )
         return SearchProviderResponse(
             results=_label_search_results(
                 normalize_dedupe_and_rank_search_results(
-                    tuple(collected),
+                    annotated,
                     max_results=query_plan.max_results,
                     source_preferences=self._source_preferences_for_results(
-                        tuple(collected),
+                        annotated,
                         request=request,
                         domain=query_plan.task.domain,
                     ),
@@ -497,14 +519,19 @@ class CurrentInfoService:
         request: CurrentInfoRequest,
         domain: str,
     ) -> dict[str, Mapping[str, object]]:
-        if self._source_preference_repository is None:
-            return {}
         hosts = tuple(dict.fromkeys(_host_from_search_result(result) for result in results if _host_from_search_result(result)))
         if not hosts:
             return {}
+        mapped: dict[str, Mapping[str, object]] = _builtin_source_preferences_for_results(
+            results,
+            request=request,
+            domain=domain,
+        )
+        if self._source_preference_repository is None:
+            return mapped
         list_for_hosts = getattr(self._source_preference_repository, "list_for_hosts", None)
         if list_for_hosts is None:
-            return {}
+            return mapped
         try:
             preferences = list_for_hosts(
                 source_hosts=hosts,
@@ -526,10 +553,9 @@ class CurrentInfoService:
                 reason_code="source_preference_lookup_failed",
                 extra={"error_class": exc.__class__.__name__},
             )
-            return {}
+            return mapped
         if not isinstance(preferences, Mapping):
-            return {}
-        mapped: dict[str, Mapping[str, object]] = {}
+            return mapped
         for host, preference in preferences.items():
             host_key = normalize_source_host(str(host))
             if not host_key:
@@ -566,8 +592,31 @@ class CurrentInfoService:
                 break
             fetch_started = time.perf_counter()
             document = None
+            fetch_error: Exception | None = None
             for candidate_url in _fetch_url_candidates(result):
-                document = self._fetch_provider.fetch(url=candidate_url, locale=request.locale)
+                try:
+                    document = self._fetch_provider.fetch(url=candidate_url, locale=request.locale)
+                except Exception as exc:
+                    fetch_error = exc
+                    log_current_info_event(
+                        logger,
+                        event="current_info.FetchRun",
+                        stage="fetch",
+                        query=request.query,
+                        chat_id=request.chat_id,
+                        user_id=request.user_id,
+                        topic_id=request.topic_id,
+                        duration_ms=int((time.perf_counter() - fetch_started) * 1000),
+                        outcome="error",
+                        reason_code="fetch_provider_error",
+                        extra={
+                            "host": result.host,
+                            "provider_kind": "fetch",
+                            "error_class": exc.__class__.__name__,
+                            "error_message": safe_error_message(exc, max_chars=200),
+                        },
+                    )
+                    continue
                 if document is not None:
                     break
             log_current_info_event(
@@ -579,8 +628,20 @@ class CurrentInfoService:
                 user_id=request.user_id,
                 topic_id=request.topic_id,
                 duration_ms=int((time.perf_counter() - fetch_started) * 1000),
-                outcome="hit" if document is not None else "miss",
-                extra={"host": result.host, "provider_kind": "fetch"},
+                outcome="hit" if document is not None else "error" if fetch_error is not None else "miss",
+                reason_code="fetch_provider_error" if document is None and fetch_error is not None else None,
+                extra={
+                    "host": result.host,
+                    "provider_kind": "fetch",
+                    **(
+                        {
+                            "error_class": fetch_error.__class__.__name__,
+                            "error_message": safe_error_message(fetch_error, max_chars=200),
+                        }
+                        if document is None and fetch_error is not None
+                        else {}
+                    ),
+                },
             )
             if document is None or not document.text.strip():
                 continue
@@ -806,12 +867,374 @@ def _label_search_results(results: tuple[SearchResult, ...]) -> tuple[SearchResu
     return tuple(labeled)
 
 
+
+_AUTHORITATIVE_SOURCE_TYPES = {SOURCE_TYPE_OFFICIAL, SOURCE_TYPE_DOCS}
+_AUTHORITATIVE_PREFERENCE_WEIGHT = -2.0
+_AUTHORITATIVE_QUERY_TERMS = {
+    "api",
+    "apis",
+    "changelog",
+    "docs",
+    "documentation",
+    "official",
+    "primary",
+    "reference",
+    "release",
+    "releases",
+    "source",
+    "version",
+    "versions",
+}
+_HOST_TOKEN_STOPWORDS = {
+    "api",
+    "app",
+    "blog",
+    "cloud",
+    "com",
+    "core",
+    "dev",
+    "developer",
+    "developers",
+    "docs",
+    "help",
+    "io",
+    "net",
+    "org",
+    "platform",
+    "support",
+    "www",
+}
+_QUERY_STOPWORDS = {
+    "a",
+    "about",
+    "an",
+    "and",
+    "are",
+    "aktuell",
+    "aktuelle",
+    "aktuellen",
+    "aktueller",
+    "as",
+    "auf",
+    "by",
+    "der",
+    "die",
+    "das",
+    "do",
+    "does",
+    "for",
+    "from",
+    "has",
+    "heute",
+    "have",
+    "how",
+    "i",
+    "in",
+    "is",
+    "ist",
+    "latest",
+    "new",
+    "neueste",
+    "jetzt",
+    "of",
+    "official",
+    "on",
+    "please",
+    "show",
+    "stand",
+    "the",
+    "to",
+    "und",
+    "was",
+    "what",
+    "when",
+    "with",
+    "zur",
+}
+
+
+def _annotate_authoritative_search_results(
+    results: tuple[SearchResult, ...],
+    *,
+    request: CurrentInfoRequest,
+    task: TaskSpec,
+) -> tuple[SearchResult, ...]:
+    if not _needs_authoritative_primary_sources(request=request, task=task):
+        return results
+    annotated: list[SearchResult] = []
+    for result in results:
+        if not _is_authoritative_primary_result(result, request=request, task=task):
+            annotated.append(result)
+            continue
+        metadata = dict(result.metadata)
+        metadata.setdefault("source_type", _classified_source_type(result))
+        metadata.setdefault("source_role", "official_source_candidate")
+        metadata.setdefault("quality_label", "official_source_candidate")
+        if _is_preferred_authoritative_primary_result(result, request=request, task=task):
+            metadata.setdefault("source_observation_outcome", "confirmed")
+            metadata.setdefault("source_observation_confidence", 1.0)
+            metadata.setdefault("source_observation_penalty", -1.0)
+            metadata.setdefault("source_preference_signal", "trusted")
+            metadata.setdefault("source_preference_weight", _AUTHORITATIVE_PREFERENCE_WEIGHT)
+            metadata.setdefault("source_preference_scope", "authoritative_primary_docs")
+            metadata.setdefault("source_preference_source", "inferred_authoritative_primary")
+        annotated.append(replace(result, metadata=metadata))
+    return tuple(annotated)
+
+
+def _builtin_source_preferences_for_results(
+    results: tuple[SearchResult, ...],
+    *,
+    request: CurrentInfoRequest,
+    domain: str,
+) -> dict[str, Mapping[str, object]]:
+    task = TaskSpec(task_type="", query=request.query, domain=domain or request.domain_hint)
+    if not _needs_authoritative_primary_sources(request=request, task=task):
+        return {}
+    preferences: dict[str, Mapping[str, object]] = {}
+    for result in results:
+        if not _is_preferred_authoritative_primary_result(result, request=request, task=task):
+            continue
+        host = _host_from_search_result(result)
+        if not host:
+            continue
+        preferences[host] = {
+            "source_preference_signal": "trusted",
+            "source_preference_weight": _AUTHORITATIVE_PREFERENCE_WEIGHT,
+            "source_preference_scope": "authoritative_primary_docs",
+            "source_preference_source": "inferred_authoritative_primary",
+        }
+    return preferences
+
+
+def _needs_authoritative_primary_sources(*, request: CurrentInfoRequest, task: TaskSpec) -> bool:
+    text = " ".join((request.query or "", task.query or "", task.domain or "", request.domain_hint or "")).casefold()
+    if not text.strip():
+        return False
+    return any(term in _query_terms(text) for term in _AUTHORITATIVE_QUERY_TERMS)
+
+
+def _is_authoritative_primary_result(result: SearchResult, *, request: CurrentInfoRequest, task: TaskSpec) -> bool:
+    provider = (result.provider or "").strip().lower()
+    existing_role = str(result.metadata.get("source_role") or "").strip().lower()
+    if provider == "direct_user_url" or existing_role == "direct_user_url":
+        return True
+    source_type = _classified_source_type(result)
+    if source_type in _AUTHORITATIVE_SOURCE_TYPES:
+        return True
+    if _looks_like_primary_source_for_query(result, request=request, task=task):
+        return True
+    return _looks_like_official_source(result)
+
+
+def _is_preferred_authoritative_primary_result(
+    result: SearchResult,
+    *,
+    request: CurrentInfoRequest,
+    task: TaskSpec,
+) -> bool:
+    provider = (result.provider or "").strip().lower()
+    existing_role = str(result.metadata.get("source_role") or "").strip().lower()
+    if provider == "direct_user_url" or existing_role == "direct_user_url":
+        return True
+    if not _host_matches_query_terms(result, request=request, task=task):
+        return False
+    source_type = _classified_source_type(result)
+    return (
+        source_type in _AUTHORITATIVE_SOURCE_TYPES
+        or _looks_like_primary_source_for_query(result, request=request, task=task)
+        or _looks_like_official_source(result)
+    )
+
+
+def _looks_like_primary_source_for_query(
+    result: SearchResult,
+    *,
+    request: CurrentInfoRequest,
+    task: TaskSpec,
+) -> bool:
+    if not _host_matches_query_terms(result, request=request, task=task):
+        return False
+    text = f"{result.title} {result.snippet} {urlparse(result.url or '').path}".casefold()
+    return bool(
+        re.search(
+            r"\b(?:api|changelog|docs?|documentation|reference|release|platform|developer|business|mini|paid)\b",
+            text,
+            re.IGNORECASE,
+        )
+    )
+
+
+def _host_matches_query_terms(
+    result: SearchResult,
+    *,
+    request: CurrentInfoRequest,
+    task: TaskSpec,
+) -> bool:
+    host = _host_from_search_result(result)
+    if not host:
+        return False
+    host_tokens = {
+        token
+        for token in re.findall(r"[a-z0-9][a-z0-9-]{2,}", host.casefold())
+        if token not in _HOST_TOKEN_STOPWORDS
+    }
+    if not host_tokens:
+        return False
+    query_terms = set(_query_terms(" ".join((request.query or "", task.query or ""))))
+    if not host_tokens.intersection(query_terms):
+        return False
+    return True
+
+
+def _classified_source_type(result: SearchResult) -> str:
+    existing = str(result.metadata.get("source_type") or "")
+    if existing:
+        return existing
+    return classify_source_type(result)
+
+
+def _is_fetched_authoritative_primary_document(
+    document: FetchedDocument,
+    *,
+    request: CurrentInfoRequest,
+    task: TaskSpec,
+) -> bool:
+    result = SearchResult(title=document.title, url=document.url, host=_host_from_url(document.url), metadata=document.metadata)
+    return _is_authoritative_primary_result(result, request=request, task=task)
+
+
+def _prepare_evidence_chunks_for_request(
+    chunks: tuple[EvidenceChunk, ...],
+    *,
+    documents: tuple[FetchedDocument, ...],
+    request: CurrentInfoRequest,
+    task: TaskSpec,
+) -> tuple[EvidenceChunk, ...]:
+    if not _needs_authoritative_primary_sources(request=request, task=task):
+        return chunks
+    prepared = list(chunks)
+    existing_urls = {chunk.source_url for chunk in prepared if chunk.source_url}
+    for document in documents:
+        if (
+            not document.url
+            or document.url in existing_urls
+            or not _is_fetched_authoritative_primary_document(document, request=request, task=task)
+        ):
+            continue
+        text = " ".join(document.text.split())
+        if not text:
+            continue
+        source_type = _classified_source_type(
+            SearchResult(title=document.title, url=document.url, host=_host_from_url(document.url), metadata=document.metadata)
+        )
+        prepared.append(
+            EvidenceChunk(
+                text=text[:1200],
+                source_url=document.url,
+                source_title=document.title,
+                relevance=1.0,
+                metadata={
+                    "source_type": source_type,
+                    "source_role": "official_source_candidate",
+                    "quality_label": "official_source_candidate",
+                    "retrieval": "fetched_document",
+                },
+            )
+        )
+    fetched_authoritative_urls = {
+        document.url
+        for document in documents
+        if document.url and _is_fetched_authoritative_primary_document(document, request=request, task=task)
+    }
+    if not fetched_authoritative_urls:
+        return chunks
+    rescored = [
+        _mark_irrelevant_authoritative_chunk(
+            chunk,
+            request=request,
+            task=task,
+            fetched_authoritative_urls=fetched_authoritative_urls,
+        )
+        for chunk in prepared
+    ]
+    return tuple(
+        sorted(
+            rescored,
+            key=lambda chunk: _evidence_chunk_priority(chunk, fetched_authoritative_urls=fetched_authoritative_urls),
+        )
+    )
+
+
+def _mark_irrelevant_authoritative_chunk(
+    chunk: EvidenceChunk,
+    *,
+    request: CurrentInfoRequest,
+    task: TaskSpec,
+    fetched_authoritative_urls: set[str],
+) -> EvidenceChunk:
+    if chunk.source_url not in fetched_authoritative_urls:
+        return chunk
+    if _chunk_relevant_to_query(chunk, request=request, task=task):
+        return chunk
+    metadata = dict(chunk.metadata)
+    metadata["warning_codes"] = tuple(dict.fromkeys((*_metadata_warning_codes(metadata), "irrelevant_source")))
+    return replace(chunk, metadata=metadata)
+
+
+def _evidence_chunk_priority(chunk: EvidenceChunk, *, fetched_authoritative_urls: set[str]) -> tuple[int, int, float]:
+    fetched_authoritative = chunk.source_url in fetched_authoritative_urls
+    warning_codes = _metadata_warning_codes(chunk.metadata)
+    irrelevant = "irrelevant_source" in warning_codes
+    source_type = str(chunk.metadata.get("source_type") or "")
+    return (
+        0 if fetched_authoritative and not irrelevant else 1,
+        0 if source_type in _AUTHORITATIVE_SOURCE_TYPES else 1,
+        -float(chunk.relevance or 0.0),
+    )
+
+
+def _chunk_relevant_to_query(chunk: EvidenceChunk, *, request: CurrentInfoRequest, task: TaskSpec) -> bool:
+    haystack = " ".join((chunk.source_title or "", chunk.text or "")).casefold()
+    if not haystack.strip():
+        return False
+    query_terms = tuple(term for term in _query_terms(" ".join((request.query or "", task.query or ""))) if term not in _AUTHORITATIVE_QUERY_TERMS)
+    if not query_terms:
+        query_terms = _query_terms(" ".join((request.query or "", task.query or "")))
+    if not query_terms:
+        return True
+    matches = sum(1 for term in dict.fromkeys(query_terms) if term in haystack)
+    required = 1 if len(set(query_terms)) <= 2 else 2
+    return matches >= required
+
+
+def _metadata_warning_codes(metadata: Mapping[str, object]) -> tuple[str, ...]:
+    warnings = metadata.get("warning_codes") or metadata.get("warnings") or ()
+    if isinstance(warnings, str):
+        return tuple(item for item in warnings.replace(",", " ").split() if item)
+    if isinstance(warnings, (tuple, list, set)):
+        return tuple(str(item) for item in warnings if str(item).strip())
+    return ()
+
+
+def _query_terms(text: str) -> tuple[str, ...]:
+    terms: list[str] = []
+    for term in re.findall(r"[a-zA-Z0-9][a-zA-Z0-9_.+-]{1,}", (text or "").casefold()):
+        normalized = term.strip("._-+")
+        if len(normalized) < 2 or normalized in _QUERY_STOPWORDS:
+            continue
+        terms.append(normalized)
+    return tuple(dict.fromkeys(terms))
+
+
 def _source_role(result: SearchResult) -> str:
     provider = (result.provider or "").strip().lower()
     existing = str(result.metadata.get("source_role") or "").strip()
     if provider == "direct_user_url" or existing == "direct_user_url":
         return "direct_user_url"
     source_type = str(result.metadata.get("source_type") or "")
+    if str(result.metadata.get("source_preference_source") or "") == "inferred_authoritative_primary":
+        return "official_source_candidate"
     if source_type in {SOURCE_TYPE_OFFICIAL, SOURCE_TYPE_DOCS}:
         return "official_source_candidate"
     if _looks_like_official_source(result):
@@ -852,10 +1275,25 @@ def _fetch_priority_results(search_results: tuple[SearchResult, ...]) -> tuple[S
             search_results,
             key=lambda result: (
                 0 if (result.provider or "").strip().lower() == "direct_user_url" else 1,
+                _fetch_priority_source_score(result),
                 result.rank,
             ),
         )
     )
+
+
+def _fetch_priority_source_score(result: SearchResult) -> int:
+    if str(result.metadata.get("source_preference_source") or "") == "inferred_authoritative_primary":
+        return 0
+    if str(result.metadata.get("source_role") or "") == "official_source_candidate":
+        return 1
+    if str(result.metadata.get("source_type") or "") in {SOURCE_TYPE_OFFICIAL, SOURCE_TYPE_DOCS}:
+        return 1
+    return 2
+
+
+def _host_from_url(url: str) -> str:
+    return normalize_source_host(urlparse(url).hostname)
 
 
 def _fetch_url_candidates(result: SearchResult) -> tuple[str, ...]:

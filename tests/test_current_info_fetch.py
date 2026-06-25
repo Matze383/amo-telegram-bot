@@ -264,6 +264,40 @@ def test_fetch_returns_none_for_timeout_and_http_failure(monkeypatch) -> None:
     assert failure_fetcher.fetch(url="https://example.com/failure", locale="en") is None
 
 
+def test_crawlee_runtime_error_falls_back_to_httpx(monkeypatch) -> None:
+    monkeypatch.setattr(socket, "getaddrinfo", _public_dns)
+    html = b"""
+    <html><body><main><p>HTTPX fallback body with enough detail for current-info extraction.</p></main></body></html>
+    """
+    factory = _FakeHttpClientFactory(
+        [
+            _FakeResponse(
+                url="https://example.com/current",
+                status_code=200,
+                headers={"content-type": "text/html; charset=utf-8"},
+                content=html,
+            )
+        ]
+    )
+    fetcher = CrawleeDocumentFetcher(
+        DocumentFetchConfig(prefer_crawlee=True),
+        http_client_factory=factory,
+    )
+
+    async def _raise_runtime_error(url: str):  # noqa: ANN202
+        del url
+        raise RuntimeError("Stream is already consumed")
+
+    monkeypatch.setattr(fetcher, "_async_fetch_once_with_crawlee", _raise_runtime_error)
+
+    document = fetcher.fetch(url="https://example.com/current", locale="en")
+
+    assert document is not None
+    assert document.provider == "httpx"
+    assert "HTTPX fallback body" in document.text
+    assert [client.urls for client in factory.clients] == [["https://example.com/current"]]
+
+
 def test_build_document_fetcher_from_settings_uses_current_info_fetch_config() -> None:
     class _Settings:
         amo_document_fetch_timeout_seconds = 2.5

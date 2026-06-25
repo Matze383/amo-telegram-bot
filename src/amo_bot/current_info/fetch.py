@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import ipaddress
+import logging
 import re
 import socket
 from dataclasses import dataclass
@@ -23,6 +24,8 @@ from amo_bot.current_info.observability import (
     CurrentInfoSafetyConfig,
 )
 
+
+logger = logging.getLogger(__name__)
 
 _DEFAULT_ALLOWED_MIME_TYPES = (
     "text/html",
@@ -154,6 +157,13 @@ class CrawleeDocumentFetcher:
             return None
         except CurrentInfoBudgetExceeded as exc:
             raise CurrentInfoFetchBlocked(exc.reason_code) from exc
+        except (RuntimeError, httpx.HTTPError, TimeoutError) as exc:
+            logger.warning(
+                "current_info_crawlee_fetch_failed_fallback_httpx: %s: %s",
+                exc.__class__.__name__,
+                _safe_error_message(exc),
+            )
+            return None
 
     async def _async_fetch_once_with_crawlee(self, url: str) -> _RawFetchResult:
         from crawlee.http_clients import HttpxHttpClient
@@ -281,6 +291,13 @@ def build_document_fetcher_from_settings(settings: Any, *, http_client_factory: 
         ),
         http_client_factory=http_client_factory,
     )
+
+
+def _safe_error_message(exc: BaseException, *, max_chars: int = 200) -> str:
+    message = " ".join(str(exc).split())
+    if not message:
+        return ""
+    return message[:max_chars]
 
 
 def extract_document(

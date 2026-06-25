@@ -44,7 +44,7 @@ class WebtoolCapabilityRequest:
     Translates to WebtoolSubagentRequest internally.
 
     Attributes:
-        capability: One of "websearch" or "webscraping".
+        capability: One of "websearch", "webresearch", or "webscraping".
         user_id: Telegram user ID making the request.
         role: Role of the user for quota/policy evaluation.
         chat_id: Telegram chat ID where request originated.
@@ -96,7 +96,7 @@ class WebtoolCapabilityResult:
 def _map_operation_type(capability: str) -> str:
     """Map capability string to WebtoolOperationType."""
     normalized = capability.strip().lower()
-    if normalized == "websearch":
+    if normalized in {"websearch", "webresearch"}:
         return WebtoolOperationType.WEBSEARCH
     if normalized == "webscraping":
         return WebtoolOperationType.WEBSCRAPING

@@ -101,6 +101,7 @@ from amo_bot.current_info.research import (
     ResearchProviderUnavailable,
     build_gpt_researcher_provider_config_from_settings,
     build_gpt_researcher_provider_from_settings,
+    resolve_research_embedding_config,
     resolve_research_model_config,
 )
 from amo_bot.current_info.service import (
@@ -257,6 +258,7 @@ __all__ = [
     "map_search_profile",
     "normalize_dedupe_and_rank_search_results",
     "query_hash",
+    "resolve_research_embedding_config",
     "resolve_research_model_config",
     "searxng_profile_params",
     "select_search_profile",

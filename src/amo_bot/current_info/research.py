@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import tempfile
 from contextlib import contextmanager
@@ -9,6 +10,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Protocol
 from urllib.parse import urlparse
+
+from sqlalchemy.engine import make_url
 
 from amo_bot.current_info.models import (
     CurrentInfoAnswer,
@@ -21,7 +24,11 @@ from amo_bot.current_info.models import (
     SearchResult,
     TaskSpec,
 )
+from amo_bot.current_info.observability import safe_error_message
 from amo_bot.current_info.vector import EmbeddingProvider, build_embedding_provider_from_settings
+
+
+logger = logging.getLogger(__name__)
 
 
 class ResearchProviderError(RuntimeError):
@@ -60,6 +67,7 @@ class GptResearcherProviderConfig:
     vector_collection: str
     ollama_base_url: str
     ollama_num_ctx: int | None = None
+    embedding: str = "openai:text-embedding-3-small"
 
 
 class AmoLangChainEmbeddings:
@@ -120,6 +128,7 @@ class GptResearcherProvider:
         try:
             result = asyncio.run(asyncio.wait_for(self._answer_async(request=request, task=task), timeout=self._config.timeout_seconds))
         except TimeoutError:
+            logger.warning("gpt_researcher_timeout")
             return _provider_unavailable_answer(
                 request=request,
                 task=task,
@@ -127,12 +136,21 @@ class GptResearcherProvider:
                 warning="gpt_researcher_timeout",
             )
         except Exception as exc:
+            error_message = safe_error_message(exc)
+            logger.warning(
+                "gpt_researcher_failed: %s: %s",
+                exc.__class__.__name__,
+                error_message,
+            )
             return _provider_unavailable_answer(
                 request=request,
                 task=task,
                 query_plan=query_plan,
                 warning="gpt_researcher_failed",
-                metadata={"error_class": exc.__class__.__name__},
+                metadata={
+                    "error_class": exc.__class__.__name__,
+                    "error_message": error_message,
+                },
             )
         return _research_result_to_answer(
             result,
@@ -203,8 +221,8 @@ class GptResearcherProvider:
             "DEEP_RESEARCH_BREADTH": self._config.deep_breadth,
             "DEEP_RESEARCH_DEPTH": self._config.deep_depth,
             "DEEP_RESEARCH_CONCURRENCY": self._config.deep_concurrency,
-            "LLM_KWARGS": json.dumps(llm_kwargs) if llm_kwargs else "{}",
-            "EMBEDDING": "custom",
+            "LLM_KWARGS": llm_kwargs,
+            "EMBEDDING": self._config.embedding,
             "PROMPT_FAMILY": "default",
         }
 
@@ -244,6 +262,7 @@ def build_gpt_researcher_provider_config_from_settings(settings: Any) -> GptRese
         vector_collection=str(getattr(settings, "amo_research_vector_collection", "amo_gpt_researcher_chunks") or "amo_gpt_researcher_chunks"),
         ollama_base_url=str(getattr(settings, "ollama_base_url", "http://127.0.0.1:11434") or "http://127.0.0.1:11434"),
         ollama_num_ctx=int(getattr(settings, "ollama_thinking_budget_max_prompt_chars", 0) or 0) or None,
+        embedding=resolve_research_embedding_config(settings),
     )
 
 
@@ -265,9 +284,73 @@ def resolve_research_model_config(settings: Any) -> ResearchModelConfig:
     )
 
 
+def resolve_research_embedding_config(settings: Any) -> str:
+    provider = str(getattr(settings, "amo_vector_embedding_provider", "ollama") or "ollama").strip().casefold()
+    model = str(getattr(settings, "amo_vector_embedding_model", "") or "").strip()
+    if not provider or not model:
+        raise ValueError("Research embeddings require AMO_VECTOR_EMBEDDING_PROVIDER and AMO_VECTOR_EMBEDDING_MODEL")
+    return _embedding_id(provider=provider, model=model)
+
+
+def _embedding_id(*, provider: str, model: str) -> str:
+    model = model.strip()
+    explicit_provider = model.split(":", 1)[0].casefold() if ":" in model else ""
+    if explicit_provider in {
+        "openai",
+        "azure_openai",
+        "cohere",
+        "gigachat",
+        "google_vertexai",
+        "google_genai",
+        "fireworks",
+        "ollama",
+        "together",
+        "mistralai",
+        "huggingface",
+        "nomic",
+        "voyageai",
+        "dashscope",
+        "custom",
+        "bedrock",
+        "aimlapi",
+        "netmind",
+        "openrouter",
+        "minimax",
+    }:
+        return model
+    return f"{provider}:{model}"
+
+
 def _llm_id(*, provider: str, model: str) -> str:
     model = model.strip()
-    if ":" in model:
+    explicit_provider = model.split(":", 1)[0].casefold() if ":" in model else ""
+    if explicit_provider in {
+        "openai",
+        "anthropic",
+        "azure_openai",
+        "cohere",
+        "google_vertexai",
+        "google_genai",
+        "fireworks",
+        "ollama",
+        "together",
+        "mistralai",
+        "huggingface",
+        "groq",
+        "bedrock",
+        "dashscope",
+        "xai",
+        "deepseek",
+        "litellm",
+        "gigachat",
+        "openrouter",
+        "vllm_openai",
+        "aimlapi",
+        "netmind",
+        "forge",
+        "avian",
+        "minimax",
+    }:
         return model
     return f"{provider}:{model}"
 
@@ -290,10 +373,17 @@ def _build_pgvector_store(*, database_url: str, collection_name: str, embedding_
     return PGVector(
         embeddings=AmoLangChainEmbeddings(embedding_provider),
         collection_name=collection_name,
-        connection=database_url,
+        connection=_sync_pgvector_connection_url(database_url),
         use_jsonb=True,
-        async_mode=True,
+        async_mode=False,
     )
+
+
+def _sync_pgvector_connection_url(database_url: str) -> str:
+    url = make_url(database_url)
+    if url.drivername == "postgresql+asyncpg":
+        url = url.set(drivername="postgresql+psycopg")
+    return url.render_as_string(hide_password=False)
 
 
 def _write_temp_config(config: dict[str, Any]) -> str:

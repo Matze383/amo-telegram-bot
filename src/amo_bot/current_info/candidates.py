@@ -163,8 +163,8 @@ def normalize_dedupe_and_rank_search_results(
 
         parsed = urlparse(canonical_url)
         host = normalize_source_host(parsed.hostname or result.host)
-        source_type = classify_source_type(replace(result, url=canonical_url, host=host))
         metadata = dict(result.metadata)
+        source_type = str(metadata.get("source_type") or classify_source_type(replace(result, url=canonical_url, host=host)))
         metadata["canonical_url"] = canonical_url
         metadata["source_type"] = source_type
         if host in normalized_source_preferences:

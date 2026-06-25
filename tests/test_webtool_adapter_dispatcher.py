@@ -212,6 +212,42 @@ class TestWebtoolCapabilityDispatcherQuotaFirst:
         assert result.decision == "disabled"
         assert provider_calls == []  # Provider never called
 
+    def test_webresearch_capability_maps_to_websearch_operation(self, session_factory):
+        """Legacy webresearch capability reuses the supported websearch operation."""
+        from amo_bot.db.repositories import WebToolRoleQuotaRepository
+
+        provider_calls = []
+
+        class TrackingSearchProvider:
+            def search(self, *, query: str, locale: str, max_results: int):
+                provider_calls.append((query, locale, max_results))
+                return [{"title": "result", "url": "https://example.com", "snippet": "test"}]
+
+        with session_factory() as s:
+            quota_repo = WebToolRoleQuotaRepository(s)
+            service = create_webtool_subagent_service(
+                quota_repo,
+                search_provider=TrackingSearchProvider(),
+            )
+            dispatcher = WebtoolCapabilityDispatcher(quota_repo, service=service)
+
+        result = dispatcher.execute(
+            WebtoolCapabilityRequest(
+                capability="webresearch",
+                user_id=42,
+                role=Role.OWNER,
+                chat_id=-100,
+                query="current research query",
+                locale="de",
+                max_results=3,
+            )
+        )
+
+        assert result.allowed is True
+        assert result.decision == "allow"
+        assert result.metadata["operation"] == "websearch"
+        assert provider_calls == [("current research query", "de", 3)]
+
     def test_weather_evidence_quota_exceeded_denies_before_provider_call(self, session_factory):
         """Structured weather evidence uses the same quota-first path."""
         from amo_bot.db.repositories import WebToolRoleQuotaRepository

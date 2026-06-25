@@ -46,19 +46,23 @@ def masked_id(value: str | int | None) -> str:
 _TELEGRAM_BOT_URL_RE = re.compile(r"(/bot)([^/\s]+)(/)")
 _REDACTED_BOT_SEGMENT = r"\1***REDACTED***\3"
 
-_BEARER_RE = re.compile(r"(?i)(\bAuthorization\s*:\s*Bearer\s+)([^\s,;]+)")
+_BEARER_RE = re.compile(r"(?i)(\bAuthorization\s*[:=]\s*Bearer\s+)([^\s,;]+)")
 _KEYVALUE_SECRET_RE = re.compile(
-    r"(?i)(\b(?:api_key|token|password|cookie|session)\b\s*[:=]\s*)([^\s,;]+)"
+    r"(?i)(\b(?:api_key|key|token|password|secret|cookie|session)\b\s*[:=]\s*)([^\s,;&]+)"
 )
 _PREFIX_SECRET_RE = re.compile(r"\b(?:sk-[A-Za-z0-9_-]{8,}|ghp_[A-Za-z0-9]{8,})\b")
 
 
-def _mask_sensitive_text(value: str) -> str:
+def redact_sensitive_text(value: str) -> str:
     redacted = _TELEGRAM_BOT_URL_RE.sub(_REDACTED_BOT_SEGMENT, value)
     redacted = _BEARER_RE.sub(r"\1***REDACTED***", redacted)
     redacted = _KEYVALUE_SECRET_RE.sub(r"\1***REDACTED***", redacted)
     redacted = _PREFIX_SECRET_RE.sub("***REDACTED***", redacted)
     return redacted
+
+
+def _mask_sensitive_text(value: str) -> str:
+    return redact_sensitive_text(value)
 
 
 class SensitiveLogFilter(logging.Filter):
