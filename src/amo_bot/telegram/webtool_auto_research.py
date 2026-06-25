@@ -64,11 +64,27 @@ _MARKET_CURRENT_INTENT_RE = re.compile(
     r"börsennotiert|boersennotiert|derivat|derivative|kaufen|buy|trade|traden|handeln|handelbar)\b",
     re.IGNORECASE,
 )
+_WEATHER_INTENT_RE = re.compile(
+    r"\b(?:wetter|weather|temperatur|temperature|regen|rain|forecast|vorhersage)\b",
+    re.IGNORECASE,
+)
 
 _SMALLTALK_PATTERNS = (
     r"\bhallo\b", r"\bhi\b", r"\bhey\b", r"\bdanke\b", r"\bwie geht'?s\b",
     r"\bwas machst du\b", r"\bgute[nr]? morgen\b", r"\bgute[nr]? abend\b",
 )
+
+_COMPLEX_RESEARCH_RE = re.compile(
+    r"\b(?:"
+    r"recherchier(?:e|en)?|research|analyse|analysiere|einordnung|hintergrund|"
+    r"aktuelle\s+lage|aktueller\s+stand|latest\s+developments?|"
+    r"vergleich(?:e|en)?|compare|pro\s*/?\s*contra|vor[-\s]?und\s+nachteile|"
+    r"was\s+spricht\s+(?:daf(?:ü|ue)r|dagegen)|"
+    r"fass(?:e)?\s+.*\s+zusammen|summari[sz]e"
+    r")\b",
+    re.IGNORECASE,
+)
+_COMPLEX_SOURCE_RE = re.compile(r"\b(?:quellen|sources?|belege|evidence)\b", re.IGNORECASE)
 
 
 
@@ -99,6 +115,9 @@ def decide_auto_research(text: str, *, now: datetime | None = None) -> AutoResea
             return AutoResearchDecision(True, "websearch", "market_current_info_signal", _sanitize_text(raw, max_len=220), url)
         capability = "browser" if url.startswith("https://") else "webscraping"
         return AutoResearchDecision(True, capability, "contains_url", "", url)
+
+    if _is_complex_research_query(raw):
+        return AutoResearchDecision(True, "webresearch", "complex_research_signal", _sanitize_text(raw, max_len=220), "")
 
     current_year = (now or datetime.now(UTC)).year
     has_temporal = any(k in lowered for k in _CURRENT_KEYWORDS)
@@ -159,3 +178,17 @@ def decide_auto_research(text: str, *, now: datetime | None = None) -> AutoResea
         )
 
     return AutoResearchDecision(False, "", "timeless_or_unclear", "", "")
+
+
+def _is_complex_research_query(raw: str) -> bool:
+    strong_complex = bool(_COMPLEX_RESEARCH_RE.search(raw))
+    source_only_complex = bool(_COMPLEX_SOURCE_RE.search(raw) and len(raw) >= 80)
+    if not (strong_complex or source_only_complex):
+        return False
+    if _WEATHER_INTENT_RE.search(raw) and len(raw) < 140:
+        return False
+    if _MARKET_CURRENT_SIGNAL_RE.search(raw) and _MARKET_CURRENT_INTENT_RE.search(raw) and len(raw) < 140:
+        return False
+    if sports_query.has_competition(raw) and _SPORTS_CURRENT_INTENT_RE.search(raw) and len(raw) < 140:
+        return False
+    return True

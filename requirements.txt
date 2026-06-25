@@ -12,3 +12,6 @@ PyYAML>=6.0,<7.0
 playwright>=1.48,<2.0
 crawlee>=1.7,<2.0
 ccxt>=4.5,<5
+gpt-researcher>=0.15,<0.16
+langchain-core>=0.2,<1.0
+langchain-postgres>=0.0.12,<1.0

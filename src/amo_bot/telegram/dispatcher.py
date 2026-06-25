@@ -1820,7 +1820,7 @@ class Dispatcher:
 
         decision = decide_auto_research(normalized_text)
         current_info_query = normalized_text if decision.url and normalized_text.strip() else decision.query
-        if not decision.enabled or decision.capability not in {"websearch", "browser", "webscraping"} or not current_info_query:
+        if not decision.enabled or decision.capability not in {"webresearch", "websearch", "browser", "webscraping"} or not current_info_query:
             return False
 
         timeout_seconds = max(float(self.current_info_timeout_seconds), 0.001)
@@ -1837,6 +1837,8 @@ class Dispatcher:
             metadata={
                 "telegram_message_id": message.message_id,
                 "auto_research_reason": decision.reason,
+                "capability": decision.capability,
+                "auto_research_capability": decision.capability,
                 "direct_url": decision.url,
             },
         )

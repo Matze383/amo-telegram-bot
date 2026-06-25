@@ -193,6 +193,22 @@ class Settings(BaseSettings):
     amo_current_info_cache_retention_days: int = Field(default=30, alias="AMO_CURRENT_INFO_CACHE_RETENTION_DAYS", ge=1, le=365)
     amo_current_info_cache_max_chunk_chars: int = Field(default=1200, alias="AMO_CURRENT_INFO_CACHE_MAX_CHUNK_CHARS", ge=200, le=4000)
     amo_current_info_cache_max_chunks_per_document: int = Field(default=12, alias="AMO_CURRENT_INFO_CACHE_MAX_CHUNKS_PER_DOCUMENT", ge=1, le=100)
+    amo_gpt_researcher_enabled: bool = Field(default=False, alias="AMO_GPT_RESEARCHER_ENABLED")
+    amo_research_model_provider: str = Field(default="ollama", alias="AMO_RESEARCH_MODEL_PROVIDER")
+    amo_research_fast_model: str = Field(default="", alias="AMO_RESEARCH_FAST_MODEL")
+    amo_research_smart_model: str = Field(default="", alias="AMO_RESEARCH_SMART_MODEL")
+    amo_research_strategic_model: str = Field(default="", alias="AMO_RESEARCH_STRATEGIC_MODEL")
+    amo_research_timeout_seconds: float = Field(default=120.0, alias="AMO_RESEARCH_TIMEOUT_SECONDS", gt=0, le=900)
+    amo_research_max_sources: int = Field(default=8, alias="AMO_RESEARCH_MAX_SOURCES", ge=1, le=25)
+    amo_research_max_context_chars: int = Field(default=12000, alias="AMO_RESEARCH_MAX_CONTEXT_CHARS", ge=1000, le=100000)
+    amo_research_deep_breadth: int = Field(default=3, alias="AMO_RESEARCH_DEEP_BREADTH", ge=1, le=10)
+    amo_research_deep_depth: int = Field(default=2, alias="AMO_RESEARCH_DEEP_DEPTH", ge=1, le=10)
+    amo_research_deep_concurrency: int = Field(default=4, alias="AMO_RESEARCH_DEEP_CONCURRENCY", ge=1, le=20)
+    amo_research_vector_collection: str = Field(
+        default="amo_gpt_researcher_chunks",
+        alias="AMO_RESEARCH_VECTOR_COLLECTION",
+    )
+    amo_research_report_words: int = Field(default=900, alias="AMO_RESEARCH_REPORT_WORDS", ge=200, le=5000)
     amo_vector_enabled: bool = Field(default=False, alias="AMO_VECTOR_ENABLED")
     amo_vector_provider: str = Field(default="postgres", alias="AMO_VECTOR_PROVIDER")
     amo_vector_url: str = Field(default="", validation_alias=AliasChoices("AMO_VECTOR_URL", "QDRANT_URL"))
@@ -541,6 +557,14 @@ class Settings(BaseSettings):
             raise ValueError("AMO_VECTOR_URL (or QDRANT_URL) is required when AMO_VECTOR_ENABLED=true")
         if self.amo_vector_enabled and not self.amo_vector_embedding_model:
             raise ValueError("AMO_VECTOR_EMBEDDING_MODEL is required when AMO_VECTOR_ENABLED=true")
+        research_model_provider = self.amo_research_model_provider.strip().casefold() or "ollama"
+        if not re.fullmatch(r"[a-z0-9_.-]+", research_model_provider):
+            raise ValueError("AMO_RESEARCH_MODEL_PROVIDER must be a provider id such as ollama")
+        self.amo_research_model_provider = research_model_provider
+        self.amo_research_fast_model = self.amo_research_fast_model.strip()
+        self.amo_research_smart_model = self.amo_research_smart_model.strip()
+        self.amo_research_strategic_model = self.amo_research_strategic_model.strip()
+        self.amo_research_vector_collection = self.amo_research_vector_collection.strip() or "amo_gpt_researcher_chunks"
 
         # Validate dreaming window: start must be before end (in the same timezone).
         try:

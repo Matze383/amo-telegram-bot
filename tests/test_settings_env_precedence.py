@@ -391,6 +391,56 @@ def test_current_info_release_defaults_and_issue_76_env_values_are_parsed(monkey
     assert overridden.amo_current_info_debug_output is True
 
 
+def test_gpt_researcher_env_values_are_parsed(monkeypatch, tmp_path) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "\n".join(
+            [
+                "BOT_TOKEN=token-from-dotenv",
+                "WEBUI_PASSWORD=pw-from-dotenv",
+                "WEBUI_SECRET_KEY=dotenv-secret-key-0123456789-abcdefghij",
+                "AMO_GPT_RESEARCHER_ENABLED=true",
+                "AMO_RESEARCH_MODEL_PROVIDER=OLLAMA",
+                "AMO_RESEARCH_FAST_MODEL=fast-local",
+                "AMO_RESEARCH_SMART_MODEL=smart-local",
+                "AMO_RESEARCH_STRATEGIC_MODEL=strategic-local",
+                "AMO_RESEARCH_TIMEOUT_SECONDS=180",
+                "AMO_RESEARCH_MAX_SOURCES=9",
+                "AMO_RESEARCH_MAX_CONTEXT_CHARS=15000",
+                "AMO_RESEARCH_DEEP_BREADTH=4",
+                "AMO_RESEARCH_DEEP_DEPTH=3",
+                "AMO_RESEARCH_DEEP_CONCURRENCY=2",
+                "AMO_RESEARCH_VECTOR_COLLECTION=custom_research_chunks",
+                "AMO_RESEARCH_REPORT_WORDS=1200",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("DOTENV_PATH", str(env_file))
+    monkeypatch.delenv("AMO_ENV_OVERRIDE", raising=False)
+    monkeypatch.delenv("WEBUI_LOGIN_DELAY_BASE_SECONDS", raising=False)
+    monkeypatch.delenv("WEBUI_LOGIN_DELAY_MAX_SECONDS", raising=False)
+
+    settings = get_settings()
+
+    assert settings.amo_gpt_researcher_enabled is True
+    assert settings.amo_research_model_provider == "ollama"
+    assert settings.amo_research_fast_model == "fast-local"
+    assert settings.amo_research_smart_model == "smart-local"
+    assert settings.amo_research_strategic_model == "strategic-local"
+    assert settings.amo_research_timeout_seconds == 180
+    assert settings.amo_research_max_sources == 9
+    assert settings.amo_research_max_context_chars == 15000
+    assert settings.amo_research_deep_breadth == 4
+    assert settings.amo_research_deep_depth == 3
+    assert settings.amo_research_deep_concurrency == 2
+    assert settings.amo_research_vector_collection == "custom_research_chunks"
+    assert settings.amo_research_report_words == 1200
+
+
 def test_no_secret_values_are_exposed_in_validation_error(monkeypatch, tmp_path) -> None:
     env_file = tmp_path / ".env"
     secret_value = "super-secret-value"

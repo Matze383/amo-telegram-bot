@@ -44,6 +44,7 @@ from amo_bot.current_info import (
     build_current_info_safety_config_from_settings,
     build_current_info_vector_components_from_settings,
     build_document_fetcher_from_settings,
+    build_gpt_researcher_provider_from_settings,
     build_search_broker_from_settings,
 )
 from amo_bot.db.repositories import WebToolRoleQuotaRepository
@@ -399,6 +400,13 @@ def run(argv: list[str] | None = None) -> None:
             current_info_vector_indexer = (
                 current_info_vector_components[0] if current_info_vector_components is not None else None
             )
+            current_info_embedding_provider = (
+                current_info_vector_components[2] if current_info_vector_components is not None else None
+            )
+            current_info_research_provider = build_gpt_researcher_provider_from_settings(
+                settings,
+                embedding_provider=current_info_embedding_provider,
+            )
             current_info_fetch_provider = build_cached_fetch_provider_from_settings(
                 settings,
                 session_factory=session_factory,
@@ -413,6 +421,7 @@ def run(argv: list[str] | None = None) -> None:
                     session_factory=session_factory,
                     vector_components=current_info_vector_components,
                 ),
+                research_provider=current_info_research_provider,
                 source_preference_repository=SessionBoundSourcePreferenceRepository(session_factory=session_factory),
                 safety_config=build_current_info_safety_config_from_settings(settings),
             )

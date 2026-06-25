@@ -150,6 +150,20 @@ def test_auto_research_triggers_on_year_date_reference():
     assert d.capability == "websearch"
 
 
+def test_auto_research_routes_complex_research_prompts_to_webresearch():
+    prompts = [
+        "Recherchiere die aktuelle Lage zu SearxNG und Brave Search mit Quellen.",
+        "Analysiere Vor- und Nachteile von GPT Researcher im Vergleich zu einfacher Websuche.",
+        "Was spricht dafür und dagegen, pgvector für Research-Kontexte zu nutzen?",
+        "Latest developments on local LLM research tools with sources",
+    ]
+    for prompt in prompts:
+        d = decide_auto_research(prompt)
+        assert d.enabled is True, prompt
+        assert d.capability == "webresearch"
+        assert d.reason == "complex_research_signal"
+
+
 def test_auto_research_triggers_on_german_sports_tournament_current_prompts():
     prompts = [
         "Wie läuft die WM-Vorrunde?",

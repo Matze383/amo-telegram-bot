@@ -91,6 +91,18 @@ from amo_bot.current_info.profiles import (
     searxng_profile_params,
     select_search_profile,
 )
+from amo_bot.current_info.research import (
+    AmoLangChainEmbeddings,
+    CurrentInfoResearchProvider,
+    GptResearcherProvider,
+    GptResearcherProviderConfig,
+    ResearchModelConfig,
+    ResearchProviderError,
+    ResearchProviderUnavailable,
+    build_gpt_researcher_provider_config_from_settings,
+    build_gpt_researcher_provider_from_settings,
+    resolve_research_model_config,
+)
 from amo_bot.current_info.service import (
     CurrentInfoService,
     DefaultCurrentInfoQueryPlanner,
@@ -129,6 +141,7 @@ from amo_bot.current_info.vector import (
 )
 
 __all__ = [
+    "AmoLangChainEmbeddings",
     "CurrentInfoAnswer",
     "CurrentInfoBudgetExceeded",
     "CrawleeDocumentFetcher",
@@ -140,6 +153,7 @@ __all__ = [
     "CurrentInfoFetchTooLarge",
     "CurrentInfoQueryPlanner",
     "CurrentInfoRequest",
+    "CurrentInfoResearchProvider",
     "CurrentInfoRetrievalProvider",
     "CurrentInfoRunBudget",
     "CurrentInfoSafetyConfig",
@@ -155,6 +169,8 @@ __all__ = [
     "EvidencePackage",
     "EvidencePackageSource",
     "FetchedDocument",
+    "GptResearcherProvider",
+    "GptResearcherProviderConfig",
     "HostConcurrencyLimiter",
     "HybridCurrentInfoRetrievalProvider",
     "InMemoryRateLimiter",
@@ -164,8 +180,11 @@ __all__ = [
     "PostgresVectorStore",
     "PostgresVectorStoreConfig",
     "QueryPlan",
+    "ResearchModelConfig",
     "ResearchPlan",
     "ResearchPlanStep",
+    "ResearchProviderError",
+    "ResearchProviderUnavailable",
     "BraveSearchConfig",
     "BraveSearchProvider",
     "BRAVE_CAPABILITIES",
@@ -226,6 +245,8 @@ __all__ = [
     "build_current_info_safety_config_from_settings",
     "build_current_info_vector_components_from_settings",
     "build_embedding_provider_from_settings",
+    "build_gpt_researcher_provider_config_from_settings",
+    "build_gpt_researcher_provider_from_settings",
     "build_search_broker_from_settings",
     "canonicalize_url",
     "classify_source_type",
@@ -236,6 +257,7 @@ __all__ = [
     "map_search_profile",
     "normalize_dedupe_and_rank_search_results",
     "query_hash",
+    "resolve_research_model_config",
     "searxng_profile_params",
     "select_search_profile",
 ]

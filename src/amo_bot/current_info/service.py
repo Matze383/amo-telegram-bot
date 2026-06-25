@@ -43,6 +43,7 @@ from amo_bot.current_info.ports import (
     CurrentInfoSearchProvider,
     CurrentInfoTaskPlanner,
 )
+from amo_bot.current_info.research import CurrentInfoResearchProvider
 from amo_bot.current_info.search import SearchProviderError
 
 
@@ -161,6 +162,7 @@ class CurrentInfoService:
         retrieval_provider: CurrentInfoRetrievalProvider | None = None,
         task_planner: CurrentInfoTaskPlanner | None = None,
         query_planner: CurrentInfoQueryPlanner | None = None,
+        research_provider: CurrentInfoResearchProvider | None = None,
         source_preference_repository: object | None = None,
         safety_config: CurrentInfoSafetyConfig | None = None,
     ) -> None:
@@ -169,6 +171,7 @@ class CurrentInfoService:
         self._retrieval_provider = retrieval_provider or SnippetRetrievalProvider()
         self._task_planner = task_planner or DefaultCurrentInfoTaskPlanner()
         self._query_planner = query_planner or DefaultCurrentInfoQueryPlanner()
+        self._research_provider = research_provider
         self._source_preference_repository = source_preference_repository
         self._safety_config = safety_config or CurrentInfoSafetyConfig()
 
@@ -197,6 +200,31 @@ class CurrentInfoService:
                 query_plan=query_plan,
                 warnings=("empty_query",),
                 metadata=self._debug_metadata(budget),
+            )
+
+        if _is_webresearch_request(request) and self._research_provider is not None:
+            research_answer = self._research_provider.answer(request=request, task=task, query_plan=query_plan)
+            if research_answer.answered or research_answer.status in {"empty_evidence", "unverified_evidence"}:
+                self._log_synthesis(
+                    request=request,
+                    task=task,
+                    started=started,
+                    status=research_answer.status,
+                    budget=budget,
+                    reason_code="gpt_researcher",
+                )
+                return research_answer
+            log_current_info_event(
+                logger,
+                event="current_info.ResearchFallback",
+                stage="research",
+                query=task.query,
+                chat_id=request.chat_id,
+                user_id=request.user_id,
+                topic_id=request.topic_id,
+                outcome="fallback",
+                reason_code=",".join(research_answer.warnings) if research_answer.warnings else research_answer.status,
+                extra={"provider_mode": "gpt_researcher"},
             )
 
         direct_url_results = _direct_url_search_results(task.query)
@@ -725,6 +753,16 @@ def _extract_direct_urls(query: str) -> tuple[str, ...]:
         seen.add(url)
         urls.append(url)
     return tuple(urls)
+
+
+def _is_webresearch_request(request: CurrentInfoRequest) -> bool:
+    metadata = dict(request.metadata or {})
+    return str(
+        metadata.get("capability")
+        or metadata.get("auto_research_capability")
+        or metadata.get("research_capability")
+        or ""
+    ).casefold() == "webresearch"
 
 
 def _general_query_variants(query: str, *, add_verification: bool = False) -> tuple[str, ...]:
