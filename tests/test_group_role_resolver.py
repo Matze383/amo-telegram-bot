@@ -1,4 +1,5 @@
 import asyncio
+import logging
 
 from amo_bot.auth.roles import Role
 from amo_bot.db.base import create_session_factory
@@ -183,7 +184,7 @@ def test_global_owner_is_not_downgraded_by_telegram_member_status(tmp_path) -> N
     assert tg.calls == []
 
 
-def test_telegram_chat_member_failure_falls_back_to_normal_in_group(tmp_path) -> None:
+def test_telegram_chat_member_failure_falls_back_to_normal_in_group(tmp_path, caplog) -> None:
     db_url = f"sqlite:///{tmp_path / 'telegram_failure.db'}"
     init_db(db_url)
     sf = create_session_factory(db_url)
@@ -191,8 +192,24 @@ def test_telegram_chat_member_failure_falls_back_to_normal_in_group(tmp_path) ->
     tg = _FakeTelegramClient(fail=True)
     resolver = DBRoleResolver(sf, telegram_client=tg)
 
-    assert asyncio.run(resolver.resolve(6006, chat_id=-606, chat_type="supergroup")) == Role.NORMAL
-    assert tg.calls == [(-606, 6006)]
+    with caplog.at_level(logging.INFO, logger="amo_bot.telegram.role_resolver"):
+        assert asyncio.run(resolver.resolve(6006006, chat_id=-100606, chat_type="supergroup")) == Role.NORMAL
+
+    assert tg.calls == [(-100606, 6006006)]
+
+    records = [record for record in caplog.records if record.msg == "telegram chat member lookup failed; falling back to stored role"]
+    assert len(records) == 1
+    record = records[0]
+    assert not hasattr(record, "chat_id")
+    assert not hasattr(record, "user_id")
+    assert record.chat_id_masked == "-10***..06 [7 digits]"
+    assert record.user_id_masked == "600***..06 [7 digits]"
+    assert record.chat_type == "supergroup"
+    assert record.error_type == "RuntimeError"
+
+    rendered = caplog.text
+    assert "-100606" not in rendered
+    assert "6006006" not in rendered
 
 
 def test_telegram_admin_lookup_uses_short_cache(tmp_path) -> None:

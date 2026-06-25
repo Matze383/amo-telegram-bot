@@ -7,6 +7,7 @@ from typing import Protocol
 from sqlalchemy.orm import sessionmaker
 
 from amo_bot.auth.roles import Role
+from amo_bot.core.logging import masked_id
 from amo_bot.db.models import GROUP_CHAT_TYPES
 from amo_bot.db.repositories import ChatScopedRoleRepository, UserRoleRepository
 from amo_bot.telegram.commands import RoleResolver
@@ -97,11 +98,15 @@ class DBRoleResolver(RoleResolver):
 
         try:
             member = await self._telegram_client.get_chat_member(chat_id=chat_id, user_id=user_id)
-        except Exception:
+        except Exception as exc:
             logger.info(
                 "telegram chat member lookup failed; falling back to stored role",
-                exc_info=True,
-                extra={"chat_id": chat_id, "user_id": user_id, "chat_type": chat_type},
+                extra={
+                    "chat_id_masked": masked_id(chat_id),
+                    "user_id_masked": masked_id(user_id),
+                    "chat_type": chat_type,
+                    "error_type": type(exc).__name__,
+                },
             )
             return False
 
