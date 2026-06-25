@@ -21,7 +21,8 @@ import asyncio
 import logging
 import re
 from datetime import UTC, datetime, timedelta, timezone
-from unittest.mock import MagicMock, patch
+from types import SimpleNamespace
+from unittest.mock import MagicMock, call, patch
 
 import pytest
 
@@ -330,6 +331,42 @@ async def test_batch_times_out_when_execution_exceeds_timeout() -> None:
     await rt.stop()
 
 
+@pytest.mark.asyncio
+async def test_timed_out_batch_remains_active_until_worker_finishes() -> None:
+    """A shielded timed-out batch is tracked so later batches do not overlap it."""
+    repo = _make_mock_repo()
+    rt = DreamingRuntime(repository=repo, enabled=False, timeout_seconds=5.0)
+    rt._timeout = 0.05
+
+    started = asyncio.Event()
+    finish = asyncio.Event()
+
+    async def slow_run(*args: object, **kwargs: object) -> MemoryMaintenanceResult:
+        started.set()
+        await finish.wait()
+        return _make_success_result()
+
+    rt._run_batch = slow_run  # type: ignore[method-assignment]
+
+    first = await rt._execute_batch([])
+    await started.wait()
+
+    assert first.status == "timeout"
+    assert first.error_class == "TimeoutError"
+    assert rt._active_run_task is not None
+    assert rt._active_run_task.done() is False
+
+    second = await rt._execute_batch([])
+    assert second.status == "timeout"
+    assert second.error_class == "Overlap"
+
+    active = rt._active_run_task
+    assert active is not None
+    finish.set()
+    await asyncio.wait_for(active, timeout=1.0)
+    assert rt._active_run_task is None
+
+
 # ── test: failure isolation ────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
@@ -392,6 +429,21 @@ async def test_stop_waits_for_in_progress_batch() -> None:
     done, pending = await asyncio.wait([stop_task], timeout=2.0)
     assert len(done) == 1
     assert rt.is_running is False
+
+
+def test_stop_sync_clears_active_run_task_without_running_loop() -> None:
+    """stop_sync() must not leave a stale active batch reference behind."""
+    repo = _make_mock_repo()
+    rt = DreamingRuntime(repository=repo, enabled=True, timeout_seconds=5.0)
+    rt._running = True
+    rt._active_run_task = MagicMock()  # type: ignore[assignment]
+
+    rt.stop_sync()
+
+    assert rt.is_running is False
+    assert rt._task is None
+    assert rt._stop_event is None
+    assert rt._active_run_task is None
 
 
 # ── test: batch size enforcement ────────────────────────────────────────────────
@@ -551,6 +603,52 @@ def test_dreaming_run_result_is_metadata_only() -> None:
     assert not hasattr(r, "prompt")
     assert not hasattr(r, "tokens")
     assert not hasattr(r, "memory_content")
+
+
+# ── test: auto-approve scope isolation ─────────────────────────────────────────
+
+def test_auto_approve_candidates_is_limited_to_current_batch_scopes() -> None:
+    """Auto-approve must query candidates for exact current batch scopes only."""
+    repo = _make_mock_repo()
+    rt = DreamingRuntime(repository=repo, enabled=False, auto_approve=True)
+
+    topic_scope = SimpleNamespace(scope_type="topic", chat_id=-1001, topic_id=7, user_id=None)
+    private_scope = SimpleNamespace(scope_type="private_user", chat_id=None, topic_id=None, user_id=7001)
+    topic_candidate = SimpleNamespace(id=101, promotion_status="candidate")
+    topic_legacy = SimpleNamespace(id=102, promotion_status="none")
+    private_candidate = SimpleNamespace(id=201, promotion_status="candidate")
+
+    def list_long_memories(**kwargs: object) -> list[object]:
+        if kwargs["scope_type"] == "topic":
+            assert kwargs["chat_id"] == -1001
+            assert kwargs["topic_id"] == 7
+            assert kwargs["user_id"] is None
+            return [topic_candidate, topic_legacy]
+        if kwargs["scope_type"] == "private_user":
+            assert kwargs["chat_id"] is None
+            assert kwargs["topic_id"] is None
+            assert kwargs["user_id"] == 7001
+            return [private_candidate]
+        raise AssertionError(f"unexpected scope query: {kwargs!r}")
+
+    repo.list_long_memories.side_effect = list_long_memories
+
+    approved = rt._auto_approve_candidates_sync([topic_scope, private_scope])  # type: ignore[list-item]
+
+    assert approved == 2
+    repo.list_long_memories.assert_has_calls(
+        [
+            call(scope_type="topic", chat_id=-1001, topic_id=7, user_id=None, active_only=True, limit=100),
+            call(scope_type="private_user", chat_id=None, topic_id=None, user_id=7001, active_only=True, limit=100),
+        ]
+    )
+    repo.approve_long_memory.assert_has_calls(
+        [
+            call(memory_id=101),
+            call(memory_id=201),
+        ]
+    )
+    assert repo.approve_long_memory.call_count == 2
 
 
 # ── test: service scopes parameter ─────────────────────────────────────────────

@@ -199,12 +199,14 @@ class DreamingRuntime:
             self._stopping = True
             self._running = False
             self._task = None
+            self._active_run_task = None
             self._stop_event = None
             return
         try:
             self._stopping = True
             if self._task is not None and not self._task.done():
                 self._task.cancel()
+            self._active_run_task = None
             self._running = False
         except Exception as exc:
             logger.debug("dreaming_runtime.stop_sync: %s", exc)
@@ -411,17 +413,18 @@ class DreamingRuntime:
             if active is not None and not active.done():
                 return _timeout_result(run_id, started_at, "overlap")
 
+            run_task = asyncio.create_task(self._run_batch(run_id, scopes))
+            self._active_run_task = run_task
+            run_task.add_done_callback(self._clear_active_run_task)
             maintenance_result = await asyncio.wait_for(
-                asyncio.shield(
-                    asyncio.create_task(self._run_batch(run_id, scopes)),
-                ),
+                asyncio.shield(run_task),
                 timeout=self._timeout,
             )
 
             auto_approved = 0
             if self._auto_approve and maintenance_result.curation_promoted > 0:
                 auto_approved = await asyncio.wait_for(
-                    asyncio.to_thread(self._auto_approve_candidates_sync),
+                    asyncio.to_thread(self._auto_approve_candidates_sync, scopes),
                     timeout=max(1.0, min(self._timeout, 30.0)),
                 )
 
@@ -514,22 +517,27 @@ class DreamingRuntime:
         """Call the synchronous maintenance service for an explicit scope list."""
         return self._service.run_once(scopes=scopes)
 
-    def _auto_approve_candidates_sync(self) -> int:
+    def _auto_approve_candidates_sync(self, scopes: list["TopicAgentConfig"]) -> int:
         """
         Approve all 'candidate' long_memory rows created during the most recent batch.
         """
         approved = 0
-        for scope_type in ("topic", "group_chat", "private_user"):
+        seen_memory_ids: set[int] = set()
+        for scope in scopes:
             try:
                 rows = self._repo.list_long_memories(
-                    scope_type=scope_type,
+                    scope_type=scope.scope_type,
+                    chat_id=scope.chat_id,
+                    topic_id=scope.topic_id,
+                    user_id=scope.user_id,
                     active_only=True,
                     limit=100,
                 )
                 for row in rows:
-                    if row.promotion_status == "candidate":
+                    if row.id not in seen_memory_ids and row.promotion_status == "candidate":
                         try:
                             self._repo.approve_long_memory(memory_id=row.id)
+                            seen_memory_ids.add(row.id)
                             approved += 1
                         except Exception:  # noqa: BLE001
                             pass
