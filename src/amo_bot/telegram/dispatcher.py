@@ -135,6 +135,7 @@ class Dispatcher:
     current_info_service: Any | None = None
     current_info_enabled: bool = False
     current_info_timeout_seconds: float = 8.0
+    current_info_late_synthesis_timeout_seconds: float = 60.0
     current_info_max_results: int = 5
     current_info_max_documents: int = 3
     live_edit_adapter: TelegramLiveEditAdapter | None = None
@@ -142,6 +143,7 @@ class Dispatcher:
     auto_image_followup_ttl_seconds: int = 180
     prompt_timezone: str = DEFAULT_AI_PROMPT_TIMEZONE
     _recent_auto_image_candidates: list[_RecentAutoImageCandidate] = field(default_factory=list)
+    _current_info_background_tasks: set[asyncio.Task[None]] = field(default_factory=set)
 
     async def handle_raw_update(self, raw_update: object) -> None:
         update = parse_update(raw_update)
@@ -1844,12 +1846,19 @@ class Dispatcher:
         )
 
         started = time.perf_counter()
+        retrieval_task = asyncio.create_task(asyncio.to_thread(self.current_info_service.answer, request))
         try:
             answer = await asyncio.wait_for(
-                asyncio.to_thread(self.current_info_service.answer, request),
+                asyncio.shield(retrieval_task),
                 timeout=timeout_seconds,
             )
         except TimeoutError:
+            self._schedule_late_current_info_answer(
+                retrieval_task=retrieval_task,
+                message=message,
+                locale=locale,
+                timeout_seconds=timeout_seconds,
+            )
             log_event(
                 logger,
                 logging.INFO,
@@ -1863,6 +1872,7 @@ class Dispatcher:
                     "reason": "timeout",
                     "stage": "retrieval",
                     "timeout_seconds": timeout_seconds,
+                    "late_delivery": "scheduled",
                 },
             )
             return False
@@ -1926,6 +1936,12 @@ class Dispatcher:
 
         remaining_seconds = timeout_seconds - (time.perf_counter() - started)
         if remaining_seconds <= 0:
+            self._schedule_late_current_info_answer(
+                retrieval_task=asyncio.create_task(self._completed_current_info_answer(answer)),
+                message=message,
+                locale=locale,
+                timeout_seconds=timeout_seconds,
+            )
             log_event(
                 logger,
                 logging.INFO,
@@ -1941,6 +1957,7 @@ class Dispatcher:
                     "timeout_seconds": timeout_seconds,
                     "status": answer.status,
                     "confidence": answer.confidence,
+                    "late_delivery": "scheduled",
                 },
             )
             return False
@@ -1966,6 +1983,12 @@ class Dispatcher:
                     "status": answer.status,
                     "confidence": answer.confidence,
                 },
+            )
+            self._schedule_late_current_info_answer(
+                retrieval_task=asyncio.create_task(self._completed_current_info_answer(answer)),
+                message=message,
+                locale=locale,
+                timeout_seconds=timeout_seconds,
             )
             return False
         except Exception as exc:
@@ -2009,6 +2032,202 @@ class Dispatcher:
             },
         )
         return True
+
+    def _schedule_late_current_info_answer(
+        self,
+        *,
+        retrieval_task: asyncio.Task[CurrentInfoAnswer],
+        message: TelegramMessage,
+        locale: str,
+        timeout_seconds: float,
+    ) -> None:
+        task = asyncio.create_task(
+            self._send_late_current_info_answer(
+                retrieval_task=retrieval_task,
+                message=message,
+                locale=locale,
+                timeout_seconds=timeout_seconds,
+            )
+        )
+        self._current_info_background_tasks.add(task)
+        task.add_done_callback(self._current_info_background_tasks.discard)
+        task.add_done_callback(self._log_current_info_background_task_result)
+
+    @staticmethod
+    async def _completed_current_info_answer(answer: CurrentInfoAnswer) -> CurrentInfoAnswer:
+        return answer
+
+    @staticmethod
+    def _log_current_info_background_task_result(task: asyncio.Task[None]) -> None:
+        if task.cancelled():
+            return
+        try:
+            task.result()
+        except Exception as exc:
+            log_event(
+                logger,
+                logging.WARNING,
+                event="current_info.telegram.late_task_failed",
+                component=_COMPONENT,
+                extra={"error_class": exc.__class__.__name__},
+            )
+
+    async def _send_late_current_info_answer(
+        self,
+        *,
+        retrieval_task: asyncio.Task[CurrentInfoAnswer],
+        message: TelegramMessage,
+        locale: str,
+        timeout_seconds: float,
+    ) -> None:
+        try:
+            answer = await retrieval_task
+        except Exception as exc:
+            log_event(
+                logger,
+                logging.INFO,
+                event="current_info.telegram.late_fallback",
+                component=_COMPONENT,
+                chat_id=message.chat.id,
+                message_id=message.message_id,
+                message_thread_id=message.message_thread_id,
+                user_id=message.from_user.id,
+                extra={
+                    "reason": "service_error",
+                    "error_class": exc.__class__.__name__,
+                    "timeout_seconds": timeout_seconds,
+                },
+            )
+            return
+
+        if isinstance(answer, CurrentInfoAnswer) and answer.status in {"empty_evidence", "unverified_evidence"}:
+            text = self._format_current_info_insufficient_answer(answer=answer, locale=locale)
+            if text.strip():
+                await self._send_text(message.chat.id, text, message.message_thread_id)
+                log_event(
+                    logger,
+                    logging.INFO,
+                    event="current_info.telegram.late_sent",
+                    component=_COMPONENT,
+                    chat_id=message.chat.id,
+                    message_id=message.message_id,
+                    message_thread_id=message.message_thread_id,
+                    user_id=message.from_user.id,
+                    extra={
+                        "status": answer.status,
+                        "confidence": answer.confidence,
+                        "source_count": len(answer.sources),
+                        "warning_count": len(answer.warnings),
+                        "reason": "insufficient_evidence",
+                        "timeout_seconds": timeout_seconds,
+                    },
+                )
+            return
+
+        if not isinstance(answer, CurrentInfoAnswer) or not answer.answered:
+            log_event(
+                logger,
+                logging.INFO,
+                event="current_info.telegram.late_fallback",
+                component=_COMPONENT,
+                chat_id=message.chat.id,
+                message_id=message.message_id,
+                message_thread_id=message.message_thread_id,
+                user_id=message.from_user.id,
+                extra={
+                    "reason": "not_answered",
+                    "status": getattr(answer, "status", "invalid_response"),
+                    "warning_count": len(getattr(answer, "warnings", ()) or ()),
+                    "timeout_seconds": timeout_seconds,
+                },
+            )
+            return
+
+        synthesis_timeout = max(float(self.current_info_late_synthesis_timeout_seconds), 0.001)
+        try:
+            synthesized = await asyncio.wait_for(
+                self._synthesize_current_info_answer(answer=answer, locale=locale),
+                timeout=synthesis_timeout,
+            )
+        except TimeoutError:
+            log_event(
+                logger,
+                logging.INFO,
+                event="current_info.telegram.late_fallback",
+                component=_COMPONENT,
+                chat_id=message.chat.id,
+                message_id=message.message_id,
+                message_thread_id=message.message_thread_id,
+                user_id=message.from_user.id,
+                extra={
+                    "reason": "timeout",
+                    "stage": "synthesis",
+                    "timeout_seconds": timeout_seconds,
+                    "late_synthesis_timeout_seconds": synthesis_timeout,
+                    "status": answer.status,
+                    "confidence": answer.confidence,
+                },
+            )
+            return
+        except Exception as exc:
+            log_event(
+                logger,
+                logging.INFO,
+                event="current_info.telegram.late_fallback",
+                component=_COMPONENT,
+                chat_id=message.chat.id,
+                message_id=message.message_id,
+                message_thread_id=message.message_thread_id,
+                user_id=message.from_user.id,
+                extra={
+                    "reason": "synthesis_error",
+                    "error_class": exc.__class__.__name__,
+                    "timeout_seconds": timeout_seconds,
+                    "status": answer.status,
+                    "confidence": answer.confidence,
+                },
+            )
+            return
+
+        text = self._format_current_info_telegram_answer(answer=answer, synthesized=synthesized, locale=locale)
+        if not text.strip():
+            log_event(
+                logger,
+                logging.INFO,
+                event="current_info.telegram.late_fallback",
+                component=_COMPONENT,
+                chat_id=message.chat.id,
+                message_id=message.message_id,
+                message_thread_id=message.message_thread_id,
+                user_id=message.from_user.id,
+                extra={
+                    "reason": "empty_formatted_answer",
+                    "timeout_seconds": timeout_seconds,
+                    "status": answer.status,
+                    "confidence": answer.confidence,
+                },
+            )
+            return
+
+        await self._send_text(message.chat.id, text, message.message_thread_id)
+        log_event(
+            logger,
+            logging.INFO,
+            event="current_info.telegram.late_sent",
+            component=_COMPONENT,
+            chat_id=message.chat.id,
+            message_id=message.message_id,
+            message_thread_id=message.message_thread_id,
+            user_id=message.from_user.id,
+            extra={
+                "status": answer.status,
+                "confidence": answer.confidence,
+                "source_count": len(answer.sources),
+                "warning_count": len(answer.warnings),
+                "timeout_seconds": timeout_seconds,
+                "late_synthesis_timeout_seconds": synthesis_timeout,
+            },
+        )
 
     async def _synthesize_current_info_answer(self, *, answer: CurrentInfoAnswer, locale: str) -> str:
         prompt = self._current_info_synthesis_prompt(answer=answer, locale=locale)

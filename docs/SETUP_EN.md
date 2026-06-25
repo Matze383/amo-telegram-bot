@@ -582,7 +582,8 @@ For result-page extraction, the document fetcher prefers Crawlee and falls back 
 | `AMO_DOCUMENT_FETCH_MAX_REDIRECTS` | `3` | Maximum redirects while fetching a document |
 | `AMO_DOCUMENT_FETCH_PREFER_CRAWLEE` | `true` | Prefer Crawlee for document fetching with httpx fallback |
 | `AMO_CURRENT_INFO_ENABLED` | `false` | Enable Current-Info Telegram answers before falling back to the legacy webtool pipeline |
-| `AMO_CURRENT_INFO_TIMEOUT_SECONDS` | `8` | Total Current-Info answer budget in seconds, including answer synthesis |
+| `AMO_CURRENT_INFO_TIMEOUT_SECONDS` | `8` | Front-end Current-Info answer budget in seconds, including answer synthesis; timed-out work may still finish in the background (allowed: >0 to 60) |
+| `AMO_CURRENT_INFO_LATE_SYNTHESIS_TIMEOUT_SECONDS` | `60` | Background synthesis budget for a Current-Info answer that finishes after the front-end budget (allowed: >0 to 300) |
 | `AMO_CURRENT_INFO_MAX_RESULTS` | `5` | Maximum Current-Info search results per Telegram answer |
 | `AMO_CURRENT_INFO_MAX_DOCUMENTS` | `3` | Maximum followed documents per Current-Info Telegram answer |
 | `AMO_CURRENT_INFO_MAX_SEARCH_PROVIDER_RUNS_PER_RESPONSE` | `2` | Maximum search-provider calls per Current-Info response |

@@ -71,7 +71,13 @@ def _message(text: str) -> TelegramMessage:
     )
 
 
-def _dispatcher(*, service: object, ai: object | None = None, timeout: float = 1.0):
+def _dispatcher(
+    *,
+    service: object,
+    ai: object | None = None,
+    timeout: float = 1.0,
+    late_synthesis_timeout: float = 1.0,
+):
     sent: list[str] = []
 
     async def _send(chat_id: int, text: str, thread_id=None):
@@ -86,6 +92,7 @@ def _dispatcher(*, service: object, ai: object | None = None, timeout: float = 1
         current_info_service=service,
         current_info_enabled=True,
         current_info_timeout_seconds=timeout,
+        current_info_late_synthesis_timeout_seconds=late_synthesis_timeout,
         current_info_max_results=4,
         current_info_max_documents=2,
     )
@@ -139,17 +146,49 @@ def test_current_info_autoreply_synthesizes_and_appends_sources() -> None:
     assert "do not use prior model knowledge" in (ai.prompts or [""])[0]
 
 
-def test_current_info_timeout_falls_back_without_sending() -> None:
-    dispatcher, sent = _dispatcher(service=_SlowCurrentInfoService(), timeout=0.01)
+def test_current_info_timeout_falls_back_then_sends_late_answer() -> None:
+    dispatcher, sent = _dispatcher(
+        service=_SlowCurrentInfoService(),
+        ai=_AIService(response="Late synthesized answer."),
+        timeout=0.01,
+    )
 
-    handled = asyncio.run(
-        dispatcher._maybe_handle_current_info_autoreply(
+    async def _run() -> bool:
+        handled = await dispatcher._maybe_handle_current_info_autoreply(
             message=_message("@amo_bot aktueller Python Release heute?"),
             role=Role.ADMIN,
             normalized_text="aktueller Python Release heute?",
             locale="de",
         )
+        assert sent == []
+        await asyncio.sleep(0.08)
+        return handled
+
+    handled = asyncio.run(_run())
+
+    assert handled is False
+    assert sent == ["Late synthesized answer.\n\nQuellen:\n1. https://late.example"]
+
+
+def test_current_info_late_synthesis_timeout_does_not_send() -> None:
+    dispatcher, sent = _dispatcher(
+        service=_SlowCurrentInfoService(),
+        ai=_SlowAIService(),
+        timeout=0.01,
+        late_synthesis_timeout=0.01,
     )
+
+    async def _run() -> bool:
+        handled = await dispatcher._maybe_handle_current_info_autoreply(
+            message=_message("@amo_bot aktueller Python Release heute?"),
+            role=Role.ADMIN,
+            normalized_text="aktueller Python Release heute?",
+            locale="de",
+        )
+        await asyncio.sleep(0.12)
+        return handled
+
+    handled = asyncio.run(_run())
 
     assert handled is False
     assert sent == []
@@ -292,7 +331,7 @@ def test_current_info_autoreply_preserves_long_finance_listing_url() -> None:
     ]
 
 
-def test_current_info_synthesis_timeout_falls_back_without_sending() -> None:
+def test_current_info_synthesis_timeout_falls_back_then_sends_late_answer() -> None:
     answer = CurrentInfoAnswer(
         status="answered",
         answer_text="Raw evidence answer",
@@ -317,14 +356,18 @@ def test_current_info_synthesis_timeout_falls_back_without_sending() -> None:
         timeout=0.01,
     )
 
-    handled = asyncio.run(
-        dispatcher._maybe_handle_current_info_autoreply(
+    async def _run() -> bool:
+        handled = await dispatcher._maybe_handle_current_info_autoreply(
             message=_message("@amo_bot aktueller Python Release heute?"),
             role=Role.ADMIN,
             normalized_text="aktueller Python Release heute?",
             locale="de",
         )
-    )
+        assert sent == []
+        await asyncio.sleep(0.08)
+        return handled
+
+    handled = asyncio.run(_run())
 
     assert handled is False
-    assert sent == []
+    assert sent == ["too late\n\nQuellen:\n1. https://python.example/release"]

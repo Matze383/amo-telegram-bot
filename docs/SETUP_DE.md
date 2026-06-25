@@ -582,7 +582,8 @@ Für die Extraktion von Ergebnis-Seiten bevorzugt der Dokument-Fetcher Crawlee u
 | `AMO_DOCUMENT_FETCH_MAX_REDIRECTS` | `3` | Maximale Anzahl Redirects beim Abrufen eines Dokuments |
 | `AMO_DOCUMENT_FETCH_PREFER_CRAWLEE` | `true` | Crawlee für Dokument-Fetches bevorzugen, mit httpx-Fallback |
 | `AMO_CURRENT_INFO_ENABLED` | `false` | Current-Info-Telegram-Antworten vor dem Legacy-Webtool-Fallback aktivieren |
-| `AMO_CURRENT_INFO_TIMEOUT_SECONDS` | `8` | Gesamtes Current-Info-Antwortbudget in Sekunden, inklusive Antwortsynthese |
+| `AMO_CURRENT_INFO_TIMEOUT_SECONDS` | `8` | Frontend-Budget für Current-Info-Antworten in Sekunden, inklusive Antwortsynthese; abgelaufene Arbeit kann im Hintergrund fertig werden (zulässig: >0 bis 60) |
+| `AMO_CURRENT_INFO_LATE_SYNTHESIS_TIMEOUT_SECONDS` | `60` | Hintergrundbudget für die Synthese einer Current-Info-Antwort, die nach dem Frontend-Budget fertig wird (zulässig: >0 bis 300) |
 | `AMO_CURRENT_INFO_MAX_RESULTS` | `5` | Maximale Anzahl Current-Info-Suchergebnisse pro Telegram-Antwort |
 | `AMO_CURRENT_INFO_MAX_DOCUMENTS` | `3` | Maximale Anzahl gefolgter Dokumente pro Current-Info-Telegram-Antwort |
 | `AMO_CURRENT_INFO_MAX_SEARCH_PROVIDER_RUNS_PER_RESPONSE` | `2` | Maximale Suchprovider-Aufrufe pro Current-Info-Antwort |

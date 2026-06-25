@@ -397,6 +397,7 @@ def test_main_wires_scheduled_plugin_executor_timeout(monkeypatch) -> None:
         memory_daily_max_scopes_per_run = 10
         amo_current_info_enabled = False
         amo_current_info_timeout_seconds = 8.0
+        amo_current_info_late_synthesis_timeout_seconds = 60.0
         amo_current_info_max_results = 5
         amo_current_info_max_documents = 3
 

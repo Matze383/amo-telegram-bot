@@ -170,7 +170,7 @@ def test_amo_langchain_embeddings_delegates_to_amo_embedding_provider() -> None:
     assert provider.calls == [("alpha", "beta"), ("gamma",)]
 
 
-def test_gpt_researcher_provider_maps_report_sources_and_ollama_config(monkeypatch) -> None:
+def test_gpt_researcher_provider_maps_report_sources_and_ollama_config(monkeypatch, caplog) -> None:
     _FakeResearcher.instances.clear()
     monkeypatch.setenv("SEARX_URL", "https://previous.example")
     provider = GptResearcherProvider(
@@ -200,14 +200,15 @@ def test_gpt_researcher_provider_maps_report_sources_and_ollama_config(monkeypat
         researcher_cls=_FakeResearcher,
     )
 
-    answer = provider.answer(
-        request=CurrentInfoRequest(query="Recherchiere AMO", locale="de"),
-        task=CurrentInfoService()._task_planner.plan_task(CurrentInfoRequest(query="Recherchiere AMO", locale="de")),
-        query_plan=CurrentInfoService()._query_planner.plan_queries(
+    with caplog.at_level(logging.INFO, logger="amo_bot.current_info.research"):
+        answer = provider.answer(
             request=CurrentInfoRequest(query="Recherchiere AMO", locale="de"),
             task=CurrentInfoService()._task_planner.plan_task(CurrentInfoRequest(query="Recherchiere AMO", locale="de")),
-        ),
-    )
+            query_plan=CurrentInfoService()._query_planner.plan_queries(
+                request=CurrentInfoRequest(query="Recherchiere AMO", locale="de"),
+                task=CurrentInfoService()._task_planner.plan_task(CurrentInfoRequest(query="Recherchiere AMO", locale="de")),
+            ),
+        )
 
     assert answer.status == "answered"
     assert answer.answer_text == "Research answer with sourced details."
@@ -222,6 +223,15 @@ def test_gpt_researcher_provider_maps_report_sources_and_ollama_config(monkeypat
     assert instance.config["STRATEGIC_LLM"] == "ollama:strategic-model"
     assert instance.config["EMBEDDING"] == "ollama:nomic-embed-text-v2-moe:latest"
     assert instance.config["LLM_KWARGS"] == {"num_ctx": 8192, "verbose": False}
+    assert "current_info.GptResearcherConfigured" in caplog.text
+    assert "current_info.GptResearcherLifecycle" in caplog.text
+    assert "'stage': 'configured'" in caplog.text
+    assert "'stage': 'conduct_research'" in caplog.text
+    assert "'stage': 'write_report'" in caplog.text
+    assert "'fast_llm': 'ollama:fast-model'" in caplog.text
+    assert "'smart_llm': 'ollama:smart-model'" in caplog.text
+    assert "'strategic_llm': 'ollama:strategic-model'" in caplog.text
+    assert "'embedding': 'ollama:nomic-embed-text-v2-moe:latest'" in caplog.text
 
 
 def test_gpt_researcher_builds_sync_pgvector_for_sync_document_load(monkeypatch) -> None:

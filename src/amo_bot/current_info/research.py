@@ -24,7 +24,7 @@ from amo_bot.current_info.models import (
     SearchResult,
     TaskSpec,
 )
-from amo_bot.current_info.observability import safe_error_message
+from amo_bot.current_info.observability import log_current_info_event, safe_error_message
 from amo_bot.current_info.vector import EmbeddingProvider, build_embedding_provider_from_settings
 
 
@@ -125,10 +125,34 @@ class GptResearcherProvider:
                 warning="empty_query",
                 status="invalid_request",
             )
+        self._log_lifecycle(
+            event="current_info.GptResearcherConfigured",
+            stage="configured",
+            request=request,
+            task=task,
+            outcome="configured",
+            extra={
+                "timeout_seconds": self._config.timeout_seconds,
+                "max_sources": self._config.max_sources,
+                "report_words": self._config.report_words,
+                "deep_breadth": self._config.deep_breadth,
+                "deep_depth": self._config.deep_depth,
+                "deep_concurrency": self._config.deep_concurrency,
+            },
+        )
         try:
             result = asyncio.run(asyncio.wait_for(self._answer_async(request=request, task=task), timeout=self._config.timeout_seconds))
         except TimeoutError:
-            logger.warning("gpt_researcher_timeout")
+            self._log_lifecycle(
+                event="current_info.GptResearcherTimeout",
+                stage="answer",
+                request=request,
+                task=task,
+                outcome="timeout",
+                reason_code="gpt_researcher_timeout",
+                level=logging.WARNING,
+                extra={"timeout_seconds": self._config.timeout_seconds},
+            )
             return _provider_unavailable_answer(
                 request=request,
                 task=task,
@@ -141,6 +165,19 @@ class GptResearcherProvider:
                 "gpt_researcher_failed: %s: %s",
                 exc.__class__.__name__,
                 error_message,
+            )
+            self._log_lifecycle(
+                event="current_info.GptResearcherFailed",
+                stage="answer",
+                request=request,
+                task=task,
+                outcome="error",
+                reason_code="gpt_researcher_failed",
+                level=logging.WARNING,
+                extra={
+                    "error_class": exc.__class__.__name__,
+                    "error_message": error_message,
+                },
             )
             return _provider_unavailable_answer(
                 request=request,
@@ -183,8 +220,36 @@ class GptResearcherProvider:
                     config_path=config_path,
                     vector_store=vector_store,
                 )
+                self._log_lifecycle(
+                    event="current_info.GptResearcherLifecycle",
+                    stage="conduct_research",
+                    request=request,
+                    task=task,
+                    outcome="started",
+                )
                 await researcher.conduct_research()
+                self._log_lifecycle(
+                    event="current_info.GptResearcherLifecycle",
+                    stage="conduct_research",
+                    request=request,
+                    task=task,
+                    outcome="completed",
+                )
+                self._log_lifecycle(
+                    event="current_info.GptResearcherLifecycle",
+                    stage="write_report",
+                    request=request,
+                    task=task,
+                    outcome="started",
+                )
                 report = await researcher.write_report()
+                self._log_lifecycle(
+                    event="current_info.GptResearcherLifecycle",
+                    stage="write_report",
+                    request=request,
+                    task=task,
+                    outcome="completed",
+                )
                 sources = _call_optional(researcher, "get_source_urls") or ()
                 context = _call_optional(researcher, "get_research_context") or ""
                 costs = _call_optional(researcher, "get_costs") or {}
@@ -224,6 +289,41 @@ class GptResearcherProvider:
             "LLM_KWARGS": llm_kwargs,
             "EMBEDDING": self._config.embedding,
             "PROMPT_FAMILY": "default",
+        }
+
+    def _log_lifecycle(
+        self,
+        *,
+        event: str,
+        stage: str,
+        request: CurrentInfoRequest,
+        task: TaskSpec,
+        outcome: str,
+        reason_code: str | None = None,
+        extra: dict[str, Any] | None = None,
+        level: int = logging.INFO,
+    ) -> None:
+        log_current_info_event(
+            logger,
+            event=event,
+            stage=stage,
+            query=task.query,
+            chat_id=request.chat_id,
+            user_id=request.user_id,
+            topic_id=request.topic_id,
+            outcome=outcome,
+            reason_code=reason_code,
+            extra={**self._model_log_fields(), **(extra or {})},
+            level=level,
+        )
+
+    def _model_log_fields(self) -> dict[str, Any]:
+        return {
+            "model_provider": self._config.model_config.provider,
+            "fast_llm": self._config.model_config.fast_llm,
+            "smart_llm": self._config.model_config.smart_llm,
+            "strategic_llm": self._config.model_config.strategic_llm,
+            "embedding": self._config.embedding,
         }
 
 

@@ -157,6 +157,12 @@ class Settings(BaseSettings):
     amo_crawlee_max_concurrent_per_host: int = Field(default=2, alias="AMO_CRAWLEE_MAX_CONCURRENT_PER_HOST", ge=1, le=20)
     amo_current_info_enabled: bool = Field(default=False, alias="AMO_CURRENT_INFO_ENABLED")
     amo_current_info_timeout_seconds: float = Field(default=8.0, alias="AMO_CURRENT_INFO_TIMEOUT_SECONDS", gt=0, le=60)
+    amo_current_info_late_synthesis_timeout_seconds: float = Field(
+        default=60.0,
+        alias="AMO_CURRENT_INFO_LATE_SYNTHESIS_TIMEOUT_SECONDS",
+        gt=0,
+        le=300,
+    )
     amo_current_info_max_results: int = Field(default=5, alias="AMO_CURRENT_INFO_MAX_RESULTS", ge=1, le=10)
     amo_current_info_max_documents: int = Field(default=3, alias="AMO_CURRENT_INFO_MAX_DOCUMENTS", ge=0, le=10)
     amo_current_info_max_search_provider_runs_per_response: int = Field(

@@ -241,6 +241,7 @@ def test_main_runtime_wires_current_info_when_enabled(monkeypatch, tmp_path):
     monkeypatch.setenv("WEBUI_LOGIN_DELAY_MAX_SECONDS", "2.0")
     monkeypatch.setenv("AMO_CURRENT_INFO_ENABLED", "true")
     monkeypatch.setenv("AMO_CURRENT_INFO_TIMEOUT_SECONDS", "6")
+    monkeypatch.setenv("AMO_CURRENT_INFO_LATE_SYNTHESIS_TIMEOUT_SECONDS", "42")
     monkeypatch.setenv("AMO_CURRENT_INFO_MAX_RESULTS", "4")
     monkeypatch.setenv("AMO_CURRENT_INFO_MAX_DOCUMENTS", "2")
 
@@ -292,6 +293,7 @@ def test_main_runtime_wires_current_info_when_enabled(monkeypatch, tmp_path):
     assert captured["current_info_enabled"] is True
     assert captured["current_info_service"] is not None
     assert captured["current_info_timeout_seconds"] == 6
+    assert captured["current_info_late_synthesis_timeout_seconds"] == 42
     assert captured["current_info_max_results"] == 4
     assert captured["current_info_max_documents"] == 2
     assert captured["cached_fetch_vector_indexer"] is vector_components[0]
