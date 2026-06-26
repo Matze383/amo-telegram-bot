@@ -148,6 +148,7 @@ class Dispatcher:
     current_info_service: Any | None = None
     current_info_enabled: bool = False
     current_info_timeout_seconds: float = 8.0
+    current_info_research_timeout_seconds: float = 300.0
     current_info_late_synthesis_timeout_seconds: float = 60.0
     current_info_max_results: int = 5
     current_info_max_documents: int = 3
@@ -1920,7 +1921,11 @@ class Dispatcher:
         if not should_research:
             return False
 
-        timeout_seconds = max(float(self.current_info_timeout_seconds), 0.001)
+        timeout_seconds = max(
+            float(self.current_info_timeout_seconds),
+            float(self.current_info_research_timeout_seconds),
+            0.001,
+        )
         request = CurrentInfoRequest(
             query=current_info_query,
             locale=locale,

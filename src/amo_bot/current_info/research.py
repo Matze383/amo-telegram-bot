@@ -352,7 +352,7 @@ def build_gpt_researcher_provider_config_from_settings(settings: Any) -> GptRese
         enabled=bool(getattr(settings, "amo_gpt_researcher_enabled", False)),
         model_config=resolve_research_model_config(settings),
         searxng_url=str(getattr(settings, "amo_searxng_url", "") or "").strip().rstrip("/"),
-        timeout_seconds=float(getattr(settings, "amo_research_timeout_seconds", 120.0)),
+        timeout_seconds=float(getattr(settings, "amo_research_timeout_seconds", 300.0)),
         max_sources=int(getattr(settings, "amo_research_max_sources", 8)),
         max_context_chars=int(getattr(settings, "amo_research_max_context_chars", 12000)),
         deep_breadth=int(getattr(settings, "amo_research_deep_breadth", 3)),

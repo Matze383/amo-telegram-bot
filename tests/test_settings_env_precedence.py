@@ -443,6 +443,32 @@ def test_gpt_researcher_env_values_are_parsed(monkeypatch, tmp_path) -> None:
     assert settings.amo_research_report_words == 1200
 
 
+def test_gpt_researcher_default_timeout_allows_multi_minute_answers(monkeypatch, tmp_path) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "\n".join(
+            [
+                "BOT_TOKEN=token-from-dotenv",
+                "WEBUI_PASSWORD=pw-from-dotenv",
+                "WEBUI_SECRET_KEY=dotenv-secret-key-0123456789-abcdefghij",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("DOTENV_PATH", str(env_file))
+    monkeypatch.delenv("AMO_ENV_OVERRIDE", raising=False)
+    monkeypatch.delenv("AMO_RESEARCH_TIMEOUT_SECONDS", raising=False)
+    monkeypatch.delenv("WEBUI_LOGIN_DELAY_BASE_SECONDS", raising=False)
+    monkeypatch.delenv("WEBUI_LOGIN_DELAY_MAX_SECONDS", raising=False)
+
+    settings = get_settings()
+
+    assert settings.amo_research_timeout_seconds == 300
+
+
 def test_no_secret_values_are_exposed_in_validation_error(monkeypatch, tmp_path) -> None:
     env_file = tmp_path / ".env"
     secret_value = "super-secret-value"

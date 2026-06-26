@@ -444,6 +444,7 @@ def run(argv: list[str] | None = None) -> None:
         current_info_service=current_info_service,
         current_info_enabled=settings.amo_current_info_enabled,
         current_info_timeout_seconds=settings.amo_current_info_timeout_seconds,
+        current_info_research_timeout_seconds=float(getattr(settings, "amo_research_timeout_seconds", 300.0)),
         current_info_late_synthesis_timeout_seconds=settings.amo_current_info_late_synthesis_timeout_seconds,
         current_info_max_results=settings.amo_current_info_max_results,
         current_info_max_documents=settings.amo_current_info_max_documents,

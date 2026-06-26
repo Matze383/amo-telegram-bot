@@ -31,6 +31,24 @@ class _SlowCurrentInfoService:
         )
 
 
+class _DelayedCurrentInfoService:
+    def __init__(self, *, delay_seconds: float, answer_text: str = "delayed answer") -> None:
+        self.delay_seconds = delay_seconds
+        self.answer_text = answer_text
+        self.requests: list[CurrentInfoRequest] = []
+
+    def answer(self, request: CurrentInfoRequest) -> CurrentInfoAnswer:
+        self.requests.append(request)
+        time.sleep(self.delay_seconds)
+        return CurrentInfoAnswer(
+            status="answered",
+            answer_text=self.answer_text,
+            request=request,
+            sources=("https://research.example/source",),
+            confidence=0.8,
+        )
+
+
 class _SlowAIService:
     async def ask(self, prompt: str, *, task_type: str | None = None) -> str:
         await asyncio.sleep(0.05)
@@ -76,6 +94,7 @@ def _dispatcher(
     service: object,
     ai: object | None = None,
     timeout: float = 1.0,
+    research_timeout: float | None = None,
     late_synthesis_timeout: float = 1.0,
 ):
     sent: list[str] = []
@@ -92,6 +111,7 @@ def _dispatcher(
         current_info_service=service,
         current_info_enabled=True,
         current_info_timeout_seconds=timeout,
+        current_info_research_timeout_seconds=timeout if research_timeout is None else research_timeout,
         current_info_late_synthesis_timeout_seconds=late_synthesis_timeout,
         current_info_max_results=4,
         current_info_max_documents=2,
@@ -171,6 +191,31 @@ def test_current_info_timeout_fails_closed_without_late_search_or_ai_fallback() 
     assert sent == [
         "Dafuer brauche ich GPT-Researcher-Webrecherche, aber die Recherche konnte gerade nicht erfolgreich abgeschlossen werden."
     ]
+
+
+def test_current_info_gpt_researcher_auto_path_uses_longer_research_timeout() -> None:
+    service = _DelayedCurrentInfoService(delay_seconds=0.03, answer_text="GPT-Researcher result")
+    dispatcher, sent = _dispatcher(
+        service=service,
+        ai=_AIService(response="Synthetisierte Research-Antwort."),
+        timeout=0.01,
+        research_timeout=0.2,
+    )
+
+    handled = asyncio.run(
+        dispatcher._maybe_handle_current_info_autoreply(
+            message=_message("@amo_bot Welche Änderungen gab es heute in der OpenAI API?"),
+            role=Role.ADMIN,
+            normalized_text="Welche Änderungen gab es heute in der OpenAI API?",
+            locale="de",
+        )
+    )
+
+    assert handled is True
+    assert sent == ["Synthetisierte Research-Antwort.\n\nQuellen:\n1. https://research.example/source"]
+    assert len(service.requests) == 1
+    assert service.requests[0].metadata["require_gpt_researcher"] is True
+    assert service.requests[0].metadata["capability"] == "webresearch"
 
 
 def test_current_info_synthesis_timeout_fails_closed() -> None:

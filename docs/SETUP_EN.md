@@ -610,6 +610,7 @@ For result-page extraction, the document fetcher prefers Crawlee and falls back 
 | `AMO_VECTOR_EMBEDDING_PROVIDER` | `ollama` | Embedding provider for chunk/query vectors: `ollama` or `openai` |
 | `AMO_VECTOR_EMBEDDING_MODEL` | `nomic-embed-text-v2-moe:latest` | Embedding model used for Current-Info vectors |
 | `AMO_VECTOR_TIMEOUT_SECONDS` | `3` | Timeout for vector DB and embedding requests |
+| `AMO_RESEARCH_TIMEOUT_SECONDS` | `300` | Timeout for GPT-Researcher deep research operations (seconds) |
 
 Current-Info cache tables are created through the SQLAlchemy/Alembic PostgreSQL database setup. Query metrics store only a SHA-256 query hash, not the raw private user query text.
 When semantic retrieval is enabled, PostgreSQL remains the source of truth for documents, metadata, cache TTLs, and pruning. pgvector stores vectors plus chunk/document pointers and source metadata only; private user questions are not stored as vectors.

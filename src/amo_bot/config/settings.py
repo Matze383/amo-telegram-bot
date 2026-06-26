@@ -204,7 +204,7 @@ class Settings(BaseSettings):
     amo_research_fast_model: str = Field(default="", alias="AMO_RESEARCH_FAST_MODEL")
     amo_research_smart_model: str = Field(default="", alias="AMO_RESEARCH_SMART_MODEL")
     amo_research_strategic_model: str = Field(default="", alias="AMO_RESEARCH_STRATEGIC_MODEL")
-    amo_research_timeout_seconds: float = Field(default=120.0, alias="AMO_RESEARCH_TIMEOUT_SECONDS", gt=0, le=900)
+    amo_research_timeout_seconds: float = Field(default=300.0, alias="AMO_RESEARCH_TIMEOUT_SECONDS", gt=0, le=900)
     amo_research_max_sources: int = Field(default=8, alias="AMO_RESEARCH_MAX_SOURCES", ge=1, le=25)
     amo_research_max_context_chars: int = Field(default=12000, alias="AMO_RESEARCH_MAX_CONTEXT_CHARS", ge=1000, le=100000)
     amo_research_deep_breadth: int = Field(default=3, alias="AMO_RESEARCH_DEEP_BREADTH", ge=1, le=10)

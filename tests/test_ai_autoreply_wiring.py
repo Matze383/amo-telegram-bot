@@ -1065,6 +1065,7 @@ def test_autoreply_current_info_timeout_fails_closed_before_synthesis_for_live_w
     dispatcher.current_info_enabled = True
     dispatcher.current_info_service = SlowCurrentInfoService()
     dispatcher.current_info_timeout_seconds = 0.01
+    dispatcher.current_info_research_timeout_seconds = 0.01
 
     asyncio.run(
         dispatcher.handle_raw_update(
