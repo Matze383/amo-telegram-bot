@@ -10,6 +10,7 @@ from urllib.parse import urlparse
 from amo_bot.core.source_hosts import normalize_source_host
 from amo_bot.current_info.candidates import (
     SOURCE_TYPE_DOCS,
+    SOURCE_TYPE_MARKET_DATA,
     SOURCE_TYPE_NEWS,
     SOURCE_TYPE_OFFICIAL,
     classify_source_type,
@@ -884,7 +885,38 @@ _AUTHORITATIVE_QUERY_TERMS = {
     "source",
     "version",
     "versions",
+    "bewertung",
+    "valuation",
+    "fundamental",
+    "fundamentals",
+    "report",
+    "bericht",
+    "geschaeftsbericht",
+    "geschäftsbericht",
+    "investor",
+    "relations",
 }
+_FINANCE_MARKET_DATA_HOST_PARTS = (
+    "boerse",
+    "börse",
+    "deutsche-boerse",
+    "finanznachrichten",
+    "finanzen.",
+    "finance.yahoo",
+    "investing.",
+    "marketbeat",
+    "markets.businessinsider",
+    "marketscreener",
+    "marketwatch",
+    "nasdaq",
+    "nyse",
+    "tradingview",
+)
+_FINANCE_WEAK_CONTEXT_HOST_PARTS = (
+    "glassdoor",
+    "kununu",
+    "statista",
+)
 _HOST_TOKEN_STOPWORDS = {
     "api",
     "app",
@@ -989,9 +1021,17 @@ def _builtin_source_preferences_for_results(
     domain: str,
 ) -> dict[str, Mapping[str, object]]:
     task = TaskSpec(task_type="", query=request.query, domain=domain or request.domain_hint)
-    if not _needs_authoritative_primary_sources(request=request, task=task):
-        return {}
     preferences: dict[str, Mapping[str, object]] = {}
+    if (domain or request.domain_hint or "").strip().lower() in {"stock", "crypto"}:
+        for result in results:
+            host = _host_from_search_result(result)
+            if not host:
+                continue
+            finance_preference = _finance_source_preference(result, request=request, task=task)
+            if finance_preference:
+                preferences[host] = finance_preference
+    if not _needs_authoritative_primary_sources(request=request, task=task):
+        return preferences
     for result in results:
         if not _is_preferred_authoritative_primary_result(result, request=request, task=task):
             continue
@@ -1005,6 +1045,39 @@ def _builtin_source_preferences_for_results(
             "source_preference_source": "inferred_authoritative_primary",
         }
     return preferences
+
+
+def _finance_source_preference(
+    result: SearchResult,
+    *,
+    request: CurrentInfoRequest,
+    task: TaskSpec,
+) -> Mapping[str, object] | None:
+    host = _host_from_search_result(result)
+    if not host:
+        return None
+    if any(part in host for part in _FINANCE_WEAK_CONTEXT_HOST_PARTS):
+        return {
+            "source_preference_signal": "low_quality",
+            "source_preference_weight": 1.25,
+            "source_preference_scope": "finance_context_source",
+            "source_preference_source": "inferred_weak_finance_context",
+        }
+    if any(part in host for part in _FINANCE_MARKET_DATA_HOST_PARTS):
+        return {
+            "source_preference_signal": "preferred",
+            "source_preference_weight": -1.5,
+            "source_preference_scope": "finance_market_data",
+            "source_preference_source": "inferred_market_data_source",
+        }
+    if _host_matches_query_terms(result, request=request, task=task) and _looks_like_finance_primary_source(result):
+        return {
+            "source_preference_signal": "trusted",
+            "source_preference_weight": -1.75,
+            "source_preference_scope": "finance_primary_source",
+            "source_preference_source": "inferred_finance_primary_source",
+        }
+    return None
 
 
 def _needs_authoritative_primary_sources(*, request: CurrentInfoRequest, task: TaskSpec) -> bool:
@@ -1058,7 +1131,21 @@ def _looks_like_primary_source_for_query(
     text = f"{result.title} {result.snippet} {urlparse(result.url or '').path}".casefold()
     return bool(
         re.search(
-            r"\b(?:api|changelog|docs?|documentation|reference|release|platform|developer|business|mini|paid)\b",
+            r"\b(?:api|changelog|docs?|documentation|reference|release|platform|developer|business|mini|paid|"
+            r"investor|relations|annual|report|bericht|geschäftsbericht|geschaeftsbericht|"
+            r"bewertung|valuation|fundamental|finanzbericht)\b",
+            text,
+            re.IGNORECASE,
+        )
+    )
+
+
+def _looks_like_finance_primary_source(result: SearchResult) -> bool:
+    text = f"{result.title} {result.snippet} {urlparse(result.url or '').path}".casefold()
+    return bool(
+        re.search(
+            r"\b(?:investor|relations|annual|report|bericht|geschäftsbericht|geschaeftsbericht|"
+            r"finanzbericht|financial|results|earnings|rating|stocks?|bonds?)\b",
             text,
             re.IGNORECASE,
         )
@@ -1237,6 +1324,8 @@ def _source_role(result: SearchResult) -> str:
         return "official_source_candidate"
     if source_type in {SOURCE_TYPE_OFFICIAL, SOURCE_TYPE_DOCS}:
         return "official_source_candidate"
+    if source_type == SOURCE_TYPE_MARKET_DATA:
+        return "corroborating_source"
     if _looks_like_official_source(result):
         return "official_source_candidate"
     if source_type == SOURCE_TYPE_NEWS:
@@ -1287,7 +1376,7 @@ def _fetch_priority_source_score(result: SearchResult) -> int:
         return 0
     if str(result.metadata.get("source_role") or "") == "official_source_candidate":
         return 1
-    if str(result.metadata.get("source_type") or "") in {SOURCE_TYPE_OFFICIAL, SOURCE_TYPE_DOCS}:
+    if str(result.metadata.get("source_type") or "") in {SOURCE_TYPE_OFFICIAL, SOURCE_TYPE_DOCS, SOURCE_TYPE_MARKET_DATA}:
         return 1
     return 2
 

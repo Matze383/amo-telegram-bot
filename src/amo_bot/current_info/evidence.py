@@ -88,7 +88,7 @@ def assemble_evidence_package(
         warnings.append("source_conflict")
         confidence = min(confidence, 0.45)
 
-    warnings.extend(_metadata_warning_codes(chunks))
+    warnings.extend(_metadata_warning_codes_for_decision(chunks=chunks, sources=sources, fetched_urls=fetched_urls))
     confidence = _apply_metadata_confidence(chunks, confidence)
     freshness = _freshness_label(sources=sources, documents=documents)
     return EvidencePackage(
@@ -356,6 +356,67 @@ def _metadata_warning_codes(chunks: tuple[EvidenceChunk, ...]) -> tuple[str, ...
         elif isinstance(raw, (list, tuple, set)):
             warnings.extend(str(item).strip() for item in raw if str(item).strip())
     return tuple(dict.fromkeys(warnings))
+
+
+_NON_BLOCKING_WITH_STRONG_SUPPORT_WARNINGS = {
+    "irrelevant_source",
+    "weak_source",
+    "low_quality_source",
+}
+_BLOCKING_WARNING_MARKERS = ("conflict", "mismatch", "stale")
+_WEAK_QUALITY_LABELS = {"snippet_only", "stale", "weak_source", "low_quality_source"}
+
+
+def _metadata_warning_codes_for_decision(
+    *,
+    chunks: tuple[EvidenceChunk, ...],
+    sources: tuple[EvidencePackageSource, ...],
+    fetched_urls: frozenset[str],
+) -> tuple[str, ...]:
+    if not chunks:
+        return ()
+    strong_support_urls = _strong_support_urls(chunks=chunks, sources=sources, fetched_urls=fetched_urls)
+    has_strong_support = len(strong_support_urls) >= 2
+    warnings: list[str] = []
+    for chunk in chunks:
+        chunk_warnings = _metadata_warning_codes((chunk,))
+        if has_strong_support and chunk.source_url not in strong_support_urls:
+            warnings.extend(
+                warning
+                for warning in chunk_warnings
+                if warning not in _NON_BLOCKING_WITH_STRONG_SUPPORT_WARNINGS
+            )
+            continue
+        warnings.extend(chunk_warnings)
+    return tuple(dict.fromkeys(warnings))
+
+
+def _strong_support_urls(
+    *,
+    chunks: tuple[EvidenceChunk, ...],
+    sources: tuple[EvidencePackageSource, ...],
+    fetched_urls: frozenset[str],
+) -> frozenset[str]:
+    sources_by_url = {source.url: source for source in sources if source.url}
+    urls: list[str] = []
+    hosts: set[str] = set()
+    for chunk in chunks:
+        if not chunk.source_url or chunk.source_url not in fetched_urls:
+            continue
+        source = sources_by_url.get(chunk.source_url)
+        if source is not None and (source.stale or source.quality_label in _WEAK_QUALITY_LABELS):
+            continue
+        chunk_warnings = _metadata_warning_codes((chunk,))
+        if any(marker in warning for warning in chunk_warnings for marker in _BLOCKING_WARNING_MARKERS):
+            continue
+        if any(warning in _NON_BLOCKING_WITH_STRONG_SUPPORT_WARNINGS for warning in chunk_warnings):
+            continue
+        host = source.host if source is not None else _host(chunk.source_url)
+        if not host or host in hosts:
+            continue
+        hosts.add(host)
+        urls.append(chunk.source_url)
+    return frozenset(urls)
 
 
 def _apply_metadata_confidence(chunks: tuple[EvidenceChunk, ...], confidence: float) -> float:

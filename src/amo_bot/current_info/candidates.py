@@ -12,6 +12,7 @@ from amo_bot.current_info.models import SearchResult
 SOURCE_TYPE_NEWS = "News"
 SOURCE_TYPE_OFFICIAL = "Official"
 SOURCE_TYPE_DOCS = "Docs"
+SOURCE_TYPE_MARKET_DATA = "MarketData"
 SOURCE_TYPE_SOCIAL = "Social"
 SOURCE_TYPE_FORUM = "Forum"
 SOURCE_TYPE_COMMERCE = "Commerce"
@@ -61,6 +62,23 @@ _COMMERCE_HOSTS = {
     "etsy.com",
     "shopify.com",
 }
+
+_MARKET_DATA_HOST_PARTS = (
+    "boerse",
+    "börse",
+    "deutsche-boerse",
+    "finanznachrichten",
+    "finanzen.",
+    "finance.yahoo",
+    "investing.",
+    "marketbeat",
+    "markets.businessinsider",
+    "marketscreener",
+    "marketwatch",
+    "nasdaq",
+    "nyse",
+    "tradingview",
+)
 
 _NEWS_HOST_PARTS = (
     "apnews",
@@ -134,6 +152,8 @@ def classify_source_type(result: SearchResult) -> str:
         return SOURCE_TYPE_COMMERCE
     if any(marker in path for marker in ("/shop", "/store", "/product", "/pricing", "/cart")):
         return SOURCE_TYPE_COMMERCE
+    if any(part in host for part in _MARKET_DATA_HOST_PARTS):
+        return SOURCE_TYPE_MARKET_DATA
     if any(part in host for part in _NEWS_HOST_PARTS) or any(word in text for word in ("breaking news", "latest news")):
         return SOURCE_TYPE_NEWS
     if "/news" in path or "/article" in path:
@@ -201,6 +221,7 @@ def _source_type_score(source_type: str) -> int:
     return {
         SOURCE_TYPE_OFFICIAL: 5,
         SOURCE_TYPE_DOCS: 4,
+        SOURCE_TYPE_MARKET_DATA: 4,
         SOURCE_TYPE_NEWS: 3,
         SOURCE_TYPE_FORUM: 2,
         SOURCE_TYPE_SOCIAL: 1,

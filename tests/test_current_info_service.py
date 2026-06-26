@@ -836,6 +836,163 @@ def test_current_info_service_answers_siemens_listing_from_wkn_and_ticker_withou
     assert "aktuelle Kurse" not in answer.answer_text
 
 
+def test_current_info_service_answers_finance_research_with_mixed_strong_and_weak_sources():
+    marketscreener = SearchResult(
+        title="Siemens AG Bewertung",
+        url="https://de.marketscreener.example/kurs/aktie/SIEMENS-AG-56358595/bewertung",
+        snippet="Bewertung, Kennzahlen und Analystenschätzungen zur Siemens AG.",
+        provider="fake_search",
+        rank=3,
+        host="de.marketscreener.example",
+    )
+    siemens_report = SearchResult(
+        title="Siemens Bericht",
+        url="https://www.siemens.com/siemensbericht",
+        snippet="Offizieller Geschäftsbericht der Siemens AG.",
+        provider="fake_search",
+        rank=4,
+        host="www.siemens.com",
+        metadata={"source_type": "Official"},
+    )
+    kununu = SearchResult(
+        title="Siemens als Arbeitgeber",
+        url="https://www.kununu.example/de/siemens",
+        snippet="Arbeitgeberbewertungen zu Siemens.",
+        provider="fake_search",
+        rank=1,
+        host="www.kununu.example",
+    )
+    statista = SearchResult(
+        title="Statistiken zur Siemens AG",
+        url="https://de.statista.example/themen/229/siemens-ag",
+        snippet="Statistikportal mit Dossier zur Siemens AG.",
+        provider="fake_search",
+        rank=2,
+        host="de.statista.example",
+    )
+    documents = {
+        marketscreener.url: FetchedDocument(
+            url=marketscreener.url,
+            title=marketscreener.title,
+            text="Siemens AG Bewertung: KGV, Marktkapitalisierung und Analystenschätzungen werden ausgewiesen.",
+        ),
+        siemens_report.url: FetchedDocument(
+            url=siemens_report.url,
+            title=siemens_report.title,
+            text="Der Siemens Geschäftsbericht enthält Umsatz, Ergebnis, Ausblick und Segmentinformationen.",
+        ),
+        kununu.url: FetchedDocument(
+            url=kununu.url,
+            title=kununu.title,
+            text="Kununu sammelt Arbeitgeberbewertungen zu Siemens.",
+        ),
+        statista.url: FetchedDocument(
+            url=statista.url,
+            title=statista.title,
+            text="Statista bietet allgemeine Dossier-Statistiken zur Siemens AG.",
+        ),
+    }
+    chunks = (
+        EvidenceChunk(
+            text=documents[marketscreener.url].text,
+            source_url=marketscreener.url,
+            source_title=marketscreener.title,
+            relevance=0.95,
+            metadata={"claim_key": "siemens_finance_research", "claim_value": "sufficient_context"},
+        ),
+        EvidenceChunk(
+            text=documents[siemens_report.url].text,
+            source_url=siemens_report.url,
+            source_title=siemens_report.title,
+            relevance=0.9,
+            metadata={"claim_key": "siemens_finance_research", "claim_value": "sufficient_context"},
+        ),
+        EvidenceChunk(
+            text=documents[kununu.url].text,
+            source_url=kununu.url,
+            source_title=kununu.title,
+            relevance=0.4,
+            metadata={"warning_codes": ("weak_source",)},
+        ),
+        EvidenceChunk(
+            text=documents[statista.url].text,
+            source_url=statista.url,
+            source_title=statista.title,
+            relevance=0.4,
+            metadata={"warning_codes": ("weak_source",)},
+        ),
+    )
+    service = CurrentInfoService(
+        search_provider=_FakeSearchProvider((kununu, statista, marketscreener, siemens_report)),
+        fetch_provider=_FakeFetchProvider(documents),
+        retrieval_provider=_FakeRetrievalProvider(chunks),
+    )
+
+    query = "Bewertung Siemens Aktie"
+    answer = service.answer(CurrentInfoRequest(query=query, locale="de", domain_hint="stock", max_results=5))
+
+    assert answer.status == "answered"
+    assert "weak_source" not in answer.warnings
+    assert "irrelevant_source" not in answer.warnings
+    assert answer.search_bundle is not None
+    assert {result.host for result in answer.search_bundle.results[:2]} == {
+        "de.marketscreener.example",
+        "siemens.com",
+    }
+    assert set(answer.sources[:2]) == {marketscreener.url, siemens_report.url}
+    assert "KGV" in answer.answer_text
+    assert "Geschäftsbericht" in answer.answer_text
+
+
+def test_current_info_service_fails_closed_for_finance_research_with_only_weak_context_sources():
+    kununu = SearchResult(
+        title="Siemens als Arbeitgeber",
+        url="https://www.kununu.example/de/siemens",
+        snippet="Arbeitgeberbewertungen zu Siemens.",
+        provider="fake_search",
+        rank=1,
+        host="www.kununu.example",
+    )
+    statista = SearchResult(
+        title="Statistiken zur Siemens AG",
+        url="https://de.statista.example/themen/229/siemens-ag",
+        snippet="Statistikportal mit Dossier zur Siemens AG.",
+        provider="fake_search",
+        rank=2,
+        host="de.statista.example",
+    )
+    documents = {
+        kununu.url: FetchedDocument(url=kununu.url, title=kununu.title, text="Kununu sammelt Arbeitgeberbewertungen."),
+        statista.url: FetchedDocument(url=statista.url, title=statista.title, text="Statista sammelt allgemeine Dossiers."),
+    }
+    chunks = (
+        EvidenceChunk(
+            text=documents[kununu.url].text,
+            source_url=kununu.url,
+            source_title=kununu.title,
+            metadata={"warning_codes": ("weak_source",)},
+        ),
+        EvidenceChunk(
+            text=documents[statista.url].text,
+            source_url=statista.url,
+            source_title=statista.title,
+            metadata={"warning_codes": ("weak_source",)},
+        ),
+    )
+    service = CurrentInfoService(
+        search_provider=_FakeSearchProvider((kununu, statista)),
+        fetch_provider=_FakeFetchProvider(documents),
+        retrieval_provider=_FakeRetrievalProvider(chunks),
+    )
+
+    answer = service.answer(CurrentInfoRequest(query="Bewertung Siemens Aktie", locale="de", domain_hint="stock"))
+
+    assert answer.status == "unverified_evidence"
+    assert answer.answer_text == ""
+    assert "weak_source" in answer.warnings
+    assert answer.metadata["reason"] == "weak_source"
+
+
 def test_current_info_service_does_not_use_siemens_energy_as_siemens_ag_listing_proof():
     boerse = SearchResult(
         title="Siemens Energy AG Aktie",
