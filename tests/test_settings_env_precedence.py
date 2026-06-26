@@ -122,6 +122,7 @@ def test_ollama_retry_and_fallback_env_values_are_parsed(monkeypatch, tmp_path) 
     monkeypatch.delenv("AMO_VECTOR_PROVIDER", raising=False)
     monkeypatch.delenv("AMO_VECTOR_EMBEDDING_PROVIDER", raising=False)
     monkeypatch.delenv("AMO_VECTOR_EMBEDDING_MODEL", raising=False)
+    monkeypatch.delenv("OLLAMA_MODEL", raising=False)
     monkeypatch.delenv("WEBUI_LOGIN_DELAY_BASE_SECONDS", raising=False)
     monkeypatch.delenv("WEBUI_LOGIN_DELAY_MAX_SECONDS", raising=False)
 
@@ -305,6 +306,7 @@ def test_vector_postgres_defaults_use_ollama_nomic_embedding_model(monkeypatch, 
     monkeypatch.delenv("AMO_VECTOR_PROVIDER", raising=False)
     monkeypatch.delenv("AMO_VECTOR_EMBEDDING_PROVIDER", raising=False)
     monkeypatch.delenv("AMO_VECTOR_EMBEDDING_MODEL", raising=False)
+    monkeypatch.delenv("OLLAMA_MODEL", raising=False)
     monkeypatch.delenv("WEBUI_LOGIN_DELAY_BASE_SECONDS", raising=False)
     monkeypatch.delenv("WEBUI_LOGIN_DELAY_MAX_SECONDS", raising=False)
 

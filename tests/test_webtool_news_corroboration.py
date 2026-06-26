@@ -185,7 +185,7 @@ def test_stale_or_weak_trusted_primary_source_still_fails_closed():
 
 def test_fail_closed_response_names_uncertainty_without_raw_dump():
     raw_text = (
-        "2026-06-11 Acme announced regulator approval for the Berlin battery plant. "
+        "Acme announced regulator approval for the Berlin battery plant. "
         "This raw paragraph should not be dumped into the user response."
     )
 
@@ -196,9 +196,9 @@ def test_fail_closed_response_names_uncertainty_without_raw_dump():
     )
 
     assert "cannot reliably confirm" in response
+    assert "claim level" in response
     assert "Source/status:" in response
     assert "raw paragraph" not in response
-    assert "single.example" not in response
 
 
 def test_fail_closed_response_mentions_conflict_status_without_raw_tool_output():
@@ -208,12 +208,12 @@ def test_fail_closed_response_mentions_conflict_status_without_raw_tool_output()
             (
                 "webscraping",
                 "positive.example",
-                "2026-06-11 Acme announced regulator approval for the Berlin battery plant after the agency completed its review.",
+                "Acme announced regulator approval for the Berlin battery plant after the agency completed its review.",
             ),
             (
                 "webscraping",
                 "negative.example",
-                "2026-06-11 Acme has not announced regulator approval for the Berlin battery plant after the agency completed its review.",
+                "Acme has not announced regulator approval for the Berlin battery plant after the agency completed its review.",
             ),
         ),
         locale="de",

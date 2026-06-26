@@ -17,6 +17,7 @@ def test_main_wires_plugin_command_executor_into_dispatcher(monkeypatch, tmp_pat
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
     monkeypatch.setenv("OFFSET_STATE_FILE", str(offset_path))
     monkeypatch.setenv("AMO_PLUGIN_DIR", str(tmp_path / "plugins"))
+    monkeypatch.setenv("AMO_ENV_OVERRIDE", "0")
     monkeypatch.setenv("WEBUI_OWNER_TELEGRAM_ID", "")
     monkeypatch.setenv("WEBUI_LOGIN_DELAY_BASE_SECONDS", "0.25")
     monkeypatch.setenv("WEBUI_LOGIN_DELAY_MAX_SECONDS", "1.0")
