@@ -218,11 +218,32 @@ def test_current_info_unverified_evidence_sends_insufficient_answer_without_synt
 
     assert handled is True
     assert sent == [
-        "Die verfügbaren geprüften Quellen reichen nicht aus, um das verlässlich zu beantworten.\n\n"
-        "Geprüfte Quellen:\n"
+        "Die verfügbaren Quellen und Kandidaten reichen nicht aus, um das verlässlich zu beantworten.\n\n"
+        "Berücksichtigte Quellen/Kandidaten:\n"
         "1. https://www.bybit.com/en/trade/usdt/SPCXUSDT"
     ]
+    assert "Geprüfte Quellen" not in sent[0]
     assert ai.prompts is None
+
+
+def test_current_info_insufficient_answer_labels_sources_as_candidates_in_english() -> None:
+    answer = CurrentInfoAnswer(
+        status="unverified_evidence",
+        answer_text="",
+        request=CurrentInfoRequest(query="current listing status?"),
+        sources=("https://search.example/result",),
+        warnings=("snippet_only_evidence",),
+    )
+
+    text = Dispatcher._format_current_info_insufficient_answer(answer=answer, locale="en")
+
+    assert text == (
+        "The available sources and candidates are not sufficient to answer this reliably.\n\n"
+        "Sources/candidates considered:\n"
+        "1. https://search.example/result"
+    )
+    assert "Sources checked" not in text
+    assert "checked sources" not in text
 
 
 def test_current_info_autoreply_accepts_spacex_listing_url_as_user_evidence() -> None:
@@ -256,10 +277,11 @@ def test_current_info_autoreply_accepts_spacex_listing_url_as_user_evidence() ->
     assert service.requests[0].domain_hint == "stock"
     assert service.requests[0].query == f"Ist SpaceX an der Börse? Quelle: {url}"
     assert sent == [
-        "Die verfügbaren geprüften Quellen reichen nicht aus, um das verlässlich zu beantworten.\n\n"
-        "Geprüfte Quellen:\n"
+        "Die verfügbaren Quellen und Kandidaten reichen nicht aus, um das verlässlich zu beantworten.\n\n"
+        "Berücksichtigte Quellen/Kandidaten:\n"
         f"1. {url}"
     ]
+    assert "Geprüfte Quellen" not in sent[0]
     assert ai.prompts is None
 
 
@@ -325,10 +347,11 @@ def test_current_info_autoreply_preserves_long_finance_listing_url() -> None:
     assert service.requests[0].metadata["direct_url"] == url
     assert url in service.requests[0].query
     assert sent == [
-        "Die verfügbaren geprüften Quellen reichen nicht aus, um das verlässlich zu beantworten.\n\n"
-        "Geprüfte Quellen:\n"
+        "Die verfügbaren Quellen und Kandidaten reichen nicht aus, um das verlässlich zu beantworten.\n\n"
+        "Berücksichtigte Quellen/Kandidaten:\n"
         f"1. {url}"
     ]
+    assert "Geprüfte Quellen" not in sent[0]
 
 
 def test_current_info_synthesis_timeout_falls_back_then_sends_late_answer() -> None:

@@ -2294,11 +2294,11 @@ class Dispatcher:
             :CURRENT_INFO_SYNTHESIS_MAX_SOURCE_COUNT
         ]
         if locale == "en":
-            body = "The available checked sources are not sufficient to answer this reliably."
-            label = "Sources checked"
+            body = "The available sources and candidates are not sufficient to answer this reliably."
+            label = "Sources/candidates considered"
         else:
-            body = "Die verfügbaren geprüften Quellen reichen nicht aus, um das verlässlich zu beantworten."
-            label = "Geprüfte Quellen"
+            body = "Die verfügbaren Quellen und Kandidaten reichen nicht aus, um das verlässlich zu beantworten."
+            label = "Berücksichtigte Quellen/Kandidaten"
         if not sources:
             return body
         source_lines = [f"{index}. {url}" for index, url in enumerate(sources, start=1)]
