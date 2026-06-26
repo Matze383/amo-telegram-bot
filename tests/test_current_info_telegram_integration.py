@@ -56,6 +56,11 @@ class _SlowAIService:
         return "too late"
 
 
+class _FailingAIService:
+    async def ask(self, prompt: str, *, task_type: str | None = None) -> str:
+        raise RuntimeError("synthesis failed")
+
+
 @dataclass
 class _AIService:
     response: str = "Synthetisierte Antwort."
@@ -291,10 +296,10 @@ def test_current_info_gpt_researcher_auto_path_uses_longer_research_timeout() ->
     assert service.requests[0].metadata["capability"] == "webresearch"
 
 
-def test_current_info_synthesis_timeout_fails_closed() -> None:
+def test_current_info_synthesis_timeout_sends_compact_answer_with_sources() -> None:
     answer = CurrentInfoAnswer(
         status="answered",
-        answer_text="Raw evidence answer",
+        answer_text="Raw GPT-Researcher answer from checked evidence.",
         request=CurrentInfoRequest(query="aktueller Python Release heute"),
         evidence=EvidencePackage(
             chunks=(
@@ -330,9 +335,170 @@ def test_current_info_synthesis_timeout_fails_closed() -> None:
     handled = asyncio.run(_run())
 
     assert handled is True
+    assert sent == ["Raw GPT-Researcher answer from checked evidence.\n\nQuellen:\n1. https://python.example/release"]
+    assert "Recherche konnte gerade nicht erfolgreich abgeschlossen werden" not in sent[0]
+
+
+def test_current_info_synthesis_exception_sends_compact_answer_with_sources() -> None:
+    answer = CurrentInfoAnswer(
+        status="answered",
+        answer_text="Raw GPT-Researcher answer after AI synthesis failed.",
+        request=CurrentInfoRequest(query="aktueller Python Release heute"),
+        evidence=EvidencePackage(
+            chunks=(
+                EvidenceChunk(
+                    text="Python 3.13.5 is the current release.",
+                    source_url="https://python.example/release",
+                    source_title="Python release",
+                ),
+            ),
+            freshness="fresh",
+            confidence=0.72,
+        ),
+        sources=("https://python.example/release",),
+        confidence=0.72,
+    )
+    dispatcher, sent = _dispatcher(
+        service=_CurrentInfoService(answer),
+        ai=_FailingAIService(),
+    )
+
+    handled = asyncio.run(
+        dispatcher._maybe_handle_current_info_autoreply(
+            message=_message("@amo_bot aktueller Python Release heute?"),
+            role=Role.ADMIN,
+            normalized_text="aktueller Python Release heute?",
+            locale="de",
+        )
+    )
+
+    assert handled is True
+    assert sent == [
+        "Raw GPT-Researcher answer after AI synthesis failed.\n\nQuellen:\n1. https://python.example/release"
+    ]
+    assert "Recherche konnte gerade nicht erfolgreich abgeschlossen werden" not in sent[0]
+
+
+def test_current_info_synthesis_timeout_without_sources_still_fails_closed() -> None:
+    answer = CurrentInfoAnswer(
+        status="answered",
+        answer_text="Raw answer without sources.",
+        request=CurrentInfoRequest(query="aktueller Python Release heute"),
+        evidence=EvidencePackage(
+            chunks=(
+                EvidenceChunk(
+                    text="Python 3.13.5 is the current release.",
+                    source_url="https://python.example/release",
+                    source_title="Python release",
+                ),
+            ),
+            freshness="fresh",
+            confidence=0.72,
+        ),
+        sources=(),
+        confidence=0.72,
+    )
+    dispatcher, sent = _dispatcher(
+        service=_CurrentInfoService(answer),
+        ai=_SlowAIService(),
+        timeout=1.0,
+        late_synthesis_timeout=0.01,
+    )
+
+    handled = asyncio.run(
+        dispatcher._maybe_handle_current_info_autoreply(
+            message=_message("@amo_bot aktueller Python Release heute?"),
+            role=Role.ADMIN,
+            normalized_text="aktueller Python Release heute?",
+            locale="de",
+        )
+    )
+
+    assert handled is True
     assert sent == [
         "Dafuer brauche ich GPT-Researcher-Webrecherche, aber die Recherche konnte gerade nicht erfolgreich abgeschlossen werden."
     ]
+
+
+def test_current_info_synthesis_timeout_without_evidence_still_fails_closed() -> None:
+    answer = CurrentInfoAnswer(
+        status="answered",
+        answer_text="Raw answer without evidence.",
+        request=CurrentInfoRequest(query="aktueller Python Release heute"),
+        evidence=None,
+        sources=("https://python.example/release",),
+        confidence=0.72,
+    )
+    dispatcher, sent = _dispatcher(
+        service=_CurrentInfoService(answer),
+        ai=_SlowAIService(),
+        timeout=1.0,
+        late_synthesis_timeout=0.01,
+    )
+
+    handled = asyncio.run(
+        dispatcher._maybe_handle_current_info_autoreply(
+            message=_message("@amo_bot aktueller Python Release heute?"),
+            role=Role.ADMIN,
+            normalized_text="aktueller Python Release heute?",
+            locale="de",
+        )
+    )
+
+    assert handled is True
+    assert sent == [
+        "Dafuer brauche ich GPT-Researcher-Webrecherche, aber die Recherche konnte gerade nicht erfolgreich abgeschlossen werden."
+    ]
+
+
+def test_current_info_compact_synthesis_timeout_applies_expired_planned_date_guard() -> None:
+    answer = CurrentInfoAnswer(
+        status="answered",
+        answer_text=(
+            "Laut Quellen ist SpaceX noch nicht börsennotiert. "
+            "Ein Börsengang ist für den 12. Juni 2026 an der Nasdaq unter dem Ticker SPCX geplant, "
+            "aber bis dahin ist die Aktie nicht direkt handelbar."
+        ),
+        request=CurrentInfoRequest(
+            query="Ist SpaceX schon boersennotiert?",
+            metadata={"now": "2026-06-26T10:00:00Z", "timezone": "Europe/Berlin"},
+        ),
+        evidence=EvidencePackage(
+            chunks=(
+                EvidenceChunk(
+                    text="Die Quellen nennen einen geplanten SpaceX IPO am 12. Juni 2026 an der Nasdaq.",
+                    source_url="https://finance.example/spacex-ipo",
+                    source_title="SpaceX IPO",
+                ),
+            ),
+            freshness="current",
+            confidence=0.78,
+        ),
+        sources=("https://finance.example/spacex-ipo",),
+        confidence=0.78,
+    )
+    dispatcher, sent = _dispatcher(
+        service=_CurrentInfoService(answer),
+        ai=_SlowAIService(),
+        timeout=1.0,
+        late_synthesis_timeout=0.01,
+    )
+
+    handled = asyncio.run(
+        dispatcher._maybe_handle_current_info_autoreply(
+            message=_message("@amo_bot Ist SpaceX schon boersennotiert?"),
+            role=Role.ADMIN,
+            normalized_text="Ist SpaceX schon boersennotiert?",
+            locale="de",
+        )
+    )
+
+    assert handled is True
+    body = sent[0].split("\n\nQuellen:", 1)[0]
+    assert "bis dahin" not in body.casefold()
+    assert "ist für den 12. juni 2026" not in body.casefold()
+    assert "wurde für den 12. Juni 2026" in body
+    assert "Quellen:\n1. https://finance.example/spacex-ipo" in sent[0]
 
 
 def test_current_info_unverified_evidence_sends_insufficient_answer_without_synthesis() -> None:

@@ -5,7 +5,7 @@ import json
 import logging
 import re
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from typing import Any, Awaitable, Callable, Protocol
 
@@ -74,6 +74,7 @@ BOT_PEER_V1_ALLOWED_COMMANDS: set[str] = {"help", "ping"}
 RESTART_ACK_TIMEOUT_SECONDS = 3.0
 CURRENT_INFO_SYNTHESIS_MAX_EVIDENCE_CHARS = 4500
 CURRENT_INFO_SYNTHESIS_MAX_SOURCE_COUNT = 5
+CURRENT_INFO_COMPACT_FALLBACK_MAX_BODY_CHARS = 3200
 
 
 def _terminate_current_process() -> None:
@@ -2064,6 +2065,31 @@ class Dispatcher:
                 timeout=synthesis_timeout,
             )
         except TimeoutError:
+            text = self._format_current_info_compact_fallback_answer(answer=answer, locale=locale)
+            if text.strip():
+                log_event(
+                    logger,
+                    logging.INFO,
+                    event="current_info.telegram.sent",
+                    component=_COMPONENT,
+                    chat_id=message.chat.id,
+                    message_id=message.message_id,
+                    message_thread_id=message.message_thread_id,
+                    user_id=message.from_user.id,
+                    extra={
+                        "status": answer.status,
+                        "confidence": answer.confidence,
+                        "source_count": len(answer.sources),
+                        "warning_count": len(answer.warnings),
+                        "reason": "synthesis_timeout_compact_fallback",
+                        "stage": "synthesis",
+                        "timeout_seconds": timeout_seconds,
+                        "late_synthesis_timeout_seconds": synthesis_timeout,
+                        "retrieval_elapsed_seconds": round(retrieval_elapsed_seconds, 3),
+                    },
+                )
+                await self._send_text(message.chat.id, text, message.message_thread_id)
+                return True
             log_event(
                 logger,
                 logging.INFO,
@@ -2090,6 +2116,28 @@ class Dispatcher:
             )
             return True
         except Exception as exc:
+            text = self._format_current_info_compact_fallback_answer(answer=answer, locale=locale)
+            if text.strip():
+                log_event(
+                    logger,
+                    logging.INFO,
+                    event="current_info.telegram.sent",
+                    component=_COMPONENT,
+                    chat_id=message.chat.id,
+                    message_id=message.message_id,
+                    message_thread_id=message.message_thread_id,
+                    user_id=message.from_user.id,
+                    extra={
+                        "status": answer.status,
+                        "confidence": answer.confidence,
+                        "source_count": len(answer.sources),
+                        "warning_count": len(answer.warnings),
+                        "reason": "synthesis_error_compact_fallback",
+                        "error_class": exc.__class__.__name__,
+                    },
+                )
+                await self._send_text(message.chat.id, text, message.message_thread_id)
+                return True
             log_event(
                 logger,
                 logging.INFO,
@@ -2259,6 +2307,29 @@ class Dispatcher:
                 timeout=synthesis_timeout,
             )
         except TimeoutError:
+            text = self._format_current_info_compact_fallback_answer(answer=answer, locale=locale)
+            if text.strip():
+                await self._send_text(message.chat.id, text, message.message_thread_id)
+                log_event(
+                    logger,
+                    logging.INFO,
+                    event="current_info.telegram.late_sent",
+                    component=_COMPONENT,
+                    chat_id=message.chat.id,
+                    message_id=message.message_id,
+                    message_thread_id=message.message_thread_id,
+                    user_id=message.from_user.id,
+                    extra={
+                        "status": answer.status,
+                        "confidence": answer.confidence,
+                        "source_count": len(answer.sources),
+                        "warning_count": len(answer.warnings),
+                        "reason": "synthesis_timeout_compact_fallback",
+                        "timeout_seconds": timeout_seconds,
+                        "late_synthesis_timeout_seconds": synthesis_timeout,
+                    },
+                )
+                return
             log_event(
                 logger,
                 logging.INFO,
@@ -2279,6 +2350,29 @@ class Dispatcher:
             )
             return
         except Exception as exc:
+            text = self._format_current_info_compact_fallback_answer(answer=answer, locale=locale)
+            if text.strip():
+                await self._send_text(message.chat.id, text, message.message_thread_id)
+                log_event(
+                    logger,
+                    logging.INFO,
+                    event="current_info.telegram.late_sent",
+                    component=_COMPONENT,
+                    chat_id=message.chat.id,
+                    message_id=message.message_id,
+                    message_thread_id=message.message_thread_id,
+                    user_id=message.from_user.id,
+                    extra={
+                        "status": answer.status,
+                        "confidence": answer.confidence,
+                        "source_count": len(answer.sources),
+                        "warning_count": len(answer.warnings),
+                        "reason": "synthesis_error_compact_fallback",
+                        "error_class": exc.__class__.__name__,
+                        "timeout_seconds": timeout_seconds,
+                    },
+                )
+                return
             log_event(
                 logger,
                 logging.INFO,
@@ -2413,6 +2507,23 @@ class Dispatcher:
         label = "Sources" if locale == "en" else "Quellen"
         source_lines = [f"{index}. {url}" for index, url in enumerate(sources, start=1)]
         return f"{body}\n\n{label}:\n" + "\n".join(source_lines)
+
+    @staticmethod
+    def _format_current_info_compact_fallback_answer(*, answer: CurrentInfoAnswer, locale: str) -> str:
+        if not answer.answered:
+            return ""
+        if not tuple(source for source in answer.sources if source):
+            return ""
+        if answer.evidence is None:
+            return ""
+        if not (answer.evidence.chunks or answer.evidence.documents or answer.evidence.sources):
+            return ""
+
+        body = " ".join(answer.answer_text.split())
+        if len(body) > CURRENT_INFO_COMPACT_FALLBACK_MAX_BODY_CHARS:
+            body = body[:CURRENT_INFO_COMPACT_FALLBACK_MAX_BODY_CHARS].rstrip() + " ..."
+        compact_answer = replace(answer, answer_text=body)
+        return Dispatcher._format_current_info_telegram_answer(answer=compact_answer, synthesized="", locale=locale)
 
     @staticmethod
     def _format_current_info_insufficient_answer(*, answer: CurrentInfoAnswer, locale: str) -> str:
