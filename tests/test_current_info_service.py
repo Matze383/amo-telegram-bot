@@ -102,6 +102,16 @@ class _FakeRetrievalProvider:
         return self.chunks
 
 
+class _FakeResearchProvider:
+    def __init__(self, answer: CurrentInfoAnswer) -> None:
+        self.answer_value = answer
+        self.calls: list[tuple[CurrentInfoRequest, TaskSpec, QueryPlan]] = []
+
+    def answer(self, *, request: CurrentInfoRequest, task: TaskSpec, query_plan: QueryPlan) -> CurrentInfoAnswer:
+        self.calls.append((request, task, query_plan))
+        return self.answer_value
+
+
 class _PreferenceRepo:
     def __init__(self) -> None:
         self.calls: list[dict[str, object]] = []
@@ -1814,6 +1824,85 @@ def test_current_info_service_fails_closed_without_search_provider():
     assert answer.status == "provider_unavailable"
     assert answer.warnings == ("search_provider_not_configured",)
     assert answer.search_bundle is None
+
+
+def test_current_info_service_gpt_researcher_required_uses_research_provider_only():
+    search_provider = _FakeSearchProvider(
+        (SearchResult(title="Search-only", url="https://search.example", snippet="Do not use"),)
+    )
+    fetch_provider = _FakeFetchProvider(
+        {"https://search.example": FetchedDocument(url="https://search.example", text="Do not fetch")}
+    )
+    research_answer = CurrentInfoAnswer(
+        status="answered",
+        answer_text="GPT-Researcher answer",
+        sources=("https://research.example/source",),
+        metadata={"provider_mode": "gpt_researcher"},
+    )
+    research_provider = _FakeResearchProvider(research_answer)
+    service = CurrentInfoService(
+        search_provider=search_provider,
+        fetch_provider=fetch_provider,
+        research_provider=research_provider,
+    )
+
+    answer = service.answer(
+        CurrentInfoRequest(
+            query="latest OpenAI API version",
+            metadata={"require_gpt_researcher": True, "capability": "webresearch"},
+        )
+    )
+
+    assert answer.answer_text == "GPT-Researcher answer"
+    assert len(research_provider.calls) == 1
+    assert search_provider.calls == []
+    assert fetch_provider.calls == []
+
+
+def test_current_info_service_gpt_researcher_required_fails_closed_without_provider():
+    search_provider = _FakeSearchProvider(
+        (SearchResult(title="Search-only", url="https://search.example", snippet="Do not use"),)
+    )
+    service = CurrentInfoService(search_provider=search_provider)
+
+    answer = service.answer(
+        CurrentInfoRequest(
+            query="current Stripe API changes",
+            metadata={"require_gpt_researcher": True, "capability": "webresearch"},
+        )
+    )
+
+    assert answer.status == "provider_unavailable"
+    assert answer.warnings == ("gpt_researcher_not_configured",)
+    assert answer.search_bundle is None
+    assert answer.metadata["provider_mode"] == "gpt_researcher"
+    assert search_provider.calls == []
+
+
+def test_current_info_service_gpt_researcher_required_does_not_fallback_after_research_failure():
+    search_provider = _FakeSearchProvider(
+        (SearchResult(title="Search-only", url="https://search.example", snippet="Do not use"),)
+    )
+    research_provider = _FakeResearchProvider(
+        CurrentInfoAnswer(
+            status="provider_unavailable",
+            warnings=("gpt_researcher_timeout",),
+            metadata={"provider_mode": "gpt_researcher"},
+        )
+    )
+    service = CurrentInfoService(search_provider=search_provider, research_provider=research_provider)
+
+    answer = service.answer(
+        CurrentInfoRequest(
+            query="latest Tesla news",
+            metadata={"require_gpt_researcher": True, "capability": "webresearch"},
+        )
+    )
+
+    assert answer.status == "provider_unavailable"
+    assert answer.warnings == ("gpt_researcher_timeout",)
+    assert len(research_provider.calls) == 1
+    assert search_provider.calls == []
 
 
 def test_current_info_service_reports_empty_result_from_fake_provider():

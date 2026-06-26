@@ -46,7 +46,14 @@ def _legacy_webtool_evidence_tests_use_direct_answer_strategy(monkeypatch):
     def _classify_response_strategy(_message, *, context=None):
         return ResponseStrategy("direct_answer", "legacy_webtool_evidence_test")
 
+    async def _skip_current_info_autoreply(*_args, **_kwargs):
+        return False
+
     monkeypatch.setattr("amo_bot.telegram.dispatcher.classify_response_strategy", _classify_response_strategy)
+    monkeypatch.setattr(
+        "amo_bot.telegram.dispatcher.Dispatcher._maybe_handle_current_info_autoreply",
+        _skip_current_info_autoreply,
+    )
 
 
 class _Response:

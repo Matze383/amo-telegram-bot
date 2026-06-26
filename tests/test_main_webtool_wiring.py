@@ -298,3 +298,61 @@ def test_main_runtime_wires_current_info_when_enabled(monkeypatch, tmp_path):
     assert captured["current_info_max_documents"] == 2
     assert captured["cached_fetch_vector_indexer"] is vector_components[0]
     assert captured["retrieval_vector_components"] is vector_components
+
+
+def test_main_runtime_wires_current_info_with_gpt_researcher_without_search_broker(monkeypatch, tmp_path):
+    from amo_bot import main as main_module
+
+    monkeypatch.setenv("BOT_TOKEN", "123:ABC")
+    monkeypatch.setenv("WEBUI_PASSWORD", "secret")
+    monkeypatch.setenv("WEBUI_SECRET_KEY", "unit-test-webui-secret-key-0123456789abcdef")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'bot.db'}")
+    monkeypatch.setenv("OFFSET_STATE_FILE", str(tmp_path / "offset.json"))
+    monkeypatch.setenv("BOT_PID_FILE", str(tmp_path / "amo_bot.pid"))
+    monkeypatch.setenv("AMO_PLUGIN_DIR", str(tmp_path / "plugins"))
+    monkeypatch.setenv("WEBUI_OWNER_TELEGRAM_ID", "")
+    monkeypatch.setenv("AMO_ENV_OVERRIDE", "0")
+    monkeypatch.setenv("AMO_CURRENT_INFO_ENABLED", "true")
+
+    captured: dict[str, object] = {}
+    research_provider = object()
+
+    class _DummyDispatcher:
+        def __init__(self, **kwargs) -> None:  # noqa: ANN003
+            captured.update(kwargs)
+
+    async def _fake_run_polling(*args, **kwargs):  # noqa: ANN002,ANN003
+        raise _StopFlow()
+
+    monkeypatch.setattr(main_module, "Dispatcher", _DummyDispatcher)
+    monkeypatch.setattr(main_module, "run_polling", _fake_run_polling)
+    monkeypatch.setattr(main_module, "build_search_broker_from_settings", lambda settings: None)
+    monkeypatch.setattr(
+        main_module,
+        "build_gpt_researcher_provider_from_settings",
+        lambda settings, **kwargs: research_provider,
+    )
+    monkeypatch.setattr(main_module, "build_document_fetcher_from_settings", lambda settings: object())
+    monkeypatch.setattr(
+        main_module,
+        "build_current_info_vector_components_from_settings",
+        lambda settings, **kwargs: None,
+    )
+    monkeypatch.setattr(
+        main_module,
+        "build_cached_fetch_provider_from_settings",
+        lambda settings, **kwargs: object(),
+    )
+    monkeypatch.setattr(
+        main_module,
+        "build_current_info_retrieval_provider_from_settings",
+        lambda settings, **kwargs: object(),
+    )
+
+    try:
+        main_module.run([])
+    except _StopFlow:
+        pass
+
+    assert captured["current_info_enabled"] is True
+    assert captured["current_info_service"] is not None

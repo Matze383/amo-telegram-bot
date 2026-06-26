@@ -205,6 +205,36 @@ class CurrentInfoService:
                 metadata=self._debug_metadata(budget),
             )
 
+        if _requires_gpt_researcher(request):
+            if self._research_provider is None:
+                self._log_synthesis(
+                    request=request,
+                    task=task,
+                    started=started,
+                    status="provider_unavailable",
+                    budget=budget,
+                    reason_code="gpt_researcher_not_configured",
+                )
+                return CurrentInfoAnswer(
+                    status="provider_unavailable",
+                    request=request,
+                    task=task,
+                    query_plan=query_plan,
+                    warnings=("gpt_researcher_not_configured",),
+                    metadata={**self._debug_metadata(budget), "provider_mode": "gpt_researcher"},
+                )
+
+            research_answer = self._research_provider.answer(request=request, task=task, query_plan=query_plan)
+            self._log_synthesis(
+                request=request,
+                task=task,
+                started=started,
+                status=research_answer.status,
+                budget=budget,
+                reason_code="gpt_researcher",
+            )
+            return research_answer
+
         if _is_webresearch_request(request) and self._research_provider is not None:
             research_answer = self._research_provider.answer(request=request, task=task, query_plan=query_plan)
             if research_answer.answered or research_answer.status in {"empty_evidence", "unverified_evidence"}:
@@ -825,6 +855,11 @@ def _is_webresearch_request(request: CurrentInfoRequest) -> bool:
         or metadata.get("research_capability")
         or ""
     ).casefold() == "webresearch"
+
+
+def _requires_gpt_researcher(request: CurrentInfoRequest) -> bool:
+    metadata = dict(request.metadata or {})
+    return bool(metadata.get("require_gpt_researcher"))
 
 
 def _general_query_variants(query: str, *, add_verification: bool = False) -> tuple[str, ...]:

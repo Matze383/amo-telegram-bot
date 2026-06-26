@@ -92,6 +92,10 @@ CURRENT_INFO_UNAVAILABLE_FALLBACK_TEXT = {
     "de": "Dafuer brauche ich aktuelle Recherche, aber Current-Info ist gerade nicht verfuegbar oder nicht konfiguriert.",
     "en": "I need current research for that, but Current Info is not available or configured right now.",
 }
+CURRENT_INFO_RESEARCH_FAILED_FALLBACK_TEXT = {
+    "de": "Dafuer brauche ich GPT-Researcher-Webrecherche, aber die Recherche konnte gerade nicht erfolgreich abgeschlossen werden.",
+    "en": "I need GPT-Researcher web research for that, but the research could not be completed successfully right now.",
+}
 
 SendTextFn = Callable[[int, str, int | None], Awaitable[object]]
 SendMarkupFn = Callable[[int, str, dict[str, Any], int | None], Awaitable[object]]
@@ -1877,8 +1881,18 @@ class Dispatcher:
         fallback_to_ai_on_incomplete: bool = True,
         strategy_reason: str = "",
     ) -> bool:
+        decision = decide_auto_research(normalized_text)
+        current_info_query = normalized_text if decision.url and normalized_text.strip() else decision.query
+        original_capability = decision.capability
+        capability = "webresearch"
+        reason = decision.reason
+        if force and not current_info_query:
+            current_info_query = normalized_text.strip()
+            reason = strategy_reason or "response_strategy_research_needed"
+        should_research = bool((decision.enabled or force) and current_info_query)
+
         if not self.current_info_enabled or self.current_info_service is None or self.ai_service is None:
-            if force:
+            if should_research:
                 await self._send_text(
                     message.chat.id,
                     CURRENT_INFO_UNAVAILABLE_FALLBACK_TEXT["en" if locale == "en" else "de"],
@@ -1903,19 +1917,7 @@ class Dispatcher:
                 return True
             return False
 
-        decision = decide_auto_research(normalized_text)
-        current_info_query = normalized_text if decision.url and normalized_text.strip() else decision.query
-        capability = decision.capability
-        reason = decision.reason
-        if force and not current_info_query:
-            current_info_query = normalized_text.strip()
-            capability = "webresearch"
-            reason = strategy_reason or "response_strategy_research_needed"
-        if (
-            not (decision.enabled or force)
-            or capability not in {"webresearch", "websearch", "browser", "webscraping"}
-            or not current_info_query
-        ):
+        if not should_research:
             return False
 
         timeout_seconds = max(float(self.current_info_timeout_seconds), 0.001)
@@ -1934,9 +1936,11 @@ class Dispatcher:
                 "auto_research_reason": reason,
                 "response_strategy_reason": strategy_reason,
                 "capability": capability,
+                "requested_capability": original_capability,
                 "auto_research_capability": capability,
                 "direct_url": decision.url,
                 "forced_by_response_strategy": force,
+                "require_gpt_researcher": True,
             },
         )
 
@@ -1948,12 +1952,7 @@ class Dispatcher:
                 timeout=timeout_seconds,
             )
         except TimeoutError:
-            self._schedule_late_current_info_answer(
-                retrieval_task=retrieval_task,
-                message=message,
-                locale=locale,
-                timeout_seconds=timeout_seconds,
-            )
+            retrieval_task.cancel()
             log_event(
                 logger,
                 logging.INFO,
@@ -1967,10 +1966,15 @@ class Dispatcher:
                     "reason": "timeout",
                     "stage": "retrieval",
                     "timeout_seconds": timeout_seconds,
-                    "late_delivery": "scheduled",
+                    "late_delivery": "disabled",
                 },
             )
-            return not fallback_to_ai_on_incomplete
+            await self._send_text(
+                message.chat.id,
+                CURRENT_INFO_RESEARCH_FAILED_FALLBACK_TEXT["en" if locale == "en" else "de"],
+                message.message_thread_id,
+            )
+            return True
         except Exception as exc:
             log_event(
                 logger,
@@ -1986,7 +1990,12 @@ class Dispatcher:
                     "error_class": exc.__class__.__name__,
                 },
             )
-            return not fallback_to_ai_on_incomplete
+            await self._send_text(
+                message.chat.id,
+                CURRENT_INFO_RESEARCH_FAILED_FALLBACK_TEXT["en" if locale == "en" else "de"],
+                message.message_thread_id,
+            )
+            return True
 
         if isinstance(answer, CurrentInfoAnswer) and answer.status in {"empty_evidence", "unverified_evidence"}:
             text = self._format_current_info_insufficient_answer(answer=answer, locale=locale)
@@ -2027,16 +2036,15 @@ class Dispatcher:
                     "warning_count": len(getattr(answer, "warnings", ()) or ()),
                 },
             )
-            return not fallback_to_ai_on_incomplete
+            await self._send_text(
+                message.chat.id,
+                CURRENT_INFO_RESEARCH_FAILED_FALLBACK_TEXT["en" if locale == "en" else "de"],
+                message.message_thread_id,
+            )
+            return True
 
         remaining_seconds = timeout_seconds - (time.perf_counter() - started)
         if remaining_seconds <= 0:
-            self._schedule_late_current_info_answer(
-                retrieval_task=asyncio.create_task(self._completed_current_info_answer(answer)),
-                message=message,
-                locale=locale,
-                timeout_seconds=timeout_seconds,
-            )
             log_event(
                 logger,
                 logging.INFO,
@@ -2052,10 +2060,15 @@ class Dispatcher:
                     "timeout_seconds": timeout_seconds,
                     "status": answer.status,
                     "confidence": answer.confidence,
-                    "late_delivery": "scheduled",
+                    "late_delivery": "disabled",
                 },
             )
-            return not fallback_to_ai_on_incomplete
+            await self._send_text(
+                message.chat.id,
+                CURRENT_INFO_RESEARCH_FAILED_FALLBACK_TEXT["en" if locale == "en" else "de"],
+                message.message_thread_id,
+            )
+            return True
         try:
             synthesized = await asyncio.wait_for(
                 self._synthesize_current_info_answer(answer=answer, locale=locale),
@@ -2079,13 +2092,12 @@ class Dispatcher:
                     "confidence": answer.confidence,
                 },
             )
-            self._schedule_late_current_info_answer(
-                retrieval_task=asyncio.create_task(self._completed_current_info_answer(answer)),
-                message=message,
-                locale=locale,
-                timeout_seconds=timeout_seconds,
+            await self._send_text(
+                message.chat.id,
+                CURRENT_INFO_RESEARCH_FAILED_FALLBACK_TEXT["en" if locale == "en" else "de"],
+                message.message_thread_id,
             )
-            return not fallback_to_ai_on_incomplete
+            return True
         except Exception as exc:
             log_event(
                 logger,
@@ -2103,11 +2115,21 @@ class Dispatcher:
                     "confidence": answer.confidence,
                 },
             )
-            return not fallback_to_ai_on_incomplete
+            await self._send_text(
+                message.chat.id,
+                CURRENT_INFO_RESEARCH_FAILED_FALLBACK_TEXT["en" if locale == "en" else "de"],
+                message.message_thread_id,
+            )
+            return True
 
         text = self._format_current_info_telegram_answer(answer=answer, synthesized=synthesized, locale=locale)
         if not text.strip():
-            return False
+            await self._send_text(
+                message.chat.id,
+                CURRENT_INFO_RESEARCH_FAILED_FALLBACK_TEXT["en" if locale == "en" else "de"],
+                message.message_thread_id,
+            )
+            return True
 
         await self._send_text(message.chat.id, text, message.message_thread_id)
         log_event(

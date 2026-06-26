@@ -136,6 +136,8 @@ def test_current_info_autoreply_synthesizes_and_appends_sources() -> None:
     assert service.requests[0].max_results == 4
     assert service.requests[0].max_documents == 2
     assert service.requests[0].role == Role.ADMIN
+    assert service.requests[0].metadata["require_gpt_researcher"] is True
+    assert service.requests[0].metadata["capability"] == "webresearch"
     assert ai.task_types == ["answer_synthesis"]
     assert "Checked evidence" in (ai.prompts or [""])[0]
     assert "Source class: verified_external_evidence" in (ai.prompts or [""])[0]
@@ -146,7 +148,7 @@ def test_current_info_autoreply_synthesizes_and_appends_sources() -> None:
     assert "do not use prior model knowledge" in (ai.prompts or [""])[0]
 
 
-def test_current_info_timeout_falls_back_then_sends_late_answer() -> None:
+def test_current_info_timeout_fails_closed_without_late_search_or_ai_fallback() -> None:
     dispatcher, sent = _dispatcher(
         service=_SlowCurrentInfoService(),
         ai=_AIService(response="Late synthesized answer."),
@@ -160,17 +162,18 @@ def test_current_info_timeout_falls_back_then_sends_late_answer() -> None:
             normalized_text="aktueller Python Release heute?",
             locale="de",
         )
-        assert sent == []
         await asyncio.sleep(0.08)
         return handled
 
     handled = asyncio.run(_run())
 
-    assert handled is False
-    assert sent == ["Late synthesized answer.\n\nQuellen:\n1. https://late.example"]
+    assert handled is True
+    assert sent == [
+        "Dafuer brauche ich GPT-Researcher-Webrecherche, aber die Recherche konnte gerade nicht erfolgreich abgeschlossen werden."
+    ]
 
 
-def test_current_info_late_synthesis_timeout_does_not_send() -> None:
+def test_current_info_synthesis_timeout_fails_closed() -> None:
     dispatcher, sent = _dispatcher(
         service=_SlowCurrentInfoService(),
         ai=_SlowAIService(),
@@ -190,8 +193,10 @@ def test_current_info_late_synthesis_timeout_does_not_send() -> None:
 
     handled = asyncio.run(_run())
 
-    assert handled is False
-    assert sent == []
+    assert handled is True
+    assert sent == [
+        "Dafuer brauche ich GPT-Researcher-Webrecherche, aber die Recherche konnte gerade nicht erfolgreich abgeschlossen werden."
+    ]
 
 
 def test_current_info_unverified_evidence_sends_insufficient_answer_without_synthesis() -> None:
@@ -244,6 +249,62 @@ def test_current_info_insufficient_answer_labels_sources_as_candidates_in_englis
     )
     assert "Sources checked" not in text
     assert "checked sources" not in text
+
+
+def test_current_info_websearch_signal_with_service_disabled_fails_closed_without_ai_fallback() -> None:
+    dispatcher, sent = _dispatcher(service=_CurrentInfoService(CurrentInfoAnswer(status="answered")), ai=_AIService())
+    dispatcher.current_info_enabled = False
+
+    handled = asyncio.run(
+        dispatcher._maybe_handle_current_info_autoreply(
+            message=_message("@amo_bot aktueller Python Release heute?"),
+            role=Role.ADMIN,
+            normalized_text="aktueller Python Release heute?",
+            locale="de",
+            force=False,
+        )
+    )
+
+    assert handled is True
+    assert sent == [
+        "Dafuer brauche ich aktuelle Recherche, aber Current-Info ist gerade nicht verfuegbar oder nicht konfiguriert."
+    ]
+
+
+def test_current_info_mutable_fact_queries_are_marked_gpt_researcher_only() -> None:
+    answer = CurrentInfoAnswer(
+        status="answered",
+        answer_text="Research answer.",
+        sources=("https://research.example/source",),
+        confidence=0.8,
+    )
+    service = _CurrentInfoService(answer)
+    dispatcher, sent = _dispatcher(service=service, ai=_AIService(response="Synthesis."))
+
+    queries = (
+        "Welche Firmen gehören aktuell zu OpenAI und Microsoft?",
+        "Welche Änderungen gab es in der Stripe API?",
+        "Was kostet ChatGPT Pro heute?",
+        "Was sind die neuesten News zu Nvidia?",
+        "Wer ist aktuell CEO von OpenAI?",
+    )
+    for index, query in enumerate(queries, start=1):
+        handled = asyncio.run(
+            dispatcher._maybe_handle_current_info_autoreply(
+                message=_message(f"@amo_bot {query}"),
+                role=Role.ADMIN,
+                normalized_text=query,
+                locale="de",
+                force=True,
+                strategy_reason="semantic_current_data_required",
+            )
+        )
+        assert handled is True, query
+        assert service.requests[index - 1].metadata["require_gpt_researcher"] is True
+        assert service.requests[index - 1].metadata["capability"] == "webresearch"
+
+    assert len(service.requests) == len(queries)
+    assert len(sent) == len(queries)
 
 
 def test_current_info_autoreply_accepts_spacex_listing_url_as_user_evidence() -> None:
@@ -311,6 +372,8 @@ def test_current_info_autoreply_keeps_full_long_url_in_request() -> None:
     assert service.requests[0].query == prompt
     assert url in service.requests[0].query
     assert service.requests[0].metadata["direct_url"] == url
+    assert service.requests[0].metadata["capability"] == "webresearch"
+    assert service.requests[0].metadata["requested_capability"] == "browser"
     assert sent == [f"Die Quelle wurde geprüft.\n\nQuellen:\n1. {url}"]
 
 
@@ -354,7 +417,7 @@ def test_current_info_autoreply_preserves_long_finance_listing_url() -> None:
     assert "Geprüfte Quellen" not in sent[0]
 
 
-def test_current_info_synthesis_timeout_falls_back_then_sends_late_answer() -> None:
+def test_current_info_synthesis_budget_exhausted_fails_closed_without_late_answer() -> None:
     answer = CurrentInfoAnswer(
         status="answered",
         answer_text="Raw evidence answer",
@@ -386,11 +449,12 @@ def test_current_info_synthesis_timeout_falls_back_then_sends_late_answer() -> N
             normalized_text="aktueller Python Release heute?",
             locale="de",
         )
-        assert sent == []
         await asyncio.sleep(0.08)
         return handled
 
     handled = asyncio.run(_run())
 
-    assert handled is False
-    assert sent == ["too late\n\nQuellen:\n1. https://python.example/release"]
+    assert handled is True
+    assert sent == [
+        "Dafuer brauche ich GPT-Researcher-Webrecherche, aber die Recherche konnte gerade nicht erfolgreich abgeschlossen werden."
+    ]

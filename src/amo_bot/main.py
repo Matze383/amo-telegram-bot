@@ -391,22 +391,22 @@ def run(argv: list[str] | None = None) -> None:
     web_evidence_pipeline = WebEvidencePipeline(session_factory=session_factory)
     current_info_service = None
     if settings.amo_current_info_enabled:
+        current_info_vector_components = build_current_info_vector_components_from_settings(
+            settings,
+            session_factory=session_factory,
+        )
+        current_info_vector_indexer = (
+            current_info_vector_components[0] if current_info_vector_components is not None else None
+        )
+        current_info_embedding_provider = (
+            current_info_vector_components[2] if current_info_vector_components is not None else None
+        )
+        current_info_research_provider = build_gpt_researcher_provider_from_settings(
+            settings,
+            embedding_provider=current_info_embedding_provider,
+        )
         current_info_search_provider = build_search_broker_from_settings(settings)
-        if current_info_search_provider is not None:
-            current_info_vector_components = build_current_info_vector_components_from_settings(
-                settings,
-                session_factory=session_factory,
-            )
-            current_info_vector_indexer = (
-                current_info_vector_components[0] if current_info_vector_components is not None else None
-            )
-            current_info_embedding_provider = (
-                current_info_vector_components[2] if current_info_vector_components is not None else None
-            )
-            current_info_research_provider = build_gpt_researcher_provider_from_settings(
-                settings,
-                embedding_provider=current_info_embedding_provider,
-            )
+        if current_info_search_provider is not None or current_info_research_provider is not None:
             current_info_fetch_provider = build_cached_fetch_provider_from_settings(
                 settings,
                 session_factory=session_factory,

@@ -1079,7 +1079,13 @@ def test_autoreply_current_info_timeout_fails_closed_before_synthesis_for_live_w
         )
     )
 
-    assert sender.sent == []
+    assert sender.sent == [
+        (
+            -1002,
+            "Dafuer brauche ich GPT-Researcher-Webrecherche, aber die Recherche konnte gerade nicht erfolgreich abgeschlossen werden.",
+            77,
+        )
+    ]
     assert ai.prompts == []
 
 
@@ -1131,9 +1137,58 @@ def test_autoreply_research_needed_uses_current_info_before_normal_ai_draft(tmp_
     assert len(service.requests) == 1
     assert service.requests[0].metadata["forced_by_response_strategy"] is True
     assert service.requests[0].metadata["response_strategy_reason"] == "semantic_current_data_required"
+    assert service.requests[0].metadata["require_gpt_researcher"] is True
+    assert service.requests[0].metadata["capability"] == "webresearch"
     assert len(ai.prompts) == 1
     assert "Checked evidence" in ai.prompts[0]
     assert "User message:" not in ai.prompts[0]
+
+
+def test_autoreply_direct_answer_does_not_invoke_current_info(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'ai_autoreply_direct_answer.db'}"
+    init_db(db_url)
+    _seed_user(
+        db_url,
+        user_id=2706,
+        role="vip",
+        consent="accepted",
+        group_chat_id=-1006,
+        group_role="vip",
+    )
+
+    sf = create_session_factory(db_url)
+    with sf() as session:
+        TopicAgentMemoryRepository(session).upsert_config(
+            scope_type="topic",
+            chat_id=-1006,
+            topic_id=81,
+            ai_enabled=True,
+            recent_context_window_size=10,
+        )
+
+    ai = FakeAIService(answer="Direkte Antwort.")
+    sender = Sender()
+    service = FastCurrentInfoService()
+    dispatcher = _mk_dispatcher(db_url, ai, sender)
+    dispatcher.current_info_enabled = True
+    dispatcher.current_info_service = service
+
+    asyncio.run(
+        dispatcher.handle_raw_update(
+            _mk_update(
+                uid=2706,
+                chat_id=-1006,
+                chat_type="supergroup",
+                text="@AmoBot Erklär mir kurz, was eine Python-Funktion ist.",
+                update_id=2251,
+                message_thread_id=81,
+            )
+        )
+    )
+
+    assert sender.sent == [(-1006, "Direkte Antwort.", 81)]
+    assert service.requests == []
+    assert len(ai.prompts) == 1
 
 
 def test_autoreply_research_needed_with_current_info_disabled_fails_closed(tmp_path) -> None:

@@ -29,6 +29,10 @@ _CURRENT_KEYWORDS = (
     "störung", "stoerung", "available", "availability", "verfügbarkeit",
     "verfuegbarkeit", "lieferbar",
 )
+_CURRENT_KEYWORD_RE = re.compile(
+    r"\b(?:" + "|".join(re.escape(item) for item in _CURRENT_KEYWORDS) + r")\b",
+    re.IGNORECASE,
+)
 
 _SPORTS_CURRENT_INTENT_RE = re.compile(
     r"\b(?:"
@@ -66,6 +70,10 @@ _MARKET_CURRENT_INTENT_RE = re.compile(
 )
 _WEATHER_INTENT_RE = re.compile(
     r"\b(?:wetter|weather|temperatur|temperature|regen|rain|forecast|vorhersage)\b",
+    re.IGNORECASE,
+)
+_LOCAL_MEDIA_ANALYSIS_RE = re.compile(
+    r"\b(?:chart|bild|image|foto|photo|screenshot|grafik|graph|diagramm|diagram)\b",
     re.IGNORECASE,
 )
 
@@ -145,6 +153,21 @@ def decide_auto_research(text: str, *, now: datetime | None = None) -> AutoResea
         )
     )
 
+    classifier_decision = classify_current_data(
+        raw,
+        metadata={
+            "has_year": has_year,
+            "has_date": has_date,
+            "has_current_year": has_current_year,
+        },
+    )
+    if (
+        has_temporal
+        and not (has_year or has_date or has_current_year or has_sports_current_signal or has_market_current_signal)
+        and not classifier_decision.should_research
+    ):
+        return AutoResearchDecision(False, "", "timeless_or_personal", "", "")
+
     if has_temporal or has_year or has_date or has_current_year or has_sports_current_signal or has_market_current_signal:
         reason = (
             "sports_current_info_signal"
@@ -160,14 +183,6 @@ def decide_auto_research(text: str, *, now: datetime | None = None) -> AutoResea
     ):
         return AutoResearchDecision(False, "", "timeless_or_unclear", "", "")
 
-    classifier_decision = classify_current_data(
-        raw,
-        metadata={
-            "has_year": has_year,
-            "has_date": has_date,
-            "has_current_year": has_current_year,
-        },
-    )
     if classifier_decision.should_research:
         capability = "webresearch" if _should_use_deep_research(raw, classifier_decision.signals) else "websearch"
         return AutoResearchDecision(
@@ -185,6 +200,10 @@ def _is_complex_research_query(raw: str) -> bool:
     strong_complex = bool(_COMPLEX_RESEARCH_RE.search(raw))
     source_only_complex = bool(_COMPLEX_SOURCE_RE.search(raw) and len(raw) >= 80)
     if not (strong_complex or source_only_complex):
+        return False
+    if _LOCAL_MEDIA_ANALYSIS_RE.search(raw) and not (
+        _URL_RE.search(raw) or _COMPLEX_SOURCE_RE.search(raw) or _CURRENT_KEYWORD_RE.search(raw)
+    ):
         return False
     if _WEATHER_INTENT_RE.search(raw) and len(raw) < 140:
         return False
