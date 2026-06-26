@@ -9,6 +9,7 @@ from amo_bot.ai.router import AIRouterContextV1, AIRouterDecision, AIRouterReaso
 
 from sqlalchemy import select
 
+from amo_bot.current_info.models import CurrentInfoAnswer
 from amo_bot.db.base import create_session_factory
 from amo_bot.db.init_db import init_db
 from amo_bot.auth.roles import Role
@@ -45,6 +46,21 @@ class SlowCurrentInfoService:
     def answer(self, request) -> None:
         time.sleep(0.05)
         return None
+
+
+class FastCurrentInfoService:
+    def __init__(self) -> None:
+        self.requests = []
+
+    def answer(self, request) -> CurrentInfoAnswer:
+        self.requests.append(request)
+        return CurrentInfoAnswer(
+            status="answered",
+            answer_text="Verified current-info answer",
+            request=request,
+            sources=("https://source.example/current",),
+            confidence=0.82,
+        )
 
 
 def _mk_update(*, uid: int, chat_id: int, chat_type: str, text: str, update_id: int, message_thread_id: int | None = None, reply_to_is_bot: bool = False, reply_to_message_id: int | None = None, reply_to_bot_username: str = "AmoBot", reply_to_text: str = "") -> dict[str, object]:
@@ -1081,15 +1097,61 @@ def test_autoreply_current_info_timeout_fails_closed_before_synthesis_for_live_w
         )
     )
 
-    assert sender.sent == [(-1002, "Ich habe dafür gerade keine geprüfte externe Evidenz.", 77)]
+    assert sender.sent == []
+    assert ai.prompts == []
+
+
+def test_autoreply_research_needed_uses_current_info_before_normal_ai_draft(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'ai_autoreply_strategy_current_info.db'}"
+    init_db(db_url)
+    _seed_user(
+        db_url,
+        user_id=2703,
+        role="vip",
+        consent="accepted",
+        group_chat_id=-1003,
+        group_role="vip",
+    )
+
+    sf = create_session_factory(db_url)
+    with sf() as session:
+        TopicAgentMemoryRepository(session).upsert_config(
+            scope_type="topic",
+            chat_id=-1003,
+            topic_id=78,
+            ai_enabled=True,
+            recent_context_window_size=10,
+        )
+
+    ai = FakeAIService(answer="Synthetisierte Scout-Antwort.")
+    sender = Sender()
+    service = FastCurrentInfoService()
+    dispatcher = _mk_dispatcher(db_url, ai, sender)
+    dispatcher.current_info_enabled = True
+    dispatcher.current_info_service = service
+
+    asyncio.run(
+        dispatcher.handle_raw_update(
+            _mk_update(
+                uid=2703,
+                chat_id=-1003,
+                chat_type="supergroup",
+                text="@AmoBot Welche Änderungen gab es in der Stripe API?",
+                update_id=2248,
+                message_thread_id=78,
+            )
+        )
+    )
+
+    assert sender.sent == [
+        (-1003, "Synthetisierte Scout-Antwort.\n\nQuellen:\n1. https://source.example/current", 78)
+    ]
+    assert len(service.requests) == 1
+    assert service.requests[0].metadata["forced_by_response_strategy"] is True
+    assert service.requests[0].metadata["response_strategy_reason"] == "semantic_current_data_required"
     assert len(ai.prompts) == 1
-    prompt = ai.prompts[0]
-    assert "Current-info decision before synthesis:" in prompt
-    assert "Verified external evidence is required" in prompt
-    assert "Do not assert current facts from model_prior" in prompt
-    assert "semantic_memory, topic_summary, user_claim, or bot_claim" in prompt
-    assert '"requires_external_evidence": true' in prompt
-    assert '"evidence_available": false' in prompt
+    assert "Checked evidence" in ai.prompts[0]
+    assert "User message:" not in ai.prompts[0]
 
 
 def test_reply_to_user_message_uses_safe_inline_quote_context(tmp_path) -> None:

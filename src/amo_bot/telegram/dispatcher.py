@@ -14,6 +14,7 @@ from amo_bot.ai.compact_topic_state import build_compact_topic_state_payload, fo
 from amo_bot.ai.context_snapshot import build_context_snapshot
 from amo_bot.ai.learning_feedback import LearningFeedbackScope, LearningFeedbackService
 from amo_bot.ai.prompt_language import DEFAULT_RESPONSE_LANGUAGE_RULE
+from amo_bot.ai.response_strategy import classify_response_strategy, draft_self_limitation_requires_research
 from amo_bot.ai.router import AIRouter, AIRouterReasonCode
 from amo_bot.auth.permissions import can_use_bot
 from amo_bot.auth.roles import Role, role_meets_minimum
@@ -82,6 +83,10 @@ def _terminate_current_process() -> None:
 AI_AUTOREPLY_ERROR_FALLBACK_TEXT = {
     "de": "Ich konnte gerade keine KI-Antwort erzeugen. Bitte versuch es gleich nochmal.",
     "en": "I couldn't generate an AI reply right now. Please try again in a moment.",
+}
+AI_CLARIFY_FALLBACK_TEXT = {
+    "de": "Kannst du kurz konkretisieren, worauf sich das bezieht?",
+    "en": "Can you briefly clarify what this refers to?",
 }
 
 SendTextFn = Callable[[int, str, int | None], Awaitable[object]]
@@ -1469,8 +1474,6 @@ class Dispatcher:
                 )
             )
 
-        auto_research_decision = decide_auto_research(normalized_text)
-
         explicit_trigger_reason_codes = {
             AIRouterReasonCode.MENTION_IN_ACTIVE_SCOPE,
             AIRouterReasonCode.REPLY_TO_BOT_IN_ACTIVE_SCOPE,
@@ -1480,6 +1483,20 @@ class Dispatcher:
         is_triggered_path = decision_reason_value in explicit_trigger_reason_values
 
         message_locale = self._locale_for_message(message)
+        response_strategy = classify_response_strategy(
+            normalized_text,
+            context={
+                "router_reason": decision.reason_code.value,
+                "scope_type": decision.context.scope_type,
+                "triggered_path": is_triggered_path,
+            },
+        )
+
+        if response_strategy.label == "clarify":
+            await self._send_text(message.chat.id, AI_CLARIFY_FALLBACK_TEXT[message_locale], message.message_thread_id)
+            return
+
+        auto_research_decision = decide_auto_research(normalized_text)
 
         followup_context_text = ""
         if reply_context_block:
@@ -1539,15 +1556,19 @@ class Dispatcher:
             return
 
         auto_note = ""
-        if trigger is None and self.webtool_dispatcher is not None:
+        if trigger is None:
             if await self._maybe_handle_current_info_autoreply(
                 message=message,
                 role=role,
                 normalized_text=normalized_text,
                 locale=message_locale,
+                force=response_strategy.requires_research,
+                fallback_to_ai_on_incomplete=not response_strategy.requires_research,
+                strategy_reason=response_strategy.reason,
             ):
                 return
 
+        if trigger is None and self.webtool_dispatcher is not None:
             research_session_factory = create_session_factory(self.database_url) if self.database_url is not None else None
             research_result = WebResearchOrchestrator(
                 webtool_dispatcher=self.webtool_dispatcher,
@@ -1598,6 +1619,14 @@ class Dispatcher:
                 "Current-info decision before synthesis:\n"
                 f"{context_snapshot.current_info_decision.fail_closed_instruction}"
             )
+        prompt_sections.append(
+            "Response strategy before synthesis:\n"
+            f"- strategy: {response_strategy.label}\n"
+            f"- reason: {response_strategy.reason}\n"
+            f"- signals: {', '.join(response_strategy.signals) if response_strategy.signals else 'none'}\n"
+            "If strategy is research_needed, do not answer mutable external facts from model prior. "
+            "Use only verified external evidence or trigger/await current-info research."
+        )
 
         compact_state_text = ""
         compact_state_record = None
@@ -1773,6 +1802,30 @@ class Dispatcher:
         if auto_note:
             response = sanitize_auto_research_user_response(response)
 
+        if draft_self_limitation_requires_research(message=normalized_text, draft=response):
+            if await self._maybe_handle_current_info_autoreply(
+                message=message,
+                role=role,
+                normalized_text=normalized_text,
+                locale=message_locale,
+                force=True,
+                fallback_to_ai_on_incomplete=False,
+                strategy_reason="draft_self_limitation_guard",
+            ):
+                return
+            log_event(
+                logger,
+                logging.INFO,
+                event="ai.autoreply.draft_discarded",
+                component=_COMPONENT,
+                chat_id=message.chat.id,
+                message_id=message.message_id,
+                message_thread_id=message.message_thread_id,
+                user_id=message.from_user.id,
+                extra={"reason": "draft_self_limitation_requires_research"},
+            )
+            return
+
         await self._send_text(message.chat.id, response, message.message_thread_id)
 
         log_event(
@@ -1816,13 +1869,26 @@ class Dispatcher:
         role: Role,
         normalized_text: str,
         locale: str,
+        force: bool = False,
+        fallback_to_ai_on_incomplete: bool = True,
+        strategy_reason: str = "",
     ) -> bool:
         if not self.current_info_enabled or self.current_info_service is None or self.ai_service is None:
             return False
 
         decision = decide_auto_research(normalized_text)
         current_info_query = normalized_text if decision.url and normalized_text.strip() else decision.query
-        if not decision.enabled or decision.capability not in {"webresearch", "websearch", "browser", "webscraping"} or not current_info_query:
+        capability = decision.capability
+        reason = decision.reason
+        if force and not current_info_query:
+            current_info_query = normalized_text.strip()
+            capability = "webresearch"
+            reason = strategy_reason or "response_strategy_research_needed"
+        if (
+            not (decision.enabled or force)
+            or capability not in {"webresearch", "websearch", "browser", "webscraping"}
+            or not current_info_query
+        ):
             return False
 
         timeout_seconds = max(float(self.current_info_timeout_seconds), 0.001)
@@ -1838,10 +1904,12 @@ class Dispatcher:
             role=role,
             metadata={
                 "telegram_message_id": message.message_id,
-                "auto_research_reason": decision.reason,
-                "capability": decision.capability,
-                "auto_research_capability": decision.capability,
+                "auto_research_reason": reason,
+                "response_strategy_reason": strategy_reason,
+                "capability": capability,
+                "auto_research_capability": capability,
                 "direct_url": decision.url,
+                "forced_by_response_strategy": force,
             },
         )
 
@@ -1875,7 +1943,7 @@ class Dispatcher:
                     "late_delivery": "scheduled",
                 },
             )
-            return False
+            return not fallback_to_ai_on_incomplete
         except Exception as exc:
             log_event(
                 logger,
@@ -1891,7 +1959,7 @@ class Dispatcher:
                     "error_class": exc.__class__.__name__,
                 },
             )
-            return False
+            return not fallback_to_ai_on_incomplete
 
         if isinstance(answer, CurrentInfoAnswer) and answer.status in {"empty_evidence", "unverified_evidence"}:
             text = self._format_current_info_insufficient_answer(answer=answer, locale=locale)
@@ -1932,7 +2000,7 @@ class Dispatcher:
                     "warning_count": len(getattr(answer, "warnings", ()) or ()),
                 },
             )
-            return False
+            return not fallback_to_ai_on_incomplete
 
         remaining_seconds = timeout_seconds - (time.perf_counter() - started)
         if remaining_seconds <= 0:
@@ -1960,7 +2028,7 @@ class Dispatcher:
                     "late_delivery": "scheduled",
                 },
             )
-            return False
+            return not fallback_to_ai_on_incomplete
         try:
             synthesized = await asyncio.wait_for(
                 self._synthesize_current_info_answer(answer=answer, locale=locale),
@@ -1990,7 +2058,7 @@ class Dispatcher:
                 locale=locale,
                 timeout_seconds=timeout_seconds,
             )
-            return False
+            return not fallback_to_ai_on_incomplete
         except Exception as exc:
             log_event(
                 logger,
@@ -2008,7 +2076,7 @@ class Dispatcher:
                     "confidence": answer.confidence,
                 },
             )
-            return False
+            return not fallback_to_ai_on_incomplete
 
         text = self._format_current_info_telegram_answer(answer=answer, synthesized=synthesized, locale=locale)
         if not text.strip():
