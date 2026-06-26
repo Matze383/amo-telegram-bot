@@ -169,9 +169,10 @@ def decide_auto_research(text: str, *, now: datetime | None = None) -> AutoResea
         },
     )
     if classifier_decision.should_research:
+        capability = "webresearch" if _should_use_deep_research(raw, classifier_decision.signals) else "websearch"
         return AutoResearchDecision(
             True,
-            "websearch",
+            capability,
             classifier_decision.reason,
             _sanitize_text(raw, max_len=220),
             "",
@@ -192,3 +193,19 @@ def _is_complex_research_query(raw: str) -> bool:
     if sports_query.has_competition(raw) and _SPORTS_CURRENT_INTENT_RE.search(raw) and len(raw) < 140:
         return False
     return True
+
+
+def _should_use_deep_research(raw: str, signals: tuple[str, ...]) -> bool:
+    """Route broad mutable company lookups to GPT-Researcher instead of one-shot search."""
+
+    signal_set = set(signals)
+    if "lookup_intent" not in signal_set:
+        return False
+
+    broad_company_facets = {"finance_or_market", "organization_relationship", "organization_role"}
+    matched_facets = signal_set & broad_company_facets
+    if len(matched_facets) >= 2:
+        return True
+
+    has_list_shape = bool(re.search(r"\b(?:und|and)\b|[,;/]", raw, re.IGNORECASE))
+    return has_list_shape and bool(matched_facets)
