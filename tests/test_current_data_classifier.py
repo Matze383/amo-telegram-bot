@@ -59,8 +59,14 @@ def test_classifier_requires_current_data_for_real_world_entity_mutable_facts_wi
 def test_classifier_requires_current_data_for_lookup_intent_named_entity_mutable_facts():
     prompts = [
         "@TsubasaOzora_bot finde Infos zu Bosch und ihren Partnern, und zur Bewertung am Finanzmarkt",
+        "finde Infos zu Novo Nordisk Partnern und Bewertung",
         "show info about AcmeCloud API releases",
         "look up Contoso supplier partnerships and credit ratings",
+        "zeige infos zu Claude API version",
+        "gib mir infos zu Microsoft News",
+        "finde Infos zu PlayStation 6 Preis",
+        "zeige mir Infos zu Tesla Produkten und Preisen",
+        "find info about iPhone availability",
     ]
     for prompt in prompts:
         decision = classify_current_data(prompt)
@@ -84,6 +90,8 @@ def test_classifier_does_not_require_current_data_for_timeless_prompts():
         "Was ist ein Partner in einer Beziehung?",
         "finde Infos zu einem Bond",
         "finde Infos zu Partnern in Beziehungen",
+        "gib mir Infos zu Preisgestaltung im Allgemeinen",
+        "show info about product management basics",
     ]
     for prompt in prompts:
         decision = classify_current_data(prompt)

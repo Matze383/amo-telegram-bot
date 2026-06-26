@@ -77,7 +77,7 @@ _TEMPORAL_CURRENT_RE = re.compile(
     re.IGNORECASE,
 )
 _PRICE_RE = re.compile(
-    r"\b(?:kostet|preis(?:e)?|price(?:s)?|kurs(?:e)?|rate(?:s)?|tarif(?:e)?|angebot(?:e)?|"
+    r"\b(?:kostet|preis(?:e|en)?|price(?:s)?|kurs(?:e)?|rate(?:s)?|tarif(?:e)?|angebot(?:e)?|"
     r"verf(?:ü|ue)gbarkeit|availability|available|stock|lieferbar|in\s+stock|"
     r"ausverkauft|sold\s+out|vorbestell(?:en|bar)|pre[-\s]?order)\b",
     re.IGNORECASE,
@@ -144,7 +144,7 @@ _LOCAL_REGION_RE = re.compile(
 )
 _EXTERNAL_NOUN_RE = re.compile(
     r"\b(?:dienst|service|anbieter|provider|vodafone|telekom|o2|python|iphone|kino|berlin|"
-    r"deutschland|germany|markt|market|produkt|product|app|website|server|"
+    r"deutschland|germany|markt|market|produkt(?:e|en)?|product(?:s)?|app|website|server|"
     r"unternehmen|firma|company|organisation|organization|konzern|group|"
     r"gmbh|ag|se|kg|ohg|inc|corp|corporation|ltd|llc|plc|s\.?a\.?|sarl|nv|bv|"
     r"person|ceo|cfo|cto|vorstand|geschäftsführer|geschaeftsfuehrer|"
@@ -177,6 +177,18 @@ _GENERIC_ENTITY_CONTEXT_NOUNS = {
     "beziehungen",
     "relationship",
     "relationships",
+}
+_MUTABLE_ENTITY_FACT_SIGNALS = {
+    "price_or_availability",
+    "service_status",
+    "version_or_release",
+    "finance_or_market",
+    "organization_role",
+    "organization_relationship",
+    "schedule_results_polls",
+    "news",
+    "docs_or_official",
+    "local_or_region",
 }
 
 
@@ -295,6 +307,10 @@ class HeuristicCurrentDataClassifier:
         if "version_or_release" in signal_set and (
             "question_intent" in signal_set or "external_entity" in signal_set or mutable_entity_lookup
         ):
+            return CurrentDataDecision(
+                "requires_current_data", "semantic_current_data_required", _dedupe(signals), True
+            )
+        if mutable_entity_lookup and signal_set & _MUTABLE_ENTITY_FACT_SIGNALS:
             return CurrentDataDecision(
                 "requires_current_data", "semantic_current_data_required", _dedupe(signals), True
             )

@@ -219,13 +219,19 @@ def test_auto_research_uses_generic_current_data_classifier_for_category_prompts
 
 
 def test_auto_research_triggers_on_lookup_intent_named_entity_mutable_facts():
-    d = decide_auto_research(
-        "@TsubasaOzora_bot finde Infos zu Bosch und ihren Partnern, und zur Bewertung am Finanzmarkt"
-    )
-
-    assert d.enabled is True
-    assert d.capability == "websearch"
-    assert d.reason == "semantic_current_data_required"
+    prompts = [
+        "@TsubasaOzora_bot finde Infos zu Bosch und ihren Partnern, und zur Bewertung am Finanzmarkt",
+        "finde Infos zu Novo Nordisk Partnern und Bewertung",
+        "show info about AcmeCloud API releases",
+        "look up Contoso supplier partnerships and credit ratings",
+        "gib mir infos zu Microsoft News",
+        "zeige mir Infos zu Tesla Produkten und Preisen",
+    ]
+    for prompt in prompts:
+        d = decide_auto_research(prompt)
+        assert d.enabled is True, prompt
+        assert d.capability == "websearch"
+        assert d.reason in {"semantic_current_data_required", "current_info_signal"}
 
 
 def test_auto_research_classifier_does_not_trigger_timeless_prompts():
@@ -241,6 +247,8 @@ def test_auto_research_classifier_does_not_trigger_timeless_prompts():
         "Was ist ein Partner in einer Beziehung?",
         "finde Infos zu einem Bond",
         "finde Infos zu Partnern in Beziehungen",
+        "gib mir Infos zu Kostenplanung im Allgemeinen",
+        "show info about product management basics",
     ]
     for prompt in prompts:
         d = decide_auto_research(prompt)
