@@ -88,6 +88,10 @@ AI_CLARIFY_FALLBACK_TEXT = {
     "de": "Kannst du kurz konkretisieren, worauf sich das bezieht?",
     "en": "Can you briefly clarify what this refers to?",
 }
+CURRENT_INFO_UNAVAILABLE_FALLBACK_TEXT = {
+    "de": "Dafuer brauche ich aktuelle Recherche, aber Current-Info ist gerade nicht verfuegbar oder nicht konfiguriert.",
+    "en": "I need current research for that, but Current Info is not available or configured right now.",
+}
 
 SendTextFn = Callable[[int, str, int | None], Awaitable[object]]
 SendMarkupFn = Callable[[int, str, dict[str, Any], int | None], Awaitable[object]]
@@ -1874,6 +1878,29 @@ class Dispatcher:
         strategy_reason: str = "",
     ) -> bool:
         if not self.current_info_enabled or self.current_info_service is None or self.ai_service is None:
+            if force:
+                await self._send_text(
+                    message.chat.id,
+                    CURRENT_INFO_UNAVAILABLE_FALLBACK_TEXT["en" if locale == "en" else "de"],
+                    message.message_thread_id,
+                )
+                log_event(
+                    logger,
+                    logging.INFO,
+                    event="current_info.telegram.unavailable",
+                    component=_COMPONENT,
+                    chat_id=message.chat.id,
+                    message_id=message.message_id,
+                    message_thread_id=message.message_thread_id,
+                    user_id=message.from_user.id,
+                    extra={
+                        "enabled": bool(self.current_info_enabled),
+                        "has_service": self.current_info_service is not None,
+                        "has_ai_service": self.ai_service is not None,
+                        "response_strategy_reason": strategy_reason,
+                    },
+                )
+                return True
             return False
 
         decision = decide_auto_research(normalized_text)

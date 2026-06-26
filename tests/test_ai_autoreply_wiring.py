@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import time
 from unittest.mock import patch
 
@@ -946,7 +945,7 @@ def test_reply_to_persisted_bot_message_includes_reply_context(tmp_path) -> None
     assert "User message:\nWas meinst du damit?" in prompt
 
 
-def test_autoreply_writes_context_snapshot_audit_for_mixed_context_incident_fixture(tmp_path) -> None:
+def test_autoreply_current_fact_with_missing_current_info_fails_closed(tmp_path) -> None:
     db_url = f"sqlite:///{tmp_path / 'ai_context_snapshot_mixed_context.db'}"
     init_db(db_url)
     _seed_user(
@@ -1003,46 +1002,29 @@ def test_autoreply_writes_context_snapshot_audit_for_mixed_context_incident_fixt
         )
     )
 
-    assert sender.sent == [(-1603, "ai-answer", 33)]
-    assert len(ai.prompts) == 1
-    assert "Structured runtime context snapshot" in ai.prompts[0]
-    assert '"schema_version": "context_snapshot_v1"' in ai.prompts[0]
-    assert '"frame": "current_turn"' in ai.prompts[0]
-    assert '"frame": "recent_chat_context"' in ai.prompts[0]
+    assert sender.sent == [
+        (
+            -1603,
+            "Dafuer brauche ich aktuelle Recherche, aber Current-Info ist gerade nicht verfuegbar oder nicht konfiguriert.",
+            33,
+        )
+    ]
+    assert ai.prompts == []
 
     with sf() as session:
-        snapshot_event = (
+        snapshot_events = (
             session.query(AuditEvent)
             .filter(AuditEvent.event_type == "ai_context_snapshot")
-            .one()
+            .all()
         )
-        payload = json.loads(snapshot_event.payload_json)
-
-    snapshot = payload["context_snapshot"]
-    assert snapshot["schema_version"] == "context_snapshot_v1"
-    assert snapshot["requires_current_info"] is True
-    frames = {candidate["frame"] for candidate in snapshot["frame_candidates"]}
-    assert {"current_turn", "recent_chat_context"} <= frames
-    assert [conflict["conflict_type"] for conflict in snapshot["conflicts"]] == [
-        "semantic_frame_conflict",
-        "source_frame_boundary",
-    ]
-    assert snapshot["conflicts"][0]["frames"] == ["real_world_current_fact", "fictional_or_simulated_context"]
-    assert snapshot["conflicts"][1]["frames"] == ["current_turn", "background_context"]
-    assert "source_frame_boundary_needs_resolution" in snapshot["uncertainty"]
-
-    with sf() as session:
         state = TopicCompactStateRepository(session).get_state(
             scope_type="topic",
             chat_id=-1603,
             topic_id=33,
         )
-    assert state is not None
-    assert any(item["subject"] == "aktuelle echte Kurs BTC" for item in state.active_subjects)
-    assert any(item["conflict_type"] == "semantic_frame_conflict" for item in state.conflicts)
-    assert any(item["assumption"] == "background_context_shares_current_frame" for item in state.discarded_assumptions)
-    assert "Compact topic state:" in ai.prompts[0]
-    assert "fictional_or_simulated_context" in ai.prompts[0]
+
+    assert snapshot_events == []
+    assert state is None
 
 
 def test_autoreply_current_info_timeout_fails_closed_before_synthesis_for_live_wm_question(tmp_path) -> None:
@@ -1152,6 +1134,155 @@ def test_autoreply_research_needed_uses_current_info_before_normal_ai_draft(tmp_
     assert len(ai.prompts) == 1
     assert "Checked evidence" in ai.prompts[0]
     assert "User message:" not in ai.prompts[0]
+
+
+def test_autoreply_research_needed_with_current_info_disabled_fails_closed(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'ai_autoreply_strategy_current_info_disabled.db'}"
+    init_db(db_url)
+    _seed_user(
+        db_url,
+        user_id=2704,
+        role="vip",
+        consent="accepted",
+        group_chat_id=-1004,
+        group_role="vip",
+    )
+
+    sf = create_session_factory(db_url)
+    with sf() as session:
+        TopicAgentMemoryRepository(session).upsert_config(
+            scope_type="topic",
+            chat_id=-1004,
+            topic_id=79,
+            ai_enabled=True,
+            recent_context_window_size=10,
+        )
+
+    ai = FakeAIService(answer="Sam Altman ist CEO von OpenAI.")
+    sender = Sender()
+    dispatcher = _mk_dispatcher(db_url, ai, sender)
+    dispatcher.current_info_enabled = False
+    dispatcher.current_info_service = FastCurrentInfoService()
+
+    asyncio.run(
+        dispatcher.handle_raw_update(
+            _mk_update(
+                uid=2704,
+                chat_id=-1004,
+                chat_type="supergroup",
+                text="@AmoBot Wer ist CEO von OpenAI?",
+                update_id=2249,
+                message_thread_id=79,
+            )
+        )
+    )
+
+    assert sender.sent == [
+        (
+            -1004,
+            "Dafuer brauche ich aktuelle Recherche, aber Current-Info ist gerade nicht verfuegbar oder nicht konfiguriert.",
+            79,
+        )
+    ]
+    assert ai.prompts == []
+
+
+def test_autoreply_research_needed_with_current_info_service_missing_fails_closed(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'ai_autoreply_strategy_current_info_missing.db'}"
+    init_db(db_url)
+    _seed_user(
+        db_url,
+        user_id=2705,
+        role="vip",
+        consent="accepted",
+        group_chat_id=-1005,
+        group_role="vip",
+    )
+
+    sf = create_session_factory(db_url)
+    with sf() as session:
+        TopicAgentMemoryRepository(session).upsert_config(
+            scope_type="topic",
+            chat_id=-1005,
+            topic_id=80,
+            ai_enabled=True,
+            recent_context_window_size=10,
+        )
+
+    ai = FakeAIService(answer="Sam Altman ist CEO von OpenAI.")
+    sender = Sender()
+    dispatcher = _mk_dispatcher(db_url, ai, sender)
+    dispatcher.current_info_enabled = True
+    dispatcher.current_info_service = None
+
+    asyncio.run(
+        dispatcher.handle_raw_update(
+            _mk_update(
+                uid=2705,
+                chat_id=-1005,
+                chat_type="supergroup",
+                text="@AmoBot Wer ist CEO von OpenAI?",
+                update_id=2250,
+                message_thread_id=80,
+            )
+        )
+    )
+
+    assert sender.sent == [
+        (
+            -1005,
+            "Dafuer brauche ich aktuelle Recherche, aber Current-Info ist gerade nicht verfuegbar oder nicht konfiguriert.",
+            80,
+        )
+    ]
+    assert ai.prompts == []
+
+
+def test_autoreply_direct_answer_with_current_info_disabled_still_uses_normal_ai(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'ai_autoreply_strategy_current_info_disabled_direct.db'}"
+    init_db(db_url)
+    _seed_user(
+        db_url,
+        user_id=2706,
+        role="vip",
+        consent="accepted",
+        group_chat_id=-1006,
+        group_role="vip",
+    )
+
+    sf = create_session_factory(db_url)
+    with sf() as session:
+        TopicAgentMemoryRepository(session).upsert_config(
+            scope_type="topic",
+            chat_id=-1006,
+            topic_id=81,
+            ai_enabled=True,
+            recent_context_window_size=10,
+        )
+
+    ai = FakeAIService(answer="Trainingsdaten sind Daten, aus denen ein Modell Muster lernt.")
+    sender = Sender()
+    dispatcher = _mk_dispatcher(db_url, ai, sender)
+    dispatcher.current_info_enabled = False
+
+    asyncio.run(
+        dispatcher.handle_raw_update(
+            _mk_update(
+                uid=2706,
+                chat_id=-1006,
+                chat_type="supergroup",
+                text="@AmoBot Erklär mir Trainingsdaten",
+                update_id=2251,
+                message_thread_id=81,
+            )
+        )
+    )
+
+    assert sender.sent == [
+        (-1006, "Trainingsdaten sind Daten, aus denen ein Modell Muster lernt.", 81)
+    ]
+    assert len(ai.prompts) == 1
+    assert "User message:\nErklär mir Trainingsdaten" in ai.prompts[0]
 
 
 def test_reply_to_user_message_uses_safe_inline_quote_context(tmp_path) -> None:
