@@ -610,10 +610,36 @@ Für die Extraktion von Ergebnis-Seiten bevorzugt der Dokument-Fetcher Crawlee u
 | `AMO_VECTOR_EMBEDDING_PROVIDER` | `ollama` | Embedding-Provider für Chunk-/Query-Vektoren: `ollama` oder `openai` |
 | `AMO_VECTOR_EMBEDDING_MODEL` | `nomic-embed-text-v2-moe:latest` | Embedding-Modell für Current-Info-Vektoren |
 | `AMO_VECTOR_TIMEOUT_SECONDS` | `3` | Timeout für Vector-DB- und Embedding-Anfragen |
-| `AMO_RESEARCH_TIMEOUT_SECONDS` | `300` | Timeout für GPT-Researcher Tiefenrecherche-Operationen (Sekunden) |
+| `AMO_GPT_RESEARCHER_ENABLED` | `false` | GPT-Researcher für Deep-Research-/`research_needed`-Anfragen aktivieren |
+| `AMO_RESEARCH_MODEL_PROVIDER` | `ollama` | Provider-ID für GPT-Researcher-LLM-Namen, z.B. `ollama` |
+| `AMO_RESEARCH_FAST_MODEL` | *(leer)* | Schnelles Research-Modell; leer nutzt `OLLAMA_NON_THINKING_MODEL` oder `OLLAMA_MODEL` |
+| `AMO_RESEARCH_SMART_MODEL` | *(leer)* | Smart-Research-Modell; leer nutzt `OLLAMA_MODEL` |
+| `AMO_RESEARCH_STRATEGIC_MODEL` | *(leer)* | Strategisches Research-Modell; leer nutzt `OLLAMA_THINKING_MODEL` oder `OLLAMA_MODEL` |
+| `AMO_RESEARCH_MAX_SOURCES` | `8` | Maximale GPT-Researcher-Quellen-URLs pro Antwort (zulässig: 1 bis 25) |
+| `AMO_RESEARCH_MAX_CONTEXT_CHARS` | `12000` | Maximale Zeichen aus GPT-Researcher-Evidenzkontext (zulässig: 1000 bis 100000) |
+| `AMO_RESEARCH_DEEP_BREADTH` | `3` | Breitenbudget für Deep Research (zulässig: 1 bis 10) |
+| `AMO_RESEARCH_DEEP_DEPTH` | `2` | Tiefenbudget für Deep Research (zulässig: 1 bis 10) |
+| `AMO_RESEARCH_DEEP_CONCURRENCY` | `4` | Parallelitätsbudget für Deep Research (zulässig: 1 bis 20) |
+| `AMO_RESEARCH_VECTOR_COLLECTION` | `amo_gpt_researcher_chunks` | pgvector-Collection für GPT-Researcher-Chunks |
+| `AMO_RESEARCH_REPORT_WORDS` | `900` | Zielumfang des GPT-Researcher-Berichts in Wörtern (zulässig: 200 bis 5000) |
+| `AMO_RESEARCH_TIMEOUT_SECONDS` | `300` | Timeout für GPT-Researcher Tiefenrecherche-Operationen in Sekunden (zulässig: >0 bis 900) |
 
 Die Current-Info-Cache-Tabellen werden über SQLAlchemy/Alembic im PostgreSQL-Datenbanksetup erstellt. Query-Metriken speichern nur einen SHA-256-Hash der Anfrage, nicht den privaten Rohtext.
 Bei aktivierter semantischer Suche bleibt PostgreSQL die Source of Truth für Dokumente, Metadaten, Cache-TTLs und Pruning. pgvector speichert nur Vektoren plus Chunk-/Dokument-Pointer und Quellenmetadaten; private Nutzerfragen werden nicht als Vektoren gespeichert.
+
+### GPT-Researcher aktivieren
+
+GPT-Researcher ist optional und bleibt standardmäßig aus. Aktivierung braucht:
+
+- installierte Python-Abhängigkeiten aus `requirements.txt`, inklusive `gpt-researcher`, `langchain-core` und `langchain-postgres`
+- eine erreichbare SearXNG-Instanz, konfiguriert mit `AMO_SEARXNG_URL`, das AMO als `SEARX_URL` an GPT-Researcher übergibt; GPT-Researcher nutzt `RETRIEVER=searx`, daher gilt Brave-Fallback nur für den normalen Current-Info-SearchBroker-Pfad
+- ein Research-Modellsetup: entweder `OLLAMA_MODEL`/Model-Policy-Werte oder explizite `AMO_RESEARCH_*_MODEL`-Werte
+- ein Embedding-Setup über `AMO_VECTOR_EMBEDDING_PROVIDER` und `AMO_VECTOR_EMBEDDING_MODEL`; daraus erzeugt AMO die GPT-Researcher-Form `provider:model`
+- PostgreSQL, wenn GPT-Researcher seine pgvector-Collection persistieren soll
+
+Nach Änderungen an Abhängigkeiten oder `.env` den Bot-Prozess neu starten. `AMO_RESEARCH_FAST_MODEL`, `AMO_RESEARCH_SMART_MODEL` und `AMO_RESEARCH_STRATEGIC_MODEL` dürfen bereits einen Provider-Prefix enthalten; sonst ergänzt AMO `AMO_RESEARCH_MODEL_PROVIDER`. Leere Werte fallen auf die Ollama-Modelle zurück. Wenn dadurch kein vollständiges Modellset entsteht, startet die Research-Konfiguration nicht.
+
+Budget- und Safety-Grenzen bleiben in AMO gesetzt: `AMO_RESEARCH_TIMEOUT_SECONDS`, `AMO_RESEARCH_MAX_SOURCES`, `AMO_RESEARCH_MAX_CONTEXT_CHARS`, `AMO_RESEARCH_DEEP_*` und `AMO_RESEARCH_REPORT_WORDS` begrenzen Laufzeit, Quellen, Kontext und Berichtslänge. GPT-Researcher- oder Current-Info-Ausfälle werden fail-closed behandelt: Bei `research_needed` erfindet der Bot keine aktuellen Fakten aus Trainingswissen, sondern meldet fehlende/verfehlte Recherche. Wenn GPT-Researcher für normale Webresearch-Pfade verfügbar ist und fehlschlägt, fällt AMO nur auf den normalen Current-Info-Pfad zurück; snippet-only/no-scrape-Evidenz wird nicht als verifiziert bewertet.
 
 ### Direkte URL-Behandlung
 

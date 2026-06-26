@@ -610,10 +610,36 @@ For result-page extraction, the document fetcher prefers Crawlee and falls back 
 | `AMO_VECTOR_EMBEDDING_PROVIDER` | `ollama` | Embedding provider for chunk/query vectors: `ollama` or `openai` |
 | `AMO_VECTOR_EMBEDDING_MODEL` | `nomic-embed-text-v2-moe:latest` | Embedding model used for Current-Info vectors |
 | `AMO_VECTOR_TIMEOUT_SECONDS` | `3` | Timeout for vector DB and embedding requests |
-| `AMO_RESEARCH_TIMEOUT_SECONDS` | `300` | Timeout for GPT-Researcher deep research operations (seconds) |
+| `AMO_GPT_RESEARCHER_ENABLED` | `false` | Enable GPT-Researcher for deep-research / `research_needed` requests |
+| `AMO_RESEARCH_MODEL_PROVIDER` | `ollama` | Provider id for GPT-Researcher LLM names, for example `ollama` |
+| `AMO_RESEARCH_FAST_MODEL` | *(empty)* | Fast research model; empty uses `OLLAMA_NON_THINKING_MODEL` or `OLLAMA_MODEL` |
+| `AMO_RESEARCH_SMART_MODEL` | *(empty)* | Smart research model; empty uses `OLLAMA_MODEL` |
+| `AMO_RESEARCH_STRATEGIC_MODEL` | *(empty)* | Strategic research model; empty uses `OLLAMA_THINKING_MODEL` or `OLLAMA_MODEL` |
+| `AMO_RESEARCH_MAX_SOURCES` | `8` | Maximum GPT-Researcher source URLs per answer (allowed: 1 to 25) |
+| `AMO_RESEARCH_MAX_CONTEXT_CHARS` | `12000` | Maximum characters retained from GPT-Researcher evidence context (allowed: 1000 to 100000) |
+| `AMO_RESEARCH_DEEP_BREADTH` | `3` | Deep-research breadth budget (allowed: 1 to 10) |
+| `AMO_RESEARCH_DEEP_DEPTH` | `2` | Deep-research depth budget (allowed: 1 to 10) |
+| `AMO_RESEARCH_DEEP_CONCURRENCY` | `4` | Deep-research concurrency budget (allowed: 1 to 20) |
+| `AMO_RESEARCH_VECTOR_COLLECTION` | `amo_gpt_researcher_chunks` | pgvector collection for GPT-Researcher chunks |
+| `AMO_RESEARCH_REPORT_WORDS` | `900` | Target GPT-Researcher report length in words (allowed: 200 to 5000) |
+| `AMO_RESEARCH_TIMEOUT_SECONDS` | `300` | Timeout for GPT-Researcher deep research operations in seconds (allowed: >0 to 900) |
 
 Current-Info cache tables are created through the SQLAlchemy/Alembic PostgreSQL database setup. Query metrics store only a SHA-256 query hash, not the raw private user query text.
 When semantic retrieval is enabled, PostgreSQL remains the source of truth for documents, metadata, cache TTLs, and pruning. pgvector stores vectors plus chunk/document pointers and source metadata only; private user questions are not stored as vectors.
+
+### Enable GPT-Researcher
+
+GPT-Researcher is optional and stays disabled by default. Enabling it requires:
+
+- installed Python dependencies from `requirements.txt`, including `gpt-researcher`, `langchain-core`, and `langchain-postgres`
+- a reachable SearXNG instance configured with `AMO_SEARXNG_URL`, which AMO passes to GPT-Researcher as `SEARX_URL`; GPT-Researcher uses `RETRIEVER=searx`, so Brave fallback only covers the normal Current-Info SearchBroker path
+- a research model setup: either `OLLAMA_MODEL` / model-policy values or explicit `AMO_RESEARCH_*_MODEL` values
+- an embedding setup through `AMO_VECTOR_EMBEDDING_PROVIDER` and `AMO_VECTOR_EMBEDDING_MODEL`; AMO converts these into the GPT-Researcher `provider:model` form
+- PostgreSQL when GPT-Researcher should persist its pgvector collection
+
+Restart the bot process after dependency or `.env` changes. `AMO_RESEARCH_FAST_MODEL`, `AMO_RESEARCH_SMART_MODEL`, and `AMO_RESEARCH_STRATEGIC_MODEL` may already include a provider prefix; otherwise AMO prefixes them with `AMO_RESEARCH_MODEL_PROVIDER`. Empty values fall back to the Ollama models. If that does not produce a complete model set, research configuration does not start.
+
+Budget and safety boundaries stay controlled by AMO: `AMO_RESEARCH_TIMEOUT_SECONDS`, `AMO_RESEARCH_MAX_SOURCES`, `AMO_RESEARCH_MAX_CONTEXT_CHARS`, `AMO_RESEARCH_DEEP_*`, and `AMO_RESEARCH_REPORT_WORDS` cap runtime, sources, context, and report length. GPT-Researcher or Current-Info failures are fail-closed: for `research_needed`, the bot does not invent current facts from training knowledge and instead reports unavailable or failed research. When GPT-Researcher is available for normal web-research paths and fails, AMO only falls back to the normal Current-Info path; snippet-only/no-scrape evidence is not treated as verified.
 
 ### Direct URL Handling
 

@@ -167,9 +167,24 @@ OFFSET_STATE_FILE=.state/offset.json
 # AMO_CURRENT_INFO_ENABLED=true
 # AMO_SEARXNG_URL=https://your-searxng-instance.com
 # AMO_SEARCH_FALLBACK_PROVIDER=
+# GPT-Researcher Deep Research (optional – braucht erreichbares SearXNG, Modelle und Embeddings)
+# AMO_GPT_RESEARCHER_ENABLED=false
+# AMO_RESEARCH_MODEL_PROVIDER=ollama
+# AMO_RESEARCH_FAST_MODEL=
+# AMO_RESEARCH_SMART_MODEL=
+# AMO_RESEARCH_STRATEGIC_MODEL=
+# AMO_RESEARCH_MAX_SOURCES=8  # zulässig: 1 bis 25
+# AMO_RESEARCH_MAX_CONTEXT_CHARS=12000  # zulässig: 1000 bis 100000
+# AMO_RESEARCH_DEEP_BREADTH=3  # zulässig: 1 bis 10
+# AMO_RESEARCH_DEEP_DEPTH=2  # zulässig: 1 bis 10
+# AMO_RESEARCH_DEEP_CONCURRENCY=4  # zulässig: 1 bis 20
+# AMO_RESEARCH_VECTOR_COLLECTION=amo_gpt_researcher_chunks
+# AMO_RESEARCH_REPORT_WORDS=900  # zulässig: 200 bis 5000
+# AMO_RESEARCH_TIMEOUT_SECONDS=300  # zulässig: >0 bis 900
 # Hinweis: Fragen zu aktuellen externen Fakten werden vor der normalen KI-Antwort
 # über Current-Info geprüft. Ist Current-Info nicht verfügbar, antwortet der Bot
 # bewusst mit einer Unsicherheitsmeldung statt mit Trainingswissen zu raten.
+# Nach Änderungen an Abhängigkeiten oder .env den Bot neu starten.
 ```
 
 ---
@@ -393,6 +408,8 @@ Wenn `OLLAMA_MODEL_POLICY_ENABLED=true`:
 **Test – Current-Info Auto-Antworten:**
 - [ ] Stabile Erklärung (`@Bot Erklär mir Trainingsdaten`) wird direkt beantwortet
 - [ ] Aktuelle externe Frage (`@Bot Was ist der aktuelle BTC-Kurs?`) nutzt Current-Info, wenn `AMO_CURRENT_INFO_ENABLED=true` und ein SearchBroker konfiguriert ist
+- [ ] GPT-Researcher aktiviert: Mit `AMO_CURRENT_INFO_ENABLED=true`, `AMO_GPT_RESEARCHER_ENABLED=true`, erreichbarem SearXNG, konfiguriert mit `AMO_SEARXNG_URL` und an GPT-Researcher als `SEARX_URL` übergeben, Research-Modellen und Embeddings beantwortet eine breite aktuelle Recherchefrage (`@Bot Recherchiere den aktuellen Stand zu <Thema> mit Quellen`) mit GPT-Researcher-Evidenz und Quellen statt nur aus Modellwissen. Brave-Fallback gilt nur für den normalen Current-Info-SearchBroker-Pfad, nicht für den GPT-Researcher-Retriever
+- [ ] GPT-Researcher unavailable/fail-closed: Bei `AMO_GPT_RESEARCHER_ENABLED=false` oder fehlenden Research-Abhängigkeiten meldet eine `research_needed`-Frage fehlende/fehlgeschlagene GPT-Researcher-Recherche und erfindet keine aktuellen Fakten
 - [ ] Bei deaktivierter oder fehlender Current-Info antwortet eine aktuelle externe Frage fail-closed mit Unsicherheitsmeldung, nicht aus Modell-/Trainingswissen
 
 **Für Anthropic:**
