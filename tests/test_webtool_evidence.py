@@ -7,8 +7,10 @@ from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 import httpx
+import pytest
 from sqlalchemy import select
 
+from amo_bot.ai.response_strategy import ResponseStrategy
 from amo_bot.auth.roles import Role
 from amo_bot.db.base import create_session_factory
 from amo_bot.db.init_db import init_db
@@ -35,6 +37,16 @@ from amo_bot.telegram.webtool_evidence import (
 )
 
 from test_webtool_chat_integration import _allowing_router_decision, _mk_dispatcher, _mk_message, _mk_sequence_dispatcher
+
+
+@pytest.fixture(autouse=True)
+def _legacy_webtool_evidence_tests_use_direct_answer_strategy(monkeypatch):
+    """Keep autoresearch evidence tests on the legacy webtool path."""
+
+    def _classify_response_strategy(_message, *, context=None):
+        return ResponseStrategy("direct_answer", "legacy_webtool_evidence_test")
+
+    monkeypatch.setattr("amo_bot.telegram.dispatcher.classify_response_strategy", _classify_response_strategy)
 
 
 class _Response:

@@ -5,8 +5,10 @@ import json
 import logging
 from types import SimpleNamespace
 
+import pytest
 from sqlalchemy import select
 
+from amo_bot.ai.response_strategy import ResponseStrategy
 from amo_bot.ai.router import AIRouterContextV1, AIRouterDecision, AIRouterReasonCode
 from amo_bot.auth.roles import Role
 from amo_bot.db.base import create_session_factory
@@ -35,6 +37,16 @@ from amo_bot.telegram.webtool_chat_integration import (
     parse_webtool_chat_trigger,
     sanitize_webtool_user_facing_text,
 )
+
+
+@pytest.fixture(autouse=True)
+def _legacy_webtool_tests_use_direct_answer_strategy(monkeypatch):
+    """Keep this module focused on the legacy webtool orchestration path."""
+
+    def _classify_response_strategy(_message, *, context=None):
+        return ResponseStrategy("direct_answer", "legacy_webtool_integration_test")
+
+    monkeypatch.setattr("amo_bot.telegram.dispatcher.classify_response_strategy", _classify_response_strategy)
 
 
 class _RoleResolver:
