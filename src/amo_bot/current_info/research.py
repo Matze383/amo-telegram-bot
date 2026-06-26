@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import tempfile
+from collections.abc import Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -251,9 +252,9 @@ class GptResearcherProvider:
                     outcome="completed",
                 )
                 sources = _call_optional(researcher, "get_source_urls") or ()
+                source_docs = _call_optional(researcher, "get_research_sources") or ()
                 context = _call_optional(researcher, "get_research_context") or ""
                 costs = _call_optional(researcher, "get_costs") or {}
-                source_docs = _call_optional(researcher, "get_research_sources") or ()
         finally:
             try:
                 os.unlink(config_path)
@@ -261,10 +262,10 @@ class GptResearcherProvider:
                 pass
         return {
             "report": str(report or ""),
-            "sources": tuple(str(item) for item in sources if str(item).strip()),
-            "context": str(context or ""),
-            "costs": costs if isinstance(costs, dict) else {},
+            "sources": sources,
             "source_docs": source_docs,
+            "context": context,
+            "costs": costs if isinstance(costs, dict) else {},
         }
 
     def _gpt_researcher_config(self, *, language: str) -> dict[str, Any]:
@@ -526,8 +527,15 @@ def _research_result_to_answer(
     max_context_chars: int,
 ) -> CurrentInfoAnswer:
     report = " ".join(str(result.get("report", "") or "").split())
-    context = " ".join(str(result.get("context", "") or "").split())[:max_context_chars]
-    sources = tuple(dict.fromkeys(str(item).strip() for item in result.get("sources", ()) if str(item).strip()))[:max_sources]
+    context = " ".join(_research_context_text(result.get("context", "")).split())[:max_context_chars]
+    sources = _extract_source_urls(
+        (
+            result.get("sources", ()),
+            result.get("source_docs", ()),
+            result.get("context", ()),
+        ),
+        max_sources=max_sources,
+    )
     chunks = (
         (
             EvidenceChunk(
@@ -582,6 +590,80 @@ def _research_result_to_answer(
             "costs": result.get("costs", {}) if isinstance(result.get("costs"), dict) else {},
         },
     )
+
+
+_SOURCE_URL_KEYS = frozenset({"url", "link", "href", "source_url"})
+
+
+def _extract_source_urls(value: Any, *, max_sources: int | None = None) -> tuple[str, ...]:
+    urls: list[str] = []
+    seen_urls: set[str] = set()
+    seen_containers: set[int] = set()
+
+    def add(candidate: Any) -> None:
+        if not isinstance(candidate, str):
+            return
+        url = candidate.strip()
+        if not _is_http_url(url) or url in seen_urls:
+            return
+        seen_urls.add(url)
+        urls.append(url)
+
+    def walk(item: Any) -> None:
+        if max_sources is not None and len(urls) >= max_sources:
+            return
+        if item is None:
+            return
+        if isinstance(item, str):
+            add(item)
+            return
+        if isinstance(item, Mapping):
+            object_id = id(item)
+            if object_id in seen_containers:
+                return
+            seen_containers.add(object_id)
+            for key, nested in item.items():
+                if str(key).casefold() in _SOURCE_URL_KEYS:
+                    add(nested)
+            for nested in item.values():
+                walk(nested)
+            return
+        if isinstance(item, (list, tuple, set, frozenset)):
+            object_id = id(item)
+            if object_id in seen_containers:
+                return
+            seen_containers.add(object_id)
+            for nested in item:
+                walk(nested)
+            return
+        for attr in _SOURCE_URL_KEYS:
+            if hasattr(item, attr):
+                add(getattr(item, attr))
+
+    walk(value)
+    return tuple(urls)
+
+
+def _is_http_url(value: str) -> bool:
+    try:
+        parsed = urlparse(value)
+    except Exception:
+        return False
+    return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
+
+
+def _research_context_text(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, Mapping):
+        parts = [_research_context_text(nested) for nested in value.values()]
+        return " ".join(part for part in parts if part)
+    if isinstance(value, (list, tuple, set, frozenset)):
+        parts = [_research_context_text(nested) for nested in value]
+        return " ".join(part for part in parts if part)
+    return str(value)
 
 
 def _provider_unavailable_answer(

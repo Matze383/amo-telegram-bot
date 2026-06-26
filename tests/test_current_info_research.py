@@ -14,6 +14,7 @@ from amo_bot.current_info.research import (
     GptResearcherProviderConfig,
     ResearchModelConfig,
     build_gpt_researcher_provider_config_from_settings,
+    _extract_source_urls,
     _sync_pgvector_connection_url,
     resolve_research_embedding_config,
     resolve_research_model_config,
@@ -70,6 +71,56 @@ class _FailingResearcher:
         )
 
 
+class _FallbackSourcesResearcher:
+    def __init__(self, **kwargs) -> None:
+        self.kwargs = kwargs
+
+    async def conduct_research(self) -> None:
+        self.conducted = True
+
+    async def write_report(self) -> str:
+        return "Research answer recovered from structured sources."
+
+    def get_source_urls(self) -> tuple[str, ...]:
+        return ()
+
+    def get_research_context(self) -> list[dict[str, object]]:
+        return [{"content": "Detailed context.", "metadata": {"href": "https://context.example/item"}}]
+
+    def get_costs(self) -> dict[str, float]:
+        return {"total": 0.0}
+
+    def get_research_sources(self) -> tuple[dict[str, object], ...]:
+        return (
+            {
+                "title": "Primary source",
+                "content": "Source content",
+                "metadata": {"url": "https://source.example/recovered"},
+            },
+            {"link": "https://source.example/recovered"},
+        )
+
+
+class _NoRecoverableSourcesResearcher:
+    def __init__(self, **kwargs) -> None:
+        self.kwargs = kwargs
+
+    async def conduct_research(self) -> None:
+        self.conducted = True
+
+    async def write_report(self) -> str:
+        return "Research answer without reliable source URLs."
+
+    def get_source_urls(self) -> tuple[str, ...]:
+        return ()
+
+    def get_research_context(self) -> list[dict[str, object]]:
+        return [{"content": "Detailed context.", "metadata": {"href": "not-a-url"}}]
+
+    def get_research_sources(self) -> tuple[dict[str, object], ...]:
+        return ({"url": "ftp://source.example/file"}, {"link": ""})
+
+
 class _SyncVectorResearcher:
     instances: list["_SyncVectorResearcher"] = []
 
@@ -110,6 +161,41 @@ class _Settings:
     ollama_thinking_budget_max_prompt_chars: int | None = 8192
     amo_vector_embedding_provider: str = "ollama"
     amo_vector_embedding_model: str = "nomic-embed-text-v2-moe:latest"
+
+
+def _provider_for_researcher(researcher_cls) -> GptResearcherProvider:
+    return GptResearcherProvider(
+        config=GptResearcherProviderConfig(
+            enabled=True,
+            model_config=ResearchModelConfig(
+                provider="ollama",
+                fast_llm="ollama:fast-model",
+                smart_llm="ollama:smart-model",
+                strategic_llm="ollama:strategic-model",
+            ),
+            searxng_url="https://searx.example",
+            timeout_seconds=30,
+            max_sources=2,
+            max_context_chars=500,
+            deep_breadth=1,
+            deep_depth=1,
+            deep_concurrency=1,
+            report_words=200,
+            vector_collection="research_chunks",
+            ollama_base_url="http://ollama.test:11434",
+        ),
+        embedding_provider=_FakeEmbeddingProvider(),
+        database_url="sqlite:///:memory:",
+        researcher_cls=researcher_cls,
+    )
+
+
+def _research_request_parts(query: str = "Recherchiere AMO"):
+    request = CurrentInfoRequest(query=query, locale="de")
+    service = CurrentInfoService()
+    task = service._task_planner.plan_task(request)
+    query_plan = service._query_planner.plan_queries(request=request, task=task)
+    return request, task, query_plan
 
 
 def test_research_model_config_uses_ollama_roles_and_keeps_explicit_provider_ids() -> None:
@@ -232,6 +318,58 @@ def test_gpt_researcher_provider_maps_report_sources_and_ollama_config(monkeypat
     assert "'smart_llm': 'ollama:smart-model'" in caplog.text
     assert "'strategic_llm': 'ollama:strategic-model'" in caplog.text
     assert "'embedding': 'ollama:nomic-embed-text-v2-moe:latest'" in caplog.text
+
+
+def test_gpt_researcher_provider_recovers_sources_from_research_sources_when_source_urls_empty() -> None:
+    request, task, query_plan = _research_request_parts()
+    answer = _provider_for_researcher(_FallbackSourcesResearcher).answer(
+        request=request,
+        task=task,
+        query_plan=query_plan,
+    )
+
+    assert answer.status == "answered"
+    assert answer.sources == ("https://source.example/recovered", "https://context.example/item")
+    assert answer.metadata["source_count"] == 2
+    assert answer.confidence > 0
+
+
+def test_gpt_researcher_provider_fails_closed_when_no_reliable_urls_are_recovered() -> None:
+    request, task, query_plan = _research_request_parts()
+    answer = _provider_for_researcher(_NoRecoverableSourcesResearcher).answer(
+        request=request,
+        task=task,
+        query_plan=query_plan,
+    )
+
+    assert answer.status == "empty_evidence"
+    assert answer.answer_text == "Research answer without reliable source URLs."
+    assert answer.sources == ()
+    assert answer.metadata["source_count"] == 0
+    assert answer.warnings == ("empty_research_result",)
+
+
+def test_extract_source_urls_handles_nested_object_shapes_and_filters_invalid_values() -> None:
+    class _UrlObject:
+        source_url = "https://object.example/source"
+        link = "javascript:alert(1)"
+
+    payload = [
+        "https://plain.example/source",
+        "not-a-url",
+        {"url": "https://dict.example/source", "nested": [{"href": "http://nested.example/item"}]},
+        {"link": "ftp://invalid.example/file", "source": {"source_url": "https://deep.example/source"}},
+        _UrlObject(),
+        {"url": "https://dict.example/source"},
+    ]
+
+    assert _extract_source_urls(payload) == (
+        "https://plain.example/source",
+        "https://dict.example/source",
+        "http://nested.example/item",
+        "https://deep.example/source",
+        "https://object.example/source",
+    )
 
 
 def test_gpt_researcher_builds_sync_pgvector_for_sync_document_load(monkeypatch) -> None:
