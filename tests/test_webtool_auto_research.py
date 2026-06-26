@@ -9,6 +9,7 @@ def test_auto_research_triggers_on_current_question():
     d = decide_auto_research("Wie ist der aktuelle BTC Kurs heute?")
     assert d.enabled is True
     assert d.capability == "websearch"
+    assert d.research_report_type == "research_report"
 
 
 def test_auto_research_triggers_on_crypto_current_price_de_and_en():
@@ -162,6 +163,31 @@ def test_auto_research_routes_complex_research_prompts_to_webresearch():
         assert d.enabled is True, prompt
         assert d.capability == "webresearch"
         assert d.reason == "complex_research_signal"
+        assert d.research_report_type == "deep_research"
+
+
+def test_auto_research_does_not_route_generic_summaries_and_simple_comparisons_to_deep_research():
+    prompts = [
+        "Summarize this text",
+        "Summarize last chat",
+        "Summarize the last chat",
+        "Fasse den letzten Chat zusammen",
+        "Fasse bitte den letzten Chat zusammen",
+        "Bitte vergleiche kurz Python und Go",
+    ]
+    for prompt in prompts:
+        d = decide_auto_research(prompt)
+        assert d.capability != "webresearch", prompt
+        assert d.research_report_type != "deep_research", prompt
+
+
+def test_auto_research_keeps_current_external_comparison_as_deep_research():
+    d = decide_auto_research("Vergleiche die aktuellen Python und Go Releases mit Quellen.")
+
+    assert d.enabled is True
+    assert d.capability == "webresearch"
+    assert d.reason == "complex_research_signal"
+    assert d.research_report_type == "deep_research"
 
 
 def test_auto_research_triggers_on_german_sports_tournament_current_prompts():
@@ -175,6 +201,21 @@ def test_auto_research_triggers_on_german_sports_tournament_current_prompts():
         d = decide_auto_research(prompt)
         assert d.enabled is True, prompt
         assert d.capability == "websearch"
+        assert d.research_report_type == "research_report"
+
+
+def test_auto_research_keeps_short_weather_sport_price_and_simple_fact_out_of_deep_research():
+    prompts = [
+        "Wie ist das Wetter morgen in Berlin?",
+        "Bundesliga Tabelle aktuell",
+        "Was ist der aktuelle Bitcoin Preis in USD?",
+        "What is the CEO of OpenAI?",
+    ]
+    for prompt in prompts:
+        d = decide_auto_research(prompt)
+        assert d.enabled is True, prompt
+        assert d.capability == "websearch"
+        assert d.research_report_type == "research_report"
 
 
 def test_auto_research_does_not_trigger_for_general_sports_chat_without_current_detail():
@@ -243,6 +284,7 @@ def test_auto_research_routes_broad_company_lookup_to_webresearch():
         assert d.enabled is True, prompt
         assert d.capability == "webresearch"
         assert d.reason == "semantic_current_data_required"
+        assert d.research_report_type == "deep_research"
 
 
 def test_auto_research_classifier_does_not_trigger_timeless_prompts():

@@ -16,6 +16,7 @@ class AutoResearchDecision:
     reason: str
     query: str
     url: str
+    research_report_type: str = "research_report"
 
 
 _URL_RE = re.compile(r"https?://[^\s<>()\[\]{}\"']+", re.IGNORECASE)
@@ -93,6 +94,17 @@ _COMPLEX_RESEARCH_RE = re.compile(
     re.IGNORECASE,
 )
 _COMPLEX_SOURCE_RE = re.compile(r"\b(?:quellen|sources?|belege|evidence)\b", re.IGNORECASE)
+_LOCAL_SUMMARY_RE = re.compile(
+    r"\b(?:"
+    r"summari[sz]e\s+(?:please\s+)?(?:(?:this|the)\s+)?(?:(?:last|previous)\s+)?(?:text|chat|conversation|message|thread)|"
+    r"fass(?:e)?\s+(?:bitte\s+)?(?:(?:den|diesen|diese[nr]?)\s+)?(?:(?:letzten|vorherigen)\s+)?(?:text|chat|verlauf|conversation|message)\s+zusammen"
+    r")\b",
+    re.IGNORECASE,
+)
+_SIMPLE_COMPARE_RE = re.compile(
+    r"\b(?:vergleiche?|vergleich(?:e|en)?|compare)\b",
+    re.IGNORECASE,
+)
 
 
 
@@ -125,7 +137,7 @@ def decide_auto_research(text: str, *, now: datetime | None = None) -> AutoResea
         return AutoResearchDecision(True, capability, "contains_url", "", url)
 
     if _is_complex_research_query(raw):
-        return AutoResearchDecision(True, "webresearch", "complex_research_signal", _sanitize_text(raw, max_len=220), "")
+        return AutoResearchDecision(True, "webresearch", "complex_research_signal", _sanitize_text(raw, max_len=220), "", "deep_research")
 
     current_year = (now or datetime.now(UTC)).year
     has_temporal = any(k in lowered for k in _CURRENT_KEYWORDS)
@@ -185,12 +197,14 @@ def decide_auto_research(text: str, *, now: datetime | None = None) -> AutoResea
 
     if classifier_decision.should_research:
         capability = "webresearch" if _should_use_deep_research(raw, classifier_decision.signals) else "websearch"
+        report_type = "deep_research" if capability == "webresearch" else "research_report"
         return AutoResearchDecision(
             True,
             capability,
             classifier_decision.reason,
             _sanitize_text(raw, max_len=220),
             "",
+            report_type,
         )
 
     return AutoResearchDecision(False, "", "timeless_or_unclear", "", "")
@@ -200,6 +214,11 @@ def _is_complex_research_query(raw: str) -> bool:
     strong_complex = bool(_COMPLEX_RESEARCH_RE.search(raw))
     source_only_complex = bool(_COMPLEX_SOURCE_RE.search(raw) and len(raw) >= 80)
     if not (strong_complex or source_only_complex):
+        return False
+    has_external_research_context = _has_external_research_context(raw)
+    if _LOCAL_SUMMARY_RE.search(raw) and not has_external_research_context:
+        return False
+    if _SIMPLE_COMPARE_RE.search(raw) and len(raw) < 80 and not has_external_research_context:
         return False
     if _LOCAL_MEDIA_ANALYSIS_RE.search(raw) and not (
         _URL_RE.search(raw) or _COMPLEX_SOURCE_RE.search(raw) or _CURRENT_KEYWORD_RE.search(raw)
@@ -212,6 +231,19 @@ def _is_complex_research_query(raw: str) -> bool:
     if sports_query.has_competition(raw) and _SPORTS_CURRENT_INTENT_RE.search(raw) and len(raw) < 140:
         return False
     return True
+
+
+def _has_external_research_context(raw: str) -> bool:
+    return bool(
+        _URL_RE.search(raw)
+        or _COMPLEX_SOURCE_RE.search(raw)
+        or _CURRENT_KEYWORD_RE.search(raw)
+        or _YEAR_RE.search(raw)
+        or _DATE_RE.search(raw)
+        or _MARKET_CURRENT_SIGNAL_RE.search(raw)
+        or _MARKET_CURRENT_INTENT_RE.search(raw)
+        or (sports_query.has_competition(raw) and _SPORTS_CURRENT_INTENT_RE.search(raw))
+    )
 
 
 def _should_use_deep_research(raw: str, signals: tuple[str, ...]) -> bool:

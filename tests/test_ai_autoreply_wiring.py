@@ -1140,6 +1140,8 @@ def test_autoreply_research_needed_uses_current_info_before_normal_ai_draft(tmp_
     assert service.requests[0].metadata["response_strategy_reason"] == "semantic_current_data_required"
     assert service.requests[0].metadata["require_gpt_researcher"] is True
     assert service.requests[0].metadata["capability"] == "webresearch"
+    assert service.requests[0].metadata["research_report_type"] == "research_report"
+    assert service.requests[0].metadata["deep_research"] is False
     assert len(ai.prompts) == 1
     assert "Checked evidence" in ai.prompts[0]
     assert "User message:" not in ai.prompts[0]

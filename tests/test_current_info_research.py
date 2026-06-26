@@ -73,6 +73,16 @@ class _FailingResearcher:
         )
 
 
+class _SlowResearcher:
+    def __init__(self, **kwargs) -> None:
+        self.kwargs = kwargs
+
+    async def conduct_research(self) -> None:
+        import asyncio
+
+        await asyncio.sleep(0.05)
+
+
 class _FallbackSourcesResearcher:
     def __init__(self, **kwargs) -> None:
         self.kwargs = kwargs
@@ -417,6 +427,7 @@ def test_gpt_researcher_provider_maps_report_sources_and_ollama_config(monkeypat
     assert "Recherchiere AMO" in instance.kwargs["query"]
     assert "Current date/time context for this research run:" in instance.kwargs["query"]
     assert "Date handling:" in instance.kwargs["query"]
+    assert instance.kwargs["report_type"] == "research_report"
     assert instance.config["FAST_LLM"] == "ollama:fast-model"
     assert instance.config["SMART_LLM"] == "ollama:smart-model"
     assert instance.config["STRATEGIC_LLM"] == "ollama:strategic-model"
@@ -431,6 +442,40 @@ def test_gpt_researcher_provider_maps_report_sources_and_ollama_config(monkeypat
     assert "'smart_llm': 'ollama:smart-model'" in caplog.text
     assert "'strategic_llm': 'ollama:strategic-model'" in caplog.text
     assert "'embedding': 'ollama:nomic-embed-text-v2-moe:latest'" in caplog.text
+    assert "'report_type': 'research_report'" in caplog.text
+    assert answer.metadata["research_report_type"] == "research_report"
+    assert answer.metadata["deep_research"] is False
+    assert answer.metadata["deep_breadth"] == 2
+    assert answer.metadata["deep_depth"] == 2
+    assert answer.metadata["deep_concurrency"] == 2
+
+
+def test_gpt_researcher_provider_uses_deep_research_report_type_from_metadata(caplog) -> None:
+    _FakeResearcher.instances.clear()
+    request, task, query_plan = _research_request_parts("Recherchiere AMO Deep Research")
+    request = CurrentInfoRequest(
+        query=request.query,
+        locale=request.locale,
+        metadata={"research_report_type": "deep_research"},
+    )
+
+    with caplog.at_level(logging.INFO, logger="amo_bot.current_info.research"):
+        answer = _provider_for_researcher(_FakeResearcher).answer(
+            request=request,
+            task=task,
+            query_plan=query_plan,
+        )
+
+    assert answer.status == "answered"
+    instance = _FakeResearcher.instances[0]
+    assert instance.kwargs["report_type"] == "deep_research"
+    assert answer.metadata["research_report_type"] == "deep_research"
+    assert answer.metadata["deep_research"] is True
+    assert answer.metadata["deep_breadth"] == 1
+    assert answer.metadata["deep_depth"] == 1
+    assert answer.metadata["deep_concurrency"] == 1
+    assert "'report_type': 'deep_research'" in caplog.text
+    assert "'deep_breadth': 1" in caplog.text
 
 
 def test_gpt_researcher_query_uses_request_date_context_for_expired_planned_dates() -> None:
@@ -739,7 +784,7 @@ def test_sync_pgvector_connection_url_keeps_sync_postgres_urls() -> None:
 
 
 def test_gpt_researcher_provider_returns_safe_error_metadata_and_logs(caplog) -> None:
-    request = CurrentInfoRequest(query="Recherchiere AMO", locale="de")
+    request = CurrentInfoRequest(query="Recherchiere AMO", locale="de", metadata={"deep_research": True})
     service = CurrentInfoService()
     task = service._task_planner.plan_task(request)
     query_plan = service._query_planner.plan_queries(request=request, task=task)
@@ -773,6 +818,8 @@ def test_gpt_researcher_provider_returns_safe_error_metadata_and_logs(caplog) ->
 
     assert answer.status == "provider_unavailable"
     assert answer.warnings == ("gpt_researcher_failed",)
+    assert answer.metadata["research_report_type"] == "deep_research"
+    assert answer.metadata["deep_research"] is True
     assert answer.metadata["error_class"] == "RuntimeError"
     assert "live-token-123" not in answer.metadata["error_message"]
     assert "123456:ABCDEF" not in answer.metadata["error_message"]
@@ -783,6 +830,49 @@ def test_gpt_researcher_provider_returns_safe_error_metadata_and_logs(caplog) ->
     assert "123456:ABCDEF" not in caplog.text
     assert "sk-testsecret123456" not in caplog.text
     assert "gpt_researcher_failed: RuntimeError: provider failed Authorization: Bearer ***REDACTED***" in caplog.text
+    assert "'report_type': 'deep_research'" in caplog.text
+
+
+def test_gpt_researcher_provider_timeout_fails_closed_with_deep_metadata(caplog) -> None:
+    request = CurrentInfoRequest(query="Recherchiere AMO", locale="de", metadata={"research_mode": "deep"})
+    service = CurrentInfoService()
+    task = service._task_planner.plan_task(request)
+    query_plan = service._query_planner.plan_queries(request=request, task=task)
+    provider = GptResearcherProvider(
+        config=GptResearcherProviderConfig(
+            enabled=True,
+            model_config=ResearchModelConfig(
+                provider="ollama",
+                fast_llm="ollama:fast-model",
+                smart_llm="ollama:smart-model",
+                strategic_llm="ollama:strategic-model",
+            ),
+            searxng_url="https://searx.example",
+            timeout_seconds=0.001,
+            max_sources=2,
+            max_context_chars=500,
+            deep_breadth=3,
+            deep_depth=2,
+            deep_concurrency=4,
+            report_words=200,
+            vector_collection="research_chunks",
+            ollama_base_url="http://ollama.test:11434",
+        ),
+        embedding_provider=_FakeEmbeddingProvider(),
+        database_url="sqlite:///:memory:",
+        researcher_cls=_SlowResearcher,
+    )
+
+    with caplog.at_level(logging.WARNING, logger="amo_bot.current_info.research"):
+        answer = provider.answer(request=request, task=task, query_plan=query_plan)
+
+    assert answer.status == "provider_unavailable"
+    assert answer.warnings == ("gpt_researcher_timeout",)
+    assert answer.metadata["research_report_type"] == "deep_research"
+    assert answer.metadata["deep_breadth"] == 3
+    assert answer.metadata["deep_depth"] == 2
+    assert answer.metadata["deep_concurrency"] == 4
+    assert "current_info.GptResearcherTimeout" in caplog.text
 
 
 def test_current_info_service_uses_research_provider_for_webresearch_requests() -> None:

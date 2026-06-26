@@ -1887,6 +1887,7 @@ class Dispatcher:
         current_info_query = normalized_text if decision.url and normalized_text.strip() else decision.query
         original_capability = decision.capability
         capability = "webresearch"
+        research_report_type = str(getattr(decision, "research_report_type", "") or "research_report").strip() or "research_report"
         reason = decision.reason
         if force and not current_info_query:
             current_info_query = normalized_text.strip()
@@ -1949,6 +1950,9 @@ class Dispatcher:
                 "capability": capability,
                 "requested_capability": original_capability,
                 "auto_research_capability": capability,
+                "research_report_type": research_report_type,
+                "gpt_researcher_report_type": research_report_type,
+                "deep_research": research_report_type == "deep_research",
                 "direct_url": decision.url,
                 "forced_by_response_strategy": force,
                 "require_gpt_researcher": True,

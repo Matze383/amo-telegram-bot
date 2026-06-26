@@ -114,12 +114,15 @@ class GptResearcherProvider:
         self._vector_store = vector_store
 
     def answer(self, *, request: CurrentInfoRequest, task: TaskSpec, query_plan: QueryPlan) -> CurrentInfoAnswer:
+        report_type = _research_report_type(request)
+        report_metadata = _research_report_metadata(report_type=report_type, config=self._config)
         if not self._config.enabled:
             return _provider_unavailable_answer(
                 request=request,
                 task=task,
                 query_plan=query_plan,
                 warning="gpt_researcher_disabled",
+                metadata=report_metadata,
             )
         if not task.query.strip():
             return _provider_unavailable_answer(
@@ -128,6 +131,7 @@ class GptResearcherProvider:
                 query_plan=query_plan,
                 warning="empty_query",
                 status="invalid_request",
+                metadata=report_metadata,
             )
         self._log_lifecycle(
             event="current_info.GptResearcherConfigured",
@@ -136,16 +140,19 @@ class GptResearcherProvider:
             task=task,
             outcome="configured",
             extra={
+                **report_metadata,
                 "timeout_seconds": self._config.timeout_seconds,
                 "max_sources": self._config.max_sources,
                 "report_words": self._config.report_words,
-                "deep_breadth": self._config.deep_breadth,
-                "deep_depth": self._config.deep_depth,
-                "deep_concurrency": self._config.deep_concurrency,
             },
         )
         try:
-            result = asyncio.run(asyncio.wait_for(self._answer_async(request=request, task=task), timeout=self._config.timeout_seconds))
+            result = asyncio.run(
+                asyncio.wait_for(
+                    self._answer_async(request=request, task=task, report_type=report_type),
+                    timeout=self._config.timeout_seconds,
+                )
+            )
         except TimeoutError:
             self._log_lifecycle(
                 event="current_info.GptResearcherTimeout",
@@ -155,13 +162,14 @@ class GptResearcherProvider:
                 outcome="timeout",
                 reason_code="gpt_researcher_timeout",
                 level=logging.WARNING,
-                extra={"timeout_seconds": self._config.timeout_seconds},
+                extra={**report_metadata, "timeout_seconds": self._config.timeout_seconds},
             )
             return _provider_unavailable_answer(
                 request=request,
                 task=task,
                 query_plan=query_plan,
                 warning="gpt_researcher_timeout",
+                metadata=report_metadata,
             )
         except Exception as exc:
             error_message = safe_error_message(exc)
@@ -180,6 +188,7 @@ class GptResearcherProvider:
                 reason_code="gpt_researcher_failed",
                 level=logging.WARNING,
                 extra={
+                    **report_metadata,
                     "error_class": exc.__class__.__name__,
                     "error_message": error_message,
                     **({"remediation": remediation} if remediation else {}),
@@ -191,6 +200,7 @@ class GptResearcherProvider:
                 query_plan=query_plan,
                 warning="gpt_researcher_failed",
                 metadata={
+                    **report_metadata,
                     "error_class": exc.__class__.__name__,
                     "error_message": error_message,
                     **({"remediation": remediation} if remediation else {}),
@@ -230,7 +240,7 @@ class GptResearcherProvider:
         )
         return answer
 
-    async def _answer_async(self, *, request: CurrentInfoRequest, task: TaskSpec) -> dict[str, Any]:
+    async def _answer_async(self, *, request: CurrentInfoRequest, task: TaskSpec, report_type: str) -> dict[str, Any]:
         researcher_cls = self._researcher_cls or _load_gpt_researcher_class()
         vector_store = self._vector_store or _build_pgvector_store(
             database_url=self._database_url,
@@ -247,7 +257,7 @@ class GptResearcherProvider:
             ):
                 researcher = researcher_cls(
                     query=_gpt_researcher_query(request=request, task=task),
-                    report_type="research_report",
+                    report_type=report_type,
                     report_source="web",
                     config_path=config_path,
                     vector_store=vector_store,
@@ -258,6 +268,7 @@ class GptResearcherProvider:
                     request=request,
                     task=task,
                     outcome="started",
+                    extra=_research_report_metadata(report_type=report_type, config=self._config),
                 )
                 await researcher.conduct_research()
                 self._log_lifecycle(
@@ -266,6 +277,7 @@ class GptResearcherProvider:
                     request=request,
                     task=task,
                     outcome="completed",
+                    extra=_research_report_metadata(report_type=report_type, config=self._config),
                 )
                 self._log_lifecycle(
                     event="current_info.GptResearcherLifecycle",
@@ -273,6 +285,7 @@ class GptResearcherProvider:
                     request=request,
                     task=task,
                     outcome="started",
+                    extra=_research_report_metadata(report_type=report_type, config=self._config),
                 )
                 report = await researcher.write_report()
                 self._log_lifecycle(
@@ -281,6 +294,7 @@ class GptResearcherProvider:
                     request=request,
                     task=task,
                     outcome="completed",
+                    extra=_research_report_metadata(report_type=report_type, config=self._config),
                 )
                 sources = _call_optional(researcher, "get_source_urls") or ()
                 source_docs = _call_optional(researcher, "get_research_sources") or ()
@@ -297,6 +311,10 @@ class GptResearcherProvider:
             "source_docs": source_docs,
             "context": context,
             "costs": costs if isinstance(costs, dict) else {},
+            "report_type": report_type,
+            "deep_breadth": self._config.deep_breadth,
+            "deep_depth": self._config.deep_depth,
+            "deep_concurrency": self._config.deep_concurrency,
         }
 
     def _gpt_researcher_config(self, *, language: str) -> dict[str, Any]:
@@ -560,6 +578,38 @@ def _parse_request_datetime(value: Any) -> datetime | None:
     return parsed.astimezone(UTC) if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
 
+def _research_report_type(request: CurrentInfoRequest) -> str:
+    metadata = dict(request.metadata or {})
+    if metadata.get("deep_research") is True:
+        return "deep_research"
+
+    candidates = (
+        metadata.get("gpt_researcher_report_type"),
+        metadata.get("research_report_type"),
+        metadata.get("report_type"),
+        metadata.get("webresearch_mode"),
+        metadata.get("research_mode"),
+    )
+    for candidate in candidates:
+        normalized = str(candidate or "").strip().casefold().replace("-", "_")
+        if normalized in {"deep", "deep_research", "deepresearch"}:
+            return "deep_research"
+        if normalized in {"standard", "research", "research_report", "webresearch"}:
+            return "research_report"
+    return "research_report"
+
+
+def _research_report_metadata(*, report_type: str, config: GptResearcherProviderConfig) -> dict[str, Any]:
+    return {
+        "report_type": report_type,
+        "research_report_type": report_type,
+        "deep_research": report_type == "deep_research",
+        "deep_breadth": config.deep_breadth,
+        "deep_depth": config.deep_depth,
+        "deep_concurrency": config.deep_concurrency,
+    }
+
+
 def _write_temp_config(config: dict[str, Any]) -> str:
     handle = tempfile.NamedTemporaryFile("w", suffix=".json", prefix="amo-gpt-researcher-", delete=False, encoding="utf-8")
     with handle:
@@ -692,6 +742,12 @@ def _research_result_to_answer(
         warnings=evidence.warnings,
         metadata={
             "provider_mode": "gpt_researcher",
+            "report_type": str(result.get("report_type") or "research_report"),
+            "research_report_type": str(result.get("report_type") or "research_report"),
+            "deep_research": str(result.get("report_type") or "").casefold() == "deep_research",
+            "deep_breadth": int(result.get("deep_breadth") or 0),
+            "deep_depth": int(result.get("deep_depth") or 0),
+            "deep_concurrency": int(result.get("deep_concurrency") or 0),
             "source_count": len(sources),
             "source_doc_count": _container_len(source_docs),
             "fetched_source_count": fetched_count,

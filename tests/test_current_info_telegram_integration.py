@@ -170,6 +170,8 @@ def test_current_info_autoreply_synthesizes_and_appends_sources() -> None:
     assert service.requests[0].role == Role.ADMIN
     assert service.requests[0].metadata["require_gpt_researcher"] is True
     assert service.requests[0].metadata["capability"] == "webresearch"
+    assert service.requests[0].metadata["research_report_type"] == "research_report"
+    assert service.requests[0].metadata["deep_research"] is False
     assert "Current date:" in service.requests[0].metadata["current_time_context_text"]
     assert service.requests[0].metadata["now"].endswith("Z")
     assert service.requests[0].metadata["timezone"] == "Europe/Berlin"
@@ -349,6 +351,8 @@ def test_current_info_gpt_researcher_auto_path_uses_longer_research_timeout() ->
     assert len(service.requests) == 1
     assert service.requests[0].metadata["require_gpt_researcher"] is True
     assert service.requests[0].metadata["capability"] == "webresearch"
+    assert service.requests[0].metadata["research_report_type"] == "research_report"
+    assert service.requests[0].metadata["deep_research"] is False
 
 
 def test_current_info_synthesis_timeout_sends_compact_answer_with_sources() -> None:
@@ -659,9 +663,39 @@ def test_current_info_mutable_fact_queries_are_marked_gpt_researcher_only() -> N
         assert handled is True, query
         assert service.requests[index - 1].metadata["require_gpt_researcher"] is True
         assert service.requests[index - 1].metadata["capability"] == "webresearch"
+        assert service.requests[index - 1].metadata["research_report_type"] == "research_report"
+        assert service.requests[index - 1].metadata["deep_research"] is False
 
     assert len(service.requests) == len(queries)
     assert len(sent) == len(queries)
+
+
+def test_current_info_autoreply_marks_broad_complex_research_as_deep_research() -> None:
+    answer = CurrentInfoAnswer(
+        status="answered",
+        answer_text="Research answer.",
+        sources=("https://research.example/source",),
+        confidence=0.8,
+    )
+    service = _CurrentInfoService(answer)
+    dispatcher, sent = _dispatcher(service=service, ai=_AIService(response="Synthesis."))
+    prompt = "Recherchiere die aktuelle Lage zu SearxNG und Brave Search mit Quellen."
+
+    handled = asyncio.run(
+        dispatcher._maybe_handle_current_info_autoreply(
+            message=_message(f"@amo_bot {prompt}"),
+            role=Role.ADMIN,
+            normalized_text=prompt,
+            locale="de",
+        )
+    )
+
+    assert handled is True
+    assert service.requests[0].metadata["require_gpt_researcher"] is True
+    assert service.requests[0].metadata["capability"] == "webresearch"
+    assert service.requests[0].metadata["research_report_type"] == "deep_research"
+    assert service.requests[0].metadata["deep_research"] is True
+    assert sent == ["Synthesis.\n\nQuellen:\n1. https://research.example/source"]
 
 
 def test_current_info_autoreply_accepts_spacex_listing_url_as_user_evidence() -> None:
@@ -731,6 +765,8 @@ def test_current_info_autoreply_keeps_full_long_url_in_request() -> None:
     assert service.requests[0].metadata["direct_url"] == url
     assert service.requests[0].metadata["capability"] == "webresearch"
     assert service.requests[0].metadata["requested_capability"] == "browser"
+    assert service.requests[0].metadata["research_report_type"] == "research_report"
+    assert service.requests[0].metadata["deep_research"] is False
     assert sent == [f"Die Quelle wurde geprüft.\n\nQuellen:\n1. {url}"]
 
 
