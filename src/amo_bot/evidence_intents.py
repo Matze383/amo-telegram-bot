@@ -26,6 +26,14 @@ _FINANCE_EXPOSURE_RE = re.compile(
     r"\b(?:kaufen|buy|trade|traden|handeln|handelbar|investieren|invest|exposure|zugang)\b",
     re.IGNORECASE,
 )
+_STOCK_LISTING_STATUS_RE = re.compile(
+    r"\b(?:"
+    r"börsennotiert|boersennotiert|(?:öffentlich|oeffentlich)\s+gelistet|"
+    r"listed|listing|publicly\s+(?:traded|listed)|ipo|ticker|"
+    r"stock\s+exchange|nasdaq|nyse|an\s+der\s+börse|an\s+der\s+boerse"
+    r")\b",
+    re.IGNORECASE,
+)
 
 _WEATHER_RE = re.compile(r"\b(?:wetter|weather|temperatur|temperature|regen|rain|forecast|vorhersage)\b", re.IGNORECASE)
 _CRYPTO_RE = re.compile(
@@ -83,6 +91,15 @@ def is_finance_listing_query(text: str) -> bool:
     if _FINANCE_LISTING_RE.search(raw):
         return True
     if _FINANCE_DERIVATIVE_EXCHANGE_RE.search(raw):
+        return True
+    return bool(_FINANCE_SECURITY_RE.search(raw) and _FINANCE_EXPOSURE_RE.search(raw))
+
+
+def is_stock_listing_status_query(text: str) -> bool:
+    raw = text or ""
+    if is_derivative_exchange_query(raw):
+        return False
+    if _STOCK_LISTING_STATUS_RE.search(raw):
         return True
     return bool(_FINANCE_SECURITY_RE.search(raw) and _FINANCE_EXPOSURE_RE.search(raw))
 

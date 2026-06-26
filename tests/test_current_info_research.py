@@ -18,7 +18,9 @@ from amo_bot.current_info.research import (
     _sync_pgvector_connection_url,
     resolve_research_embedding_config,
     resolve_research_model_config,
+    _pgvector_embedding_id_notnull_remediation,
 )
+from amo_bot.evidence_intents import is_finance_listing_query, is_stock_listing_status_query
 
 
 class _FakeEmbeddingProvider:
@@ -57,7 +59,7 @@ class _FakeResearcher:
         return {"total": 0.0}
 
     def get_research_sources(self) -> tuple[dict[str, str], ...]:
-        return ({"url": "https://source.example/report"},)
+        return ({"url": "https://source.example/report", "raw_content": "Fetched page body " * 40},)
 
 
 class _FailingResearcher:
@@ -94,7 +96,7 @@ class _FallbackSourcesResearcher:
         return (
             {
                 "title": "Primary source",
-                "content": "Source content",
+                "raw_content": "Fetched source content " * 40,
                 "metadata": {"url": "https://source.example/recovered"},
             },
             {"link": "https://source.example/recovered"},
@@ -136,6 +138,114 @@ class _SyncVectorResearcher:
 
     def get_source_urls(self) -> tuple[str, ...]:
         return ("https://source.example/research",)
+
+    def get_research_sources(self) -> tuple[dict[str, object], ...]:
+        return ({"url": "https://source.example/research", "raw_content": "Fetched research page " * 40},)
+
+
+class _SnippetOnlyListingConflictResearcher:
+    def __init__(self, **kwargs) -> None:
+        self.kwargs = kwargs
+
+    async def conduct_research(self) -> None:
+        self.conducted = True
+
+    async def write_report(self) -> str:
+        return (
+            "One source says the company is a private company and not publicly traded. "
+            "Another says the IPO completed and shares are trading on Nasdaq under ticker SPCX."
+        )
+
+    def get_source_urls(self) -> tuple[str, ...]:
+        return ("https://finance.example/private", "https://market.example/spcx")
+
+    def get_research_context(self) -> list[dict[str, object]]:
+        return [
+            {
+                "content": "The company remains privately held and not publicly traded.",
+                "metadata": {"url": "https://finance.example/private"},
+            },
+            {
+                "content": "IPO completed; ticker SPCX is listed on Nasdaq.",
+                "metadata": {"url": "https://market.example/spcx"},
+            },
+        ]
+
+
+class _ObjectDoc:
+    def __init__(self, page_content: str, metadata: dict[str, object]) -> None:
+        self.page_content = page_content
+        self.metadata = metadata
+
+
+class _ObjectMetadataFetchedResearcher:
+    def __init__(self, **kwargs) -> None:
+        self.kwargs = kwargs
+
+    async def conduct_research(self) -> None:
+        self.conducted = True
+
+    async def write_report(self) -> str:
+        return "Research answer backed by fetched object document."
+
+    def get_source_urls(self) -> tuple[str, ...]:
+        return ()
+
+    def get_research_sources(self) -> tuple[_ObjectDoc, ...]:
+        return (
+            _ObjectDoc("Fetched object page body " * 40, {"source": "https://object.example/source"}),
+            _ObjectDoc("Fetched object page body " * 40, {"url": "https://object.example/url"}),
+        )
+
+
+class _PrivateTickerNegativeResearcher:
+    def __init__(self, **kwargs) -> None:
+        self.kwargs = kwargs
+
+    async def conduct_research(self) -> None:
+        self.conducted = True
+
+    async def write_report(self) -> str:
+        return "Anthropic is a privately held company and does not have a public stock ticker."
+
+    def get_source_urls(self) -> tuple[str, ...]:
+        return ("https://source.example/anthropic",)
+
+    def get_research_context(self) -> str:
+        return "Anthropic is a privately held company and does not have a public stock ticker."
+
+    def get_research_sources(self) -> tuple[dict[str, object], ...]:
+        return (
+            {
+                "url": "https://source.example/anthropic",
+                "raw_content": "Anthropic is a privately held company and does not have a public stock ticker. " * 10,
+            },
+        )
+
+
+class _ObjectMetadataUnrelatedReferenceResearcher:
+    def __init__(self, **kwargs) -> None:
+        self.kwargs = kwargs
+
+    async def conduct_research(self) -> None:
+        self.conducted = True
+
+    async def write_report(self) -> str:
+        return "Research answer backed by the source document."
+
+    def get_source_urls(self) -> tuple[str, ...]:
+        return ()
+
+    def get_research_sources(self) -> tuple[_ObjectDoc, ...]:
+        return (
+            _ObjectDoc(
+                "Fetched object page body " * 40,
+                {
+                    "unrelated_reference": "https://irrelevant.example/ad",
+                    "source": "https://source.example/doc",
+                },
+            ),
+        )
 
 
 @dataclass
@@ -371,7 +481,149 @@ def test_gpt_researcher_provider_recovers_sources_from_research_sources_when_sou
     assert answer.status == "answered"
     assert answer.sources == ("https://source.example/recovered", "https://context.example/item")
     assert answer.metadata["source_count"] == 2
+    assert answer.metadata["fetched_source_count"] == 1
+    assert answer.metadata["snippet_only_source_count"] == 1
+    assert answer.evidence is not None
+    assert answer.evidence.sources[0].fetched is True
+    assert answer.evidence.sources[1].fetched is False
     assert answer.confidence > 0
+
+
+def test_gpt_researcher_snippet_only_sources_are_not_marked_fetched(caplog) -> None:
+    request, task, query_plan = _research_request_parts("Ist SpaceX schon boersennotiert?")
+
+    with caplog.at_level(logging.WARNING, logger="amo_bot.current_info.research"):
+        answer = _provider_for_researcher(_SnippetOnlyListingConflictResearcher).answer(
+            request=request,
+            task=task,
+            query_plan=query_plan,
+        )
+
+    assert answer.status == "unverified_evidence"
+    assert answer.confidence == 0.35
+    assert answer.warnings == ("snippet_only_evidence", "source_conflict", "listing_evidence_conflict")
+    assert answer.metadata["source_count"] == 2
+    assert answer.metadata["fetched_source_count"] == 0
+    assert answer.metadata["snippet_only_source_count"] == 2
+    assert answer.metadata["evidence_quality"] == "snippet_only"
+    assert answer.evidence is not None
+    assert answer.evidence.freshness == "snippet_only"
+    assert all(source.fetched is False for source in answer.evidence.sources)
+    assert {source.quality_label for source in answer.evidence.sources} == {"snippet_only"}
+    assert "current_info.GptResearcherEvidenceQuality" in caplog.text
+    assert "snippet_only_source_count" in caplog.text
+
+
+def test_gpt_researcher_listing_conflict_yields_uncertain_verdict() -> None:
+    request, task, query_plan = _research_request_parts("Ist SpaceX an der Boerse gelistet?")
+    answer = _provider_for_researcher(_SnippetOnlyListingConflictResearcher).answer(
+        request=request,
+        task=task,
+        query_plan=query_plan,
+    )
+
+    verdict = answer.metadata["listing_verdict"]
+    assert verdict["classification"] == "conflicting"
+    assert verdict["conflict"] is True
+    assert verdict["supports_listed_count"] >= 1
+    assert verdict["supports_private_count"] >= 1
+    assert answer.status == "unverified_evidence"
+    assert "source_conflict" in answer.warnings
+
+
+def test_gpt_researcher_negative_public_ticker_statement_supports_private_listing_verdict() -> None:
+    request, task, query_plan = _research_request_parts("Ist Anthropic an der Boerse?")
+
+    answer = _provider_for_researcher(_PrivateTickerNegativeResearcher).answer(
+        request=request,
+        task=task,
+        query_plan=query_plan,
+    )
+
+    verdict = answer.metadata["listing_verdict"]
+    assert verdict["classification"] == "supports_private"
+    assert verdict["conflict"] is False
+    assert verdict["supports_private_count"] >= 1
+    assert verdict["supports_listed_count"] == 0
+    assert "source_conflict" not in answer.warnings
+    assert "listing_evidence_conflict" not in answer.warnings
+
+
+def test_gpt_researcher_derivative_exchange_query_does_not_get_stock_listing_verdict() -> None:
+    query = "Ist BTCUSDT auf Bybit handelbar?"
+    assert is_finance_listing_query(query) is True
+    assert is_stock_listing_status_query(query) is False
+    request, task, query_plan = _research_request_parts(query)
+
+    answer = _provider_for_researcher(_SnippetOnlyListingConflictResearcher).answer(
+        request=request,
+        task=task,
+        query_plan=query_plan,
+    )
+
+    assert answer.metadata["listing_verdict"]["classification"] == "not_applicable"
+    assert answer.metadata["listing_verdict"]["conflict"] is False
+    assert "source_conflict" not in answer.warnings
+    assert "listing_evidence_conflict" not in answer.warnings
+
+
+def test_gpt_researcher_generic_private_company_query_does_not_get_stock_listing_verdict() -> None:
+    query = "Was bedeutet private company?"
+    assert is_finance_listing_query(query) is True
+    assert is_stock_listing_status_query(query) is False
+    request, task, query_plan = _research_request_parts(query)
+
+    answer = _provider_for_researcher(_SnippetOnlyListingConflictResearcher).answer(
+        request=request,
+        task=task,
+        query_plan=query_plan,
+    )
+
+    assert answer.metadata["listing_verdict"]["classification"] == "not_applicable"
+    assert answer.metadata["listing_verdict"]["conflict"] is False
+    assert "source_conflict" not in answer.warnings
+    assert "listing_evidence_conflict" not in answer.warnings
+
+
+def test_stock_listing_status_helper_keeps_actual_listing_questions_applicable() -> None:
+    assert is_stock_listing_status_query("Ist SpaceX schon boersennotiert?") is True
+    assert is_stock_listing_status_query("Hat SpaceX einen IPO oder Ticker?") is True
+    assert is_stock_listing_status_query("Is Siemens publicly listed on a stock exchange?") is True
+    assert is_stock_listing_status_query("Kann man SpaceX Aktien kaufen?") is True
+
+
+def test_gpt_researcher_object_doc_metadata_source_counts_as_fetched() -> None:
+    request, task, query_plan = _research_request_parts("Research object docs")
+
+    answer = _provider_for_researcher(_ObjectMetadataFetchedResearcher).answer(
+        request=request,
+        task=task,
+        query_plan=query_plan,
+    )
+
+    assert answer.status == "answered"
+    assert answer.sources == ("https://object.example/source", "https://object.example/url")
+    assert answer.metadata["fetched_source_count"] == 2
+    assert answer.metadata["snippet_only_source_count"] == 0
+    assert answer.evidence is not None
+    assert all(source.fetched is True for source in answer.evidence.sources)
+
+
+def test_gpt_researcher_fetched_object_doc_ignores_unrelated_metadata_url_for_fetched_count() -> None:
+    request, task, query_plan = _research_request_parts("Research object docs")
+
+    answer = _provider_for_researcher(_ObjectMetadataUnrelatedReferenceResearcher).answer(
+        request=request,
+        task=task,
+        query_plan=query_plan,
+    )
+
+    assert answer.sources == ("https://source.example/doc",)
+    assert answer.metadata["fetched_source_count"] == 1
+    assert answer.metadata["snippet_only_source_count"] == 0
+    assert answer.evidence is not None
+    source_states = {source.url: source.fetched for source in answer.evidence.sources}
+    assert source_states == {"https://source.example/doc": True}
 
 
 def test_gpt_researcher_provider_fails_closed_when_no_reliable_urls_are_recovered() -> None:
@@ -387,6 +639,19 @@ def test_gpt_researcher_provider_fails_closed_when_no_reliable_urls_are_recovere
     assert answer.sources == ()
     assert answer.metadata["source_count"] == 0
     assert answer.warnings == ("empty_research_result",)
+
+
+def test_pgvector_embedding_id_notnull_error_reports_ops_remediation() -> None:
+    error = RuntimeError(
+        "psycopg.errors.NotNullViolation: null value in column "
+        '"id" of relation "langchain_pg_embedding" violates not-null constraint'
+    )
+
+    remediation = _pgvector_embedding_id_notnull_remediation(error)
+
+    assert "langchain_pg_embedding.id" in remediation
+    assert "ops migration" in remediation
+    assert "backup" in remediation
 
 
 def test_extract_source_urls_handles_nested_object_shapes_and_filters_invalid_values() -> None:

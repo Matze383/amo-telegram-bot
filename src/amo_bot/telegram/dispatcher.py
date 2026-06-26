@@ -2487,6 +2487,7 @@ class Dispatcher:
             f"Evidence confidence: {answer.confidence:.2f}\n"
             f"Evidence freshness: {freshness or 'unknown'}\n"
             f"Warnings: {warnings}\n\n"
+            f"Deterministic evidence verdict:\n{_current_info_verdict_summary(answer)}\n\n"
             f"Source landscape:\n{_current_info_source_landscape(answer)}\n\n"
             f"Checked evidence:\n{evidence}"
         )
@@ -2868,6 +2869,22 @@ def _current_info_source_landscape(answer: CurrentInfoAnswer) -> str:
     if answer.warnings:
         lines.append("Evidence gaps: " + ", ".join(answer.warnings))
     return "\n".join(lines)
+
+
+def _current_info_verdict_summary(answer: CurrentInfoAnswer) -> str:
+    verdict = answer.metadata.get("listing_verdict") if isinstance(answer.metadata, dict) else None
+    if not isinstance(verdict, dict):
+        return "No deterministic verdict available."
+    summary = str(verdict.get("summary") or "").strip()
+    classification = str(verdict.get("classification") or "unknown")
+    conflict = bool(verdict.get("conflict"))
+    counts = (
+        f"supports_listed={verdict.get('supports_listed_count', 0)}, "
+        f"supports_private={verdict.get('supports_private_count', 0)}"
+    )
+    if not summary:
+        summary = f"classification={classification}, conflict={conflict}, {counts}."
+    return f"{summary} classification={classification}; conflict={conflict}; {counts}."
 
 
 def _auto_note_has_verified_external_evidence(auto_note: str) -> bool:

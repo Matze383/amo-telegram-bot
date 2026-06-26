@@ -6,7 +6,13 @@ from dataclasses import dataclass
 
 from amo_bot.telegram import dispatcher as dispatcher_module
 from amo_bot.auth.roles import Role
-from amo_bot.current_info import CurrentInfoAnswer, CurrentInfoRequest, EvidenceChunk, EvidencePackage
+from amo_bot.current_info import (
+    CurrentInfoAnswer,
+    CurrentInfoRequest,
+    EvidenceChunk,
+    EvidencePackage,
+    EvidencePackageSource,
+)
 from amo_bot.telegram.dispatcher import Dispatcher
 from amo_bot.telegram.update_parser import TelegramChat, TelegramMessage, TelegramUser
 
@@ -244,6 +250,55 @@ def test_current_info_final_answer_rewrites_expired_planned_date_future_wording(
     assert "ist für den 12. juni 2026" not in body.casefold()
     assert "wurde für den 12. Juni 2026" in body
     assert "Quellen:\n1. https://finance.example/spacex-ipo" in text
+
+
+def test_current_info_synthesis_prompt_includes_listing_conflict_verdict() -> None:
+    answer = CurrentInfoAnswer(
+        status="answered",
+        answer_text="One source says private; another says ticker SPCX trades on Nasdaq.",
+        request=CurrentInfoRequest(query="Ist SpaceX boersennotiert?"),
+        evidence=EvidencePackage(
+            chunks=(
+                EvidenceChunk(
+                    text="Private company, not publicly traded. IPO completed; ticker SPCX listed on Nasdaq.",
+                    source_url="https://finance.example/source",
+                    source_title="Listing evidence",
+                ),
+            ),
+            sources=(
+                EvidencePackageSource(
+                    url="https://finance.example/source",
+                    host="finance.example",
+                    quality_label="snippet_only",
+                    fetched=False,
+                ),
+            ),
+            freshness="snippet_only",
+            confidence=0.35,
+            warnings=("snippet_only_evidence", "source_conflict", "listing_evidence_conflict"),
+        ),
+        sources=("https://finance.example/source",),
+        warnings=("snippet_only_evidence", "source_conflict", "listing_evidence_conflict"),
+        confidence=0.35,
+        metadata={
+            "listing_verdict": {
+                "classification": "conflicting",
+                "conflict": True,
+                "supports_listed_count": 2,
+                "supports_private_count": 1,
+                "summary": "Listing evidence is conflicting.",
+            }
+        },
+    )
+
+    prompt = Dispatcher._current_info_synthesis_prompt(answer=answer, locale="de")
+
+    assert "Deterministic evidence verdict:" in prompt
+    assert "Listing evidence is conflicting" in prompt
+    assert "classification=conflicting" in prompt
+    assert "conflict=True" in prompt
+    assert "not_fetched" in prompt
+    assert "snippet_only" in prompt
 
 
 def test_current_info_timeout_fails_closed_without_late_search_or_ai_fallback() -> None:
