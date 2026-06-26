@@ -4,6 +4,7 @@ import asyncio
 import time
 from dataclasses import dataclass
 
+from amo_bot.telegram import dispatcher as dispatcher_module
 from amo_bot.auth.roles import Role
 from amo_bot.current_info import CurrentInfoAnswer, CurrentInfoRequest, EvidenceChunk, EvidencePackage
 from amo_bot.telegram.dispatcher import Dispatcher
@@ -158,6 +159,9 @@ def test_current_info_autoreply_synthesizes_and_appends_sources() -> None:
     assert service.requests[0].role == Role.ADMIN
     assert service.requests[0].metadata["require_gpt_researcher"] is True
     assert service.requests[0].metadata["capability"] == "webresearch"
+    assert "Current date:" in service.requests[0].metadata["current_time_context_text"]
+    assert service.requests[0].metadata["now"].endswith("Z")
+    assert service.requests[0].metadata["timezone"] == "Europe/Berlin"
     assert ai.task_types == ["answer_synthesis"]
     assert "Checked evidence" in (ai.prompts or [""])[0]
     assert "Source class: verified_external_evidence" in (ai.prompts or [""])[0]
@@ -166,6 +170,75 @@ def test_current_info_autoreply_synthesizes_and_appends_sources() -> None:
         in (ai.prompts or [""])[0]
     )
     assert "do not use prior model knowledge" in (ai.prompts or [""])[0]
+
+
+def test_current_info_synthesis_prompt_marks_past_planned_dates_as_past() -> None:
+    answer = CurrentInfoAnswer(
+        status="answered",
+        answer_text="SpaceX IPO ist fuer den 12. Juni 2026 geplant.",
+        request=CurrentInfoRequest(
+            query="Ist SpaceX schon boersennotiert?",
+            metadata={
+                "current_time_context_text": "\n".join(
+                    (
+                        "Context:",
+                        "Current date: 2026-06-26",
+                        "Timezone: Europe/Berlin",
+                        "Local timestamp: 2026-06-26T12:00:00+02:00",
+                        "UTC timestamp: 2026-06-26T10:00:00Z",
+                    )
+                ),
+                "timezone": "Europe/Berlin",
+            },
+        ),
+        evidence=EvidencePackage(
+            chunks=(
+                EvidenceChunk(
+                    text="Die Quellen nennen einen geplanten SpaceX IPO am 12. Juni 2026 an der Nasdaq.",
+                    source_url="https://finance.example/spacex-ipo",
+                    source_title="SpaceX IPO",
+                ),
+            ),
+            freshness="current",
+            confidence=0.78,
+        ),
+        sources=("https://finance.example/spacex-ipo",),
+        confidence=0.78,
+    )
+
+    prompt = Dispatcher._current_info_synthesis_prompt(answer=answer, locale="de")
+
+    assert "Current date: 2026-06-26" in prompt
+    assert "Timezone: Europe/Berlin" in prompt
+    assert "12. Juni 2026" in prompt
+    assert "already passed" in prompt
+    assert "do not describe it as future, planned, upcoming, or 'bis dahin'" in prompt
+
+
+def test_current_info_final_answer_rewrites_expired_planned_date_future_wording() -> None:
+    answer = CurrentInfoAnswer(
+        status="answered",
+        answer_text="",
+        request=CurrentInfoRequest(
+            query="Ist SpaceX schon boersennotiert?",
+            metadata={"now": "2026-06-26T10:00:00Z", "timezone": "Europe/Berlin"},
+        ),
+        sources=("https://finance.example/spacex-ipo",),
+        confidence=0.78,
+    )
+    synthesized = (
+        "Laut den verfügbaren Quellen ist SpaceX noch nicht börsennotiert. "
+        "Ein Börsengang ist für den 12. Juni 2026 an der Nasdaq unter dem Ticker SPCX geplant, "
+        "aber bis dahin ist die Aktie noch nicht direkt handelbar."
+    )
+
+    text = Dispatcher._format_current_info_telegram_answer(answer=answer, synthesized=synthesized, locale="de")
+
+    body = text.split("\n\nQuellen:", 1)[0]
+    assert "bis dahin" not in body.casefold()
+    assert "ist für den 12. juni 2026" not in body.casefold()
+    assert "wurde für den 12. Juni 2026" in body
+    assert "Quellen:\n1. https://finance.example/spacex-ipo" in text
 
 
 def test_current_info_timeout_fails_closed_without_late_search_or_ai_fallback() -> None:
@@ -219,10 +292,28 @@ def test_current_info_gpt_researcher_auto_path_uses_longer_research_timeout() ->
 
 
 def test_current_info_synthesis_timeout_fails_closed() -> None:
+    answer = CurrentInfoAnswer(
+        status="answered",
+        answer_text="Raw evidence answer",
+        request=CurrentInfoRequest(query="aktueller Python Release heute"),
+        evidence=EvidencePackage(
+            chunks=(
+                EvidenceChunk(
+                    text="Python 3.13.5 is the current release.",
+                    source_url="https://python.example/release",
+                    source_title="Python release",
+                ),
+            ),
+            freshness="fresh",
+            confidence=0.72,
+        ),
+        sources=("https://python.example/release",),
+        confidence=0.72,
+    )
     dispatcher, sent = _dispatcher(
-        service=_SlowCurrentInfoService(),
+        service=_CurrentInfoService(answer),
         ai=_SlowAIService(),
-        timeout=0.01,
+        timeout=1.0,
         late_synthesis_timeout=0.01,
     )
 
@@ -462,7 +553,13 @@ def test_current_info_autoreply_preserves_long_finance_listing_url() -> None:
     assert "Geprüfte Quellen" not in sent[0]
 
 
-def test_current_info_synthesis_budget_exhausted_fails_closed_without_late_answer() -> None:
+def test_current_info_synthesizes_with_separate_budget_after_research_budget_elapsed(monkeypatch) -> None:
+    times = iter((100.0, 400.5))
+
+    def _perf_counter() -> float:
+        return next(times, 400.5)
+
+    monkeypatch.setattr(dispatcher_module.time, "perf_counter", _perf_counter)
     answer = CurrentInfoAnswer(
         status="answered",
         answer_text="Raw evidence answer",
@@ -481,25 +578,24 @@ def test_current_info_synthesis_budget_exhausted_fails_closed_without_late_answe
         sources=("https://python.example/release",),
         confidence=0.72,
     )
+    ai = _AIService(response="Python ist aktuell bei Version 3.13.5.")
     dispatcher, sent = _dispatcher(
         service=_CurrentInfoService(answer),
-        ai=_SlowAIService(),
-        timeout=0.01,
+        ai=ai,
+        timeout=300,
+        research_timeout=300,
+        late_synthesis_timeout=0.1,
     )
 
-    async def _run() -> bool:
-        handled = await dispatcher._maybe_handle_current_info_autoreply(
+    handled = asyncio.run(
+        dispatcher._maybe_handle_current_info_autoreply(
             message=_message("@amo_bot aktueller Python Release heute?"),
             role=Role.ADMIN,
             normalized_text="aktueller Python Release heute?",
             locale="de",
         )
-        await asyncio.sleep(0.08)
-        return handled
-
-    handled = asyncio.run(_run())
+    )
 
     assert handled is True
-    assert sent == [
-        "Dafuer brauche ich GPT-Researcher-Webrecherche, aber die Recherche konnte gerade nicht erfolgreich abgeschlossen werden."
-    ]
+    assert sent == ["Python ist aktuell bei Version 3.13.5.\n\nQuellen:\n1. https://python.example/release"]
+    assert ai.task_types == ["answer_synthesis"]

@@ -14,6 +14,7 @@ from urllib.parse import urlparse
 
 from sqlalchemy.engine import make_url
 
+from amo_bot.ai.current_time_context import DEFAULT_AI_PROMPT_TIMEZONE, build_current_time_context
 from amo_bot.current_info.models import (
     CurrentInfoAnswer,
     CurrentInfoRequest,
@@ -215,7 +216,7 @@ class GptResearcherProvider:
                 }
             ):
                 researcher = researcher_cls(
-                    query=task.query,
+                    query=_gpt_researcher_query(request=request, task=task),
                     report_type="research_report",
                     report_source="web",
                     config_path=config_path,
@@ -485,6 +486,48 @@ def _sync_pgvector_connection_url(database_url: str) -> str:
     if url.drivername == "postgresql+asyncpg":
         url = url.set(drivername="postgresql+psycopg")
     return url.render_as_string(hide_password=False)
+
+
+def _gpt_researcher_query(*, request: CurrentInfoRequest, task: TaskSpec) -> str:
+    return "\n\n".join(
+        (
+            "Current date/time context for this research run:",
+            _current_time_context_for_request(request),
+            "Original user research task:",
+            task.query,
+            (
+                "Date handling: Treat all dated claims relative to the current date above. "
+                "If evidence says an event was planned, scheduled, expected, or upcoming for a date "
+                "before the current date, do not describe it as future or still pending unless current "
+                "evidence explicitly confirms that status. Say that the source reports a date that has "
+                "already passed and distinguish that from what is established now."
+            ),
+        )
+    )
+
+
+def _current_time_context_for_request(request: CurrentInfoRequest) -> str:
+    metadata = request.metadata or {}
+    for key in ("current_time_context_text", "current_time_context"):
+        value = metadata.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    now = _parse_request_datetime(metadata.get("now"))
+    timezone_name = str(metadata.get("timezone") or DEFAULT_AI_PROMPT_TIMEZONE)
+    return build_current_time_context(now=now, timezone_name=timezone_name)
+
+
+def _parse_request_datetime(value: Any) -> datetime | None:
+    if isinstance(value, datetime):
+        return value.astimezone(UTC) if value.tzinfo else value.replace(tzinfo=UTC)
+    candidate = str(value or "").strip()
+    if not candidate:
+        return None
+    try:
+        parsed = datetime.fromisoformat(candidate.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed.astimezone(UTC) if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
 
 def _write_temp_config(config: dict[str, Any]) -> str:

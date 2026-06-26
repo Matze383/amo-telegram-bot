@@ -304,6 +304,9 @@ def test_gpt_researcher_provider_maps_report_sources_and_ollama_config(monkeypat
     instance = _FakeResearcher.instances[0]
     assert instance.searx_url == "https://searx.example"
     assert instance.ollama_base_url == "http://ollama.test:11434"
+    assert "Recherchiere AMO" in instance.kwargs["query"]
+    assert "Current date/time context for this research run:" in instance.kwargs["query"]
+    assert "Date handling:" in instance.kwargs["query"]
     assert instance.config["FAST_LLM"] == "ollama:fast-model"
     assert instance.config["SMART_LLM"] == "ollama:smart-model"
     assert instance.config["STRATEGIC_LLM"] == "ollama:strategic-model"
@@ -318,6 +321,43 @@ def test_gpt_researcher_provider_maps_report_sources_and_ollama_config(monkeypat
     assert "'smart_llm': 'ollama:smart-model'" in caplog.text
     assert "'strategic_llm': 'ollama:strategic-model'" in caplog.text
     assert "'embedding': 'ollama:nomic-embed-text-v2-moe:latest'" in caplog.text
+
+
+def test_gpt_researcher_query_uses_request_date_context_for_expired_planned_dates() -> None:
+    _FakeResearcher.instances.clear()
+    request = CurrentInfoRequest(
+        query="Ist SpaceX schon boersennotiert?",
+        locale="de",
+        metadata={
+            "current_time_context_text": "\n".join(
+                (
+                    "Context:",
+                    "Current date: 2026-06-26",
+                    "Timezone: Europe/Berlin",
+                    "Local timestamp: 2026-06-26T12:00:00+02:00",
+                    "UTC timestamp: 2026-06-26T10:00:00Z",
+                )
+            ),
+            "timezone": "Europe/Berlin",
+        },
+    )
+    service = CurrentInfoService()
+    task = service._task_planner.plan_task(request)
+    query_plan = service._query_planner.plan_queries(request=request, task=task)
+
+    answer = _provider_for_researcher(_FakeResearcher).answer(
+        request=request,
+        task=task,
+        query_plan=query_plan,
+    )
+
+    assert answer.status == "answered"
+    query = _FakeResearcher.instances[0].kwargs["query"]
+    assert "Ist SpaceX schon boersennotiert?" in query
+    assert "Current date: 2026-06-26" in query
+    assert "Timezone: Europe/Berlin" in query
+    assert "do not describe it as future" in query
+    assert "date that has already passed" in query
 
 
 def test_gpt_researcher_provider_recovers_sources_from_research_sources_when_source_urls_empty() -> None:

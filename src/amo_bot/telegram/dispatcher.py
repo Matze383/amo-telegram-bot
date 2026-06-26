@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any, Awaitable, Callable, Protocol
 
-from amo_bot.ai.current_time_context import DEFAULT_AI_PROMPT_TIMEZONE
+from amo_bot.ai.current_time_context import DEFAULT_AI_PROMPT_TIMEZONE, build_current_time_context
 from amo_bot.ai.compact_topic_state import build_compact_topic_state_payload, format_compact_topic_state_prompt
 from amo_bot.ai.context_snapshot import build_context_snapshot
 from amo_bot.ai.learning_feedback import LearningFeedbackScope, LearningFeedbackService
@@ -1926,6 +1926,11 @@ class Dispatcher:
             float(self.current_info_research_timeout_seconds),
             0.001,
         )
+        current_info_now = datetime.now(UTC)
+        current_time_context_text = build_current_time_context(
+            now=current_info_now,
+            timezone_name=self.prompt_timezone,
+        )
         request = CurrentInfoRequest(
             query=current_info_query,
             locale=locale,
@@ -1946,6 +1951,9 @@ class Dispatcher:
                 "direct_url": decision.url,
                 "forced_by_response_strategy": force,
                 "require_gpt_researcher": True,
+                "current_time_context_text": current_time_context_text,
+                "now": current_info_now.replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+                "timezone": self.prompt_timezone,
             },
         )
 
@@ -2048,36 +2056,12 @@ class Dispatcher:
             )
             return True
 
-        remaining_seconds = timeout_seconds - (time.perf_counter() - started)
-        if remaining_seconds <= 0:
-            log_event(
-                logger,
-                logging.INFO,
-                event="current_info.telegram.fallback",
-                component=_COMPONENT,
-                chat_id=message.chat.id,
-                message_id=message.message_id,
-                message_thread_id=message.message_thread_id,
-                user_id=message.from_user.id,
-                extra={
-                    "reason": "timeout",
-                    "stage": "budget_exhausted",
-                    "timeout_seconds": timeout_seconds,
-                    "status": answer.status,
-                    "confidence": answer.confidence,
-                    "late_delivery": "disabled",
-                },
-            )
-            await self._send_text(
-                message.chat.id,
-                CURRENT_INFO_RESEARCH_FAILED_FALLBACK_TEXT["en" if locale == "en" else "de"],
-                message.message_thread_id,
-            )
-            return True
+        retrieval_elapsed_seconds = time.perf_counter() - started
+        synthesis_timeout = max(float(self.current_info_late_synthesis_timeout_seconds), 0.001)
         try:
             synthesized = await asyncio.wait_for(
                 self._synthesize_current_info_answer(answer=answer, locale=locale),
-                timeout=remaining_seconds,
+                timeout=synthesis_timeout,
             )
         except TimeoutError:
             log_event(
@@ -2093,6 +2077,8 @@ class Dispatcher:
                     "reason": "timeout",
                     "stage": "synthesis",
                     "timeout_seconds": timeout_seconds,
+                    "late_synthesis_timeout_seconds": synthesis_timeout,
+                    "retrieval_elapsed_seconds": round(retrieval_elapsed_seconds, 3),
                     "status": answer.status,
                     "confidence": answer.confidence,
                 },
@@ -2151,6 +2137,7 @@ class Dispatcher:
                 "confidence": answer.confidence,
                 "source_count": len(answer.sources),
                 "warning_count": len(answer.warnings),
+                "retrieval_elapsed_seconds": round(retrieval_elapsed_seconds, 3),
             },
         )
         return True
@@ -2352,7 +2339,11 @@ class Dispatcher:
         )
 
     async def _synthesize_current_info_answer(self, *, answer: CurrentInfoAnswer, locale: str) -> str:
-        prompt = self._current_info_synthesis_prompt(answer=answer, locale=locale)
+        prompt = self._current_info_synthesis_prompt(
+            answer=answer,
+            locale=locale,
+            timezone_name=self.prompt_timezone,
+        )
         try:
             return await self.ai_service.ask(prompt, task_type="answer_synthesis")
         except TypeError as exc:
@@ -2361,19 +2352,31 @@ class Dispatcher:
             return await self.ai_service.ask(prompt)
 
     @staticmethod
-    def _current_info_synthesis_prompt(*, answer: CurrentInfoAnswer, locale: str) -> str:
+    def _current_info_synthesis_prompt(
+        *,
+        answer: CurrentInfoAnswer,
+        locale: str,
+        timezone_name: str = DEFAULT_AI_PROMPT_TIMEZONE,
+    ) -> str:
         query = answer.request.query if answer.request is not None else ""
         target_language = "German" if locale != "en" else "English"
         evidence = _current_info_evidence_text(answer)
         freshness = answer.evidence.freshness if answer.evidence is not None else ""
         warnings = ", ".join(answer.warnings) if answer.warnings else "none"
+        current_time_context = _current_info_current_time_context(answer=answer, timezone_name=timezone_name)
         return (
             "Synthesize a concise Telegram answer from the checked current-info evidence only.\n"
             f"Target language: {target_language}.\n"
+            f"{current_time_context}\n"
             "Source class: verified_external_evidence. Treat checked current external evidence as the highest-weight factual source.\n"
             "Use only the checked evidence below; do not use prior model knowledge.\n"
             "Do not treat user claims, prior bot answers, topic summaries, semantic memory, or model prior as evidence for this answer.\n"
             "Do not invent facts, links, dates, numbers, securities listings, exchange listings, or derivatives.\n"
+            "The current date/time context above is authoritative for tense and relative date logic. Compare planned, "
+            "scheduled, expected, upcoming, or future-dated claims in the evidence against the Current date. If an "
+            "evidence date is before the Current date, do not describe it as future, planned, upcoming, or 'bis dahin'; "
+            "say that the source reports a date that has already passed and whether the checked evidence confirms the "
+            "actual outcome after that date. Use concrete absolute dates for time-sensitive statements.\n"
             "If the evidence does not directly establish a claim, say that the available sources do not establish it.\n"
             "For finance, listing, ticker, token, derivative, or exchange questions, avoid categorical claims unless the "
             "evidence directly supports them.\n"
@@ -2401,6 +2404,7 @@ class Dispatcher:
             body = " ".join(answer.answer_text.split())
         if not body:
             return ""
+        body = _rewrite_expired_planned_future_language(body=body, answer=answer, locale=locale)
 
         sources = tuple(dict.fromkeys(source for source in answer.sources if source))[:CURRENT_INFO_SYNTHESIS_MAX_SOURCE_COUNT]
         if not sources:
@@ -2613,6 +2617,127 @@ def _current_info_evidence_text(answer: CurrentInfoAnswer) -> str:
     if len(text) > CURRENT_INFO_SYNTHESIS_MAX_EVIDENCE_CHARS:
         text = text[:CURRENT_INFO_SYNTHESIS_MAX_EVIDENCE_CHARS].rstrip() + " ..."
     return text
+
+
+def _current_info_current_time_context(*, answer: CurrentInfoAnswer, timezone_name: str) -> str:
+    metadata = answer.request.metadata if answer.request is not None else {}
+    for key in ("current_time_context_text", "current_time_context"):
+        value = metadata.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    metadata_timezone = metadata.get("timezone")
+    tz_name = metadata_timezone if isinstance(metadata_timezone, str) and metadata_timezone.strip() else timezone_name
+    return build_current_time_context(now=_parse_current_info_now(metadata.get("now")), timezone_name=tz_name)
+
+
+def _parse_current_info_now(value: Any) -> datetime | None:
+    if isinstance(value, datetime):
+        return value.astimezone(UTC) if value.tzinfo else value.replace(tzinfo=UTC)
+    candidate = str(value or "").strip()
+    if not candidate:
+        return None
+    try:
+        parsed = datetime.fromisoformat(candidate.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed.astimezone(UTC) if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+
+
+_MONTHS: dict[str, int] = {
+    "januar": 1,
+    "jan": 1,
+    "january": 1,
+    "februar": 2,
+    "feb": 2,
+    "february": 2,
+    "maerz": 3,
+    "märz": 3,
+    "mar": 3,
+    "march": 3,
+    "april": 4,
+    "apr": 4,
+    "mai": 5,
+    "may": 5,
+    "juni": 6,
+    "jun": 6,
+    "june": 6,
+    "juli": 7,
+    "jul": 7,
+    "july": 7,
+    "august": 8,
+    "aug": 8,
+    "september": 9,
+    "sep": 9,
+    "sept": 9,
+    "oktober": 10,
+    "october": 10,
+    "oct": 10,
+    "november": 11,
+    "nov": 11,
+    "dezember": 12,
+    "december": 12,
+    "dec": 12,
+}
+_MONTH_PATTERN = "|".join(sorted((re.escape(item) for item in _MONTHS), key=len, reverse=True))
+_DMY_DATE_RE = re.compile(rf"\b(?:den\s+)?(\d{{1,2}})\.\s*({_MONTH_PATTERN})\s+(\d{{4}})\b", re.IGNORECASE)
+_MDY_DATE_RE = re.compile(rf"\b({_MONTH_PATTERN})\s+(\d{{1,2}})(?:,)?\s+(\d{{4}})\b", re.IGNORECASE)
+
+
+def _rewrite_expired_planned_future_language(*, body: str, answer: CurrentInfoAnswer, locale: str) -> str:
+    if not re.search(r"\b(bis dahin|until then|planned|geplant|scheduled|upcoming|erwartet)\b", body, re.IGNORECASE):
+        return body
+    metadata = answer.request.metadata if answer.request is not None else {}
+    now = _parse_current_info_now(metadata.get("now"))
+    if now is None:
+        return body
+    expired_date_texts = _expired_date_texts(body, current_date=now.date())
+    if not expired_date_texts:
+        return body
+    rewritten = body
+    for date_text in expired_date_texts:
+        escaped = re.escape(date_text)
+        rewritten = re.sub(
+            rf"\bist\s+für\s+(?:den\s+)?({escaped})\s+([^.!?]*?)\s+geplant\b",
+            r"wurde für \1 \2 als geplant beschrieben",
+            rewritten,
+            flags=re.IGNORECASE,
+        )
+        rewritten = re.sub(
+            rf"\bis\s+planned\s+for\s+({escaped})\s*([^.!?]*?)\b",
+            r"was described as planned for \1 \2",
+            rewritten,
+            flags=re.IGNORECASE,
+        )
+    if locale == "en":
+        rewritten = re.sub(r"\s*,?\s*but\s+until\s+then\b[^.!?]*(?=[.!?])", "", rewritten, flags=re.IGNORECASE)
+    else:
+        rewritten = re.sub(r"\s*,?\s*aber\s+bis\s+dahin\b[^.!?]*(?=[.!?])", "", rewritten, flags=re.IGNORECASE)
+    return " ".join(rewritten.split())
+
+
+def _expired_date_texts(text: str, *, current_date) -> tuple[str, ...]:
+    expired: list[str] = []
+    for match in _DMY_DATE_RE.finditer(text):
+        day = int(match.group(1))
+        month = _MONTHS[match.group(2).casefold()]
+        year = int(match.group(3))
+        try:
+            candidate = datetime(year, month, day, tzinfo=UTC).date()
+        except ValueError:
+            continue
+        if candidate < current_date:
+            expired.append(match.group(0))
+    for match in _MDY_DATE_RE.finditer(text):
+        month = _MONTHS[match.group(1).casefold()]
+        day = int(match.group(2))
+        year = int(match.group(3))
+        try:
+            candidate = datetime(year, month, day, tzinfo=UTC).date()
+        except ValueError:
+            continue
+        if candidate < current_date:
+            expired.append(match.group(0))
+    return tuple(dict.fromkeys(expired))
 
 
 def _current_info_source_landscape(answer: CurrentInfoAnswer) -> str:
