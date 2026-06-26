@@ -218,6 +218,16 @@ def test_auto_research_uses_generic_current_data_classifier_for_category_prompts
         }
 
 
+def test_auto_research_triggers_on_lookup_intent_named_entity_mutable_facts():
+    d = decide_auto_research(
+        "@TsubasaOzora_bot finde Infos zu Bosch und ihren Partnern, und zur Bewertung am Finanzmarkt"
+    )
+
+    assert d.enabled is True
+    assert d.capability == "websearch"
+    assert d.reason == "semantic_current_data_required"
+
+
 def test_auto_research_classifier_does_not_trigger_timeless_prompts():
     prompts = [
         "Erklär mir was eine Vorrunde ist",
@@ -229,6 +239,8 @@ def test_auto_research_classifier_does_not_trigger_timeless_prompts():
         "Was bedeutet local variable scope in Python?",
         "Erkläre mir was ein Bond ist",
         "Was ist ein Partner in einer Beziehung?",
+        "finde Infos zu einem Bond",
+        "finde Infos zu Partnern in Beziehungen",
     ]
     for prompt in prompts:
         d = decide_auto_research(prompt)

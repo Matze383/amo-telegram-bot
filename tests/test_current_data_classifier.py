@@ -56,6 +56,20 @@ def test_classifier_requires_current_data_for_real_world_entity_mutable_facts_wi
         assert "question_intent" in decision.signals
 
 
+def test_classifier_requires_current_data_for_lookup_intent_named_entity_mutable_facts():
+    prompts = [
+        "@TsubasaOzora_bot finde Infos zu Bosch und ihren Partnern, und zur Bewertung am Finanzmarkt",
+        "show info about AcmeCloud API releases",
+        "look up Contoso supplier partnerships and credit ratings",
+    ]
+    for prompt in prompts:
+        decision = classify_current_data(prompt)
+        assert decision.should_research is True, prompt
+        assert decision.label == "requires_current_data"
+        assert decision.reason == "semantic_current_data_required"
+        assert "lookup_intent" in decision.signals
+
+
 def test_classifier_does_not_require_current_data_for_timeless_prompts():
     prompts = [
         "Erklär mir was eine Vorrunde ist",
@@ -68,6 +82,8 @@ def test_classifier_does_not_require_current_data_for_timeless_prompts():
         "Schreib mir einen kurzen freundlichen Geburtstagsgruß",
         "Erkläre mir was ein Bond ist",
         "Was ist ein Partner in einer Beziehung?",
+        "finde Infos zu einem Bond",
+        "finde Infos zu Partnern in Beziehungen",
     ]
     for prompt in prompts:
         decision = classify_current_data(prompt)

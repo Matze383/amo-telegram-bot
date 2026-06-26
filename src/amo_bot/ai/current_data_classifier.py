@@ -55,6 +55,15 @@ _SMALLTALK_RE = re.compile(
     r"wie\s+geht'?s|how\s+are\s+you)\b",
     re.IGNORECASE,
 )
+_LOOKUP_INTENT_RE = re.compile(
+    r"\b(?:"
+    r"finde|find|such(?:e|en)?|search|look\s+up|zeige|show|"
+    r"gib(?:\s+mir)?\s+infos?|give(?:\s+me)?\s+info|"
+    r"infos?\s+(?:zu|about|on|for)|informationen\s+(?:zu|über|ueber)|"
+    r"information\s+(?:about|on)"
+    r")\b",
+    re.IGNORECASE,
+)
 
 _TEMPORAL_CURRENT_RE = re.compile(
     r"\b(?:"
@@ -149,9 +158,26 @@ _NAMED_ENTITY_RE = re.compile(
     r"\b[A-Z][a-z]+[A-Z][A-Za-z0-9&.-]*\b",
 )
 _ENTITY_CONTEXT_RE = re.compile(
-    r"\b(?:von|bei|for|of|hat|has)\s+(?:der\s+|die\s+|das\s+)?"
-    r"[A-ZÄÖÜ][A-Za-zÄÖÜäöüß0-9&.-]{2,}(?:\s+[A-ZÄÖÜ][A-Za-zÄÖÜäöüß0-9&.-]{2,}){0,3}\b"
+    r"\b(?:von|bei|zu|über|ueber|about|for|of|on|hat|has)\s+(?:der\s+|die\s+|das\s+|einer?\s+)?"
+    r"(?P<entity>[A-ZÄÖÜ][A-Za-zÄÖÜäöüß0-9&.-]{2,}(?:\s+[A-ZÄÖÜ][A-Za-zÄÖÜäöüß0-9&.-]{2,}){0,3})\b"
 )
+_LOOKUP_TARGET_ENTITY_RE = re.compile(
+    r"\b(?:finde|find|such(?:e|en)?|search|look\s+up|zeige|show)\s+"
+    r"(?:infos?\s+(?:zu|about|on|for)\s+|informationen\s+(?:zu|über|ueber)\s+|info\s+(?:about|on)\s+)?"
+    r"(?P<entity>[A-ZÄÖÜ][A-Za-zÄÖÜäöüß0-9&.-]{2,}(?:\s+[A-ZÄÖÜ][A-Za-zÄÖÜäöüß0-9&.-]{2,}){0,3})\b",
+    re.IGNORECASE,
+)
+_GENERIC_ENTITY_CONTEXT_NOUNS = {
+    "bond",
+    "bonds",
+    "partner",
+    "partnern",
+    "partners",
+    "beziehung",
+    "beziehungen",
+    "relationship",
+    "relationships",
+}
 
 
 def _dedupe(values: list[str]) -> tuple[str, ...]:
@@ -162,6 +188,21 @@ def _dedupe(values: list[str]) -> tuple[str, ...]:
             result.append(value)
             seen.add(value)
     return tuple(result)
+
+
+def _has_named_entity(raw: str) -> bool:
+    if _NAMED_ENTITY_RE.search(raw):
+        return True
+
+    for pattern in (_ENTITY_CONTEXT_RE, _LOOKUP_TARGET_ENTITY_RE):
+        for match in pattern.finditer(raw):
+            entity = match.group("entity").strip()
+            if not entity or not entity[0].isupper():
+                continue
+            first_token = re.split(r"\s+", entity, maxsplit=1)[0].strip(".,;:!?)]}'\"").lower()
+            if first_token not in _GENERIC_ENTITY_CONTEXT_NOUNS:
+                return True
+    return False
 
 
 class HeuristicCurrentDataClassifier:
@@ -207,10 +248,12 @@ class HeuristicCurrentDataClassifier:
             signals.append("local_or_region")
         if _EXTERNAL_NOUN_RE.search(raw):
             signals.append("external_entity")
-        if _NAMED_ENTITY_RE.search(raw) or _ENTITY_CONTEXT_RE.search(raw):
+        if _has_named_entity(raw):
             signals.append("named_entity")
         if _QUESTION_RE.search(raw):
             signals.append("question_intent")
+        if _LOOKUP_INTENT_RE.search(raw):
+            signals.append("lookup_intent")
 
         signal_set = set(signals)
         external_lookup = bool(
@@ -239,24 +282,31 @@ class HeuristicCurrentDataClassifier:
             return CurrentDataDecision(
                 "requires_current_data", "semantic_current_data_required", _dedupe(signals), True
             )
-        if "service_status" in signal_set and ("question_intent" in signal_set or "external_entity" in signal_set):
+        mutable_entity_lookup = bool(
+            ("question_intent" in signal_set or "lookup_intent" in signal_set)
+            and ("named_entity" in signal_set or "external_entity" in signal_set)
+        )
+        if "service_status" in signal_set and (
+            "question_intent" in signal_set or "external_entity" in signal_set or mutable_entity_lookup
+        ):
             return CurrentDataDecision(
                 "requires_current_data", "semantic_current_data_required", _dedupe(signals), True
             )
-        if "version_or_release" in signal_set and ("question_intent" in signal_set or "external_entity" in signal_set):
+        if "version_or_release" in signal_set and (
+            "question_intent" in signal_set or "external_entity" in signal_set or mutable_entity_lookup
+        ):
             return CurrentDataDecision(
                 "requires_current_data", "semantic_current_data_required", _dedupe(signals), True
             )
-        mutable_named_entity_question = "question_intent" in signal_set and "named_entity" in signal_set
-        if "organization_role" in signal_set and mutable_named_entity_question:
+        if "organization_role" in signal_set and mutable_entity_lookup:
             return CurrentDataDecision(
                 "requires_current_data", "semantic_current_data_required", _dedupe(signals), True
             )
-        if "finance_or_market" in signal_set and mutable_named_entity_question:
+        if "finance_or_market" in signal_set and mutable_entity_lookup:
             return CurrentDataDecision(
                 "requires_current_data", "semantic_current_data_required", _dedupe(signals), True
             )
-        if "organization_relationship" in signal_set and mutable_named_entity_question:
+        if "organization_relationship" in signal_set and mutable_entity_lookup:
             return CurrentDataDecision(
                 "requires_current_data", "semantic_current_data_required", _dedupe(signals), True
             )
