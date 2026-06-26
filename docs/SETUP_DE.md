@@ -552,6 +552,7 @@ AMO_WEBSEARCH_SEARXNG_CATEGORIES=general,news
 ## Current-Info Search / SearchBroker (optional)
 
 Der Bot nutzt einen SearchBroker für aktuelle Informationen (News, Wetter, Sport, Aktien). Dieser verwendet SearXNG als primäre Quelle mit optionaler Brave Search als Fallback.
+Vor normalen KI-Antworten stuft der MainBot Nachrichten als `direct_answer`, `research_needed` oder `clarify` ein. Mutable externe Fakten werden als `research_needed` behandelt und zuerst über Current-Info recherchiert. Ist dafür keine Current-Info-Suche verfügbar oder liefert sie keine belastbare Evidenz, antwortet der Bot bewusst fail-closed mit einer ehrlichen Unsicherheitsmeldung statt aus Modell-/Trainingswissen zu raten. Wenn ein normaler KI-Entwurf bei einer Current-Info-Frage mit "keine Live-Daten", "Wissensstand" oder "Trainingsdaten" ausweicht, wird er verworfen und ebenfalls durch Current-Info bzw. Fail-closed behandelt.
 Safesearch- und Region-Einstellungen steuern das SearXNG/Brave-Suchprofil-Parameter-Mapping; sie machen Brave nicht zum primären Anbieter.
 Optionale Profildateien steuern die generische Intent-Ebene vor dem Provider-Mapping. Ungültige Dateien werden abgelehnt und die Current-Info-Suche wird deaktiviert, statt unsichere Provider-Parameter zu senden.
 Für die Extraktion von Ergebnis-Seiten bevorzugt der Dokument-Fetcher Crawlee und fällt auf httpx zurück. Er folgt nur begrenzten Redirects, begrenzt die Antwortgröße, blockiert private/interne Ziele und akzeptiert HTML/XHTML/Plain-Text-Antworten.
@@ -581,7 +582,7 @@ Für die Extraktion von Ergebnis-Seiten bevorzugt der Dokument-Fetcher Crawlee u
 | `AMO_DOCUMENT_FETCH_MAX_BYTES` | `1000000` | Maximale Body-Größe eines abgerufenen Dokuments in Bytes |
 | `AMO_DOCUMENT_FETCH_MAX_REDIRECTS` | `3` | Maximale Anzahl Redirects beim Abrufen eines Dokuments |
 | `AMO_DOCUMENT_FETCH_PREFER_CRAWLEE` | `true` | Crawlee für Dokument-Fetches bevorzugen, mit httpx-Fallback |
-| `AMO_CURRENT_INFO_ENABLED` | `false` | Current-Info-Telegram-Antworten vor dem Legacy-Webtool-Fallback aktivieren |
+| `AMO_CURRENT_INFO_ENABLED` | `false` | Current-Info-Telegram-Antworten aktivieren; bei `research_needed` wird ohne verfügbare Current-Info fail-closed geantwortet statt auf normale KI-Antworten zurückzufallen |
 | `AMO_CURRENT_INFO_TIMEOUT_SECONDS` | `8` | Frontend-Budget für Current-Info-Antworten in Sekunden, inklusive Antwortsynthese; abgelaufene Arbeit kann im Hintergrund fertig werden (zulässig: >0 bis 60) |
 | `AMO_CURRENT_INFO_LATE_SYNTHESIS_TIMEOUT_SECONDS` | `60` | Hintergrundbudget für die Synthese einer Current-Info-Antwort, die nach dem Frontend-Budget fertig wird (zulässig: >0 bis 300) |
 | `AMO_CURRENT_INFO_MAX_RESULTS` | `5` | Maximale Anzahl Current-Info-Suchergebnisse pro Telegram-Antwort |

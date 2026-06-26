@@ -2,6 +2,32 @@
 
 ---
 
+## [Unreleased] – Current-Info Response Strategy Routing
+
+**Datum / Date:** 2026-06-26
+
+### 🇩🇪 Deutsch
+
+#### Übersicht
+Der MainBot routet Auto-Antworten vor der normalen KI-Synthese über eine Response-Strategy (`direct_answer`, `research_needed`, `clarify`). Mutable externe Fakten werden zuerst über Current-Info recherchiert.
+
+#### Geändert
+- **Current-Info Gate:** `research_needed`-Anfragen nutzen Current-Info/GPT-Researcher vor der normalen LLM-Antwort.
+- **Fail-closed:** Wenn Current-Info nötig, aber nicht verfügbar oder nicht belastbar ist, antwortet der Bot ehrlich unsicher statt aus Trainingswissen zu raten.
+- **Draft Guard:** KI-Entwürfe mit "keine Live-Daten", "Wissensstand" oder "Trainingsdaten" bei Current-Info-Fragen werden verworfen und über Current-Info bzw. Fail-closed behandelt.
+
+### 🇬🇧 English
+
+#### Overview
+MainBot now routes auto replies through a response strategy (`direct_answer`, `research_needed`, `clarify`) before normal AI synthesis. Mutable external facts go through Current-Info first.
+
+#### Changed
+- **Current-Info Gate:** `research_needed` requests use Current-Info/GPT-Researcher before normal LLM answers.
+- **Fail-closed:** When Current-Info is required but unavailable or insufficiently evidenced, the bot responds honestly with uncertainty instead of guessing from training knowledge.
+- **Draft Guard:** AI drafts that mention "no live data", "knowledge cutoff", or "training data" for Current-Info questions are discarded and handled through Current-Info or fail-closed behavior.
+
+---
+
 ## [2026.06.23] – PostgreSQL pgvector Migration Readiness (PR #95)
 
 **Datum / Date:** 2026-06-23

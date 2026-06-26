@@ -552,6 +552,7 @@ AMO_WEBSEARCH_SEARXNG_CATEGORIES=general,news
 ## Current-Info Search / SearchBroker (optional)
 
 The bot uses a SearchBroker for current information (news, weather, sports, stocks). It uses SearXNG as the primary source with optional Brave Search as fallback.
+Before normal AI answers, MainBot classifies messages as `direct_answer`, `research_needed`, or `clarify`. Mutable external facts are treated as `research_needed` and go through Current-Info first. If Current-Info search is unavailable or cannot provide sufficient evidence, the bot intentionally fails closed with an honest uncertainty message instead of guessing from model/training knowledge. If a normal AI draft for a Current-Info question falls back to "no live data", "knowledge cutoff", or "training data" wording, the draft is discarded and handled through Current-Info or fail-closed behavior.
 Safesearch and region settings tune the SearXNG/Brave search-profile parameter mapping; they do not make Brave the primary provider.
 Optional profile files tune the generic intent layer before provider mapping. Invalid files are rejected and Current-Info search is disabled instead of sending unsafe provider parameters.
 For result-page extraction, the document fetcher prefers Crawlee and falls back to httpx. It follows only bounded redirects, caps response size, blocks private/internal targets, and accepts HTML/XHTML/plain-text responses.
@@ -581,7 +582,7 @@ For result-page extraction, the document fetcher prefers Crawlee and falls back 
 | `AMO_DOCUMENT_FETCH_MAX_BYTES` | `1000000` | Maximum fetched document body size in bytes |
 | `AMO_DOCUMENT_FETCH_MAX_REDIRECTS` | `3` | Maximum redirects while fetching a document |
 | `AMO_DOCUMENT_FETCH_PREFER_CRAWLEE` | `true` | Prefer Crawlee for document fetching with httpx fallback |
-| `AMO_CURRENT_INFO_ENABLED` | `false` | Enable Current-Info Telegram answers before falling back to the legacy webtool pipeline |
+| `AMO_CURRENT_INFO_ENABLED` | `false` | Enable Current-Info Telegram answers; for `research_needed`, unavailable Current-Info fails closed instead of falling back to normal AI answers |
 | `AMO_CURRENT_INFO_TIMEOUT_SECONDS` | `8` | Front-end Current-Info answer budget in seconds, including answer synthesis; timed-out work may still finish in the background (allowed: >0 to 60) |
 | `AMO_CURRENT_INFO_LATE_SYNTHESIS_TIMEOUT_SECONDS` | `60` | Background synthesis budget for a Current-Info answer that finishes after the front-end budget (allowed: >0 to 300) |
 | `AMO_CURRENT_INFO_MAX_RESULTS` | `5` | Maximum Current-Info search results per Telegram answer |

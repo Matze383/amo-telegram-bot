@@ -162,6 +162,14 @@ OFFSET_STATE_FILE=.state/offset.json
 # AMO_WEBSEARCH_SEARXNG_LANGUAGE=de-DE
 # AMO_WEBSEARCH_SEARXNG_CATEGORIES=general
 # Hinweis: Nur HTTPS-URLs für öffentliche Endpunkte erlaubt. HTTP nur für Loopback/Private.
+
+# Current-Info (optional – für aktuelle externe Fakten in Auto-Antworten)
+# AMO_CURRENT_INFO_ENABLED=true
+# AMO_SEARXNG_URL=https://your-searxng-instance.com
+# AMO_SEARCH_FALLBACK_PROVIDER=
+# Hinweis: Fragen zu aktuellen externen Fakten werden vor der normalen KI-Antwort
+# über Current-Info geprüft. Ist Current-Info nicht verfügbar, antwortet der Bot
+# bewusst mit einer Unsicherheitsmeldung statt mit Trainingswissen zu raten.
 ```
 
 ---
@@ -381,6 +389,11 @@ Wenn `OLLAMA_MODEL_POLICY_ENABLED=true`:
 - [ ] Kurze einfache Frage (`/ask Was ist 2+2?`) verwendet Non-Thinking-Modell
 - [ ] Komplexe Forschungsfrage (`/ask Erkläre Quantencomputing`) verwendet Thinking-Modell
 - [ ] Bei transientem Timeout/Error erfolgt nach Retry ein Fallback auf das konfigurierte Non-Thinking-/Fallback-Modell
+
+**Test – Current-Info Auto-Antworten:**
+- [ ] Stabile Erklärung (`@Bot Erklär mir Trainingsdaten`) wird direkt beantwortet
+- [ ] Aktuelle externe Frage (`@Bot Was ist der aktuelle BTC-Kurs?`) nutzt Current-Info, wenn `AMO_CURRENT_INFO_ENABLED=true` und ein SearchBroker konfiguriert ist
+- [ ] Bei deaktivierter oder fehlender Current-Info antwortet eine aktuelle externe Frage fail-closed mit Unsicherheitsmeldung, nicht aus Modell-/Trainingswissen
 
 **Für Anthropic:**
 - Stelle sicher, dass `ANTHROPIC_API_KEY` in `.env` gesetzt ist
