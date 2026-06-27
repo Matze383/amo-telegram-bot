@@ -14,7 +14,9 @@ from amo_bot.current_info.research import (
     GptResearcherProviderConfig,
     ResearchModelConfig,
     build_gpt_researcher_provider_config_from_settings,
+    _build_pgvector_store,
     _extract_source_urls,
+    _NonEmptyVectorStore,
     _sync_pgvector_connection_url,
     resolve_research_embedding_config,
     resolve_research_model_config,
@@ -151,6 +153,26 @@ class _SyncVectorResearcher:
 
     def get_research_sources(self) -> tuple[dict[str, object], ...]:
         return ({"url": "https://source.example/research", "raw_content": "Fetched research page " * 40},)
+
+
+class _EmptyVectorBatchResearcher:
+    instances: list["_EmptyVectorBatchResearcher"] = []
+
+    def __init__(self, **kwargs) -> None:
+        self.kwargs = kwargs
+        _EmptyVectorBatchResearcher.instances.append(self)
+
+    async def conduct_research(self) -> None:
+        self.kwargs["vector_store"].add_documents([])
+
+    async def write_report(self) -> str:
+        return "Research answer without reliable source URLs."
+
+    def get_source_urls(self) -> tuple[str, ...]:
+        return ()
+
+    def get_research_sources(self) -> tuple[dict[str, object], ...]:
+        return ()
 
 
 class _SnippetOnlyListingConflictResearcher:
@@ -838,6 +860,99 @@ def test_gpt_researcher_builds_sync_pgvector_for_sync_document_load(monkeypatch)
     assert created_pgvector_kwargs[0]["async_mode"] is False
     assert created_pgvector_kwargs[0]["connection"] == "postgresql+psycopg://amo:secret@db.example:5432/amo"
     assert _SyncVectorResearcher.instances[0].kwargs["vector_store"].kwargs["collection_name"] == "research_chunks"
+
+
+def test_gpt_researcher_pgvector_skips_empty_document_batches(monkeypatch) -> None:
+    empty_add_calls: list[list[object]] = []
+
+    class _FakePGVector:
+        def __init__(self, **kwargs) -> None:
+            self.kwargs = kwargs
+
+        def add_documents(self, documents) -> list[str]:
+            documents_ = list(documents)
+            empty_add_calls.append(documents_)
+            if not documents_:
+                raise AssertionError("empty document batch reached PGVector")
+            return ["stored"]
+
+    package = types.ModuleType("langchain_postgres")
+    vectorstores = types.ModuleType("langchain_postgres.vectorstores")
+    vectorstores.PGVector = _FakePGVector
+    monkeypatch.setitem(sys.modules, "langchain_postgres", package)
+    monkeypatch.setitem(sys.modules, "langchain_postgres.vectorstores", vectorstores)
+    _EmptyVectorBatchResearcher.instances.clear()
+    request = CurrentInfoRequest(query="Research AMO", locale="en")
+    service = CurrentInfoService()
+    task = service._task_planner.plan_task(request)
+    query_plan = service._query_planner.plan_queries(request=request, task=task)
+    provider = GptResearcherProvider(
+        config=GptResearcherProviderConfig(
+            enabled=True,
+            model_config=ResearchModelConfig(
+                provider="ollama",
+                fast_llm="ollama:fast-model",
+                smart_llm="ollama:smart-model",
+                strategic_llm="ollama:strategic-model",
+            ),
+            searxng_url="https://searx.example",
+            timeout_seconds=30,
+            max_sources=2,
+            max_context_chars=500,
+            deep_breadth=1,
+            deep_depth=1,
+            deep_concurrency=1,
+            report_words=200,
+            vector_collection="research_chunks",
+            ollama_base_url="http://ollama.test:11434",
+        ),
+        embedding_provider=_FakeEmbeddingProvider(),
+        database_url="postgresql+asyncpg://amo:secret@db.example:5432/amo",
+        researcher_cls=_EmptyVectorBatchResearcher,
+    )
+
+    answer = provider.answer(request=request, task=task, query_plan=query_plan)
+
+    assert answer.status == "empty_evidence"
+    assert answer.warnings == ("empty_research_result",)
+    assert empty_add_calls == []
+    assert isinstance(_EmptyVectorBatchResearcher.instances[0].kwargs["vector_store"], _NonEmptyVectorStore)
+
+
+def test_pgvector_store_wrapper_skips_empty_text_and_embedding_batches(monkeypatch) -> None:
+    class _FakePGVector:
+        def __init__(self, **kwargs) -> None:
+            self.kwargs = kwargs
+            self.text_calls: list[object] = []
+            self.embedding_calls: list[object] = []
+
+        def add_texts(self, texts, metadatas=None, ids=None, **kwargs) -> list[str]:
+            self.text_calls.append((list(texts), metadatas, ids, kwargs))
+            return ["text-id"]
+
+        def add_embeddings(self, texts, embeddings, metadatas=None, ids=None, **kwargs) -> list[str]:
+            self.embedding_calls.append((list(texts), list(embeddings), metadatas, ids, kwargs))
+            return ["embedding-id"]
+
+    package = types.ModuleType("langchain_postgres")
+    vectorstores = types.ModuleType("langchain_postgres.vectorstores")
+    vectorstores.PGVector = _FakePGVector
+    monkeypatch.setitem(sys.modules, "langchain_postgres", package)
+    monkeypatch.setitem(sys.modules, "langchain_postgres.vectorstores", vectorstores)
+
+    store = _build_pgvector_store(
+        database_url="postgresql+asyncpg://amo:secret@db.example:5432/amo",
+        collection_name="research_chunks",
+        embedding_provider=_FakeEmbeddingProvider(),
+    )
+
+    assert store is not None
+    assert store.add_texts([]) == []
+    assert store.add_embeddings(texts=[], embeddings=[]) == []
+    assert store.add_texts(["kept"], metadatas=[{"source": "unit"}], ids=["id-1"]) == ["text-id"]
+    assert store.add_embeddings(texts=["kept"], embeddings=[[1.0, 2.0]]) == ["embedding-id"]
+    assert store._wrapped.text_calls == [(["kept"], [{"source": "unit"}], ["id-1"], {})]
+    assert store._wrapped.embedding_calls == [(["kept"], [[1.0, 2.0]], None, None, {})]
 
 
 def test_sync_pgvector_connection_url_keeps_sync_postgres_urls() -> None:

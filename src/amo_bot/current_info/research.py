@@ -97,6 +97,57 @@ class AmoLangChainEmbeddings:
         return await asyncio.to_thread(self.embed_query, text)
 
 
+class _NonEmptyVectorStore:
+    """Protect langchain-postgres PGVector from empty batch inserts."""
+
+    def __init__(self, wrapped: Any) -> None:
+        self._wrapped = wrapped
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._wrapped, name)
+
+    def add_documents(self, documents: Any, **kwargs: Any) -> list[str]:
+        documents_ = list(documents) if documents is not None else []
+        if not documents_:
+            logger.info("gpt_researcher_vectorstore_empty_add_documents_skipped")
+            return []
+        return self._wrapped.add_documents(documents_, **kwargs)
+
+    def add_texts(self, texts: Any, metadatas: Any = None, ids: Any = None, **kwargs: Any) -> list[str]:
+        texts_ = list(texts) if texts is not None else []
+        if not texts_:
+            logger.info("gpt_researcher_vectorstore_empty_add_texts_skipped")
+            return []
+        metadatas_ = list(metadatas) if metadatas is not None else None
+        ids_ = list(ids) if ids is not None else None
+        return self._wrapped.add_texts(texts_, metadatas=metadatas_, ids=ids_, **kwargs)
+
+    def add_embeddings(
+        self,
+        texts: Any,
+        embeddings: Any,
+        metadatas: Any = None,
+        ids: Any = None,
+        **kwargs: Any,
+    ) -> list[str]:
+        texts_ = list(texts) if texts is not None else []
+        embeddings_ = list(embeddings) if embeddings is not None else []
+        if not texts_ and not embeddings_:
+            logger.info("gpt_researcher_vectorstore_empty_add_embeddings_skipped")
+            return []
+        if len(texts_) != len(embeddings_):
+            raise ResearchProviderError("vectorstore embedding batch size does not match text batch size")
+        metadatas_ = list(metadatas) if metadatas is not None else None
+        ids_ = list(ids) if ids is not None else None
+        return self._wrapped.add_embeddings(
+            texts=texts_,
+            embeddings=embeddings_,
+            metadatas=metadatas_,
+            ids=ids_,
+            **kwargs,
+        )
+
+
 class GptResearcherProvider:
     def __init__(
         self,
@@ -581,13 +632,14 @@ def _build_pgvector_store(*, database_url: str, collection_name: str, embedding_
         from langchain_postgres.vectorstores import PGVector  # type: ignore
     except Exception as exc:
         raise ResearchProviderUnavailable("langchain-postgres is not installed") from exc
-    return PGVector(
+    store = PGVector(
         embeddings=AmoLangChainEmbeddings(embedding_provider),
         collection_name=collection_name,
         connection=_sync_pgvector_connection_url(database_url),
         use_jsonb=True,
         async_mode=False,
     )
+    return _NonEmptyVectorStore(store)
 
 
 def _sync_pgvector_connection_url(database_url: str) -> str:
