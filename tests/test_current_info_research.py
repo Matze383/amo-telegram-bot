@@ -7,7 +7,7 @@ import sys
 import types
 from dataclasses import dataclass
 
-from amo_bot.current_info import CurrentInfoRequest, CurrentInfoService
+from amo_bot.current_info import CurrentInfoRequest, CurrentInfoService, FetchedDocument
 from amo_bot.current_info.research import (
     AmoLangChainEmbeddings,
     GptResearcherProvider,
@@ -133,6 +133,33 @@ class _NoRecoverableSourcesResearcher:
 
     def get_research_sources(self) -> tuple[dict[str, object], ...]:
         return ({"url": "ftp://source.example/file"}, {"link": ""})
+
+
+class _EmptySourceDocsResearcher:
+    def __init__(self, **kwargs) -> None:
+        self.kwargs = kwargs
+
+    async def conduct_research(self) -> None:
+        self.conducted = True
+
+    async def write_report(self) -> str:
+        return "Research answer with citations but empty source docs."
+
+    def get_source_urls(self) -> tuple[str, ...]:
+        return ("https://source.example/empty", "https://other.example/empty")
+
+    def get_research_sources(self) -> tuple[dict[str, object], ...]:
+        return ({"url": "https://source.example/empty"}, {"url": "https://other.example/empty", "raw_content": ""})
+
+
+class _RecordingSourceFetcher:
+    def __init__(self, documents: dict[str, FetchedDocument | None]) -> None:
+        self.documents = documents
+        self.calls: list[tuple[str, str]] = []
+
+    def fetch(self, *, url: str, locale: str) -> FetchedDocument | None:
+        self.calls.append((url, locale))
+        return self.documents.get(url)
 
 
 class _SyncVectorResearcher:
@@ -327,7 +354,7 @@ class _Settings:
     amo_vector_embedding_model: str = "nomic-embed-text-v2-moe:latest"
 
 
-def _provider_for_researcher(researcher_cls) -> GptResearcherProvider:
+def _provider_for_researcher(researcher_cls, *, source_fetcher=None) -> GptResearcherProvider:
     return GptResearcherProvider(
         config=GptResearcherProviderConfig(
             enabled=True,
@@ -351,6 +378,7 @@ def _provider_for_researcher(researcher_cls) -> GptResearcherProvider:
         embedding_provider=_FakeEmbeddingProvider(),
         database_url="sqlite:///:memory:",
         researcher_cls=researcher_cls,
+        source_fetcher=source_fetcher,
     )
 
 
@@ -641,6 +669,63 @@ def test_gpt_researcher_content_source_docs_count_as_fetched() -> None:
     assert "snippet_only_evidence" not in answer.warnings
     assert answer.evidence is not None
     assert answer.evidence.sources[0].fetched is True
+
+
+def test_gpt_researcher_validates_empty_source_docs_from_discovered_urls(caplog) -> None:
+    request, task, query_plan = _research_request_parts("Research empty GPT-Researcher docs")
+    fetcher = _RecordingSourceFetcher(
+        {
+            "https://source.example/empty": FetchedDocument(
+                url="https://source.example/empty",
+                title="Recovered source",
+                text="Recovered fetched page content. " * 20,
+                fetched_at="2026-06-27T10:00:00+00:00",
+                status_code=200,
+                provider="unit_fetcher",
+            ),
+            "https://other.example/empty": None,
+        }
+    )
+
+    with caplog.at_level(logging.INFO, logger="amo_bot.current_info.research"):
+        answer = _provider_for_researcher(_EmptySourceDocsResearcher, source_fetcher=fetcher).answer(
+            request=request,
+            task=task,
+            query_plan=query_plan,
+        )
+
+    assert fetcher.calls == [("https://source.example/empty", "de"), ("https://other.example/empty", "de")]
+    assert answer.status == "answered"
+    assert answer.metadata["fetched_source_count"] == 1
+    assert answer.metadata["snippet_only_source_count"] == 1
+    assert answer.metadata["evidence_quality"] == "fetched"
+    assert answer.evidence is not None
+    assert answer.evidence.sources[0].fetched is True
+    assert answer.evidence.sources[0].quality_label == "gpt_researcher_fetched_source"
+    assert "'stage': 'source_validation'" in caplog.text
+    assert "'source_validation_fetched_count': 1" in caplog.text
+
+
+def test_gpt_researcher_empty_source_docs_fail_closed_when_validation_fetch_empty(caplog) -> None:
+    request, task, query_plan = _research_request_parts("Research empty GPT-Researcher docs")
+    fetcher = _RecordingSourceFetcher({})
+
+    with caplog.at_level(logging.WARNING, logger="amo_bot.current_info.research"):
+        answer = _provider_for_researcher(_EmptySourceDocsResearcher, source_fetcher=fetcher).answer(
+            request=request,
+            task=task,
+            query_plan=query_plan,
+        )
+
+    assert fetcher.calls == [("https://source.example/empty", "de"), ("https://other.example/empty", "de")]
+    assert answer.status == "empty_evidence"
+    assert answer.warnings == ("empty_scraped_source_docs",)
+    assert answer.confidence == 0.42
+    assert answer.metadata["fetched_source_count"] == 0
+    assert answer.metadata["snippet_only_source_count"] == 2
+    assert answer.evidence is not None
+    assert all(source.fetched is False for source in answer.evidence.sources)
+    assert "source_validation_empty" in caplog.text
 
 
 def test_gpt_researcher_listing_conflict_yields_uncertain_verdict() -> None:

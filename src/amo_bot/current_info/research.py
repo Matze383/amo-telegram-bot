@@ -22,12 +22,14 @@ from amo_bot.current_info.models import (
     EvidenceChunk,
     EvidencePackage,
     EvidencePackageSource,
+    FetchedDocument,
     QueryPlan,
     SearchBundle,
     SearchResult,
     TaskSpec,
 )
 from amo_bot.current_info.observability import log_current_info_event, query_hash, safe_error_message
+from amo_bot.current_info.ports import CurrentInfoFetchProvider
 from amo_bot.current_info.vector import EmbeddingProvider, build_embedding_provider_from_settings
 from amo_bot.evidence_intents import is_stock_listing_status_query
 
@@ -157,12 +159,14 @@ class GptResearcherProvider:
         database_url: str = "",
         researcher_cls: Any | None = None,
         vector_store: Any | None = None,
+        source_fetcher: CurrentInfoFetchProvider | None = None,
     ) -> None:
         self._config = config
         self._embedding_provider = embedding_provider
         self._database_url = database_url
         self._researcher_cls = researcher_cls
         self._vector_store = vector_store
+        self._source_fetcher = source_fetcher
 
     def answer(self, *, request: CurrentInfoRequest, task: TaskSpec, query_plan: QueryPlan) -> CurrentInfoAnswer:
         report_type = _research_report_type(request)
@@ -385,6 +389,22 @@ class GptResearcherProvider:
                     outcome="collected",
                     extra=_source_doc_diagnostics(source_docs),
                 )
+                source_docs, source_validation_diagnostics = await self._validate_source_urls(
+                    sources=sources,
+                    source_docs=source_docs,
+                    request=request,
+                    task=task,
+                )
+                self._log_lifecycle(
+                    event="current_info.GptResearcherDiagnostics",
+                    stage="source_validation",
+                    request=request,
+                    task=task,
+                    outcome="checked",
+                    reason_code=str(source_validation_diagnostics.get("reason_code") or "") or None,
+                    level=logging.WARNING if source_validation_diagnostics.get("reason_code") else logging.INFO,
+                    extra=source_validation_diagnostics,
+                )
                 context = _call_optional(researcher, "get_research_context") or ""
                 self._log_lifecycle(
                     event="current_info.GptResearcherDiagnostics",
@@ -452,6 +472,66 @@ class GptResearcherProvider:
             "PROMPT_FAMILY": "default",
         }
 
+    async def _validate_source_urls(
+        self,
+        *,
+        sources: Any,
+        source_docs: Any,
+        request: CurrentInfoRequest,
+        task: TaskSpec,
+    ) -> tuple[Any, dict[str, Any]]:
+        del request
+        source_urls = _extract_source_urls(sources, max_sources=self._config.max_sources)
+        if not source_urls:
+            return source_docs, {"source_validation": "skipped", "reason_code": "no_source_urls"}
+        existing_fetched_urls = _fetched_source_urls(source_docs)
+        if existing_fetched_urls:
+            return source_docs, {
+                "source_validation": "skipped",
+                "reason_code": "",
+                "source_validation_source_url_count": len(source_urls),
+                "source_validation_existing_fetched_count": len(existing_fetched_urls),
+            }
+        if self._source_fetcher is None:
+            return source_docs, {
+                "source_validation": "skipped",
+                "reason_code": "source_fetcher_unavailable",
+                "source_validation_source_url_count": len(source_urls),
+            }
+
+        fetched_docs: list[dict[str, Any]] = []
+        failed_urls: list[str] = []
+        for url in source_urls:
+            try:
+                document = await asyncio.to_thread(self._source_fetcher.fetch, url=url, locale=task.locale)
+            except Exception as exc:
+                failed_urls.append(url)
+                logger.warning(
+                    "gpt_researcher_source_validation_fetch_failed: %s: %s url=%s",
+                    exc.__class__.__name__,
+                    safe_error_message(exc),
+                    _safe_log_url(url),
+                )
+                continue
+            if document is None or not document.text.strip():
+                failed_urls.append(url)
+                continue
+            fetched_docs.append(_fetched_document_to_source_doc(document))
+
+        merged_source_docs = _merge_source_docs(source_docs, tuple(fetched_docs))
+        return merged_source_docs, {
+            "source_validation": "attempted",
+            "reason_code": "" if fetched_docs else "source_validation_empty",
+            "source_validation_source_url_count": len(source_urls),
+            "source_validation_attempted_count": len(source_urls),
+            "source_validation_fetched_count": len(fetched_docs),
+            "source_validation_failed_count": len(failed_urls),
+            "source_validation_fetched_urls": tuple(
+                _safe_log_url(str(item.get("url") or "")) for item in fetched_docs[:10]
+            ),
+            "source_validation_failed_urls": tuple(_safe_log_url(url) for url in failed_urls[:10]),
+        }
+
     def _log_lifecycle(
         self,
         *,
@@ -495,17 +575,23 @@ def build_gpt_researcher_provider_from_settings(
     embedding_provider: EmbeddingProvider | None = None,
     researcher_cls: Any | None = None,
     vector_store: Any | None = None,
+    source_fetcher: CurrentInfoFetchProvider | None = None,
 ) -> GptResearcherProvider | None:
     if not bool(getattr(settings, "amo_gpt_researcher_enabled", False)):
         return None
     config = build_gpt_researcher_provider_config_from_settings(settings)
     embedding_provider = embedding_provider or build_embedding_provider_from_settings(settings)
+    if source_fetcher is None:
+        from amo_bot.current_info.fetch import build_document_fetcher_from_settings
+
+        source_fetcher = build_document_fetcher_from_settings(settings)
     return GptResearcherProvider(
         config=config,
         embedding_provider=embedding_provider,
         database_url=str(getattr(settings, "database_url", "") or ""),
         researcher_cls=researcher_cls,
         vector_store=vector_store,
+        source_fetcher=source_fetcher,
     )
 
 
@@ -996,6 +1082,7 @@ def _research_result_to_answer(
     evidence_quality_warnings = _research_evidence_quality_warnings(
         report=report,
         sources=sources,
+        source_docs=source_docs,
         fetched_count=fetched_count,
         snippet_only_count=snippet_only_count,
     )
@@ -1101,8 +1188,77 @@ def _container_len(value: Any) -> int:
     return 0
 
 
+def _merge_source_docs(source_docs: Any, fetched_docs: tuple[dict[str, Any], ...]) -> Any:
+    if not fetched_docs:
+        return source_docs
+    if source_docs is None:
+        return fetched_docs
+    if isinstance(source_docs, tuple):
+        return (*source_docs, *fetched_docs)
+    if isinstance(source_docs, list):
+        return (*source_docs, *fetched_docs)
+    return (source_docs, *fetched_docs)
+
+
+def _fetched_document_to_source_doc(document: FetchedDocument) -> dict[str, Any]:
+    metadata = {
+        **dict(document.metadata or {}),
+        "source": document.url,
+        "url": document.url,
+        "source_state": "fetched",
+        "fetch_provider": document.provider,
+        "status_code": document.status_code,
+        "fetched_at": document.fetched_at,
+    }
+    return {
+        "url": document.url,
+        "title": document.title,
+        "raw_content": document.text,
+        "metadata": metadata,
+        "fetched": True,
+    }
+
+
+def _all_source_doc_containers_empty(source_docs: Any) -> bool:
+    if _container_len(source_docs) <= 0:
+        return False
+
+    has_container = False
+    seen_containers: set[int] = set()
+
+    def walk(item: Any) -> bool:
+        nonlocal has_container
+        if item is None or isinstance(item, str):
+            return False
+        if isinstance(item, Mapping):
+            object_id = id(item)
+            if object_id in seen_containers:
+                return False
+            seen_containers.add(object_id)
+            has_container = True
+            if _source_doc_content_length(item) > 0 or _looks_like_fetched_document(item):
+                return True
+            return any(walk(nested) for nested in item.values())
+        if isinstance(item, (list, tuple, set, frozenset)):
+            object_id = id(item)
+            if object_id in seen_containers:
+                return False
+            seen_containers.add(object_id)
+            has_container = True
+            return any(walk(nested) for nested in item)
+        if _source_doc_content_length(item) > 0 or _looks_like_fetched_document(item):
+            has_container = True
+            return True
+        return False
+
+    has_content = walk(source_docs)
+    return has_container and not has_content
+
+
 def _research_answer_status(*, report: str, sources: tuple[str, ...], warnings: tuple[str, ...]) -> str:
     if not report or not sources:
+        return "empty_evidence"
+    if "empty_scraped_source_docs" in warnings:
         return "empty_evidence"
     if any(warning in warnings for warning in {"snippet_only_evidence", "source_conflict"}):
         return "unverified_evidence"
@@ -1113,11 +1269,14 @@ def _research_evidence_quality_warnings(
     *,
     report: str,
     sources: tuple[str, ...],
+    source_docs: Any = (),
     fetched_count: int,
     snippet_only_count: int,
 ) -> tuple[str, ...]:
     if not report or not sources:
         return ("empty_research_result",)
+    if fetched_count <= 0 and _all_source_doc_containers_empty(source_docs):
+        return ("empty_scraped_source_docs",)
     warnings: list[str] = []
     if fetched_count <= 0 and snippet_only_count > 0:
         warnings.append("snippet_only_evidence")
