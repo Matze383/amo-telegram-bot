@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import importlib
 import json
 import logging
 import os
@@ -330,7 +331,7 @@ class GptResearcherProvider:
                     "SEARX_URL": self._config.searxng_url,
                     "OLLAMA_BASE_URL": self._config.ollama_base_url,
                 }
-            ):
+            ), _temporary_gpt_researcher_searx_snippet_adapter():
                 researcher_query = _gpt_researcher_query(request=request, task=task)
                 self._log_lifecycle(
                     event="current_info.GptResearcherInput",
@@ -776,6 +777,59 @@ def _load_gpt_researcher_class() -> Any:
     except Exception as exc:
         raise ResearchProviderUnavailable("gpt-researcher is not installed") from exc
     return GPTResearcher
+
+
+@contextmanager
+def _temporary_gpt_researcher_searx_snippet_adapter():
+    """Keep SearX snippets out of GPT-Researcher's prefetched-content path."""
+
+    try:
+        searx_module = importlib.import_module("gpt_researcher.retrievers.searx.searx")
+        searx_search_cls = getattr(searx_module, "SearxSearch", None)
+        original_search = getattr(searx_search_cls, "search", None)
+    except Exception:
+        yield
+        return
+
+    if searx_search_cls is None or original_search is None or getattr(original_search, "_amo_snippet_adapter", False):
+        yield
+        return
+
+    def search_without_prefetched_snippets(self, *args: Any, **kwargs: Any) -> Any:
+        return _strip_searx_prefetched_content(original_search(self, *args, **kwargs))
+
+    search_without_prefetched_snippets._amo_snippet_adapter = True  # type: ignore[attr-defined]
+    try:
+        searx_search_cls.search = search_without_prefetched_snippets
+        yield
+    finally:
+        searx_search_cls.search = original_search
+
+
+def _strip_searx_prefetched_content(results: Any) -> Any:
+    if not isinstance(results, list):
+        return results
+
+    normalized: list[Any] = []
+    for result in results:
+        if not isinstance(result, Mapping):
+            normalized.append(result)
+            continue
+
+        url = str(result.get("href") or result.get("url") or "").strip()
+        if not url:
+            normalized.append(dict(result))
+            continue
+
+        item = dict(result)
+        snippet = str(item.get("raw_content") or item.get("body") or item.get("content") or "").strip()
+        item.pop("raw_content", None)
+        item.pop("body", None)
+        if snippet and "snippet" not in item:
+            item["snippet"] = snippet
+        normalized.append(item)
+
+    return normalized
 
 
 def _build_pgvector_store(*, database_url: str, collection_name: str, embedding_provider: EmbeddingProvider) -> Any | None:

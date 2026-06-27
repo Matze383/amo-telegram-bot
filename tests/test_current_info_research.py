@@ -17,6 +17,7 @@ from amo_bot.current_info.research import (
     _build_pgvector_store,
     _extract_source_urls,
     _NonEmptyVectorStore,
+    _strip_searx_prefetched_content,
     _sync_pgvector_connection_url,
     resolve_research_embedding_config,
     resolve_research_model_config,
@@ -199,6 +200,67 @@ class _RecordingSourceFetcher:
     def fetch(self, *, url: str, locale: str) -> FetchedDocument | None:
         self.calls.append((url, locale))
         return self.documents.get(url)
+
+
+class _SearxSnippetBrowseResearcher:
+    instances: list["_SearxSnippetBrowseResearcher"] = []
+
+    def __init__(self, **kwargs) -> None:
+        self.kwargs = kwargs
+        self.source_urls: tuple[str, ...] = ()
+        self.source_docs: tuple[dict[str, object], ...] = ()
+        self.scraper_manager = _RecordingScraperManager()
+        _SearxSnippetBrowseResearcher.instances.append(self)
+
+    async def conduct_research(self) -> None:
+        from gpt_researcher.retrievers.searx.searx import SearxSearch
+
+        search_results = SearxSearch("amo").search(max_results=2)
+        self.search_results = tuple(search_results)
+
+        new_search_urls: list[str] = []
+        prefetched_content: list[dict[str, str]] = []
+        for result in search_results:
+            url = result.get("href") or result.get("url")
+            raw_content = result.get("raw_content") or result.get("body")
+            if url and raw_content and len(raw_content) > 100:
+                prefetched_content.append({"url": url, "raw_content": raw_content})
+            elif url:
+                new_search_urls.append(url)
+
+        scraped_content = await self.scraper_manager.browse_urls(new_search_urls)
+        self.source_docs = (*scraped_content, *prefetched_content)
+        self.source_urls = tuple(new_search_urls) + tuple(item["url"] for item in prefetched_content)
+        self.research_conductor = types.SimpleNamespace(
+            new_search_urls=tuple(new_search_urls),
+            visited_urls=set(new_search_urls),
+            search_results=self.search_results,
+        )
+
+    async def write_report(self) -> str:
+        return "Research answer backed by scraped SearX source."
+
+    def get_source_urls(self) -> tuple[str, ...]:
+        return self.source_urls
+
+    def get_research_sources(self) -> tuple[dict[str, object], ...]:
+        return self.source_docs
+
+
+class _RecordingScraperManager:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, ...]] = []
+
+    async def browse_urls(self, urls: list[str]) -> list[dict[str, object]]:
+        self.calls.append(tuple(urls))
+        return [
+            {
+                "url": url,
+                "raw_content": "Fetched page content from scraper. " * 20,
+                "title": "Fetched source",
+            }
+            for url in urls
+        ]
 
 
 class _SyncVectorResearcher:
@@ -690,6 +752,86 @@ def test_gpt_researcher_snippet_only_sources_are_not_marked_fetched(caplog) -> N
     assert "snippet_only_source_count" in caplog.text
     assert "no_fetched_source_docs" in caplog.text
     assert "source_urls_without_fetched_docs" in caplog.text
+
+
+def test_searx_snippet_body_is_not_prefetched_content() -> None:
+    long_snippet = "SearX snippet only. " * 12
+
+    normalized = _strip_searx_prefetched_content(
+        [
+            {
+                "href": "https://source.example/searx-snippet",
+                "body": long_snippet,
+                "title": "Snippet source",
+            }
+        ]
+    )
+
+    assert normalized == [
+        {
+            "href": "https://source.example/searx-snippet",
+            "title": "Snippet source",
+            "snippet": long_snippet.strip(),
+        }
+    ]
+    assert "body" not in normalized[0]
+    assert "raw_content" not in normalized[0]
+
+
+def test_gpt_researcher_searx_snippet_url_reaches_browse_urls(monkeypatch) -> None:
+    long_snippet = "SearX snippet only. " * 12
+
+    class _FakeSearxSearch:
+        def __init__(self, query: str, query_domains=None) -> None:
+            self.query = query
+            self.query_domains = query_domains
+
+        def search(self, max_results: int = 10):
+            return [
+                {
+                    "href": "https://source.example/searx-snippet",
+                    "body": long_snippet,
+                    "title": "Snippet source",
+                }
+            ][:max_results]
+
+    original_search = _FakeSearxSearch.search
+    gpt_package = types.ModuleType("gpt_researcher")
+    retrievers_package = types.ModuleType("gpt_researcher.retrievers")
+    searx_package = types.ModuleType("gpt_researcher.retrievers.searx")
+    searx_module = types.ModuleType("gpt_researcher.retrievers.searx.searx")
+    searx_module.SearxSearch = _FakeSearxSearch
+    monkeypatch.setitem(sys.modules, "gpt_researcher", gpt_package)
+    monkeypatch.setitem(sys.modules, "gpt_researcher.retrievers", retrievers_package)
+    monkeypatch.setitem(sys.modules, "gpt_researcher.retrievers.searx", searx_package)
+    monkeypatch.setitem(sys.modules, "gpt_researcher.retrievers.searx.searx", searx_module)
+
+    _SearxSnippetBrowseResearcher.instances.clear()
+    request, task, query_plan = _research_request_parts("Research SearX snippet")
+
+    answer = _provider_for_researcher(_SearxSnippetBrowseResearcher).answer(
+        request=request,
+        task=task,
+        query_plan=query_plan,
+    )
+
+    instance = _SearxSnippetBrowseResearcher.instances[0]
+    assert instance.scraper_manager.calls == [("https://source.example/searx-snippet",)]
+    assert instance.research_conductor.new_search_urls == ("https://source.example/searx-snippet",)
+    assert instance.search_results == (
+        {
+            "href": "https://source.example/searx-snippet",
+            "title": "Snippet source",
+            "snippet": long_snippet.strip(),
+        },
+    )
+    assert _FakeSearxSearch.search is original_search
+    assert answer.status == "answered"
+    assert answer.sources == ("https://source.example/searx-snippet",)
+    assert answer.metadata["fetched_source_count"] == 1
+    assert answer.metadata["snippet_only_source_count"] == 0
+    assert answer.metadata["evidence_quality"] == "fetched"
+    assert "snippet_only_evidence" not in answer.warnings
 
 
 def test_gpt_researcher_content_source_docs_count_as_fetched() -> None:
