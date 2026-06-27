@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+import inspect
 import json
 import logging
 import os
@@ -12,7 +13,7 @@ from collections.abc import Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any, Protocol
+from typing import Any, Callable, Protocol
 from urllib.parse import urlparse
 
 from sqlalchemy.engine import make_url
@@ -307,6 +308,16 @@ class GptResearcherProvider:
                 else False,
             },
         )
+        self._log_lifecycle(
+            event="current_info.GptResearcherAnswerTransition",
+            stage="answer_transition",
+            request=request,
+            task=task,
+            outcome=answer.status,
+            reason_code=",".join(answer.warnings) if answer.warnings else None,
+            level=logging.WARNING if answer.status != "answered" else logging.INFO,
+            extra=_answer_transition_diagnostics(answer=answer, research_run_id=research_run_id),
+        )
         return answer
 
     async def _answer_async(
@@ -326,12 +337,28 @@ class GptResearcherProvider:
         gpt_researcher_config = self._gpt_researcher_config(language=_language_for_locale(task.locale))
         config_path = _write_temp_config(gpt_researcher_config)
         try:
+            emit_searx_debug = _research_debug_emitter(
+                provider=self,
+                event="current_info.GptResearcherSearxAdapter",
+                request=request,
+                task=task,
+                research_run_id=research_run_id,
+            )
+            emit_browser_debug = _research_debug_emitter(
+                provider=self,
+                event="current_info.GptResearcherBrowserActivity",
+                request=request,
+                task=task,
+                research_run_id=research_run_id,
+            )
             with _temporary_env(
                 {
                     "SEARX_URL": self._config.searxng_url,
                     "OLLAMA_BASE_URL": self._config.ollama_base_url,
                 }
-            ), _temporary_gpt_researcher_searx_snippet_adapter():
+            ), _temporary_gpt_researcher_searx_snippet_adapter(
+                emit=emit_searx_debug
+            ), _temporary_gpt_researcher_browser_activity_probe(emit=emit_browser_debug):
                 researcher_query = _gpt_researcher_query(request=request, task=task)
                 self._log_lifecycle(
                     event="current_info.GptResearcherInput",
@@ -356,6 +383,10 @@ class GptResearcherProvider:
                     report_source="web",
                     config_path=config_path,
                     vector_store=vector_store,
+                )
+                restore_researcher_browser_probe = _install_researcher_browser_activity_probe(
+                    researcher,
+                    emit=emit_browser_debug,
                 )
                 self._log_lifecycle(
                     event="current_info.GptResearcherDiagnostics",
@@ -393,7 +424,10 @@ class GptResearcherProvider:
                         **_research_report_metadata(report_type=report_type, config=self._config),
                     },
                 )
-                await researcher.conduct_research()
+                try:
+                    await researcher.conduct_research()
+                finally:
+                    restore_researcher_browser_probe()
                 conduct_sources = _call_optional(researcher, "get_source_urls") or ()
                 conduct_source_docs = _call_optional(researcher, "get_research_sources") or ()
                 self._log_lifecycle(
@@ -422,6 +456,7 @@ class GptResearcherProvider:
                     },
                 )
                 report = await researcher.write_report()
+                write_source_docs = _call_optional(researcher, "get_research_sources") or conduct_source_docs
                 self._log_lifecycle(
                     event="current_info.GptResearcherLifecycle",
                     stage="write_report",
@@ -431,6 +466,7 @@ class GptResearcherProvider:
                     extra={
                         "research_run_id": research_run_id,
                         **_research_report_metadata(report_type=report_type, config=self._config),
+                        **_source_doc_diagnostics(write_source_docs, prefix="post_write_source_doc"),
                         **_researcher_state_diagnostics(researcher),
                     },
                 )
@@ -443,7 +479,7 @@ class GptResearcherProvider:
                     outcome="collected",
                     extra={"research_run_id": research_run_id, **_source_url_diagnostics(sources)},
                 )
-                source_docs = _call_optional(researcher, "get_research_sources") or ()
+                source_docs = write_source_docs
                 self._log_lifecycle(
                     event="current_info.GptResearcherDiagnostics",
                     stage="source_docs",
@@ -637,6 +673,36 @@ class GptResearcherProvider:
         }
 
 
+def _research_debug_emitter(
+    *,
+    provider: GptResearcherProvider,
+    event: str,
+    request: CurrentInfoRequest,
+    task: TaskSpec,
+    research_run_id: str,
+) -> Callable[..., None]:
+    def emit(
+        *,
+        stage: str,
+        outcome: str,
+        extra: dict[str, Any] | None = None,
+        reason_code: str | None = None,
+        level: int = logging.INFO,
+    ) -> None:
+        provider._log_lifecycle(
+            event=event,
+            stage=stage,
+            request=request,
+            task=task,
+            outcome=outcome,
+            reason_code=reason_code,
+            level=level,
+            extra={"research_run_id": research_run_id, **(extra or {})},
+        )
+
+    return emit
+
+
 def build_gpt_researcher_provider_from_settings(
     settings: Any,
     *,
@@ -780,7 +846,7 @@ def _load_gpt_researcher_class() -> Any:
 
 
 @contextmanager
-def _temporary_gpt_researcher_searx_snippet_adapter():
+def _temporary_gpt_researcher_searx_snippet_adapter(*, emit: Callable[..., None] | None = None):
     """Keep SearX snippets out of GPT-Researcher's prefetched-content path."""
 
     try:
@@ -796,14 +862,216 @@ def _temporary_gpt_researcher_searx_snippet_adapter():
         return
 
     def search_without_prefetched_snippets(self, *args: Any, **kwargs: Any) -> Any:
-        return _strip_searx_prefetched_content(original_search(self, *args, **kwargs))
+        if emit:
+            emit(stage="searx_search", outcome="called", extra={"searx_search_called": True})
+        results = original_search(self, *args, **kwargs)
+        normalized = _strip_searx_prefetched_content(results)
+        if emit:
+            emit(
+                stage="searx_search",
+                outcome="completed",
+                extra=_searx_search_result_diagnostics(results=results, normalized=normalized),
+            )
+        return normalized
 
     search_without_prefetched_snippets._amo_snippet_adapter = True  # type: ignore[attr-defined]
     try:
         searx_search_cls.search = search_without_prefetched_snippets
+        if emit:
+            emit(
+                stage="searx_adapter",
+                outcome="installed",
+                extra={"searx_snippet_adapter_installed": True},
+            )
         yield
     finally:
         searx_search_cls.search = original_search
+
+
+@contextmanager
+def _temporary_gpt_researcher_browser_activity_probe(*, emit: Callable[..., None] | None = None):
+    restores: list[Callable[[], None]] = []
+    for module_name, class_name in (
+        ("gpt_researcher.skills.browser", "BrowserManager"),
+        ("gpt_researcher.scraper.browser.browser_manager", "BrowserManager"),
+        ("gpt_researcher.scraper.browser_manager", "BrowserManager"),
+        ("gpt_researcher.scraper.scraper", "BrowserManager"),
+    ):
+        try:
+            module = importlib.import_module(module_name)
+            browser_manager_cls = getattr(module, class_name, None)
+            original = getattr(browser_manager_cls, "browse_urls", None)
+        except Exception:
+            continue
+        if browser_manager_cls is None or original is None or _has_activity_probe_marker(original):
+            continue
+        wrapped = _browser_activity_wrapper(original=original, emit=emit, scope="class")
+        try:
+            browser_manager_cls.browse_urls = wrapped
+        except Exception:
+            continue
+        restores.append(_restore_attr(browser_manager_cls, "browse_urls", original))
+        if emit:
+            emit(
+                stage="browser_probe",
+                outcome="installed",
+                extra={"browser_probe_scope": "class", "browser_probe_target": f"{module_name}.{class_name}"},
+            )
+    try:
+        yield
+    finally:
+        for restore in reversed(restores):
+            restore()
+
+
+def _install_researcher_browser_activity_probe(researcher: Any, *, emit: Callable[..., None] | None = None) -> Callable[[], None]:
+    manager = getattr(researcher, "scraper_manager", None) or getattr(researcher, "browser_manager", None)
+    if manager is None:
+        return lambda: None
+    original = getattr(manager, "browse_urls", None)
+    if original is None or _has_activity_probe_marker(original):
+        return lambda: None
+    wrapped = _browser_activity_wrapper(original=original, emit=emit, scope="instance")
+    try:
+        setattr(manager, "browse_urls", wrapped)
+    except Exception:
+        return lambda: None
+    if emit:
+        emit(
+            stage="browser_probe",
+            outcome="installed",
+            extra={"browser_probe_scope": "instance", "browser_probe_target": type(manager).__name__},
+        )
+    return _restore_attr(manager, "browse_urls", original)
+
+
+def _has_activity_probe_marker(value: Any) -> bool:
+    if getattr(value, "_amo_browser_activity_probe", False):
+        return True
+    wrapped_function = getattr(value, "__func__", None)
+    return bool(getattr(wrapped_function, "_amo_browser_activity_probe", False))
+
+
+def _restore_attr(target: Any, name: str, original: Any) -> Callable[[], None]:
+    def restore() -> None:
+        try:
+            setattr(target, name, original)
+        except Exception:
+            pass
+
+    return restore
+
+
+def _browser_activity_wrapper(*, original: Any, emit: Callable[..., None] | None, scope: str) -> Any:
+    call_count = 0
+
+    async def browse_urls_with_activity(*args: Any, **kwargs: Any) -> Any:
+        nonlocal call_count
+        call_count += 1
+        urls = _browse_urls_input(args=args, kwargs=kwargs)
+        if emit:
+            emit(
+                stage="browse_urls",
+                outcome="called",
+                extra={
+                    "browser_probe_scope": scope,
+                    "browse_urls_call_count": call_count,
+                    **_browse_url_input_diagnostics(urls),
+                },
+            )
+        try:
+            result = original(*args, **kwargs)
+            if inspect.isawaitable(result):
+                result = await result
+        except Exception as exc:
+            if emit:
+                emit(
+                    stage="browse_urls",
+                    outcome="error",
+                    reason_code="browse_urls_error",
+                    level=logging.WARNING,
+                    extra={
+                        "browser_probe_scope": scope,
+                        "browse_urls_call_count": call_count,
+                        "error_class": exc.__class__.__name__,
+                        "timeout": isinstance(exc, TimeoutError),
+                        **_browse_url_input_diagnostics(urls),
+                    },
+                )
+            raise
+        if emit:
+            emit(
+                stage="browse_urls",
+                outcome="completed",
+                extra={
+                    "browser_probe_scope": scope,
+                    "browse_urls_call_count": call_count,
+                    **_browse_url_input_diagnostics(urls),
+                    **_browse_urls_output_diagnostics(result),
+                },
+            )
+        return result
+
+    browse_urls_with_activity._amo_browser_activity_probe = True  # type: ignore[attr-defined]
+    return browse_urls_with_activity
+
+
+def _browse_urls_input(*, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
+    if "urls" in kwargs:
+        return kwargs.get("urls")
+    if len(args) >= 2:
+        return args[1]
+    if args:
+        return args[0]
+    return ()
+
+
+def _browse_url_input_diagnostics(urls: Any) -> dict[str, Any]:
+    extracted = _extract_source_urls(urls)
+    if not extracted and isinstance(urls, (list, tuple, set, frozenset)):
+        extracted = tuple(str(item).strip() for item in urls if str(item).strip().startswith(("http://", "https://")))
+    return {
+        "browse_urls_input_count": _container_len(urls),
+        "browse_urls_input_url_count": len(extracted),
+        "browse_urls_input_domains": tuple(dict.fromkeys(_host_from_url(url) for url in extracted if _host_from_url(url)))[:10],
+        "browse_urls_input_urls": tuple(_safe_log_url(url) for url in extracted[:10]),
+        "browse_urls_input_truncated": len(extracted) > 10,
+    }
+
+
+def _browse_urls_output_diagnostics(result: Any) -> dict[str, Any]:
+    return {
+        "browse_urls_output_doc_count": _container_len(result),
+        "browse_urls_output_non_empty_count": _non_empty_source_doc_count(result),
+        **_source_doc_diagnostics(result, prefix="browse_urls_output_doc"),
+    }
+
+
+def _searx_search_result_diagnostics(*, results: Any, normalized: Any) -> dict[str, Any]:
+    result_items = results if isinstance(results, list) else []
+    normalized_items = normalized if isinstance(normalized, list) else []
+    urls = _extract_source_urls(result_items)
+    raw_or_body_count = sum(
+        1
+        for item in result_items
+        if isinstance(item, Mapping)
+        and (
+            bool(str(item.get("raw_content") or "").strip())
+            or bool(str(item.get("body") or "").strip())
+        )
+    )
+    snippet_count = sum(
+        1 for item in normalized_items if isinstance(item, Mapping) and bool(str(item.get("snippet") or "").strip())
+    )
+    return {
+        "searx_raw_result_count": len(result_items),
+        "searx_url_result_count": len(urls),
+        "searx_raw_content_or_body_present_count": raw_or_body_count,
+        "searx_snippet_present_after_strip_count": snippet_count,
+        "searx_result_domains": tuple(dict.fromkeys(_host_from_url(url) for url in urls if _host_from_url(url)))[:10],
+        "searx_result_urls": tuple(_safe_log_url(url) for url in urls[:10]),
+        "searx_result_truncated": len(urls) > 10,
+    }
 
 
 def _strip_searx_prefetched_content(results: Any) -> Any:
@@ -1371,6 +1639,42 @@ def _research_result_to_answer(
             "costs": result.get("costs", {}) if isinstance(result.get("costs"), dict) else {},
         },
     )
+
+
+def _answer_transition_diagnostics(*, answer: CurrentInfoAnswer, research_run_id: str) -> dict[str, Any]:
+    listing_verdict = answer.metadata.get("listing_verdict") if isinstance(answer.metadata, dict) else None
+    evidence_warnings: tuple[str, ...] = ()
+    if answer.evidence is not None:
+        evidence_warnings = tuple(answer.evidence.warnings)
+    return {
+        "research_run_id": research_run_id,
+        "answer_status": answer.status,
+        "answer_warning_count": len(answer.warnings),
+        "answer_warnings": answer.warnings,
+        "evidence_warning_count": len(evidence_warnings),
+        "evidence_warnings": evidence_warnings,
+        "evidence_quality": answer.metadata.get("evidence_quality", "unknown"),
+        "source_count": answer.metadata.get("source_count", 0),
+        "source_doc_count": answer.metadata.get("source_doc_count", 0),
+        "non_empty_source_doc_count": answer.metadata.get("non_empty_source_doc_count", 0),
+        "fetched_source_count": answer.metadata.get("fetched_source_count", 0),
+        "snippet_only_source_count": answer.metadata.get("snippet_only_source_count", 0),
+        "source_urls_present_but_no_nonempty_docs": answer.metadata.get(
+            "source_urls_present_but_no_nonempty_docs", False
+        ),
+        "confidence": answer.confidence,
+        "rejection_reason": ",".join(answer.warnings) if answer.status != "answered" and answer.warnings else "",
+        "listing_verdict": str(listing_verdict.get("classification") or "")
+        if isinstance(listing_verdict, dict)
+        else "",
+        "listing_conflict": bool(listing_verdict.get("conflict")) if isinstance(listing_verdict, dict) else False,
+        "listing_supports_listed_count": int(listing_verdict.get("supports_listed_count") or 0)
+        if isinstance(listing_verdict, dict)
+        else 0,
+        "listing_supports_private_count": int(listing_verdict.get("supports_private_count") or 0)
+        if isinstance(listing_verdict, dict)
+        else 0,
+    }
 
 
 def _container_len(value: Any) -> int:

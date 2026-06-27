@@ -778,8 +778,9 @@ def test_searx_snippet_body_is_not_prefetched_content() -> None:
     assert "raw_content" not in normalized[0]
 
 
-def test_gpt_researcher_searx_snippet_url_reaches_browse_urls(monkeypatch) -> None:
+def test_gpt_researcher_searx_snippet_url_reaches_browse_urls(monkeypatch, caplog) -> None:
     long_snippet = "SearX snippet only. " * 12
+    source_url = "https://source.example/searx-snippet?api_key=secret-token"
 
     class _FakeSearxSearch:
         def __init__(self, query: str, query_domains=None) -> None:
@@ -789,7 +790,7 @@ def test_gpt_researcher_searx_snippet_url_reaches_browse_urls(monkeypatch) -> No
         def search(self, max_results: int = 10):
             return [
                 {
-                    "href": "https://source.example/searx-snippet",
+                    "href": source_url,
                     "body": long_snippet,
                     "title": "Snippet source",
                 }
@@ -809,29 +810,53 @@ def test_gpt_researcher_searx_snippet_url_reaches_browse_urls(monkeypatch) -> No
     _SearxSnippetBrowseResearcher.instances.clear()
     request, task, query_plan = _research_request_parts("Research SearX snippet")
 
-    answer = _provider_for_researcher(_SearxSnippetBrowseResearcher).answer(
-        request=request,
-        task=task,
-        query_plan=query_plan,
-    )
+    with caplog.at_level(logging.INFO, logger="amo_bot.current_info.research"):
+        answer = _provider_for_researcher(_SearxSnippetBrowseResearcher).answer(
+            request=request,
+            task=task,
+            query_plan=query_plan,
+        )
 
     instance = _SearxSnippetBrowseResearcher.instances[0]
-    assert instance.scraper_manager.calls == [("https://source.example/searx-snippet",)]
-    assert instance.research_conductor.new_search_urls == ("https://source.example/searx-snippet",)
+    assert instance.scraper_manager.calls == [(source_url,)]
+    assert instance.research_conductor.new_search_urls == (source_url,)
     assert instance.search_results == (
         {
-            "href": "https://source.example/searx-snippet",
+            "href": source_url,
             "title": "Snippet source",
             "snippet": long_snippet.strip(),
         },
     )
     assert _FakeSearxSearch.search is original_search
     assert answer.status == "answered"
-    assert answer.sources == ("https://source.example/searx-snippet",)
+    assert answer.sources == (source_url,)
     assert answer.metadata["fetched_source_count"] == 1
     assert answer.metadata["snippet_only_source_count"] == 0
     assert answer.metadata["evidence_quality"] == "fetched"
     assert "snippet_only_evidence" not in answer.warnings
+    assert "current_info.GptResearcherSearxAdapter" in caplog.text
+    assert "current_info.GptResearcherBrowserActivity" in caplog.text
+    assert "current_info.GptResearcherAnswerTransition" in caplog.text
+    assert "'stage': 'searx_adapter'" in caplog.text
+    assert "'searx_snippet_adapter_installed': True" in caplog.text
+    assert "'stage': 'searx_search'" in caplog.text
+    assert "'searx_search_called': True" in caplog.text
+    assert "'searx_raw_result_count': 1" in caplog.text
+    assert "'searx_url_result_count': 1" in caplog.text
+    assert "'searx_raw_content_or_body_present_count': 1" in caplog.text
+    assert "'searx_snippet_present_after_strip_count': 1" in caplog.text
+    assert "'stage': 'browse_urls'" in caplog.text
+    assert "'browse_urls_call_count': 1" in caplog.text
+    assert "'browse_urls_input_url_count': 1" in caplog.text
+    assert "'browse_urls_output_doc_count': 1" in caplog.text
+    assert "'browse_urls_output_non_empty_count': 1" in caplog.text
+    assert "'post_conduct_source_doc_non_empty_count': 1" in caplog.text
+    assert "'post_write_source_doc_non_empty_count': 1" in caplog.text
+    assert "'answer_status': 'answered'" in caplog.text
+    assert "secret-token" not in caplog.text
+    assert "?api_key=" not in caplog.text
+    assert long_snippet.strip() not in caplog.text
+    assert "Fetched page content from scraper" not in caplog.text
 
 
 def test_gpt_researcher_content_source_docs_count_as_fetched() -> None:
