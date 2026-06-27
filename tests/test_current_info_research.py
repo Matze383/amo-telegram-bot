@@ -152,6 +152,45 @@ class _EmptySourceDocsResearcher:
         return ({"url": "https://source.example/empty"}, {"url": "https://other.example/empty", "raw_content": ""})
 
 
+class _InstrumentedEmptySourceDocsResearcher:
+    def __init__(self, **kwargs) -> None:
+        self.kwargs = kwargs
+        self.cfg = types.SimpleNamespace(
+            retriever="searx",
+            scraper="bs",
+            report_source="web",
+            max_search_results_per_query=2,
+        )
+        self.search_results = ()
+        self.source_urls = ()
+        self.visited_urls = set()
+        self.research_conductor = types.SimpleNamespace(
+            new_search_urls=(),
+            visited_urls=set(),
+            search_results=(),
+        )
+
+    async def conduct_research(self) -> None:
+        self.search_results = (
+            {"url": "https://source.example/empty", "title": "Empty source"},
+            {"href": "https://other.example/empty", "title": "Other empty source"},
+        )
+        self.source_urls = ("https://source.example/empty", "https://other.example/empty")
+        self.visited_urls = {"https://source.example/empty", "https://other.example/empty"}
+        self.research_conductor.new_search_urls = self.source_urls
+        self.research_conductor.visited_urls = self.visited_urls
+        self.research_conductor.search_results = self.search_results
+
+    async def write_report(self) -> str:
+        return "Research answer with URLs but empty scraped documents."
+
+    def get_source_urls(self) -> tuple[str, ...]:
+        return self.source_urls
+
+    def get_research_sources(self) -> tuple[dict[str, object], ...]:
+        return ({"url": "https://source.example/empty"}, {"url": "https://other.example/empty", "raw_content": ""})
+
+
 class _RecordingSourceFetcher:
     def __init__(self, documents: dict[str, FetchedDocument | None]) -> None:
         self.documents = documents
@@ -726,6 +765,43 @@ def test_gpt_researcher_empty_source_docs_fail_closed_when_validation_fetch_empt
     assert answer.evidence is not None
     assert all(source.fetched is False for source in answer.evidence.sources)
     assert "source_validation_empty" in caplog.text
+
+
+def test_gpt_researcher_diagnostics_log_urls_present_with_empty_docs(caplog) -> None:
+    request, task, query_plan = _research_request_parts("Research GPT-Researcher scrape diagnostics")
+
+    with caplog.at_level(logging.INFO, logger="amo_bot.current_info.research"):
+        answer = _provider_for_researcher(_InstrumentedEmptySourceDocsResearcher).answer(
+            request=request,
+            task=task,
+            query_plan=query_plan,
+        )
+
+    assert answer.status == "empty_evidence"
+    assert answer.metadata["source_count"] == 2
+    assert answer.metadata["source_doc_count"] == 2
+    assert answer.metadata["non_empty_source_doc_count"] == 0
+    assert answer.metadata["fetched_source_count"] == 0
+    assert answer.metadata["source_urls_present_but_no_nonempty_docs"] is True
+    assert "current_info.GptResearcherDiagnostics" in caplog.text
+    assert "'stage': 'runtime_config'" in caplog.text
+    assert "'stage': 'researcher_state'" in caplog.text
+    assert "'outcome': 'before_conduct_research'" in caplog.text
+    assert "'gpt_researcher_retriever': 'searx'" in caplog.text
+    assert "'gpt_researcher_report_source': 'web'" in caplog.text
+    assert "'gpt_researcher_max_search_results_per_query': 2" in caplog.text
+    assert "'gpt_researcher_active_retriever': 'searx'" in caplog.text
+    assert "'gpt_researcher_active_scraper': 'bs'" in caplog.text
+    assert "'gpt_researcher_active_report_source': 'web'" in caplog.text
+    assert "'search_results_count': 2" in caplog.text
+    assert "'new_search_urls_count': 2" in caplog.text
+    assert "'visited_urls_count': 2" in caplog.text
+    assert "'post_conduct_url_count': 2" in caplog.text
+    assert "'post_conduct_source_doc_container_count': 2" in caplog.text
+    assert "'post_conduct_source_doc_non_empty_count': 0" in caplog.text
+    assert "'source_doc_non_empty_count': 0" in caplog.text
+    assert "'source_urls_present_but_no_nonempty_docs': True" in caplog.text
+    assert "'research_run_id': 'gptr-" in caplog.text
 
 
 def test_gpt_researcher_listing_conflict_yields_uncertain_verdict() -> None:

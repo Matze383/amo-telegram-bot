@@ -190,7 +190,12 @@ def log_current_info_event(
 def _redact_log_payload(payload: JsonDict) -> JsonDict:
     redacted: JsonDict = {}
     for key, value in payload.items():
-        if "query" in key.casefold() and key not in {"query_hash", "query_length"}:
+        if "query" in key.casefold() and key not in {
+            "query_hash",
+            "query_length",
+            "gpt_researcher_max_search_results_per_query",
+            "gpt_researcher_active_max_search_results_per_query",
+        }:
             continue
         if key == "error_message" and isinstance(value, str):
             redacted[key] = redact_sensitive_text(value)

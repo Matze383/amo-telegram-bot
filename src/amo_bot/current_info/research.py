@@ -6,6 +6,7 @@ import logging
 import os
 import re
 import tempfile
+import uuid
 from collections.abc import Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -16,6 +17,7 @@ from urllib.parse import urlparse
 from sqlalchemy.engine import make_url
 
 from amo_bot.ai.current_time_context import DEFAULT_AI_PROMPT_TIMEZONE, build_current_time_context
+from amo_bot.core.logging import get_request_id
 from amo_bot.current_info.models import (
     CurrentInfoAnswer,
     CurrentInfoRequest,
@@ -171,6 +173,7 @@ class GptResearcherProvider:
     def answer(self, *, request: CurrentInfoRequest, task: TaskSpec, query_plan: QueryPlan) -> CurrentInfoAnswer:
         report_type = _research_report_type(request)
         report_metadata = _research_report_metadata(report_type=report_type, config=self._config)
+        research_run_id = f"gptr-{uuid.uuid4().hex[:12]}"
         if not self._config.enabled:
             return _provider_unavailable_answer(
                 request=request,
@@ -204,7 +207,12 @@ class GptResearcherProvider:
         try:
             result = asyncio.run(
                 asyncio.wait_for(
-                    self._answer_async(request=request, task=task, report_type=report_type),
+                    self._answer_async(
+                        request=request,
+                        task=task,
+                        report_type=report_type,
+                        research_run_id=research_run_id,
+                    ),
                     timeout=self._config.timeout_seconds,
                 )
             )
@@ -278,10 +286,15 @@ class GptResearcherProvider:
             reason_code=",".join(answer.warnings) if answer.warnings else None,
             level=logging.WARNING if answer.status == "unverified_evidence" else logging.INFO,
             extra={
+                "research_run_id": research_run_id,
                 "source_count": answer.metadata.get("source_count", 0),
                 "source_doc_count": answer.metadata.get("source_doc_count", 0),
+                "non_empty_source_doc_count": answer.metadata.get("non_empty_source_doc_count", 0),
                 "fetched_source_count": answer.metadata.get("fetched_source_count", 0),
                 "snippet_only_source_count": answer.metadata.get("snippet_only_source_count", 0),
+                "source_urls_present_but_no_nonempty_docs": answer.metadata.get(
+                    "source_urls_present_but_no_nonempty_docs", False
+                ),
                 "evidence_quality": answer.metadata.get("evidence_quality", "unknown"),
                 "confidence": answer.confidence,
                 "warnings": answer.warnings,
@@ -295,14 +308,22 @@ class GptResearcherProvider:
         )
         return answer
 
-    async def _answer_async(self, *, request: CurrentInfoRequest, task: TaskSpec, report_type: str) -> dict[str, Any]:
+    async def _answer_async(
+        self,
+        *,
+        request: CurrentInfoRequest,
+        task: TaskSpec,
+        report_type: str,
+        research_run_id: str,
+    ) -> dict[str, Any]:
         researcher_cls = self._researcher_cls or _load_gpt_researcher_class()
         vector_store = self._vector_store or _build_pgvector_store(
             database_url=self._database_url,
             collection_name=self._config.vector_collection,
             embedding_provider=self._embedding_provider,
         )
-        config_path = _write_temp_config(self._gpt_researcher_config(language=_language_for_locale(task.locale)))
+        gpt_researcher_config = self._gpt_researcher_config(language=_language_for_locale(task.locale))
+        config_path = _write_temp_config(gpt_researcher_config)
         try:
             with _temporary_env(
                 {
@@ -318,7 +339,9 @@ class GptResearcherProvider:
                     task=task,
                     outcome="prepared",
                     extra={
+                        "research_run_id": research_run_id,
                         **_research_report_metadata(report_type=report_type, config=self._config),
+                        **_gpt_researcher_config_diagnostics(gpt_researcher_config),
                         **_research_query_diagnostics(
                             user_task=task.query,
                             researcher_query=researcher_query,
@@ -334,15 +357,44 @@ class GptResearcherProvider:
                     vector_store=vector_store,
                 )
                 self._log_lifecycle(
+                    event="current_info.GptResearcherDiagnostics",
+                    stage="runtime_config",
+                    request=request,
+                    task=task,
+                    outcome="collected",
+                    extra={
+                        "research_run_id": research_run_id,
+                        **_gpt_researcher_runtime_config_diagnostics(
+                            researcher=researcher,
+                            config=gpt_researcher_config,
+                        ),
+                    },
+                )
+                self._log_lifecycle(
+                    event="current_info.GptResearcherDiagnostics",
+                    stage="researcher_state",
+                    request=request,
+                    task=task,
+                    outcome="before_conduct_research",
+                    extra={
+                        "research_run_id": research_run_id,
+                        **_researcher_state_diagnostics(researcher),
+                    },
+                )
+                self._log_lifecycle(
                     event="current_info.GptResearcherLifecycle",
                     stage="conduct_research",
                     request=request,
                     task=task,
                     outcome="started",
-                    extra=_research_report_metadata(report_type=report_type, config=self._config),
+                    extra={
+                        "research_run_id": research_run_id,
+                        **_research_report_metadata(report_type=report_type, config=self._config),
+                    },
                 )
                 await researcher.conduct_research()
                 conduct_sources = _call_optional(researcher, "get_source_urls") or ()
+                conduct_source_docs = _call_optional(researcher, "get_research_sources") or ()
                 self._log_lifecycle(
                     event="current_info.GptResearcherLifecycle",
                     stage="conduct_research",
@@ -350,8 +402,11 @@ class GptResearcherProvider:
                     task=task,
                     outcome="completed",
                     extra={
+                        "research_run_id": research_run_id,
                         **_research_report_metadata(report_type=report_type, config=self._config),
                         **_source_url_diagnostics(conduct_sources, prefix="post_conduct"),
+                        **_source_doc_diagnostics(conduct_source_docs, prefix="post_conduct_source_doc"),
+                        **_researcher_state_diagnostics(researcher),
                     },
                 )
                 self._log_lifecycle(
@@ -360,7 +415,10 @@ class GptResearcherProvider:
                     request=request,
                     task=task,
                     outcome="started",
-                    extra=_research_report_metadata(report_type=report_type, config=self._config),
+                    extra={
+                        "research_run_id": research_run_id,
+                        **_research_report_metadata(report_type=report_type, config=self._config),
+                    },
                 )
                 report = await researcher.write_report()
                 self._log_lifecycle(
@@ -369,7 +427,11 @@ class GptResearcherProvider:
                     request=request,
                     task=task,
                     outcome="completed",
-                    extra=_research_report_metadata(report_type=report_type, config=self._config),
+                    extra={
+                        "research_run_id": research_run_id,
+                        **_research_report_metadata(report_type=report_type, config=self._config),
+                        **_researcher_state_diagnostics(researcher),
+                    },
                 )
                 sources = _call_optional(researcher, "get_source_urls") or conduct_sources
                 self._log_lifecycle(
@@ -378,7 +440,7 @@ class GptResearcherProvider:
                     request=request,
                     task=task,
                     outcome="collected",
-                    extra=_source_url_diagnostics(sources),
+                    extra={"research_run_id": research_run_id, **_source_url_diagnostics(sources)},
                 )
                 source_docs = _call_optional(researcher, "get_research_sources") or ()
                 self._log_lifecycle(
@@ -387,7 +449,7 @@ class GptResearcherProvider:
                     request=request,
                     task=task,
                     outcome="collected",
-                    extra=_source_doc_diagnostics(source_docs),
+                    extra={"research_run_id": research_run_id, **_source_doc_diagnostics(source_docs)},
                 )
                 source_docs, source_validation_diagnostics = await self._validate_source_urls(
                     sources=sources,
@@ -403,7 +465,7 @@ class GptResearcherProvider:
                     outcome="checked",
                     reason_code=str(source_validation_diagnostics.get("reason_code") or "") or None,
                     level=logging.WARNING if source_validation_diagnostics.get("reason_code") else logging.INFO,
-                    extra=source_validation_diagnostics,
+                    extra={"research_run_id": research_run_id, **source_validation_diagnostics},
                 )
                 context = _call_optional(researcher, "get_research_context") or ""
                 self._log_lifecycle(
@@ -412,7 +474,7 @@ class GptResearcherProvider:
                     request=request,
                     task=task,
                     outcome="collected",
-                    extra=_research_context_diagnostics(context),
+                    extra={"research_run_id": research_run_id, **_research_context_diagnostics(context)},
                 )
                 self._log_lifecycle(
                     event="current_info.GptResearcherDiagnostics",
@@ -422,7 +484,10 @@ class GptResearcherProvider:
                     outcome="checked",
                     reason_code=",".join(_source_mapping_warning_codes(sources=sources, source_docs=source_docs))
                     or None,
-                    extra=_source_mapping_diagnostics(sources=sources, source_docs=source_docs),
+                    extra={
+                        "research_run_id": research_run_id,
+                        **_source_mapping_diagnostics(sources=sources, source_docs=source_docs),
+                    },
                     level=logging.WARNING
                     if _source_mapping_warning_codes(sources=sources, source_docs=source_docs)
                     else logging.INFO,
@@ -442,6 +507,7 @@ class GptResearcherProvider:
             "report_type": report_type,
             "max_sources": self._config.max_sources,
             "max_context_chars": self._config.max_context_chars,
+            "research_run_id": research_run_id,
             "report_words": self._config.report_words,
             "deep_breadth": self._config.deep_breadth,
             "deep_depth": self._config.deep_depth,
@@ -566,6 +632,7 @@ class GptResearcherProvider:
             "strategic_llm": self._config.model_config.strategic_llm,
             "embedding": self._config.embedding,
             "llm_call_visibility": "config_only_gpt_researcher_internal_calls",
+            "request_correlation_id": get_request_id() or "",
         }
 
 
@@ -756,6 +823,71 @@ def _research_query_diagnostics(
     }
 
 
+def _gpt_researcher_config_diagnostics(config: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "gpt_researcher_retriever": str(config.get("RETRIEVER") or ""),
+        "gpt_researcher_scraper": str(config.get("SCRAPER") or ""),
+        "gpt_researcher_report_source": str(config.get("REPORT_SOURCE") or ""),
+        "gpt_researcher_max_search_results_per_query": int(config.get("MAX_SEARCH_RESULTS_PER_QUERY") or 0),
+    }
+
+
+def _gpt_researcher_runtime_config_diagnostics(*, researcher: Any, config: Mapping[str, Any]) -> dict[str, Any]:
+    cfg = getattr(researcher, "cfg", None)
+    report_source = getattr(researcher, "report_source", None) or getattr(cfg, "report_source", None)
+    scraper = getattr(cfg, "scraper", None) or getattr(cfg, "scraper_name", None) or config.get("SCRAPER") or ""
+    retriever = getattr(cfg, "retriever", None) or getattr(cfg, "retrievers", None) or config.get("RETRIEVER") or ""
+    max_results = (
+        getattr(cfg, "max_search_results_per_query", None)
+        or getattr(cfg, "max_search_results", None)
+        or config.get("MAX_SEARCH_RESULTS_PER_QUERY")
+        or 0
+    )
+    return {
+        "gpt_researcher_active_retriever": _safe_config_value(retriever),
+        "gpt_researcher_active_scraper": _safe_config_value(scraper),
+        "gpt_researcher_active_report_source": _safe_config_value(report_source),
+        "gpt_researcher_active_max_search_results_per_query": int(max_results or 0),
+    }
+
+
+def _safe_config_value(value: Any) -> str:
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return ",".join(str(item) for item in value)
+    return str(value or "")
+
+
+def _researcher_state_diagnostics(researcher: Any) -> dict[str, Any]:
+    search_results = _first_existing_attr(researcher, ("search_results",), nested_attrs=("research_conductor",))
+    new_search_urls = _first_existing_attr(researcher, ("new_search_urls",), nested_attrs=("research_conductor",))
+    visited_urls = _first_existing_attr(researcher, ("visited_urls",), nested_attrs=("research_conductor",))
+    source_urls = _first_existing_attr(researcher, ("source_urls",), nested_attrs=("research_conductor",))
+    return {
+        "search_results_count": _container_len(search_results),
+        "search_results_url_count": len(_extract_source_urls(search_results)),
+        "new_search_urls_count": _container_len(new_search_urls),
+        "new_search_urls_url_count": len(_extract_source_urls(new_search_urls)),
+        "visited_urls_count": _container_len(visited_urls),
+        "visited_urls_url_count": len(_extract_source_urls(visited_urls)),
+        "source_urls_attr_count": _container_len(source_urls),
+        "source_urls_attr_url_count": len(_extract_source_urls(source_urls)),
+    }
+
+
+def _first_existing_attr(value: Any, attr_names: tuple[str, ...], *, nested_attrs: tuple[str, ...]) -> Any:
+    for attr_name in attr_names:
+        if hasattr(value, attr_name):
+            return getattr(value, attr_name)
+    for nested_attr in nested_attrs:
+        nested = getattr(value, nested_attr, None)
+        if nested is None:
+            continue
+        for attr_name in attr_names:
+            if hasattr(nested, attr_name):
+                return getattr(nested, attr_name)
+    return ()
+
+
 def _source_url_diagnostics(value: Any, *, prefix: str = "source") -> dict[str, Any]:
     urls = _extract_source_urls(value)
     safe_urls = tuple(_safe_log_url(url) for url in urls[:10])
@@ -767,7 +899,7 @@ def _source_url_diagnostics(value: Any, *, prefix: str = "source") -> dict[str, 
     }
 
 
-def _source_doc_diagnostics(source_docs: Any) -> dict[str, Any]:
+def _source_doc_diagnostics(source_docs: Any, *, prefix: str = "source_doc") -> dict[str, Any]:
     summaries: list[dict[str, Any]] = []
     seen_containers: set[int] = set()
 
@@ -801,6 +933,7 @@ def _source_doc_diagnostics(source_docs: Any) -> dict[str, Any]:
     content_buckets: dict[str, int] = {}
     shape_counts: dict[str, int] = {}
     fetched_like_count = 0
+    non_empty_count = 0
     for summary in summaries:
         bucket = str(summary.get("content_length_bucket") or "unknown")
         content_buckets[bucket] = content_buckets.get(bucket, 0) + 1
@@ -808,16 +941,19 @@ def _source_doc_diagnostics(source_docs: Any) -> dict[str, Any]:
         shape_counts[shape] = shape_counts.get(shape, 0) + 1
         if summary.get("fetched_like"):
             fetched_like_count += 1
+        if summary.get("content_length_bucket") != "empty":
+            non_empty_count += 1
     return {
-        "source_doc_container_count": _container_len(source_docs),
-        "source_doc_summary_count": len(summaries),
-        "source_doc_summary_truncated": len(summaries) >= 20,
-        "source_doc_shape_counts": shape_counts,
-        "source_doc_content_length_buckets": content_buckets,
-        "source_doc_fetched_like_count": fetched_like_count,
-        "source_doc_url_count": len(all_doc_urls),
-        "source_doc_domains": tuple(dict.fromkeys(_host_from_url(url) for url in all_doc_urls if _host_from_url(url)))[:10],
-        "source_doc_urls": tuple(_safe_log_url(url) for url in all_doc_urls[:10]),
+        f"{prefix}_container_count": _container_len(source_docs),
+        f"{prefix}_summary_count": len(summaries),
+        f"{prefix}_summary_truncated": len(summaries) >= 20,
+        f"{prefix}_shape_counts": shape_counts,
+        f"{prefix}_content_length_buckets": content_buckets,
+        f"{prefix}_non_empty_count": non_empty_count,
+        f"{prefix}_fetched_like_count": fetched_like_count,
+        f"{prefix}_url_count": len(all_doc_urls),
+        f"{prefix}_domains": tuple(dict.fromkeys(_host_from_url(url) for url in all_doc_urls if _host_from_url(url)))[:10],
+        f"{prefix}_urls": tuple(_safe_log_url(url) for url in all_doc_urls[:10]),
         "fetched_source_url_count": len(fetched_urls),
         "fetched_source_domains": tuple(dict.fromkeys(_host_from_url(url) for url in fetched_urls if _host_from_url(url)))[:10],
         "fetched_source_urls": tuple(_safe_log_url(url) for url in fetched_urls[:10]),
@@ -1078,6 +1214,7 @@ def _research_result_to_answer(
     )
     fetched_source_urls = _fetched_source_urls(source_docs)
     fetched_count = sum(1 for url in sources if url in fetched_source_urls)
+    non_empty_source_doc_count = _non_empty_source_doc_count(source_docs)
     snippet_only_count = max(len(sources) - fetched_count, 0)
     evidence_quality_warnings = _research_evidence_quality_warnings(
         report=report,
@@ -1170,8 +1307,10 @@ def _research_result_to_answer(
             "report_words": int(result.get("report_words") or 0),
             "source_count": len(sources),
             "source_doc_count": _container_len(source_docs),
+            "non_empty_source_doc_count": non_empty_source_doc_count,
             "fetched_source_count": fetched_count,
             "snippet_only_source_count": snippet_only_count,
+            "source_urls_present_but_no_nonempty_docs": bool(sources) and non_empty_source_doc_count <= 0,
             "context_chars": len(context),
             "evidence_quality": "fetched" if fetched_count else "snippet_only",
             "listing_verdict": verdict,
@@ -1253,6 +1392,39 @@ def _all_source_doc_containers_empty(source_docs: Any) -> bool:
 
     has_content = walk(source_docs)
     return has_container and not has_content
+
+
+def _non_empty_source_doc_count(source_docs: Any) -> int:
+    count = 0
+    seen_containers: set[int] = set()
+
+    def walk(item: Any) -> None:
+        nonlocal count
+        if item is None or isinstance(item, str):
+            return
+        if isinstance(item, Mapping):
+            object_id = id(item)
+            if object_id in seen_containers:
+                return
+            seen_containers.add(object_id)
+            if _looks_like_source_doc(item) and _source_doc_content_length(item) > 0:
+                count += 1
+            for nested in item.values():
+                walk(nested)
+            return
+        if isinstance(item, (list, tuple, set, frozenset)):
+            object_id = id(item)
+            if object_id in seen_containers:
+                return
+            seen_containers.add(object_id)
+            for nested in item:
+                walk(nested)
+            return
+        if _looks_like_source_doc(item) and _source_doc_content_length(item) > 0:
+            count += 1
+
+    walk(source_docs)
+    return count
 
 
 def _research_answer_status(*, report: str, sources: tuple[str, ...], warnings: tuple[str, ...]) -> str:
