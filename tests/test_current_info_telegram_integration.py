@@ -131,6 +131,54 @@ def _dispatcher(
     return dispatcher, sent
 
 
+def test_current_info_retrieval_timeout_adds_bounded_research_cushion() -> None:
+    assert dispatcher_module._current_info_retrieval_timeout_seconds(
+        base_timeout_seconds=8,
+        research_timeout_seconds=300,
+    ) == 315
+    assert dispatcher_module._current_info_retrieval_timeout_seconds(
+        base_timeout_seconds=8,
+        research_timeout_seconds=900,
+    ) == 930
+    assert dispatcher_module._current_info_retrieval_timeout_seconds(
+        base_timeout_seconds=0.01,
+        research_timeout_seconds=0.01,
+    ) == 0.01
+
+
+def test_current_info_answer_diagnostics_expose_research_metadata_without_full_payload() -> None:
+    answer = CurrentInfoAnswer(
+        status="unverified_evidence",
+        metadata={
+            "provider_mode": "gpt_researcher",
+            "research_report_type": "deep_research",
+            "deep_research": True,
+            "source_count": 5,
+            "source_doc_count": 2,
+            "fetched_source_count": 2,
+            "snippet_only_source_count": 3,
+            "evidence_quality": "snippet_only",
+            "listing_verdict": {"classification": "conflicting", "conflict": True, "details": "omit"},
+            "costs": {"tokens": 123},
+        },
+    )
+
+    diagnostics = dispatcher_module._current_info_answer_diagnostics(answer)
+
+    assert diagnostics == {
+        "provider_mode": "gpt_researcher",
+        "research_report_type": "deep_research",
+        "deep_research": True,
+        "source_count": 5,
+        "source_doc_count": 2,
+        "fetched_source_count": 2,
+        "snippet_only_source_count": 3,
+        "evidence_quality": "snippet_only",
+        "listing_verdict": "conflicting",
+        "listing_conflict": True,
+    }
+
+
 def test_current_info_autoreply_synthesizes_and_appends_sources() -> None:
     answer = CurrentInfoAnswer(
         status="answered",

@@ -62,6 +62,29 @@ class FastCurrentInfoService:
         )
 
 
+class FailingCurrentInfoService:
+    def __init__(self) -> None:
+        self.requests = []
+
+    def answer(self, request) -> CurrentInfoAnswer:
+        self.requests.append(request)
+        return CurrentInfoAnswer(
+            status="provider_unavailable",
+            request=request,
+            warnings=("gpt_researcher_failed",),
+            metadata={"provider_mode": "gpt_researcher"},
+        )
+
+
+class LegacyWebtoolDispatcher:
+    def __init__(self) -> None:
+        self.calls = []
+
+    def execute(self, request):
+        self.calls.append(request)
+        raise AssertionError("legacy webtool auto fallback must not be used for current-info answers")
+
+
 def _mk_update(*, uid: int, chat_id: int, chat_type: str, text: str, update_id: int, message_thread_id: int | None = None, reply_to_is_bot: bool = False, reply_to_message_id: int | None = None, reply_to_bot_username: str = "AmoBot", reply_to_text: str = "") -> dict[str, object]:
     m: dict[str, object] = {
         "message_id": update_id + 100,
@@ -1293,6 +1316,64 @@ def test_autoreply_research_needed_with_current_info_service_missing_fails_close
             80,
         )
     ]
+    assert ai.prompts == []
+
+
+def test_autoreply_gpt_researcher_failure_does_not_use_legacy_webtool_fallback(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'ai_autoreply_strategy_no_legacy_webtool_fallback.db'}"
+    init_db(db_url)
+    _seed_user(
+        db_url,
+        user_id=2707,
+        role="vip",
+        consent="accepted",
+        group_chat_id=-1007,
+        group_role="vip",
+    )
+
+    sf = create_session_factory(db_url)
+    with sf() as session:
+        TopicAgentMemoryRepository(session).upsert_config(
+            scope_type="topic",
+            chat_id=-1007,
+            topic_id=82,
+            ai_enabled=True,
+            recent_context_window_size=10,
+        )
+
+    ai = FakeAIService(answer="Stale fallback answer")
+    sender = Sender()
+    service = FailingCurrentInfoService()
+    legacy_webtool = LegacyWebtoolDispatcher()
+    dispatcher = _mk_dispatcher(db_url, ai, sender)
+    dispatcher.current_info_enabled = True
+    dispatcher.current_info_service = service
+    dispatcher.webtool_dispatcher = legacy_webtool
+
+    asyncio.run(
+        dispatcher.handle_raw_update(
+            _mk_update(
+                uid=2707,
+                chat_id=-1007,
+                chat_type="supergroup",
+                text="@AmoBot Was kostet ChatGPT Pro heute?",
+                update_id=2252,
+                message_thread_id=82,
+            )
+        )
+    )
+
+    assert sender.sent == [
+        (
+            -1007,
+            "Dafuer brauche ich GPT-Researcher-Webrecherche, aber die Recherche konnte gerade nicht erfolgreich abgeschlossen werden.",
+            82,
+        )
+    ]
+    assert len(service.requests) == 1
+    assert service.requests[0].metadata["require_gpt_researcher"] is True
+    assert service.requests[0].metadata["capability"] == "webresearch"
+    assert legacy_webtool.calls == []
     assert ai.prompts == []
 
 

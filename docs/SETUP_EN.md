@@ -615,14 +615,14 @@ For result-page extraction, the document fetcher prefers Crawlee and falls back 
 | `AMO_RESEARCH_FAST_MODEL` | *(empty)* | Fast research model; empty uses `OLLAMA_NON_THINKING_MODEL` or `OLLAMA_MODEL` |
 | `AMO_RESEARCH_SMART_MODEL` | *(empty)* | Smart research model; empty uses `OLLAMA_MODEL` |
 | `AMO_RESEARCH_STRATEGIC_MODEL` | *(empty)* | Strategic research model; empty uses `OLLAMA_THINKING_MODEL` or `OLLAMA_MODEL` |
-| `AMO_RESEARCH_MAX_SOURCES` | `8` | Maximum GPT-Researcher source URLs per answer (allowed: 1 to 25) |
-| `AMO_RESEARCH_MAX_CONTEXT_CHARS` | `12000` | Maximum characters retained from GPT-Researcher evidence context (allowed: 1000 to 100000) |
+| `AMO_RESEARCH_MAX_SOURCES` | `10` | Maximum GPT-Researcher source URLs per answer (allowed: 1 to 25) |
+| `AMO_RESEARCH_MAX_CONTEXT_CHARS` | `16000` | Maximum characters retained from GPT-Researcher evidence context (allowed: 1000 to 100000) |
 | `AMO_RESEARCH_DEEP_BREADTH` | `3` | Deep-research breadth budget (allowed: 1 to 10) |
 | `AMO_RESEARCH_DEEP_DEPTH` | `2` | Deep-research depth budget (allowed: 1 to 10) |
 | `AMO_RESEARCH_DEEP_CONCURRENCY` | `4` | Deep-research concurrency budget (allowed: 1 to 20) |
 | `AMO_RESEARCH_VECTOR_COLLECTION` | `amo_gpt_researcher_chunks` | pgvector collection for GPT-Researcher chunks |
-| `AMO_RESEARCH_REPORT_WORDS` | `900` | Target GPT-Researcher report length in words (allowed: 200 to 5000) |
-| `AMO_RESEARCH_TIMEOUT_SECONDS` | `300` | Timeout for GPT-Researcher deep research operations in seconds (allowed: >0 to 900) |
+| `AMO_RESEARCH_REPORT_WORDS` | `1200` | Target GPT-Researcher report length in words (allowed: 200 to 5000) |
+| `AMO_RESEARCH_TIMEOUT_SECONDS` | `360` | Timeout for GPT-Researcher deep research operations in seconds (allowed: >0 to 900) |
 
 Current-Info cache tables are created through the SQLAlchemy/Alembic PostgreSQL database setup. Query metrics store only a SHA-256 query hash, not the raw private user query text.
 When semantic retrieval is enabled, PostgreSQL remains the source of truth for documents, metadata, cache TTLs, and pruning. pgvector stores vectors plus chunk/document pointers and source metadata only; private user questions are not stored as vectors.

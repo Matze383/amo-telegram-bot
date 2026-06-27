@@ -615,14 +615,14 @@ Für die Extraktion von Ergebnis-Seiten bevorzugt der Dokument-Fetcher Crawlee u
 | `AMO_RESEARCH_FAST_MODEL` | *(leer)* | Schnelles Research-Modell; leer nutzt `OLLAMA_NON_THINKING_MODEL` oder `OLLAMA_MODEL` |
 | `AMO_RESEARCH_SMART_MODEL` | *(leer)* | Smart-Research-Modell; leer nutzt `OLLAMA_MODEL` |
 | `AMO_RESEARCH_STRATEGIC_MODEL` | *(leer)* | Strategisches Research-Modell; leer nutzt `OLLAMA_THINKING_MODEL` oder `OLLAMA_MODEL` |
-| `AMO_RESEARCH_MAX_SOURCES` | `8` | Maximale GPT-Researcher-Quellen-URLs pro Antwort (zulässig: 1 bis 25) |
-| `AMO_RESEARCH_MAX_CONTEXT_CHARS` | `12000` | Maximale Zeichen aus GPT-Researcher-Evidenzkontext (zulässig: 1000 bis 100000) |
+| `AMO_RESEARCH_MAX_SOURCES` | `10` | Maximale GPT-Researcher-Quellen-URLs pro Antwort (zulässig: 1 bis 25) |
+| `AMO_RESEARCH_MAX_CONTEXT_CHARS` | `16000` | Maximale Zeichen aus GPT-Researcher-Evidenzkontext (zulässig: 1000 bis 100000) |
 | `AMO_RESEARCH_DEEP_BREADTH` | `3` | Breitenbudget für Deep Research (zulässig: 1 bis 10) |
 | `AMO_RESEARCH_DEEP_DEPTH` | `2` | Tiefenbudget für Deep Research (zulässig: 1 bis 10) |
 | `AMO_RESEARCH_DEEP_CONCURRENCY` | `4` | Parallelitätsbudget für Deep Research (zulässig: 1 bis 20) |
 | `AMO_RESEARCH_VECTOR_COLLECTION` | `amo_gpt_researcher_chunks` | pgvector-Collection für GPT-Researcher-Chunks |
-| `AMO_RESEARCH_REPORT_WORDS` | `900` | Zielumfang des GPT-Researcher-Berichts in Wörtern (zulässig: 200 bis 5000) |
-| `AMO_RESEARCH_TIMEOUT_SECONDS` | `300` | Timeout für GPT-Researcher Tiefenrecherche-Operationen in Sekunden (zulässig: >0 bis 900) |
+| `AMO_RESEARCH_REPORT_WORDS` | `1200` | Zielumfang des GPT-Researcher-Berichts in Wörtern (zulässig: 200 bis 5000) |
+| `AMO_RESEARCH_TIMEOUT_SECONDS` | `360` | Timeout für GPT-Researcher Tiefenrecherche-Operationen in Sekunden (zulässig: >0 bis 900) |
 
 Die Current-Info-Cache-Tabellen werden über SQLAlchemy/Alembic im PostgreSQL-Datenbanksetup erstellt. Query-Metriken speichern nur einen SHA-256-Hash der Anfrage, nicht den privaten Rohtext.
 Bei aktivierter semantischer Suche bleibt PostgreSQL die Source of Truth für Dokumente, Metadaten, Cache-TTLs und Pruning. pgvector speichert nur Vektoren plus Chunk-/Dokument-Pointer und Quellenmetadaten; private Nutzerfragen werden nicht als Vektoren gespeichert.

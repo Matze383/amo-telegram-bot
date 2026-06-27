@@ -75,10 +75,57 @@ RESTART_ACK_TIMEOUT_SECONDS = 3.0
 CURRENT_INFO_SYNTHESIS_MAX_EVIDENCE_CHARS = 4500
 CURRENT_INFO_SYNTHESIS_MAX_SOURCE_COUNT = 5
 CURRENT_INFO_COMPACT_FALLBACK_MAX_BODY_CHARS = 3200
+CURRENT_INFO_RESEARCH_TIMEOUT_CUSHION_MAX_SECONDS = 30.0
+CURRENT_INFO_RESEARCH_TIMEOUT_CUSHION_MIN_SECONDS = 5.0
+CURRENT_INFO_RESEARCH_TIMEOUT_CUSHION_RATIO = 0.05
 
 
 def _terminate_current_process() -> None:
     raise SystemExit(0)
+
+
+def _current_info_retrieval_timeout_seconds(*, base_timeout_seconds: float, research_timeout_seconds: float) -> float:
+    base = max(float(base_timeout_seconds), 0.001)
+    research = max(float(research_timeout_seconds), 0.001)
+    if research < CURRENT_INFO_RESEARCH_TIMEOUT_CUSHION_MIN_SECONDS:
+        return max(base, research)
+    cushion = min(
+        CURRENT_INFO_RESEARCH_TIMEOUT_CUSHION_MAX_SECONDS,
+        max(CURRENT_INFO_RESEARCH_TIMEOUT_CUSHION_MIN_SECONDS, research * CURRENT_INFO_RESEARCH_TIMEOUT_CUSHION_RATIO),
+    )
+    return max(base, research + cushion)
+
+
+def _current_info_answer_diagnostics(answer: CurrentInfoAnswer) -> dict[str, object]:
+    metadata = dict(answer.metadata or {})
+    diagnostics: dict[str, object] = {}
+    for key in (
+        "provider_mode",
+        "report_type",
+        "research_report_type",
+        "deep_research",
+        "deep_breadth",
+        "deep_depth",
+        "deep_concurrency",
+        "max_sources",
+        "max_context_chars",
+        "report_words",
+        "source_count",
+        "source_doc_count",
+        "fetched_source_count",
+        "snippet_only_source_count",
+        "evidence_quality",
+        "deep_research_fallback_used",
+        "deep_research_fallback_reason",
+        "deep_research_fallback_status",
+    ):
+        if key in metadata:
+            diagnostics[key] = metadata[key]
+    listing_verdict = metadata.get("listing_verdict")
+    if isinstance(listing_verdict, dict):
+        diagnostics["listing_verdict"] = listing_verdict.get("classification", "")
+        diagnostics["listing_conflict"] = bool(listing_verdict.get("conflict"))
+    return diagnostics
 
 
 AI_AUTOREPLY_ERROR_FALLBACK_TEXT = {
@@ -149,7 +196,7 @@ class Dispatcher:
     current_info_service: Any | None = None
     current_info_enabled: bool = False
     current_info_timeout_seconds: float = 8.0
-    current_info_research_timeout_seconds: float = 300.0
+    current_info_research_timeout_seconds: float = 360.0
     current_info_late_synthesis_timeout_seconds: float = 60.0
     current_info_max_results: int = 5
     current_info_max_documents: int = 3
@@ -1923,10 +1970,9 @@ class Dispatcher:
         if not should_research:
             return False
 
-        timeout_seconds = max(
-            float(self.current_info_timeout_seconds),
-            float(self.current_info_research_timeout_seconds),
-            0.001,
+        timeout_seconds = _current_info_retrieval_timeout_seconds(
+            base_timeout_seconds=float(self.current_info_timeout_seconds),
+            research_timeout_seconds=float(self.current_info_research_timeout_seconds),
         )
         current_info_now = datetime.now(UTC)
         current_time_context_text = build_current_time_context(
@@ -1984,6 +2030,7 @@ class Dispatcher:
                     "reason": "timeout",
                     "stage": "retrieval",
                     "timeout_seconds": timeout_seconds,
+                    "research_timeout_seconds": float(self.current_info_research_timeout_seconds),
                     "late_delivery": "disabled",
                 },
             )
@@ -2034,6 +2081,7 @@ class Dispatcher:
                         "source_count": len(answer.sources),
                         "warning_count": len(answer.warnings),
                         "reason": "insufficient_evidence",
+                        **_current_info_answer_diagnostics(answer),
                     },
                 )
                 return True
@@ -2281,6 +2329,7 @@ class Dispatcher:
                         "warning_count": len(answer.warnings),
                         "reason": "insufficient_evidence",
                         "timeout_seconds": timeout_seconds,
+                        **_current_info_answer_diagnostics(answer),
                     },
                 )
             return

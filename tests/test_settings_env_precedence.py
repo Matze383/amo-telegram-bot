@@ -461,12 +461,18 @@ def test_gpt_researcher_default_timeout_allows_multi_minute_answers(monkeypatch,
     monkeypatch.setenv("DOTENV_PATH", str(env_file))
     monkeypatch.delenv("AMO_ENV_OVERRIDE", raising=False)
     monkeypatch.delenv("AMO_RESEARCH_TIMEOUT_SECONDS", raising=False)
+    monkeypatch.delenv("AMO_RESEARCH_MAX_SOURCES", raising=False)
+    monkeypatch.delenv("AMO_RESEARCH_MAX_CONTEXT_CHARS", raising=False)
+    monkeypatch.delenv("AMO_RESEARCH_REPORT_WORDS", raising=False)
     monkeypatch.delenv("WEBUI_LOGIN_DELAY_BASE_SECONDS", raising=False)
     monkeypatch.delenv("WEBUI_LOGIN_DELAY_MAX_SECONDS", raising=False)
 
     settings = get_settings()
 
-    assert settings.amo_research_timeout_seconds == 300
+    assert settings.amo_research_timeout_seconds == 360
+    assert settings.amo_research_max_sources == 10
+    assert settings.amo_research_max_context_chars == 16000
+    assert settings.amo_research_report_words == 1200
 
 
 def test_no_secret_values_are_exposed_in_validation_error(monkeypatch, tmp_path) -> None:

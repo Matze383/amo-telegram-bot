@@ -27,7 +27,7 @@ from amo_bot.current_info.models import (
     SearchResult,
     TaskSpec,
 )
-from amo_bot.current_info.observability import log_current_info_event, safe_error_message
+from amo_bot.current_info.observability import log_current_info_event, query_hash, safe_error_message
 from amo_bot.current_info.vector import EmbeddingProvider, build_embedding_provider_from_settings
 from amo_bot.evidence_intents import is_stock_listing_status_query
 
@@ -255,8 +255,24 @@ class GptResearcherProvider:
                     "OLLAMA_BASE_URL": self._config.ollama_base_url,
                 }
             ):
+                researcher_query = _gpt_researcher_query(request=request, task=task)
+                self._log_lifecycle(
+                    event="current_info.GptResearcherInput",
+                    stage="input",
+                    request=request,
+                    task=task,
+                    outcome="prepared",
+                    extra={
+                        **_research_report_metadata(report_type=report_type, config=self._config),
+                        **_research_query_diagnostics(
+                            user_task=task.query,
+                            researcher_query=researcher_query,
+                            current_time_context=_current_time_context_for_request(request),
+                        ),
+                    },
+                )
                 researcher = researcher_cls(
-                    query=_gpt_researcher_query(request=request, task=task),
+                    query=researcher_query,
                     report_type=report_type,
                     report_source="web",
                     config_path=config_path,
@@ -271,13 +287,17 @@ class GptResearcherProvider:
                     extra=_research_report_metadata(report_type=report_type, config=self._config),
                 )
                 await researcher.conduct_research()
+                conduct_sources = _call_optional(researcher, "get_source_urls") or ()
                 self._log_lifecycle(
                     event="current_info.GptResearcherLifecycle",
                     stage="conduct_research",
                     request=request,
                     task=task,
                     outcome="completed",
-                    extra=_research_report_metadata(report_type=report_type, config=self._config),
+                    extra={
+                        **_research_report_metadata(report_type=report_type, config=self._config),
+                        **_source_url_diagnostics(conduct_sources, prefix="post_conduct"),
+                    },
                 )
                 self._log_lifecycle(
                     event="current_info.GptResearcherLifecycle",
@@ -296,9 +316,46 @@ class GptResearcherProvider:
                     outcome="completed",
                     extra=_research_report_metadata(report_type=report_type, config=self._config),
                 )
-                sources = _call_optional(researcher, "get_source_urls") or ()
+                sources = _call_optional(researcher, "get_source_urls") or conduct_sources
+                self._log_lifecycle(
+                    event="current_info.GptResearcherDiagnostics",
+                    stage="source_urls",
+                    request=request,
+                    task=task,
+                    outcome="collected",
+                    extra=_source_url_diagnostics(sources),
+                )
                 source_docs = _call_optional(researcher, "get_research_sources") or ()
+                self._log_lifecycle(
+                    event="current_info.GptResearcherDiagnostics",
+                    stage="source_docs",
+                    request=request,
+                    task=task,
+                    outcome="collected",
+                    extra=_source_doc_diagnostics(source_docs),
+                )
                 context = _call_optional(researcher, "get_research_context") or ""
+                self._log_lifecycle(
+                    event="current_info.GptResearcherDiagnostics",
+                    stage="research_context",
+                    request=request,
+                    task=task,
+                    outcome="collected",
+                    extra=_research_context_diagnostics(context),
+                )
+                self._log_lifecycle(
+                    event="current_info.GptResearcherDiagnostics",
+                    stage="source_mapping",
+                    request=request,
+                    task=task,
+                    outcome="checked",
+                    reason_code=",".join(_source_mapping_warning_codes(sources=sources, source_docs=source_docs))
+                    or None,
+                    extra=_source_mapping_diagnostics(sources=sources, source_docs=source_docs),
+                    level=logging.WARNING
+                    if _source_mapping_warning_codes(sources=sources, source_docs=source_docs)
+                    else logging.INFO,
+                )
                 costs = _call_optional(researcher, "get_costs") or {}
         finally:
             try:
@@ -312,6 +369,9 @@ class GptResearcherProvider:
             "context": context,
             "costs": costs if isinstance(costs, dict) else {},
             "report_type": report_type,
+            "max_sources": self._config.max_sources,
+            "max_context_chars": self._config.max_context_chars,
+            "report_words": self._config.report_words,
             "deep_breadth": self._config.deep_breadth,
             "deep_depth": self._config.deep_depth,
             "deep_concurrency": self._config.deep_concurrency,
@@ -374,6 +434,7 @@ class GptResearcherProvider:
             "smart_llm": self._config.model_config.smart_llm,
             "strategic_llm": self._config.model_config.strategic_llm,
             "embedding": self._config.embedding,
+            "llm_call_visibility": "config_only_gpt_researcher_internal_calls",
         }
 
 
@@ -402,13 +463,13 @@ def build_gpt_researcher_provider_config_from_settings(settings: Any) -> GptRese
         enabled=bool(getattr(settings, "amo_gpt_researcher_enabled", False)),
         model_config=resolve_research_model_config(settings),
         searxng_url=str(getattr(settings, "amo_searxng_url", "") or "").strip().rstrip("/"),
-        timeout_seconds=float(getattr(settings, "amo_research_timeout_seconds", 300.0)),
-        max_sources=int(getattr(settings, "amo_research_max_sources", 8)),
-        max_context_chars=int(getattr(settings, "amo_research_max_context_chars", 12000)),
+        timeout_seconds=float(getattr(settings, "amo_research_timeout_seconds", 360.0)),
+        max_sources=int(getattr(settings, "amo_research_max_sources", 10)),
+        max_context_chars=int(getattr(settings, "amo_research_max_context_chars", 16000)),
         deep_breadth=int(getattr(settings, "amo_research_deep_breadth", 3)),
         deep_depth=int(getattr(settings, "amo_research_deep_depth", 2)),
         deep_concurrency=int(getattr(settings, "amo_research_deep_concurrency", 4)),
-        report_words=int(getattr(settings, "amo_research_report_words", 900)),
+        report_words=int(getattr(settings, "amo_research_report_words", 1200)),
         vector_collection=str(getattr(settings, "amo_research_vector_collection", "amo_gpt_researcher_chunks") or "amo_gpt_researcher_chunks"),
         ollama_base_url=str(getattr(settings, "ollama_base_url", "http://127.0.0.1:11434") or "http://127.0.0.1:11434"),
         ollama_num_ctx=int(getattr(settings, "ollama_thinking_budget_max_prompt_chars", 0) or 0) or None,
@@ -534,6 +595,223 @@ def _sync_pgvector_connection_url(database_url: str) -> str:
     if url.drivername == "postgresql+asyncpg":
         url = url.set(drivername="postgresql+psycopg")
     return url.render_as_string(hide_password=False)
+
+
+def _research_query_diagnostics(
+    *,
+    user_task: str,
+    researcher_query: str,
+    current_time_context: str,
+) -> dict[str, Any]:
+    user_task = " ".join((user_task or "").split()).strip()
+    researcher_query = str(researcher_query or "")
+    current_time_context = str(current_time_context or "")
+    return {
+        "user_task_hash": query_hash(user_task),
+        "user_task_length": len(user_task),
+        "researcher_task_hash": query_hash(researcher_query),
+        "researcher_task_length": len(researcher_query),
+        "task_augmented": researcher_query != user_task,
+        "current_time_context_length": len(current_time_context),
+        "date_context_present": bool(current_time_context.strip()),
+        "task_policy": "user_task_embedded_with_date_context",
+    }
+
+
+def _source_url_diagnostics(value: Any, *, prefix: str = "source") -> dict[str, Any]:
+    urls = _extract_source_urls(value)
+    safe_urls = tuple(_safe_log_url(url) for url in urls[:10])
+    return {
+        f"{prefix}_url_count": len(urls),
+        f"{prefix}_domains": tuple(dict.fromkeys(_host_from_url(url) for url in urls if _host_from_url(url)))[:10],
+        f"{prefix}_urls": safe_urls,
+        f"{prefix}_truncated": len(urls) > len(safe_urls),
+    }
+
+
+def _source_doc_diagnostics(source_docs: Any) -> dict[str, Any]:
+    summaries: list[dict[str, Any]] = []
+    seen_containers: set[int] = set()
+
+    def walk(item: Any) -> None:
+        if item is None or isinstance(item, str) or len(summaries) >= 20:
+            return
+        if isinstance(item, Mapping):
+            object_id = id(item)
+            if object_id in seen_containers:
+                return
+            seen_containers.add(object_id)
+            if _looks_like_source_doc(item):
+                summaries.append(_source_doc_item_summary(item))
+            for nested in item.values():
+                walk(nested)
+            return
+        if isinstance(item, (list, tuple, set, frozenset)):
+            object_id = id(item)
+            if object_id in seen_containers:
+                return
+            seen_containers.add(object_id)
+            for nested in item:
+                walk(nested)
+            return
+        if _looks_like_source_doc(item):
+            summaries.append(_source_doc_item_summary(item))
+
+    walk(source_docs)
+    fetched_urls = sorted(_fetched_source_urls(source_docs))
+    all_doc_urls = _extract_source_urls(source_docs)
+    content_buckets: dict[str, int] = {}
+    shape_counts: dict[str, int] = {}
+    fetched_like_count = 0
+    for summary in summaries:
+        bucket = str(summary.get("content_length_bucket") or "unknown")
+        content_buckets[bucket] = content_buckets.get(bucket, 0) + 1
+        shape = str(summary.get("shape") or "unknown")
+        shape_counts[shape] = shape_counts.get(shape, 0) + 1
+        if summary.get("fetched_like"):
+            fetched_like_count += 1
+    return {
+        "source_doc_container_count": _container_len(source_docs),
+        "source_doc_summary_count": len(summaries),
+        "source_doc_summary_truncated": len(summaries) >= 20,
+        "source_doc_shape_counts": shape_counts,
+        "source_doc_content_length_buckets": content_buckets,
+        "source_doc_fetched_like_count": fetched_like_count,
+        "source_doc_url_count": len(all_doc_urls),
+        "source_doc_domains": tuple(dict.fromkeys(_host_from_url(url) for url in all_doc_urls if _host_from_url(url)))[:10],
+        "source_doc_urls": tuple(_safe_log_url(url) for url in all_doc_urls[:10]),
+        "fetched_source_url_count": len(fetched_urls),
+        "fetched_source_domains": tuple(dict.fromkeys(_host_from_url(url) for url in fetched_urls if _host_from_url(url)))[:10],
+        "fetched_source_urls": tuple(_safe_log_url(url) for url in fetched_urls[:10]),
+    }
+
+
+def _looks_like_source_doc(item: Any) -> bool:
+    if _looks_like_fetched_document(item):
+        return True
+    return bool(_extract_source_urls(item))
+
+
+def _source_doc_item_summary(item: Any) -> dict[str, Any]:
+    urls = _extract_source_urls(item)
+    content_length = _source_doc_content_length(item)
+    if isinstance(item, Mapping):
+        keys = tuple(sorted(str(key) for key in item.keys()))[:12]
+        shape = "mapping"
+    else:
+        keys = tuple(
+            attr
+            for attr in ("raw_content", "page_content", "document", "html", "content", "text", "body", "metadata")
+            if hasattr(item, attr)
+        )
+        shape = type(item).__name__
+    return {
+        "shape": shape,
+        "keys": keys,
+        "url_count": len(urls),
+        "domains": tuple(dict.fromkeys(_host_from_url(url) for url in urls if _host_from_url(url)))[:5],
+        "content_length_bucket": _length_bucket(content_length),
+        "fetched_like": _looks_like_fetched_document(item),
+    }
+
+
+def _source_doc_content_length(item: Any) -> int:
+    fields = ("raw_content", "page_content", "document", "html", "content", "text", "body")
+    values: list[str] = []
+    if isinstance(item, Mapping):
+        for key in fields:
+            value = item.get(key)
+            if isinstance(value, str):
+                values.append(value)
+        return max((len(value) for value in values), default=0)
+    for attr in fields:
+        value = getattr(item, attr, None)
+        if isinstance(value, str):
+            values.append(value)
+    return max((len(value) for value in values), default=0)
+
+
+def _research_context_diagnostics(context: Any) -> dict[str, Any]:
+    context_text = _research_context_text(context)
+    urls = _extract_source_urls(context)
+    return {
+        "context_shape": _value_shape(context),
+        "context_chars": len(context_text),
+        "context_length_bucket": _length_bucket(len(context_text)),
+        "context_empty": not bool(context_text.strip()),
+        "context_url_count": len(urls),
+        "context_domains": tuple(dict.fromkeys(_host_from_url(url) for url in urls if _host_from_url(url)))[:10],
+        "context_urls": tuple(_safe_log_url(url) for url in urls[:10]),
+    }
+
+
+def _source_mapping_warning_codes(*, sources: Any, source_docs: Any) -> tuple[str, ...]:
+    source_urls = set(_extract_source_urls(sources))
+    fetched_urls = set(_fetched_source_urls(source_docs))
+    warnings: list[str] = []
+    if source_urls and not fetched_urls:
+        warnings.append("no_fetched_source_docs")
+    if source_urls - fetched_urls:
+        warnings.append("source_urls_without_fetched_docs")
+    if fetched_urls - source_urls:
+        warnings.append("fetched_docs_not_in_source_urls")
+    return tuple(warnings)
+
+
+def _source_mapping_diagnostics(*, sources: Any, source_docs: Any) -> dict[str, Any]:
+    source_urls = set(_extract_source_urls(sources))
+    fetched_urls = set(_fetched_source_urls(source_docs))
+    unfetched = sorted(source_urls - fetched_urls)
+    fetched_without_source = sorted(fetched_urls - source_urls)
+    return {
+        "source_url_count": len(source_urls),
+        "fetched_source_url_count": len(fetched_urls),
+        "unfetched_source_url_count": len(unfetched),
+        "fetched_without_source_url_count": len(fetched_without_source),
+        "unfetched_source_domains": tuple(dict.fromkeys(_host_from_url(url) for url in unfetched if _host_from_url(url)))[:10],
+        "fetched_without_source_domains": tuple(
+            dict.fromkeys(_host_from_url(url) for url in fetched_without_source if _host_from_url(url))
+        )[:10],
+        "unfetched_source_urls": tuple(_safe_log_url(url) for url in unfetched[:10]),
+        "fetched_without_source_urls": tuple(_safe_log_url(url) for url in fetched_without_source[:10]),
+    }
+
+
+def _safe_log_url(url: str) -> str:
+    try:
+        parsed = urlparse(url)
+    except Exception:
+        return ""
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return ""
+    path = parsed.path or ""
+    if len(path) > 160:
+        path = f"{path[:157]}..."
+    return parsed._replace(params="", query="", fragment="", path=path).geturl()
+
+
+def _length_bucket(length: int) -> str:
+    if length <= 0:
+        return "empty"
+    if length < 500:
+        return "lt_500"
+    if length < 2_000:
+        return "500_1999"
+    if length < 10_000:
+        return "2000_9999"
+    if length < 50_000:
+        return "10000_49999"
+    return "gte_50000"
+
+
+def _value_shape(value: Any) -> str:
+    if value is None:
+        return "none"
+    if isinstance(value, Mapping):
+        return "mapping"
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return type(value).__name__
+    return type(value).__name__
 
 
 def _gpt_researcher_query(*, request: CurrentInfoRequest, task: TaskSpec) -> str:
@@ -748,6 +1026,9 @@ def _research_result_to_answer(
             "deep_breadth": int(result.get("deep_breadth") or 0),
             "deep_depth": int(result.get("deep_depth") or 0),
             "deep_concurrency": int(result.get("deep_concurrency") or 0),
+            "max_sources": int(result.get("max_sources") or max_sources),
+            "max_context_chars": int(result.get("max_context_chars") or max_context_chars),
+            "report_words": int(result.get("report_words") or 0),
             "source_count": len(sources),
             "source_doc_count": _container_len(source_docs),
             "fetched_source_count": fetched_count,
@@ -851,6 +1132,11 @@ def _looks_like_fetched_document(item: Any) -> bool:
     if isinstance(item, Mapping):
         if any(str(item.get(key) or "").strip() for key in ("raw_content", "page_content", "document", "html")):
             return True
+        if (
+            any(str(item.get(key) or "").strip() for key in ("content", "text", "body"))
+            and _extract_fetched_document_source_urls(item)
+        ):
+            return True
         metadata = item.get("metadata")
         if isinstance(metadata, Mapping) and any(
             str(metadata.get(key) or "").strip().casefold() in {"scraped", "fetched", "browser", "webpage", "web_page"}
@@ -860,7 +1146,7 @@ def _looks_like_fetched_document(item: Any) -> bool:
         return bool(item.get("fetched") is True or item.get("scraped") is True)
     return any(
         str(getattr(item, attr, "") or "").strip()
-        for attr in ("raw_content", "page_content", "document", "html")
+        for attr in ("raw_content", "page_content", "document", "html", "content", "text", "body")
     )
 
 
@@ -963,7 +1249,7 @@ def _pgvector_embedding_id_notnull_remediation(exc: BaseException) -> str:
 
 
 _SOURCE_URL_KEYS = frozenset({"source", "url", "link", "href", "source_url"})
-_FETCHED_DOCUMENT_SOURCE_URL_KEYS = frozenset({"source", "url", "source_url"})
+_FETCHED_DOCUMENT_SOURCE_URL_KEYS = frozenset({"source", "url", "source_url", "link", "href"})
 
 
 def _extract_fetched_document_source_urls(value: Any) -> tuple[str, ...]:

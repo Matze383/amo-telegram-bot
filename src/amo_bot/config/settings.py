@@ -204,9 +204,9 @@ class Settings(BaseSettings):
     amo_research_fast_model: str = Field(default="", alias="AMO_RESEARCH_FAST_MODEL")
     amo_research_smart_model: str = Field(default="", alias="AMO_RESEARCH_SMART_MODEL")
     amo_research_strategic_model: str = Field(default="", alias="AMO_RESEARCH_STRATEGIC_MODEL")
-    amo_research_timeout_seconds: float = Field(default=300.0, alias="AMO_RESEARCH_TIMEOUT_SECONDS", gt=0, le=900)
-    amo_research_max_sources: int = Field(default=8, alias="AMO_RESEARCH_MAX_SOURCES", ge=1, le=25)
-    amo_research_max_context_chars: int = Field(default=12000, alias="AMO_RESEARCH_MAX_CONTEXT_CHARS", ge=1000, le=100000)
+    amo_research_timeout_seconds: float = Field(default=360.0, alias="AMO_RESEARCH_TIMEOUT_SECONDS", gt=0, le=900)
+    amo_research_max_sources: int = Field(default=10, alias="AMO_RESEARCH_MAX_SOURCES", ge=1, le=25)
+    amo_research_max_context_chars: int = Field(default=16000, alias="AMO_RESEARCH_MAX_CONTEXT_CHARS", ge=1000, le=100000)
     amo_research_deep_breadth: int = Field(default=3, alias="AMO_RESEARCH_DEEP_BREADTH", ge=1, le=10)
     amo_research_deep_depth: int = Field(default=2, alias="AMO_RESEARCH_DEEP_DEPTH", ge=1, le=10)
     amo_research_deep_concurrency: int = Field(default=4, alias="AMO_RESEARCH_DEEP_CONCURRENCY", ge=1, le=20)
@@ -214,7 +214,7 @@ class Settings(BaseSettings):
         default="amo_gpt_researcher_chunks",
         alias="AMO_RESEARCH_VECTOR_COLLECTION",
     )
-    amo_research_report_words: int = Field(default=900, alias="AMO_RESEARCH_REPORT_WORDS", ge=200, le=5000)
+    amo_research_report_words: int = Field(default=1200, alias="AMO_RESEARCH_REPORT_WORDS", ge=200, le=5000)
     amo_vector_enabled: bool = Field(default=False, alias="AMO_VECTOR_ENABLED")
     amo_vector_provider: str = Field(default="postgres", alias="AMO_VECTOR_PROVIDER")
     amo_vector_url: str = Field(default="", validation_alias=AliasChoices("AMO_VECTOR_URL", "QDRANT_URL"))

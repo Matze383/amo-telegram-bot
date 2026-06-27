@@ -258,6 +258,7 @@ _FINANCE_QUERY_STOPWORDS = {
     "der",
     "die",
     "exchange",
+    "is",
     "ist",
     "kann",
     "kaufen",
@@ -265,8 +266,11 @@ _FINANCE_QUERY_STOPWORDS = {
     "man",
     "nasdaq",
     "nyse",
+    "on",
     "stock",
     "ticker",
+    "publicly",
+    "traded",
 }
 _ENTITY_COMPANY_FOLLOWERS = {
     "ag",
@@ -299,6 +303,8 @@ def _all_finance_listing_chunks_entity_mismatch(query: str, chunks: tuple[Eviden
     subject_tokens = _finance_query_subject_tokens(query)
     if len(subject_tokens) != 1:
         return False
+    if finance_listing_parent_support(query, chunks):
+        return False
     target = subject_tokens[0]
     saw_listing_evidence = False
     saw_matching_entity = False
@@ -322,6 +328,112 @@ def _finance_query_subject_tokens(query: str) -> tuple[str, ...]:
             continue
         tokens.append(normalized)
     return tuple(dict.fromkeys(tokens[:4]))
+
+
+_PARENT_RELATION_MARKERS_RE = re.compile(
+    r"\b(?:"
+    r"part\s+of|subsidiary\s+of|brand\s+of|owned\s+by|parent\s+company\s+of|owns|owner\s+of|"
+    r"geh[oö]rt\s+zu(?:m|r)?|teil\s+von|tochter(?:gesellschaft)?\s+von|marke\s+von|"
+    r"muttergesellschaft\s+von|mutter\s+von|mutter"
+    r")\b",
+    re.IGNORECASE,
+)
+_PARENT_CANDIDATE_STOPWORDS = {
+    "aktie",
+    "automobilhersteller",
+    "company",
+    "corp",
+    "corporation",
+    "der",
+    "des",
+    "die",
+    "inc",
+    "konzern",
+    "konzerns",
+    "mutter",
+    "muttergesellschaft",
+    "owner",
+    "parent",
+    "plc",
+    "sa",
+    "se",
+    "teil",
+    "the",
+}
+_PARENT_LEGAL_SUFFIX_RE = re.compile(
+    r"\s+(?:ag|corp(?:oration)?|group|inc(?:orporated)?|konzerns?|ltd|n\.?\s*v\.?|plc|s\.?\s*a\.?|se)$",
+    re.IGNORECASE,
+)
+
+
+def finance_listing_parent_support(query: str, chunks: tuple[EvidenceChunk, ...]) -> tuple[str, ...]:
+    """Return parent names that bridge a subsidiary/brand query to listing evidence."""
+
+    subject_tokens = _finance_query_subject_tokens(query)
+    if len(subject_tokens) != 1:
+        return ()
+    target = subject_tokens[0]
+    parent_names: list[str] = []
+    for chunk in chunks:
+        text = " ".join((chunk.source_title or "", chunk.text or "")).strip()
+        if text and target in text.casefold() and _PARENT_RELATION_MARKERS_RE.search(text):
+            for candidate in _parent_company_candidates(text, target=target):
+                if candidate not in parent_names:
+                    parent_names.append(candidate)
+
+    supported: list[str] = []
+    for parent_name in parent_names:
+        parent_key = parent_name.casefold()
+        for chunk in chunks:
+            text = " ".join((chunk.source_title or "", chunk.text or "")).casefold()
+            if parent_key in text and _has_finance_listing_indicator(text):
+                supported.append(parent_name)
+                break
+    return tuple(dict.fromkeys(supported))
+
+
+def _parent_company_candidates(text: str, *, target: str) -> tuple[str, ...]:
+    candidates: list[str] = []
+    for raw in re.findall(
+        r"\b[A-ZÄÖÜ][A-Za-zÄÖÜäöüß0-9&.-]{2,}"
+        r"(?:\s+(?:AG|Corp\.?|Corporation|Group|Inc\.?|Konzern|Ltd\.?|N\.?\s*V\.?|PLC|S\.?\s*A\.?|SE))?",
+        text,
+    ):
+        candidate = _normalize_parent_candidate(raw, target=target)
+        if candidate and candidate not in candidates:
+            candidates.append(candidate)
+
+    lowered = text.casefold()
+    patterns = (
+        rf"\b{re.escape(target)}\s*-\s*mutter\s+([a-z0-9][a-z0-9&.-]{{2,}})",
+        rf"\b{re.escape(target)}\b.{{0,80}}\b"
+        r"(?:part\s+of|subsidiary\s+of|brand\s+of|owned\s+by|geh[oö]rt\s+zu(?:m|r)?|"
+        r"teil\s+von|tochter(?:gesellschaft)?\s+von|marke\s+von)\b\s+"
+        r"(?:der|die|dem|den|des|the|a|an|zum|zur|to|of)?\s*"
+        r"([a-z0-9][a-z0-9&.-]{2,})",
+        r"\b([a-z0-9][a-z0-9&.-]{2,})\b.{0,60}\b"
+        r"(?:parent\s+company\s+of|owns|owner\s+of|muttergesellschaft\s+von|mutter\s+von)\b"
+        rf".{{0,30}}\b{re.escape(target)}\b",
+    )
+    for pattern in patterns:
+        for match in re.finditer(pattern, lowered, re.IGNORECASE):
+            candidate = _normalize_parent_candidate(match.group(1), target=target)
+            if candidate and candidate not in candidates:
+                candidates.append(candidate)
+    return tuple(candidates)
+
+
+def _normalize_parent_candidate(raw: str, *, target: str) -> str:
+    candidate = re.sub(r"[-_/]+(?:group|konzerns?)$", "", (raw or "").strip(" .,:;()[]{}"), flags=re.IGNORECASE)
+    candidate = _PARENT_LEGAL_SUFFIX_RE.sub("", candidate).strip(" .,:;()[]{}")
+    if not candidate:
+        return ""
+    candidate_key = candidate.casefold()
+    if target in candidate_key or candidate_key in _PARENT_CANDIDATE_STOPWORDS:
+        return ""
+    if len(candidate_key) < 3:
+        return ""
+    return candidate[:1].upper() + candidate[1:]
 
 
 def _has_finance_listing_indicator(text: str) -> bool:

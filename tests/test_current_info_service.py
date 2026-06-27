@@ -459,7 +459,7 @@ def test_current_info_service_routes_finance_listing_queries_to_listing_evidence
         assert "finance_listing_requires_verified_sources" in answer.warnings
         assert [call.query for call in search_provider.calls] == [
             query,
-            f"{query} public listing ticker exchange derivative sources",
+            f"{query} public listing ticker exchange derivative parent company publicly traded sources",
         ]
 
 
@@ -511,7 +511,7 @@ def test_current_info_service_fetches_user_provided_url_for_spacex_ipo_question(
     assert fetch_provider.calls == [(url, "de")]
     assert [call.query for call in search_provider.calls] == [
         query,
-        f"{query} public listing ticker exchange derivative sources",
+        f"{query} public listing ticker exchange derivative parent company publicly traded sources",
     ]
 
 
@@ -608,7 +608,7 @@ def test_current_info_service_blocks_single_source_anthropic_listing_from_fetche
     assert answer.metadata["reason"] == "needs_independent_source"
     assert [call.query for call in search_provider.calls] == [
         query,
-        f"{query} public listing ticker exchange derivative sources",
+        f"{query} public listing ticker exchange derivative parent company publicly traded sources",
     ]
 
 
@@ -781,7 +781,7 @@ def test_current_info_service_answers_spacex_not_public_with_two_verified_source
     assert "no SpaceX public ticker entry" in answer.answer_text
     assert [call.query for call in search_provider.calls] == [
         query,
-        f"{query} public listing ticker exchange derivative sources",
+        f"{query} public listing ticker exchange derivative parent company publicly traded sources",
     ]
 
 
@@ -844,6 +844,144 @@ def test_current_info_service_answers_siemens_listing_from_wkn_and_ticker_withou
     assert "WKN 723610" in answer.answer_text
     assert "Ticker SIE" in answer.answer_text
     assert "aktuelle Kurse" not in answer.answer_text
+
+
+def test_current_info_service_answers_subsidiary_listing_via_public_parent_without_hardcoding():
+    parent_context = SearchResult(
+        title="Automobilindustrie: Opel Zahlen und Konzernumbau",
+        url="https://news.example/unternehmen/stellantis-opel-zahlen",
+        provider="fake_search",
+        rank=1,
+        host="news.example",
+        metadata={"source_type": "News"},
+    )
+    market_data = SearchResult(
+        title="Stellantis Aktie - Ticker STLA",
+        url="https://markets.example/aktien/stellantis-aktie",
+        provider="fake_search",
+        rank=2,
+        host="markets.example",
+        metadata={"source_type": "MarketData"},
+    )
+    documents = {
+        parent_context.url: FetchedDocument(
+            url=parent_context.url,
+            title=parent_context.title,
+            text="Opel ist Teil des Stellantis-Konzerns. Stellantis ist die Muttergesellschaft von Opel.",
+            provider="fake_fetch",
+        ),
+        market_data.url: FetchedDocument(
+            url=market_data.url,
+            title=market_data.title,
+            text="Stellantis Aktie mit Ticker STLA ist an einer Börse handelbar.",
+            provider="fake_fetch",
+        ),
+    }
+    chunks = (
+        EvidenceChunk(
+            text=documents[parent_context.url].text,
+            source_url=parent_context.url,
+            source_title=parent_context.title,
+            metadata={"claim_key": "opel_parent", "claim_value": "stellantis"},
+        ),
+        EvidenceChunk(
+            text=documents[market_data.url].text,
+            source_url=market_data.url,
+            source_title=market_data.title,
+            metadata={"claim_key": "stellantis_listing", "claim_value": "listed"},
+        ),
+    )
+    query = "Ist Opel börsennotiert?"
+    search_provider = _FakeSearchProvider((parent_context, market_data))
+    service = CurrentInfoService(
+        search_provider=search_provider,
+        fetch_provider=_FakeFetchProvider(documents),
+        retrieval_provider=_FakeRetrievalProvider(chunks),
+    )
+
+    answer = service.answer(CurrentInfoRequest(query=query, locale="de", domain_hint="stock", max_results=3))
+
+    assert answer.status == "answered"
+    assert answer.sources == (parent_context.url, market_data.url)
+    assert "irrelevant_source" not in answer.warnings
+    assert "finance_listing_requires_verified_sources" not in answer.warnings
+    assert answer.answer_text.startswith("Nein, eine eigene Börsennotierung von Opel")
+    assert "Opel gehört zu Stellantis" in answer.answer_text
+    assert "Stellantis ist börsennotiert" in answer.answer_text
+    assert "Ticker STLA" in answer.answer_text
+    assert [call.query for call in search_provider.calls] == [
+        query,
+        f"{query} public listing ticker exchange derivative parent company publicly traded sources",
+    ]
+
+
+def test_current_info_service_answers_english_subsidiary_listing_via_public_parent():
+    parent_context = SearchResult(
+        title="Opel and Stellantis overview",
+        url="https://news.example/companies/opel-stellantis",
+        provider="fake_search",
+        rank=1,
+        host="news.example",
+        metadata={"source_type": "News"},
+    )
+    market_data = SearchResult(
+        title="Stellantis ticker STLA",
+        url="https://markets.example/stocks/stla",
+        provider="fake_search",
+        rank=2,
+        host="markets.example",
+        metadata={"source_type": "MarketData"},
+    )
+    documents = {
+        parent_context.url: FetchedDocument(
+            url=parent_context.url,
+            title=parent_context.title,
+            text="Opel is a brand of Stellantis. Stellantis is the parent company of Opel.",
+            provider="fake_fetch",
+        ),
+        market_data.url: FetchedDocument(
+            url=market_data.url,
+            title=market_data.title,
+            text="Stellantis stock is publicly traded under ticker STLA on a stock exchange.",
+            provider="fake_fetch",
+        ),
+    }
+    chunks = (
+        EvidenceChunk(
+            text=documents[parent_context.url].text,
+            source_url=parent_context.url,
+            source_title=parent_context.title,
+            metadata={"claim_key": "opel_parent", "claim_value": "stellantis"},
+        ),
+        EvidenceChunk(
+            text=documents[market_data.url].text,
+            source_url=market_data.url,
+            source_title=market_data.title,
+            metadata={"claim_key": "stellantis_listing", "claim_value": "listed"},
+        ),
+    )
+    query = "Is Opel publicly listed?"
+    search_provider = _FakeSearchProvider((parent_context, market_data))
+    service = CurrentInfoService(
+        search_provider=search_provider,
+        fetch_provider=_FakeFetchProvider(documents),
+        retrieval_provider=_FakeRetrievalProvider(chunks),
+    )
+
+    answer = service.answer(CurrentInfoRequest(query=query, locale="en", domain_hint="stock", max_results=3))
+
+    assert answer.status == "answered"
+    assert answer.sources == (parent_context.url, market_data.url)
+    assert "finance_listing_requires_verified_sources" not in answer.warnings
+    assert answer.answer_text.startswith("No separate public listing for Opel")
+    assert "Opel is part of Stellantis" in answer.answer_text
+    assert "Stellantis is publicly listed" in answer.answer_text
+    assert "Yes, checked sources indicate Opel is publicly listed" not in answer.answer_text
+    assert "Ticker STLA" in answer.answer_text
+    assert [call.query for call in search_provider.calls] == [
+        query,
+        f"{query} public listing ticker exchange derivative parent company publicly traded sources",
+    ]
 
 
 def test_current_info_service_answers_finance_research_with_mixed_strong_and_weak_sources():
@@ -1105,7 +1243,7 @@ def test_current_info_service_routes_derivative_exchange_queries_as_crypto_listi
     assert answer.metadata["reason"] == "needs_independent_source"
     assert [call.query for call in search_provider.calls] == [
         query,
-        f"{query} public listing ticker exchange derivative sources",
+        f"{query} public listing ticker exchange derivative parent company publicly traded sources",
     ]
 
 
@@ -1266,7 +1404,7 @@ def test_current_info_service_blocks_single_source_finance_listing_claims_with_w
         _SearchCall(
             query=(
                 "Ist SpaceX börsennotiert oder ist SPCXUSDT auf Bybit ein Derivat? "
-                "public listing ticker exchange derivative sources"
+                "public listing ticker exchange derivative parent company publicly traded sources"
             ),
             locale="de",
             max_results=3,
@@ -1903,6 +2041,173 @@ def test_current_info_service_gpt_researcher_required_does_not_fallback_after_re
     assert answer.warnings == ("gpt_researcher_timeout",)
     assert len(research_provider.calls) == 1
     assert search_provider.calls == []
+
+
+def test_current_info_service_webresearch_insufficient_result_fails_closed_without_standard_search():
+    parent_context = SearchResult(
+        title="Opel and Stellantis overview",
+        url="https://news.example/opel-stellantis",
+        provider="fake_search",
+        rank=1,
+        host="news.example",
+    )
+    market_data = SearchResult(
+        title="Stellantis ticker STLA",
+        url="https://markets.example/stla",
+        provider="fake_search",
+        rank=2,
+        host="markets.example",
+    )
+    documents = {
+        parent_context.url: FetchedDocument(
+            url=parent_context.url,
+            title=parent_context.title,
+            text="Opel is a brand of Stellantis. Stellantis is the parent company of Opel.",
+        ),
+        market_data.url: FetchedDocument(
+            url=market_data.url,
+            title=market_data.title,
+            text="Stellantis stock is publicly traded under ticker STLA on a stock exchange.",
+        ),
+    }
+    chunks = (
+        EvidenceChunk(text=documents[parent_context.url].text, source_url=parent_context.url, source_title=parent_context.title),
+        EvidenceChunk(text=documents[market_data.url].text, source_url=market_data.url, source_title=market_data.title),
+    )
+
+    for status, warnings in (
+        ("empty_evidence", ("empty_evidence",)),
+        ("unverified_evidence", ("snippet_only_evidence",)),
+    ):
+        research_provider = _FakeResearchProvider(
+            CurrentInfoAnswer(
+                status=status,
+                answer_text="Deep research found only source URLs.",
+                sources=("https://research.example/stellantis-opel",),
+                warnings=warnings,
+                metadata={
+                    "provider_mode": "gpt_researcher",
+                    "research_report_type": "deep_research",
+                    "deep_research": True,
+                    "source_count": 1,
+                    "fetched_source_count": 0,
+                    "snippet_only_source_count": 1,
+                },
+            )
+        )
+        search_provider = _FakeSearchProvider((parent_context, market_data))
+        service = CurrentInfoService(
+            search_provider=search_provider,
+            fetch_provider=_FakeFetchProvider(documents),
+            retrieval_provider=_FakeRetrievalProvider(chunks),
+            research_provider=research_provider,
+        )
+
+        answer = service.answer(
+            CurrentInfoRequest(
+                query="Ist Opel börsennotiert?",
+                locale="de",
+                domain_hint="stock",
+                metadata={"capability": "webresearch", "research_report_type": "deep_research"},
+            )
+        )
+
+        assert answer.status == status
+        assert answer.answer_text == "Deep research found only source URLs."
+        assert answer.warnings == warnings
+        assert answer.metadata["provider_mode"] == "gpt_researcher"
+        assert answer.metadata["research_report_type"] == "deep_research"
+        assert len(research_provider.calls) == 1
+        assert search_provider.calls == []
+
+
+def test_current_info_service_retries_empty_standard_search_with_deep_research_once():
+    research_provider = _FakeResearchProvider(
+        CurrentInfoAnswer(
+            status="answered",
+            answer_text="Deep research answer",
+            sources=("https://research.example/source",),
+            metadata={"provider_mode": "gpt_researcher", "research_report_type": "deep_research"},
+        )
+    )
+    search_provider = _FakeSearchProvider(())
+    service = CurrentInfoService(search_provider=search_provider, research_provider=research_provider)
+
+    answer = service.answer(CurrentInfoRequest(query="Ist ExampleCorp aktuell börsennotiert?", locale="de"))
+
+    assert answer.status == "answered"
+    assert answer.answer_text == "Deep research answer"
+    assert answer.metadata["deep_research_fallback_used"] is True
+    assert answer.metadata["deep_research_fallback_from_status"] == "empty_result"
+    assert len(research_provider.calls) == 1
+    retry_request, _, _ = research_provider.calls[0]
+    assert retry_request.metadata["deep_research"] is True
+    assert retry_request.metadata["gpt_researcher_report_type"] == "deep_research"
+    assert retry_request.metadata["deep_research_fallback_reason"] == "empty_search_result"
+    assert search_provider.calls
+
+
+def test_current_info_service_retries_unverified_finance_listing_with_deep_research():
+    result = SearchResult(
+        title="Example profile",
+        url="https://profile.example/company",
+        snippet="Example GmbH is privately held.",
+        provider="fake_search",
+        rank=1,
+        host="profile.example",
+    )
+    document = FetchedDocument(
+        url=result.url,
+        title=result.title,
+        text="Example GmbH is privately held and does not have a public stock ticker.",
+    )
+    chunk = EvidenceChunk(text=document.text, source_url=result.url, source_title=result.title)
+    research_provider = _FakeResearchProvider(
+        CurrentInfoAnswer(
+            status="answered",
+            answer_text="Deep research verified that Example GmbH is not separately listed.",
+            sources=("https://research.example/example-gmbh",),
+            metadata={"provider_mode": "gpt_researcher"},
+        )
+    )
+    service = CurrentInfoService(
+        search_provider=_FakeSearchProvider((result,)),
+        fetch_provider=_FakeFetchProvider({result.url: document}),
+        retrieval_provider=_FakeRetrievalProvider((chunk,)),
+        research_provider=research_provider,
+    )
+
+    answer = service.answer(CurrentInfoRequest(query="Ist Example GmbH an der Börse?", locale="de", domain_hint="stock"))
+
+    assert answer.status == "answered"
+    assert "not separately listed" in answer.answer_text
+    assert answer.metadata["deep_research_fallback_used"] is True
+    assert answer.metadata["deep_research_fallback_from_status"] == "unverified_evidence"
+    assert len(research_provider.calls) == 1
+    retry_request, _, _ = research_provider.calls[0]
+    assert retry_request.metadata["deep_research"] is True
+    assert retry_request.metadata["capability"] == "webresearch"
+    assert retry_request.metadata["deep_research_fallback_reason"] == "needs_independent_source"
+
+
+def test_current_info_service_keeps_original_fail_closed_answer_when_deep_research_retry_fails():
+    research_provider = _FakeResearchProvider(
+        CurrentInfoAnswer(
+            status="provider_unavailable",
+            warnings=("gpt_researcher_timeout",),
+            metadata={"provider_mode": "gpt_researcher"},
+        )
+    )
+    service = CurrentInfoService(search_provider=_FakeSearchProvider(()), research_provider=research_provider)
+
+    answer = service.answer(CurrentInfoRequest(query="latest ExampleCorp listing status", locale="en"))
+
+    assert answer.status == "empty_result"
+    assert answer.warnings == ("empty_search_result",)
+    assert answer.metadata["deep_research_fallback_attempted"] is True
+    assert answer.metadata["deep_research_fallback_status"] == "provider_unavailable"
+    assert answer.metadata["deep_research_fallback_warnings"] == ("gpt_researcher_timeout",)
+    assert len(research_provider.calls) == 1
 
 
 def test_current_info_service_reports_empty_result_from_fake_provider():

@@ -173,14 +173,14 @@ OFFSET_STATE_FILE=.state/offset.json
 # AMO_RESEARCH_FAST_MODEL=
 # AMO_RESEARCH_SMART_MODEL=
 # AMO_RESEARCH_STRATEGIC_MODEL=
-# AMO_RESEARCH_MAX_SOURCES=8  # allowed: 1 to 25
-# AMO_RESEARCH_MAX_CONTEXT_CHARS=12000  # allowed: 1000 to 100000
+# AMO_RESEARCH_MAX_SOURCES=10  # allowed: 1 to 25
+# AMO_RESEARCH_MAX_CONTEXT_CHARS=16000  # allowed: 1000 to 100000
 # AMO_RESEARCH_DEEP_BREADTH=3  # allowed: 1 to 10
 # AMO_RESEARCH_DEEP_DEPTH=2  # allowed: 1 to 10
 # AMO_RESEARCH_DEEP_CONCURRENCY=4  # allowed: 1 to 20
 # AMO_RESEARCH_VECTOR_COLLECTION=amo_gpt_researcher_chunks
-# AMO_RESEARCH_REPORT_WORDS=900  # allowed: 200 to 5000
-# AMO_RESEARCH_TIMEOUT_SECONDS=300  # allowed: >0 to 900
+# AMO_RESEARCH_REPORT_WORDS=1200  # allowed: 200 to 5000
+# AMO_RESEARCH_TIMEOUT_SECONDS=360  # allowed: >0 to 900
 # Note: Questions about current external facts are checked through Current-Info
 # before the normal AI answer. If Current-Info is unavailable, the bot responds
 # with an uncertainty message instead of guessing from training knowledge.

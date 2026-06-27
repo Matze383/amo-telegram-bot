@@ -173,14 +173,14 @@ OFFSET_STATE_FILE=.state/offset.json
 # AMO_RESEARCH_FAST_MODEL=
 # AMO_RESEARCH_SMART_MODEL=
 # AMO_RESEARCH_STRATEGIC_MODEL=
-# AMO_RESEARCH_MAX_SOURCES=8  # zulässig: 1 bis 25
-# AMO_RESEARCH_MAX_CONTEXT_CHARS=12000  # zulässig: 1000 bis 100000
+# AMO_RESEARCH_MAX_SOURCES=10  # zulässig: 1 bis 25
+# AMO_RESEARCH_MAX_CONTEXT_CHARS=16000  # zulässig: 1000 bis 100000
 # AMO_RESEARCH_DEEP_BREADTH=3  # zulässig: 1 bis 10
 # AMO_RESEARCH_DEEP_DEPTH=2  # zulässig: 1 bis 10
 # AMO_RESEARCH_DEEP_CONCURRENCY=4  # zulässig: 1 bis 20
 # AMO_RESEARCH_VECTOR_COLLECTION=amo_gpt_researcher_chunks
-# AMO_RESEARCH_REPORT_WORDS=900  # zulässig: 200 bis 5000
-# AMO_RESEARCH_TIMEOUT_SECONDS=300  # zulässig: >0 bis 900
+# AMO_RESEARCH_REPORT_WORDS=1200  # zulässig: 200 bis 5000
+# AMO_RESEARCH_TIMEOUT_SECONDS=360  # zulässig: >0 bis 900
 # Hinweis: Fragen zu aktuellen externen Fakten werden vor der normalen KI-Antwort
 # über Current-Info geprüft. Ist Current-Info nicht verfügbar, antwortet der Bot
 # bewusst mit einer Unsicherheitsmeldung statt mit Trainingswissen zu raten.

@@ -182,6 +182,28 @@ class _SnippetOnlyListingConflictResearcher:
         ]
 
 
+class _ContentSourceResearcher:
+    def __init__(self, **kwargs) -> None:
+        self.kwargs = kwargs
+
+    async def conduct_research(self) -> None:
+        self.conducted = True
+
+    async def write_report(self) -> str:
+        return "Opel is part of Stellantis; Stellantis shares trade under ticker STLA."
+
+    def get_source_urls(self) -> tuple[str, ...]:
+        return ("https://research.example/stellantis-opel",)
+
+    def get_research_sources(self) -> tuple[dict[str, object], ...]:
+        return (
+            {
+                "link": "https://research.example/stellantis-opel",
+                "content": "Opel is part of Stellantis; Stellantis shares trade under ticker STLA. " * 20,
+            },
+        )
+
+
 class _ObjectDoc:
     def __init__(self, page_content: str, metadata: dict[str, object]) -> None:
         self.page_content = page_content
@@ -434,20 +456,39 @@ def test_gpt_researcher_provider_maps_report_sources_and_ollama_config(monkeypat
     assert instance.config["EMBEDDING"] == "ollama:nomic-embed-text-v2-moe:latest"
     assert instance.config["LLM_KWARGS"] == {"num_ctx": 8192, "verbose": False}
     assert "current_info.GptResearcherConfigured" in caplog.text
+    assert "current_info.GptResearcherInput" in caplog.text
     assert "current_info.GptResearcherLifecycle" in caplog.text
+    assert "current_info.GptResearcherDiagnostics" in caplog.text
     assert "'stage': 'configured'" in caplog.text
+    assert "'stage': 'input'" in caplog.text
     assert "'stage': 'conduct_research'" in caplog.text
     assert "'stage': 'write_report'" in caplog.text
+    assert "'stage': 'source_urls'" in caplog.text
+    assert "'stage': 'source_docs'" in caplog.text
+    assert "'stage': 'research_context'" in caplog.text
+    assert "'stage': 'source_mapping'" in caplog.text
+    assert "'user_task_length': 16" in caplog.text
+    assert "'task_augmented': True" in caplog.text
+    assert "'source_url_count': 2" in caplog.text
+    assert "'source_doc_fetched_like_count': 1" in caplog.text
+    assert "'context_chars': 38" in caplog.text
+    assert "'unfetched_source_url_count': 1" in caplog.text
     assert "'fast_llm': 'ollama:fast-model'" in caplog.text
     assert "'smart_llm': 'ollama:smart-model'" in caplog.text
     assert "'strategic_llm': 'ollama:strategic-model'" in caplog.text
     assert "'embedding': 'ollama:nomic-embed-text-v2-moe:latest'" in caplog.text
+    assert "'llm_call_visibility': 'config_only_gpt_researcher_internal_calls'" in caplog.text
     assert "'report_type': 'research_report'" in caplog.text
+    assert "Current date/time context for this research run" not in caplog.text
+    assert "Date handling:" not in caplog.text
     assert answer.metadata["research_report_type"] == "research_report"
     assert answer.metadata["deep_research"] is False
     assert answer.metadata["deep_breadth"] == 2
     assert answer.metadata["deep_depth"] == 2
     assert answer.metadata["deep_concurrency"] == 2
+    assert answer.metadata["max_sources"] == 2
+    assert answer.metadata["max_context_chars"] == 500
+    assert answer.metadata["report_words"] == 700
 
 
 def test_gpt_researcher_provider_uses_deep_research_report_type_from_metadata(caplog) -> None:
@@ -473,6 +514,7 @@ def test_gpt_researcher_provider_uses_deep_research_report_type_from_metadata(ca
     assert answer.metadata["deep_research"] is True
     assert answer.metadata["deep_breadth"] == 1
     assert answer.metadata["deep_depth"] == 1
+    assert answer.metadata["max_sources"] == 2
     assert answer.metadata["deep_concurrency"] == 1
     assert "'report_type': 'deep_research'" in caplog.text
     assert "'deep_breadth': 1" in caplog.text
@@ -557,6 +599,26 @@ def test_gpt_researcher_snippet_only_sources_are_not_marked_fetched(caplog) -> N
     assert {source.quality_label for source in answer.evidence.sources} == {"snippet_only"}
     assert "current_info.GptResearcherEvidenceQuality" in caplog.text
     assert "snippet_only_source_count" in caplog.text
+    assert "no_fetched_source_docs" in caplog.text
+    assert "source_urls_without_fetched_docs" in caplog.text
+
+
+def test_gpt_researcher_content_source_docs_count_as_fetched() -> None:
+    request, task, query_plan = _research_request_parts("Ist Opel börsennotiert?")
+
+    answer = _provider_for_researcher(_ContentSourceResearcher).answer(
+        request=request,
+        task=task,
+        query_plan=query_plan,
+    )
+
+    assert answer.status == "answered"
+    assert answer.metadata["fetched_source_count"] == 1
+    assert answer.metadata["snippet_only_source_count"] == 0
+    assert answer.metadata["evidence_quality"] == "fetched"
+    assert "snippet_only_evidence" not in answer.warnings
+    assert answer.evidence is not None
+    assert answer.evidence.sources[0].fetched is True
 
 
 def test_gpt_researcher_listing_conflict_yields_uncertain_verdict() -> None:

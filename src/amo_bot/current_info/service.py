@@ -16,7 +16,7 @@ from amo_bot.current_info.candidates import (
     classify_source_type,
     normalize_dedupe_and_rank_search_results,
 )
-from amo_bot.current_info.evidence import assemble_evidence_package
+from amo_bot.current_info.evidence import assemble_evidence_package, finance_listing_parent_support
 from amo_bot.evidence_intents import is_finance_listing_query
 from amo_bot.current_info.models import (
     CurrentInfoAnswer,
@@ -237,7 +237,17 @@ class CurrentInfoService:
 
         if _is_webresearch_request(request) and self._research_provider is not None:
             research_answer = self._research_provider.answer(request=request, task=task, query_plan=query_plan)
-            if research_answer.answered or research_answer.status in {"empty_evidence", "unverified_evidence"}:
+            if research_answer.answered:
+                self._log_synthesis(
+                    request=request,
+                    task=task,
+                    started=started,
+                    status=research_answer.status,
+                    budget=budget,
+                    reason_code="gpt_researcher",
+                )
+                return research_answer
+            if research_answer.status in {"empty_evidence", "unverified_evidence"}:
                 self._log_synthesis(
                     request=request,
                     task=task,
@@ -345,15 +355,7 @@ class CurrentInfoService:
         search_results = search_response.results
         search_bundle = SearchBundle(query_plan=query_plan, results=search_results, metrics=search_response.metrics)
         if not search_results:
-            self._log_synthesis(
-                request=request,
-                task=task,
-                started=started,
-                status="empty_result",
-                budget=budget,
-                reason_code="empty_search_result",
-            )
-            return CurrentInfoAnswer(
+            preliminary = CurrentInfoAnswer(
                 status="empty_result",
                 request=request,
                 task=task,
@@ -362,6 +364,25 @@ class CurrentInfoService:
                 warnings=("empty_search_result",),
                 metadata=self._debug_metadata(budget),
             )
+            fallback = self._maybe_deep_research_fallback(
+                preliminary,
+                request=request,
+                task=task,
+                query_plan=query_plan,
+                started=started,
+                budget=budget,
+            )
+            if fallback is not None:
+                return fallback
+            self._log_synthesis(
+                request=request,
+                task=task,
+                started=started,
+                status="empty_result",
+                budget=budget,
+                reason_code="empty_search_result",
+            )
+            return preliminary
 
         documents = self._fetch_documents(search_results, request=request, budget=budget)
         chunks = self._retrieval_provider.retrieve(
@@ -401,15 +422,7 @@ class CurrentInfoService:
             },
         )
         if not chunks:
-            self._log_synthesis(
-                request=request,
-                task=task,
-                started=started,
-                status="empty_evidence",
-                budget=budget,
-                reason_code="empty_evidence",
-            )
-            return CurrentInfoAnswer(
+            preliminary = CurrentInfoAnswer(
                 status="empty_evidence",
                 request=request,
                 task=task,
@@ -421,16 +434,27 @@ class CurrentInfoService:
                 confidence=evidence.confidence,
                 metadata=self._debug_metadata(budget),
             )
-        if "snippet_only_evidence" in evidence.warnings:
+            fallback = self._maybe_deep_research_fallback(
+                preliminary,
+                request=request,
+                task=task,
+                query_plan=query_plan,
+                started=started,
+                budget=budget,
+            )
+            if fallback is not None:
+                return fallback
             self._log_synthesis(
                 request=request,
                 task=task,
                 started=started,
-                status="unverified_evidence",
+                status="empty_evidence",
                 budget=budget,
-                reason_code="snippet_only_evidence",
+                reason_code="empty_evidence",
             )
-            return CurrentInfoAnswer(
+            return preliminary
+        if "snippet_only_evidence" in evidence.warnings:
+            preliminary = CurrentInfoAnswer(
                 status="unverified_evidence",
                 request=request,
                 task=task,
@@ -442,17 +466,28 @@ class CurrentInfoService:
                 confidence=evidence.confidence,
                 metadata=self._debug_metadata(budget, reason="current_facts_need_fetched_sources"),
             )
-        if _needs_stronger_evidence(request=request, task=task, warnings=evidence.warnings):
-            reason_code = _stronger_evidence_reason(evidence.warnings)
+            fallback = self._maybe_deep_research_fallback(
+                preliminary,
+                request=request,
+                task=task,
+                query_plan=query_plan,
+                started=started,
+                budget=budget,
+            )
+            if fallback is not None:
+                return fallback
             self._log_synthesis(
                 request=request,
                 task=task,
                 started=started,
                 status="unverified_evidence",
                 budget=budget,
-                reason_code=reason_code,
+                reason_code="snippet_only_evidence",
             )
-            return CurrentInfoAnswer(
+            return preliminary
+        if _needs_stronger_evidence(request=request, task=task, warnings=evidence.warnings):
+            reason_code = _stronger_evidence_reason(evidence.warnings)
+            preliminary = CurrentInfoAnswer(
                 status="unverified_evidence",
                 request=request,
                 task=task,
@@ -464,6 +499,25 @@ class CurrentInfoService:
                 confidence=evidence.confidence,
                 metadata=self._debug_metadata(budget, reason=reason_code),
             )
+            fallback = self._maybe_deep_research_fallback(
+                preliminary,
+                request=request,
+                task=task,
+                query_plan=query_plan,
+                started=started,
+                budget=budget,
+            )
+            if fallback is not None:
+                return fallback
+            self._log_synthesis(
+                request=request,
+                task=task,
+                started=started,
+                status="unverified_evidence",
+                budget=budget,
+                reason_code=reason_code,
+            )
+            return preliminary
 
         self._log_synthesis(request=request, task=task, started=started, status="answered", budget=budget)
         return CurrentInfoAnswer(
@@ -687,6 +741,72 @@ class CurrentInfoService:
             metadata["debug"] = {"budgets": budget.to_debug_dict()}
         return metadata
 
+    def _maybe_deep_research_fallback(
+        self,
+        preliminary: CurrentInfoAnswer,
+        *,
+        request: CurrentInfoRequest,
+        task: TaskSpec,
+        query_plan: QueryPlan,
+        started: float,
+        budget: CurrentInfoRunBudget,
+    ) -> CurrentInfoAnswer | None:
+        if self._research_provider is None:
+            return None
+        if not _should_retry_with_deep_research(request=request, task=task, answer=preliminary):
+            return None
+        reason_code = _deep_research_fallback_reason(preliminary)
+        retry_request = _deep_research_retry_request(request, reason_code=reason_code)
+        log_current_info_event(
+            logger,
+            event="current_info.DeepResearchFallback",
+            stage="research",
+            query=task.query,
+            chat_id=request.chat_id,
+            user_id=request.user_id,
+            topic_id=request.topic_id,
+            outcome="attempt",
+            reason_code=reason_code,
+            extra={
+                "from_status": preliminary.status,
+                "provider_mode": "gpt_researcher",
+                "report_type": "deep_research",
+            },
+        )
+        research_answer = self._research_provider.answer(request=retry_request, task=task, query_plan=query_plan)
+        if research_answer.answered or research_answer.status in {"empty_evidence", "unverified_evidence"}:
+            self._log_synthesis(
+                request=request,
+                task=task,
+                started=started,
+                status=research_answer.status,
+                budget=budget,
+                reason_code="deep_research_fallback",
+            )
+            return _annotate_deep_research_fallback_answer(
+                research_answer,
+                from_status=preliminary.status,
+                reason_code=reason_code,
+            )
+        self._log_synthesis(
+            request=request,
+            task=task,
+            started=started,
+            status=preliminary.status,
+            budget=budget,
+            reason_code=reason_code,
+        )
+        return replace(
+            preliminary,
+            metadata={
+                **preliminary.metadata,
+                "deep_research_fallback_attempted": True,
+                "deep_research_fallback_reason": reason_code,
+                "deep_research_fallback_status": research_answer.status,
+                "deep_research_fallback_warnings": tuple(research_answer.warnings),
+            },
+        )
+
     def _log_synthesis(
         self,
         *,
@@ -741,6 +861,20 @@ def _format_finance_listing_answer_text(
     if not indicators:
         return ""
     target = _finance_listing_answer_subject(request.query) or _finance_listing_answer_subject(task.query)
+    parent_support = finance_listing_parent_support(request.query or task.query, chunks)
+    if parent_support and target:
+        parent = parent_support[0]
+        if (request.locale or task.locale or "en").lower().startswith("en"):
+            return (
+                f"No separate public listing for {target} is established by the checked sources. "
+                f"They indicate {target} is part of {parent}, and {parent} is publicly listed: "
+                f"{', '.join(indicators)}."
+            )
+        return (
+            f"Nein, eine eigene Börsennotierung von {target} belegen die geprüften Quellen nicht. "
+            f"Sie zeigen stattdessen: {target} gehört zu {parent}; {parent} ist börsennotiert: "
+            f"{', '.join(indicators)}."
+        )
     values = {
         str(chunk.metadata.get("claim_value") or chunk.metadata.get("fact_value") or "").casefold()
         for chunk in chunks
@@ -860,6 +994,75 @@ def _is_webresearch_request(request: CurrentInfoRequest) -> bool:
 def _requires_gpt_researcher(request: CurrentInfoRequest) -> bool:
     metadata = dict(request.metadata or {})
     return bool(metadata.get("require_gpt_researcher"))
+
+
+def _should_retry_with_deep_research(
+    *,
+    request: CurrentInfoRequest,
+    task: TaskSpec,
+    answer: CurrentInfoAnswer,
+) -> bool:
+    if answer.status not in {"empty_result", "empty_evidence", "unverified_evidence"}:
+        return False
+    if _requires_gpt_researcher(request) or _is_webresearch_request(request):
+        return False
+    if request.metadata.get("deep_research_fallback_attempted") or request.metadata.get("disable_deep_research_fallback"):
+        return False
+    return bool(_deep_research_fallback_reason_for_request(request=request, task=task, answer=answer))
+
+
+def _deep_research_fallback_reason(answer: CurrentInfoAnswer) -> str:
+    for warning in answer.warnings:
+        if warning:
+            return str(warning)
+    return answer.status
+
+
+def _deep_research_fallback_reason_for_request(
+    *,
+    request: CurrentInfoRequest,
+    task: TaskSpec,
+    answer: CurrentInfoAnswer,
+) -> str:
+    if _is_finance_listing_query(request=request, task=task):
+        return _deep_research_fallback_reason(answer)
+    domain = (task.domain or request.domain_hint or "").strip().lower()
+    if domain in {"news", "stock", "crypto"}:
+        return _deep_research_fallback_reason(answer)
+    if _needs_official_source_variant(request.query or task.query, task=task):
+        return _deep_research_fallback_reason(answer)
+    return ""
+
+
+def _deep_research_retry_request(request: CurrentInfoRequest, *, reason_code: str) -> CurrentInfoRequest:
+    metadata = {
+        **dict(request.metadata or {}),
+        "capability": "webresearch",
+        "auto_research_capability": "webresearch",
+        "gpt_researcher_report_type": "deep_research",
+        "research_report_type": "deep_research",
+        "deep_research": True,
+        "deep_research_fallback_attempted": True,
+        "deep_research_fallback_reason": reason_code,
+    }
+    return replace(request, metadata=metadata)
+
+
+def _annotate_deep_research_fallback_answer(
+    answer: CurrentInfoAnswer,
+    *,
+    from_status: str,
+    reason_code: str,
+) -> CurrentInfoAnswer:
+    return replace(
+        answer,
+        metadata={
+            **dict(answer.metadata or {}),
+            "deep_research_fallback_used": True,
+            "deep_research_fallback_from_status": from_status,
+            "deep_research_fallback_reason": reason_code,
+        },
+    )
 
 
 def _general_query_variants(query: str, *, add_verification: bool = False) -> tuple[str, ...]:
@@ -1441,7 +1644,7 @@ def _is_finance_listing_query(*, request: CurrentInfoRequest, task: TaskSpec) ->
 
 
 def _finance_listing_followup_query(query: str) -> str:
-    return f"{query.strip()} public listing ticker exchange derivative sources"
+    return f"{query.strip()} public listing ticker exchange derivative parent company publicly traded sources"
 
 
 def _needs_stronger_evidence(
