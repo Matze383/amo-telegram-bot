@@ -118,6 +118,12 @@ class DefaultCurrentInfoQueryPlanner:
 
 @dataclass(frozen=True, slots=True)
 class SnippetRetrievalProvider:
+    """Build evidence only from fetched documents.
+
+    Search providers may return snippets as discovery metadata, but snippets are
+    not page content and must not become evidence for current-fact answers.
+    """
+
     def retrieve(
         self,
         *,
@@ -140,18 +146,7 @@ class SnippetRetrievalProvider:
         if chunks:
             return tuple(chunks)
 
-        for result in search_results:
-            snippet = " ".join(result.snippet.split())
-            if snippet:
-                chunks.append(
-                    EvidenceChunk(
-                        text=snippet[:500],
-                        source_url=result.url,
-                        source_title=result.title,
-                        relevance=0.5,
-                    )
-                )
-        return tuple(chunks)
+        return ()
 
 
 class CurrentInfoService:

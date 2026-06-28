@@ -167,7 +167,7 @@ class _CorepluginSearchProviderAdapter:
     _BING_UA = "Mozilla/5.0"
 
     def search(self, *, query: str, locale: str, safesearch: str, max_results: int) -> tuple[WebsearchProviderResult, ...]:
-        limit = min(max(int(max_results), 1), 5)
+        limit = min(max(int(max_results), 1), 10)
 
         searxng = _resolve_searxng_config(locale=locale, max_results=limit)
         if searxng is None:
@@ -217,7 +217,7 @@ def _resolve_searxng_config(*, locale: str, max_results: int) -> _SearxngConfig 
             configured_max_results = int(max_results_raw)
         except ValueError:
             configured_max_results = max_results
-    configured_max_results = min(max(configured_max_results, 1), 5)
+    configured_max_results = min(max(configured_max_results, 1), 10)
 
     lang_raw = (os.getenv("AMO_WEBSEARCH_SEARXNG_LANGUAGE") or "").strip().lower()
     language = lang_raw if re.fullmatch(r"[a-z]{2}(?:-[a-z]{2})?", lang_raw) else None
@@ -322,13 +322,12 @@ def _search_searxng_json(*, query: str, config: _SearxngConfig) -> list[Websearc
             continue
         title = _bound_text(str(item.get("title") or "").strip(), 200)
         url = _bound_text(str(item.get("url") or "").strip(), 1000)
-        snippet = _bound_text(str(item.get("content") or item.get("snippet") or "").strip(), 400)
         if not title or not url:
             continue
         parsed = urlparse(url)
         if parsed.scheme not in {"http", "https"} or not parsed.netloc:
             continue
-        parsed_results.append(WebsearchProviderResult(title=title, url=url, snippet=snippet))
+        parsed_results.append(WebsearchProviderResult(title=title, url=url, snippet=""))
         if len(parsed_results) >= config.max_results:
             break
     return parsed_results

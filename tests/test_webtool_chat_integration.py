@@ -1652,9 +1652,9 @@ def test_browser_fallback_decision_targets_js_placeholder_and_dynamic_pages():
     js_quality = SimpleNamespace(usable=False, warning_codes=("extraction_js_placeholder",), text_length=52)
 
     js_decision = should_attempt_browser_fallback(
-        request_text="current Nvidia stock price now",
-        url="https://markets.example/nvda",
-        search_text="Nvidia quote live",
+        request_text="current ACME stock price now",
+        url="https://markets.example/acme",
+        search_text="ACME quote live",
         scrape_result=js_scrape,
         scrape_quality=js_quality,
         static_failure_count=1,
@@ -1841,8 +1841,8 @@ def test_auto_research_stock_search_hit_with_unusable_scrape_fails_closed(monkey
         allowed=True,
         decision="allow",
         reason="search_completed",
-        text="Nvidia stock live price appears in the search snippet.",
-        sources=("https://markets.example/nvda",),
+        text="ACME stock live price appears in the search snippet.",
+        sources=("https://markets.example/acme",),
         hosts=("markets.example",),
         error=None,
     )
@@ -1852,7 +1852,7 @@ def test_auto_research_stock_search_hit_with_unusable_scrape_fails_closed(monkey
         decision="allow",
         reason="scrape_completed",
         text="Please enable JavaScript to view this app. Loading...",
-        sources=("https://markets.example/nvda",),
+        sources=("https://markets.example/acme",),
         hosts=("markets.example",),
         error=None,
     )
@@ -1875,7 +1875,7 @@ def test_auto_research_stock_search_hit_with_unusable_scrape_fails_closed(monkey
     d.ai_service.ask = _ask
     asyncio.run(
         d._maybe_handle_ai_autoreply(
-            message=_mk_message("@amo_bot current Nvidia stock price now?", reply_to_is_bot=False, reply_to_user_is_bot=False, reply_to_username=""),
+            message=_mk_message("@amo_bot current ACME stock price now?", reply_to_is_bot=False, reply_to_user_is_bot=False, reply_to_username=""),
             role=Role.ADMIN,
             bot_username="amo_bot",
             from_parsed_update=True,
@@ -1886,7 +1886,7 @@ def test_auto_research_stock_search_hit_with_unusable_scrape_fails_closed(monkey
     assert calls == []
     assert sent and "nicht belastbar bestätigen" in sent[0]
     assert "Such-Snippets" in sent[0]
-    assert "Nvidia stock live price" not in sent[0]
+    assert "ACME stock live price" not in sent[0]
     assert "Please enable JavaScript" not in sent[0]
 
 

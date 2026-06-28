@@ -165,7 +165,7 @@ class SearxngSearchProvider:
                 item,
                 provider=self.name,
                 rank=len(results) + 1,
-                snippet_keys=("content", "snippet"),
+                snippet_keys=(),
                 date_keys=("publishedDate", "published_date", "date"),
             )
             if result is None:

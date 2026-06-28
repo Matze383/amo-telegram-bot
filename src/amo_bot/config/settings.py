@@ -163,7 +163,7 @@ class Settings(BaseSettings):
         gt=0,
         le=300,
     )
-    amo_current_info_max_results: int = Field(default=5, alias="AMO_CURRENT_INFO_MAX_RESULTS", ge=1, le=10)
+    amo_current_info_max_results: int = Field(default=10, alias="AMO_CURRENT_INFO_MAX_RESULTS", ge=1, le=10)
     amo_current_info_max_documents: int = Field(default=3, alias="AMO_CURRENT_INFO_MAX_DOCUMENTS", ge=0, le=10)
     amo_current_info_max_search_provider_runs_per_response: int = Field(
         default=2,
@@ -210,6 +210,16 @@ class Settings(BaseSettings):
     amo_research_deep_breadth: int = Field(default=3, alias="AMO_RESEARCH_DEEP_BREADTH", ge=1, le=10)
     amo_research_deep_depth: int = Field(default=2, alias="AMO_RESEARCH_DEEP_DEPTH", ge=1, le=10)
     amo_research_deep_concurrency: int = Field(default=4, alias="AMO_RESEARCH_DEEP_CONCURRENCY", ge=1, le=20)
+    amo_research_role_skills_dir: str = Field(default="skills/gpt_researcher", alias="AMO_RESEARCH_ROLE_SKILLS_DIR")
+    amo_research_fast_skill_path: str = Field(default="", alias="AMO_RESEARCH_FAST_SKILL_PATH")
+    amo_research_smart_skill_path: str = Field(default="", alias="AMO_RESEARCH_SMART_SKILL_PATH")
+    amo_research_strategic_skill_path: str = Field(default="", alias="AMO_RESEARCH_STRATEGIC_SKILL_PATH")
+    amo_research_role_skill_max_chars: int = Field(
+        default=12000,
+        alias="AMO_RESEARCH_ROLE_SKILL_MAX_CHARS",
+        ge=1,
+        le=50000,
+    )
     amo_research_vector_collection: str = Field(
         default="amo_gpt_researcher_chunks",
         alias="AMO_RESEARCH_VECTOR_COLLECTION",
@@ -570,6 +580,10 @@ class Settings(BaseSettings):
         self.amo_research_fast_model = self.amo_research_fast_model.strip()
         self.amo_research_smart_model = self.amo_research_smart_model.strip()
         self.amo_research_strategic_model = self.amo_research_strategic_model.strip()
+        self.amo_research_role_skills_dir = self.amo_research_role_skills_dir.strip() or "skills/gpt_researcher"
+        self.amo_research_fast_skill_path = self.amo_research_fast_skill_path.strip()
+        self.amo_research_smart_skill_path = self.amo_research_smart_skill_path.strip()
+        self.amo_research_strategic_skill_path = self.amo_research_strategic_skill_path.strip()
         self.amo_research_vector_collection = self.amo_research_vector_collection.strip() or "amo_gpt_researcher_chunks"
 
         # Validate dreaming window: start must be before end (in the same timezone).

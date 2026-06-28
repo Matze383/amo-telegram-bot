@@ -13,6 +13,7 @@ from collections.abc import Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any, Callable, Protocol
 from urllib.parse import urlparse
 
@@ -41,6 +42,11 @@ from amo_bot.evidence_intents import is_stock_listing_status_query
 logger = logging.getLogger(__name__)
 
 
+GPT_RESEARCHER_SKILL_ROLES: tuple[str, ...] = ("fast", "smart", "strategic")
+DEFAULT_GPT_RESEARCHER_SKILLS_DIR = Path(__file__).resolve().parents[3] / "skills" / "gpt_researcher"
+DEFAULT_GPT_RESEARCHER_SKILL_MAX_CHARS = 12000
+
+
 class ResearchProviderError(RuntimeError):
     pass
 
@@ -63,6 +69,13 @@ class ResearchModelConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class RoleSkillConfig:
+    skills_dir: str
+    role_paths: Mapping[str, str]
+    max_chars: int = DEFAULT_GPT_RESEARCHER_SKILL_MAX_CHARS
+
+
+@dataclass(frozen=True, slots=True)
 class GptResearcherProviderConfig:
     enabled: bool
     model_config: ResearchModelConfig
@@ -78,6 +91,7 @@ class GptResearcherProviderConfig:
     ollama_base_url: str
     ollama_num_ctx: int | None = None
     embedding: str = "openai:text-embedding-3-small"
+    role_skills: RoleSkillConfig | None = None
 
 
 class AmoLangChainEmbeddings:
@@ -334,7 +348,11 @@ class GptResearcherProvider:
             collection_name=self._config.vector_collection,
             embedding_provider=self._embedding_provider,
         )
-        gpt_researcher_config = self._gpt_researcher_config(language=_language_for_locale(task.locale))
+        loaded_role_skills = load_gpt_researcher_role_skills(self._config.role_skills)
+        gpt_researcher_config = self._gpt_researcher_config(
+            language=_language_for_locale(task.locale),
+            role_skills=loaded_role_skills,
+        )
         config_path = _write_temp_config(gpt_researcher_config)
         try:
             emit_searx_debug = _research_debug_emitter(
@@ -359,7 +377,11 @@ class GptResearcherProvider:
             ), _temporary_gpt_researcher_searx_snippet_adapter(
                 emit=emit_searx_debug
             ), _temporary_gpt_researcher_browser_activity_probe(emit=emit_browser_debug):
-                researcher_query = _gpt_researcher_query(request=request, task=task)
+                researcher_query = _gpt_researcher_query(
+                    request=request,
+                    task=task,
+                    role_skills=loaded_role_skills,
+                )
                 self._log_lifecycle(
                     event="current_info.GptResearcherInput",
                     stage="input",
@@ -370,6 +392,7 @@ class GptResearcherProvider:
                         "research_run_id": research_run_id,
                         **_research_report_metadata(report_type=report_type, config=self._config),
                         **_gpt_researcher_config_diagnostics(gpt_researcher_config),
+                        **_role_skill_diagnostics(loaded_role_skills),
                         **_research_query_diagnostics(
                             user_task=task.query,
                             researcher_query=researcher_query,
@@ -551,11 +574,11 @@ class GptResearcherProvider:
             "deep_concurrency": self._config.deep_concurrency,
         }
 
-    def _gpt_researcher_config(self, *, language: str) -> dict[str, Any]:
+    def _gpt_researcher_config(self, *, language: str, role_skills: Mapping[str, str] | None = None) -> dict[str, Any]:
         llm_kwargs: dict[str, Any] = {}
         if self._config.ollama_num_ctx:
             llm_kwargs["num_ctx"] = self._config.ollama_num_ctx
-        return {
+        config = {
             "RETRIEVER": "searx",
             "REPORT_SOURCE": "web",
             "FAST_LLM": self._config.model_config.fast_llm,
@@ -574,6 +597,12 @@ class GptResearcherProvider:
             "EMBEDDING": self._config.embedding,
             "PROMPT_FAMILY": "default",
         }
+        if role_skills:
+            config["ROLE_SKILLS"] = dict(role_skills)
+            config["FAST_LLM_SKILL"] = role_skills.get("fast", "")
+            config["SMART_LLM_SKILL"] = role_skills.get("smart", "")
+            config["STRATEGIC_LLM_SKILL"] = role_skills.get("strategic", "")
+        return config
 
     async def _validate_source_urls(
         self,
@@ -745,7 +774,46 @@ def build_gpt_researcher_provider_config_from_settings(settings: Any) -> GptRese
         ollama_base_url=str(getattr(settings, "ollama_base_url", "http://127.0.0.1:11434") or "http://127.0.0.1:11434"),
         ollama_num_ctx=int(getattr(settings, "ollama_thinking_budget_max_prompt_chars", 0) or 0) or None,
         embedding=resolve_research_embedding_config(settings),
+        role_skills=resolve_gpt_researcher_role_skill_config(settings),
     )
+
+
+def resolve_gpt_researcher_role_skill_config(settings: Any) -> RoleSkillConfig | None:
+    skills_dir = str(
+        getattr(settings, "amo_research_role_skills_dir", "")
+        or DEFAULT_GPT_RESEARCHER_SKILLS_DIR
+    ).strip()
+    role_paths = {
+        role: str(getattr(settings, f"amo_research_{role}_skill_path", "") or "").strip()
+        for role in GPT_RESEARCHER_SKILL_ROLES
+    }
+    max_chars = int(
+        getattr(settings, "amo_research_role_skill_max_chars", DEFAULT_GPT_RESEARCHER_SKILL_MAX_CHARS)
+        or DEFAULT_GPT_RESEARCHER_SKILL_MAX_CHARS
+    )
+    if not skills_dir and not any(role_paths.values()):
+        return None
+    return RoleSkillConfig(skills_dir=skills_dir, role_paths=role_paths, max_chars=max_chars)
+
+
+def load_gpt_researcher_role_skills(config: RoleSkillConfig | None) -> dict[str, str]:
+    if config is None:
+        return {}
+
+    base_dir = _resolve_skill_base_dir(config.skills_dir)
+    loaded: dict[str, str] = {}
+    for role in GPT_RESEARCHER_SKILL_ROLES:
+        skill_path = _resolve_role_skill_path(
+            role=role,
+            base_dir=base_dir,
+            configured_path=str(config.role_paths.get(role, "") or ""),
+        )
+        if skill_path is None or not skill_path.is_file():
+            continue
+        content = _read_role_skill(skill_path, max_chars=config.max_chars)
+        if content:
+            loaded[role] = content
+    return loaded
 
 
 def resolve_research_model_config(settings: Any) -> ResearchModelConfig:
@@ -772,6 +840,50 @@ def resolve_research_embedding_config(settings: Any) -> str:
     if not provider or not model:
         raise ValueError("Research embeddings require AMO_VECTOR_EMBEDDING_PROVIDER and AMO_VECTOR_EMBEDDING_MODEL")
     return _embedding_id(provider=provider, model=model)
+
+
+def _resolve_skill_base_dir(skills_dir: str) -> Path:
+    path = Path(skills_dir or DEFAULT_GPT_RESEARCHER_SKILLS_DIR)
+    if not path.is_absolute():
+        path = DEFAULT_GPT_RESEARCHER_SKILLS_DIR.parent.parent / path
+    return path.resolve()
+
+
+def _resolve_role_skill_path(*, role: str, base_dir: Path, configured_path: str) -> Path | None:
+    if role not in GPT_RESEARCHER_SKILL_ROLES:
+        return None
+    if configured_path:
+        path = Path(configured_path)
+        if not path.is_absolute():
+            path = base_dir / path
+        resolved = path.resolve()
+        if not _path_is_relative_to(resolved, base_dir):
+            raise ValueError(f"GPT-Researcher {role} skill path must stay under {base_dir}")
+        return resolved
+    return (base_dir / role / "SKILL.md").resolve()
+
+
+def _path_is_relative_to(path: Path, base_dir: Path) -> bool:
+    try:
+        path.relative_to(base_dir)
+    except ValueError:
+        return False
+    return True
+
+
+def _read_role_skill(path: Path, *, max_chars: int) -> str:
+    max_chars = max(1, min(int(max_chars or DEFAULT_GPT_RESEARCHER_SKILL_MAX_CHARS), 50000))
+    try:
+        with path.open("r", encoding="utf-8") as handle:
+            raw_content = handle.read(max_chars + 1)
+    except FileNotFoundError:
+        return ""
+    except UnicodeDecodeError as exc:
+        raise ValueError(f"GPT-Researcher role skill is not valid UTF-8: {path}") from exc
+    if len(raw_content) > max_chars:
+        raise ValueError(f"GPT-Researcher role skill exceeds {max_chars} characters: {path}")
+    content = raw_content.strip()
+    return content
 
 
 def _embedding_id(*, provider: str, model: str) -> str:
@@ -1090,11 +1202,10 @@ def _strip_searx_prefetched_content(results: Any) -> Any:
             continue
 
         item = dict(result)
-        snippet = str(item.get("raw_content") or item.get("body") or item.get("content") or "").strip()
         item.pop("raw_content", None)
         item.pop("body", None)
-        if snippet and "snippet" not in item:
-            item["snippet"] = snippet
+        item.pop("content", None)
+        item.pop("snippet", None)
         normalized.append(item)
 
     return normalized
@@ -1151,6 +1262,23 @@ def _gpt_researcher_config_diagnostics(config: Mapping[str, Any]) -> dict[str, A
         "gpt_researcher_scraper": str(config.get("SCRAPER") or ""),
         "gpt_researcher_report_source": str(config.get("REPORT_SOURCE") or ""),
         "gpt_researcher_max_search_results_per_query": int(config.get("MAX_SEARCH_RESULTS_PER_QUERY") or 0),
+    }
+
+
+def _role_skill_diagnostics(role_skills: Mapping[str, str]) -> dict[str, Any]:
+    return {
+        "gpt_researcher_role_skill_roles": tuple(role for role in GPT_RESEARCHER_SKILL_ROLES if role in role_skills),
+        "gpt_researcher_role_skill_count": len(role_skills),
+        "gpt_researcher_role_skill_lengths": {
+            role: len(content)
+            for role, content in role_skills.items()
+            if role in GPT_RESEARCHER_SKILL_ROLES
+        },
+        "gpt_researcher_role_skill_hashes": {
+            role: query_hash(content)
+            for role, content in role_skills.items()
+            if role in GPT_RESEARCHER_SKILL_ROLES
+        },
     }
 
 
@@ -1410,22 +1538,65 @@ def _value_shape(value: Any) -> str:
     return type(value).__name__
 
 
-def _gpt_researcher_query(*, request: CurrentInfoRequest, task: TaskSpec) -> str:
-    return "\n\n".join(
-        (
-            "Current date/time context for this research run:",
-            _current_time_context_for_request(request),
-            "Original user research task:",
-            task.query,
+def _gpt_researcher_query(
+    *,
+    request: CurrentInfoRequest,
+    task: TaskSpec,
+    role_skills: Mapping[str, str] | None = None,
+) -> str:
+    sections = [
+        "Current date/time context for this research run:",
+        _current_time_context_for_request(request),
+        "Original user research task:",
+        task.query,
+    ]
+    if _research_report_type(request) == "deep_research":
+        sections.extend(
             (
-                "Date handling: Treat all dated claims relative to the current date above. "
-                "If evidence says an event was planned, scheduled, expected, or upcoming for a date "
-                "before the current date, do not describe it as future or still pending unless current "
-                "evidence explicitly confirms that status. Say that the source reports a date that has "
-                "already passed and distinguish that from what is established now."
-            ),
+                "Deep research decomposition:",
+                _deep_research_decomposition(),
+            )
+        )
+    if role_skills:
+        sections.extend(
+            (
+                "GPT-Researcher role skill instructions:",
+                _format_role_skill_instructions(role_skills),
+            )
+        )
+    sections.append(
+        (
+            "Date handling: Treat all dated claims relative to the current date above. "
+            "If evidence says an event was planned, scheduled, expected, or upcoming for a date "
+            "before the current date, do not describe it as future or still pending unless current "
+            "evidence explicitly confirms that status. Say that the source reports a date that has "
+            "already passed and distinguish that from what is established now."
         )
     )
+    return "\n\n".join(sections)
+
+
+def _deep_research_decomposition() -> str:
+    return "\n".join(
+        (
+            "Split the report into multiple focused subquestions before synthesis:",
+            "1. Current state and timeline.",
+            "2. Official primary sources and durable reference sources.",
+            "3. Recent reliable news or third-party corroboration.",
+            "4. Quantitative facts, dates, and named entities.",
+            "5. Risks, uncertainties, missing evidence, and source conflicts.",
+            "6. Final synthesis with clear confidence boundaries.",
+        )
+    )
+
+
+def _format_role_skill_instructions(role_skills: Mapping[str, str]) -> str:
+    parts: list[str] = []
+    for role in GPT_RESEARCHER_SKILL_ROLES:
+        content = str(role_skills.get(role) or "").strip()
+        if content:
+            parts.append(f"[{role}]\n{content}")
+    return "\n\n".join(parts)
 
 
 def _current_time_context_for_request(request: CurrentInfoRequest) -> str:
@@ -1872,11 +2043,6 @@ def _fetched_source_urls(source_docs: Any) -> frozenset[str]:
 def _looks_like_fetched_document(item: Any) -> bool:
     if isinstance(item, Mapping):
         if any(str(item.get(key) or "").strip() for key in ("raw_content", "page_content", "document", "html")):
-            return True
-        if (
-            any(str(item.get(key) or "").strip() for key in ("content", "text", "body"))
-            and _extract_fetched_document_source_urls(item)
-        ):
             return True
         metadata = item.get("metadata")
         if isinstance(metadata, Mapping) and any(

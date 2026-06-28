@@ -137,6 +137,7 @@ def test_searxng_success_parses_results_and_metrics_without_real_network() -> No
     response = provider.search(query="latest status", locale="de", max_results=2)
 
     assert [result.title for result in response.results] == ["One", "Two"]
+    assert [result.snippet for result in response.results] == ["", ""]
     assert response.results[0].host == "one.example"
     assert response.results[0].date == "2026-06-16"
     assert response.metrics[0].provider == "searxng"

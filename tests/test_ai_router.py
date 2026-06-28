@@ -885,10 +885,10 @@ def test_recent_context_excludes_obvious_meta_status_rows_but_keeps_normal_conte
     assert "pytest" not in decision.context.recent_messages_text
 
 
-def test_recent_context_regression_chatgpt_prompt_excludes_prior_nvidia_and_workflow_noise(tmp_path) -> None:
+def test_recent_context_regression_chatgpt_prompt_excludes_prior_company_analysis_and_workflow_noise(tmp_path) -> None:
     repo = _mk_repo(tmp_path)
     repo.upsert_config(scope_type="topic", chat_id=-9001, topic_id=77, ai_enabled=True, recent_context_window_size=10)
-    repo.append_message(scope_type="topic", chat_id=-9001, topic_id=77, message_text="Nvidia earnings analysis remains bullish", source="assistant", telegram_author_is_bot=True)
+    repo.append_message(scope_type="topic", chat_id=-9001, topic_id=77, message_text="ExampleTech earnings analysis remains bullish", source="assistant", telegram_author_is_bot=True)
     repo.append_message(scope_type="topic", chat_id=-9001, topic_id=77, message_text="local commit 5fb83d9 fix: reduce off-topic memory recall drift", source="user")
     repo.append_message(scope_type="topic", chat_id=-9001, topic_id=77, message_text="What is ChatGPT?", source="user")
 
@@ -896,7 +896,7 @@ def test_recent_context_regression_chatgpt_prompt_excludes_prior_nvidia_and_work
     decision = router.decide(prompt="@AmoBot What is ChatGPT?", chat_id=-9001, topic_id=77, user_id=42, chat_type="supergroup", bot_username="AmoBot")
 
     assert "What is ChatGPT?" in decision.context.recent_messages_text
-    assert "Nvidia" not in decision.context.recent_messages_text
+    assert "ExampleTech" not in decision.context.recent_messages_text
     assert "local commit" not in decision.context.recent_messages_text
 
 
@@ -1113,11 +1113,11 @@ def test_recent_messages_prioritizes_humans_and_caps_bot_authored_rows(tmp_path)
             telegram_author_is_bot=True,
             source="bot",
         )
-    repo.append_message(scope_type="topic", chat_id=-9200, topic_id=92, message_text="human asks about Nvidia GPUs")
+    repo.append_message(scope_type="topic", chat_id=-9200, topic_id=92, message_text="human asks about ExampleTech accelerators")
     repo.append_message(scope_type="topic", chat_id=-9200, topic_id=92, message_text="human asks about CUDA drivers")
 
     decision = _mk_router(topic_agent_memory_repository=repo).decide(
-        prompt="@bot Nvidia CUDA",
+        prompt="@bot ExampleTech accelerator drivers",
         chat_id=-9200,
         topic_id=92,
         user_id=1,
@@ -1126,12 +1126,12 @@ def test_recent_messages_prioritizes_humans_and_caps_bot_authored_rows(tmp_path)
     )
 
     lines = decision.context.recent_messages_text.splitlines()
-    assert "human asks about Nvidia GPUs" in lines
+    assert "human asks about ExampleTech accelerators" in lines
     assert "human asks about CUDA drivers" in lines
     assert sum(1 for line in lines if line.startswith("bot crypto analysis")) <= AIRouter._RECENT_CONTEXT_MAX_BOT_MESSAGES
 
 
-def test_recall_skips_crypto_heavy_context_for_nvidia_prompt(tmp_path) -> None:
+def test_recall_skips_crypto_heavy_context_for_stock_prompt(tmp_path) -> None:
     repo = _mk_repo(tmp_path)
     repo.upsert_config(scope_type="topic", chat_id=-9300, topic_id=104, ai_enabled=True)
     today = datetime.now(UTC).date().isoformat()
@@ -1154,7 +1154,7 @@ def test_recall_skips_crypto_heavy_context_for_nvidia_prompt(tmp_path) -> None:
 
     router = _mk_router(topic_agent_memory_repository=repo)
     decision = router.decide(
-        prompt="@bot was ist mit Nvidia Aktie?",
+        prompt="@bot was ist mit ExampleTech Aktie?",
         chat_id=-9300,
         topic_id=104,
         user_id=7,
@@ -1164,7 +1164,7 @@ def test_recall_skips_crypto_heavy_context_for_nvidia_prompt(tmp_path) -> None:
     assert decision.context.recall_memory_text == ""
     _, _, meta = router._read_active_recall_text(
         scope={"scope_type": "topic", "chat_id": -9300, "topic_id": 104, "user_id": None},
-        prompt="was ist mit Nvidia Aktie?",
+        prompt="was ist mit ExampleTech Aktie?",
         daily_memory_text="ZEC wave XRP chart setup and crypto market rotation",
         long_memory_text="",
         recent_messages_text="ZEC wave XRP bot analysis remains bullish",
@@ -1181,29 +1181,29 @@ def test_recall_includes_matching_context_for_prompt(tmp_path) -> None:
         scope_type="private_user",
         user_id=9400,
         memory_date=today,
-        summary_text="Nvidia CUDA driver notes and GPU earnings context",
+        summary_text="ExampleTech accelerator driver notes and earnings context",
         tokens_estimate=8,
     )
 
     decision = _mk_router(topic_agent_memory_repository=repo).decide(
-        prompt="Nvidia CUDA update?",
+        prompt="ExampleTech accelerator driver update?",
         chat_id=9400,
         user_id=9400,
     )
 
-    assert "Nvidia CUDA driver notes" in decision.context.recall_memory_text
+    assert "ExampleTech accelerator driver notes" in decision.context.recall_memory_text
 
 
 def test_recall_filtering_keeps_topic_scope_isolation(tmp_path) -> None:
     repo = _mk_repo(tmp_path)
     repo.upsert_config(scope_type="topic", chat_id=-9500, topic_id=1, ai_enabled=True)
     repo.upsert_config(scope_type="topic", chat_id=-9500, topic_id=2, ai_enabled=True)
-    repo.append_message(scope_type="topic", chat_id=-9500, topic_id=1, message_text="Nvidia scope-one context")
-    repo.append_message(scope_type="topic", chat_id=-9500, topic_id=2, message_text="Nvidia scope-two context")
+    repo.append_message(scope_type="topic", chat_id=-9500, topic_id=1, message_text="ExampleTech scope-one context")
+    repo.append_message(scope_type="topic", chat_id=-9500, topic_id=2, message_text="ExampleTech scope-two context")
 
     router = _mk_router(topic_agent_memory_repository=repo)
-    topic_one = router.decide(prompt="@bot Nvidia", chat_id=-9500, topic_id=1, user_id=1, bot_username="bot")
-    topic_two = router.decide(prompt="@bot Nvidia", chat_id=-9500, topic_id=2, user_id=1, bot_username="bot")
+    topic_one = router.decide(prompt="@bot ExampleTech", chat_id=-9500, topic_id=1, user_id=1, bot_username="bot")
+    topic_two = router.decide(prompt="@bot ExampleTech", chat_id=-9500, topic_id=2, user_id=1, bot_username="bot")
 
     assert "scope-one" in topic_one.context.recall_memory_text
     assert "scope-two" not in topic_one.context.recall_memory_text

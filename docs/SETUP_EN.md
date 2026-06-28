@@ -553,6 +553,8 @@ AMO_WEBSEARCH_SEARXNG_CATEGORIES=general,news
 
 The bot uses a SearchBroker for current information (news, weather, sports, stocks). It uses SearXNG as the primary source with optional Brave Search as fallback.
 Before normal AI answers, MainBot classifies messages as `direct_answer`, `research_needed`, or `clarify`. Mutable external facts are treated as `research_needed` and go through Current-Info first. If Current-Info search is unavailable or cannot provide sufficient evidence, the bot intentionally fails closed with an honest uncertainty message instead of guessing from model/training knowledge. If a normal AI draft for a Current-Info question falls back to "no live data", "knowledge cutoff", or "training data" wording, the draft is discarded and handled through Current-Info or fail-closed behavior.
+
+> **Important:** SearX/SearXNG search result snippets are intentionally **not** used as evidence. The snippet fields are internally cleared; the system instead performs fail-closed scraping of actual page content.
 Safesearch and region settings tune the SearXNG/Brave search-profile parameter mapping; they do not make Brave the primary provider.
 Optional profile files tune the generic intent layer before provider mapping. Invalid files are rejected and Current-Info search is disabled instead of sending unsafe provider parameters.
 For result-page extraction, the document fetcher prefers Crawlee and falls back to httpx. It follows only bounded redirects, caps response size, blocks private/internal targets, and accepts HTML/XHTML/plain-text responses.
@@ -585,7 +587,7 @@ For result-page extraction, the document fetcher prefers Crawlee and falls back 
 | `AMO_CURRENT_INFO_ENABLED` | `false` | Enable Current-Info Telegram answers; for `research_needed`, unavailable Current-Info fails closed instead of falling back to normal AI answers |
 | `AMO_CURRENT_INFO_TIMEOUT_SECONDS` | `8` | Front-end Current-Info answer budget in seconds, including answer synthesis; timed-out work may still finish in the background (allowed: >0 to 60) |
 | `AMO_CURRENT_INFO_LATE_SYNTHESIS_TIMEOUT_SECONDS` | `60` | Background synthesis budget for a Current-Info answer that finishes after the front-end budget (allowed: >0 to 300) |
-| `AMO_CURRENT_INFO_MAX_RESULTS` | `5` | Maximum Current-Info search results per Telegram answer |
+| `AMO_CURRENT_INFO_MAX_RESULTS` | `10` | Maximum Current-Info search results per Telegram answer |
 | `AMO_CURRENT_INFO_MAX_DOCUMENTS` | `3` | Maximum followed documents per Current-Info Telegram answer |
 | `AMO_CURRENT_INFO_MAX_SEARCH_PROVIDER_RUNS_PER_RESPONSE` | `2` | Maximum search-provider calls per Current-Info response |
 | `AMO_CURRENT_INFO_MAX_FETCH_RUNS_PER_RESPONSE` | `3` | Maximum document-fetch calls per Current-Info response |
@@ -640,6 +642,42 @@ GPT-Researcher is optional and stays disabled by default. Enabling it requires:
 Restart the bot process after dependency or `.env` changes. `AMO_RESEARCH_FAST_MODEL`, `AMO_RESEARCH_SMART_MODEL`, and `AMO_RESEARCH_STRATEGIC_MODEL` may already include a provider prefix; otherwise AMO prefixes them with `AMO_RESEARCH_MODEL_PROVIDER`. Empty values fall back to the Ollama models. If that does not produce a complete model set, research configuration does not start.
 
 Budget and safety boundaries stay controlled by AMO: `AMO_RESEARCH_TIMEOUT_SECONDS`, `AMO_RESEARCH_MAX_SOURCES`, `AMO_RESEARCH_MAX_CONTEXT_CHARS`, `AMO_RESEARCH_DEEP_*`, and `AMO_RESEARCH_REPORT_WORDS` cap runtime, sources, context, and report length. Deep Research is selected per request by AMO metadata/auto-routing (`report_type=deep_research`); it still uses only `AMO_RESEARCH_FAST_MODEL`, `AMO_RESEARCH_SMART_MODEL`, and `AMO_RESEARCH_STRATEGIC_MODEL` for model selection. GPT-Researcher or Current-Info failures are fail-closed: for `research_needed`, the bot does not invent current facts from training knowledge and instead reports unavailable or failed research. When GPT-Researcher is available for normal web-research paths and fails, AMO only falls back to the normal Current-Info path; snippet-only/no-scrape evidence is not treated as verified.
+
+### GPT-Researcher Role Skills (optional)
+
+GPT-Researcher supports role-specific skill files for the three LLM stages (fast, smart, strategic). These files can provide specialized instructions during research (e.g., domain expertise, citation styles, output formats). Skills are loaded at bot startup and passed to GPT-Researcher.
+
+**Directory structure:**
+```
+skills/gpt_researcher/
+├── fast/SKILL.md      # For fast/initial retrieval and planning tasks
+├── smart/SKILL.md     # For evidence-based synthesis
+└── strategic/SKILL.md # For high-quality, strategic analysis
+```
+
+**Configuration variables:**
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `AMO_RESEARCH_ROLE_SKILLS_DIR` | *(empty)* | Base directory for all skill files. Individual paths are derived from this (`{DIR}/fast/SKILL.md`, etc.) unless explicitly overridden. |
+| `AMO_RESEARCH_FAST_SKILL_PATH` | `skills/gpt_researcher/fast/SKILL.md` | Path to the skill file for the "fast" stage |
+| `AMO_RESEARCH_SMART_SKILL_PATH` | `skills/gpt_researcher/smart/SKILL.md` | Path to the skill file for the "smart" stage |
+| `AMO_RESEARCH_STRATEGIC_SKILL_PATH` | `skills/gpt_researcher/strategic/SKILL.md` | Path to the skill file for the "strategic" stage |
+| `AMO_RESEARCH_ROLE_SKILL_MAX_CHARS` | `2000` | Maximum characters per skill file (allowed: 500 to 10000) |
+
+**Example configuration:**
+```ini
+# GPT-Researcher Role Skills (using default paths)
+AMO_RESEARCH_ROLE_SKILLS_DIR=skills/gpt_researcher
+AMO_RESEARCH_ROLE_SKILL_MAX_CHARS=2000
+
+# Or explicit paths per stage:
+# AMO_RESEARCH_FAST_SKILL_PATH=custom/skills/research/fast.txt
+# AMO_RESEARCH_SMART_SKILL_PATH=custom/skills/research/smart.txt
+# AMO_RESEARCH_STRATEGIC_SKILL_PATH=custom/skills/research/strategic.txt
+```
+
+> **Note:** Missing skill files are ignored (no error). Oversized files are truncated to `MAX_CHARS`. Invalid paths or directories log warnings; the system falls back to an empty skill set.
 
 ### Direct URL Handling
 

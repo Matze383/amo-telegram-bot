@@ -553,6 +553,8 @@ AMO_WEBSEARCH_SEARXNG_CATEGORIES=general,news
 
 Der Bot nutzt einen SearchBroker für aktuelle Informationen (News, Wetter, Sport, Aktien). Dieser verwendet SearXNG als primäre Quelle mit optionaler Brave Search als Fallback.
 Vor normalen KI-Antworten stuft der MainBot Nachrichten als `direct_answer`, `research_needed` oder `clarify` ein. Mutable externe Fakten werden als `research_needed` behandelt und zuerst über Current-Info recherchiert. Ist dafür keine Current-Info-Suche verfügbar oder liefert sie keine belastbare Evidenz, antwortet der Bot bewusst fail-closed mit einer ehrlichen Unsicherheitsmeldung statt aus Modell-/Trainingswissen zu raten. Wenn ein normaler KI-Entwurf bei einer Current-Info-Frage mit "keine Live-Daten", "Wissensstand" oder "Trainingsdaten" ausweicht, wird er verworfen und ebenfalls durch Current-Info bzw. Fail-closed behandelt.
+
+> **Wichtig:** SearX/SearXNG-Suchergebnis-Snippets werden absichtlich **nicht** als Evidenz genutzt. Die Snippet-Felder werden intern geleert; das System führt stattdessen Fail-Closed-Scraping von tatsächlichen Seiteninhalten durch.
 Safesearch- und Region-Einstellungen steuern das SearXNG/Brave-Suchprofil-Parameter-Mapping; sie machen Brave nicht zum primären Anbieter.
 Optionale Profildateien steuern die generische Intent-Ebene vor dem Provider-Mapping. Ungültige Dateien werden abgelehnt und die Current-Info-Suche wird deaktiviert, statt unsichere Provider-Parameter zu senden.
 Für die Extraktion von Ergebnis-Seiten bevorzugt der Dokument-Fetcher Crawlee und fällt auf httpx zurück. Er folgt nur begrenzten Redirects, begrenzt die Antwortgröße, blockiert private/interne Ziele und akzeptiert HTML/XHTML/Plain-Text-Antworten.
@@ -585,7 +587,7 @@ Für die Extraktion von Ergebnis-Seiten bevorzugt der Dokument-Fetcher Crawlee u
 | `AMO_CURRENT_INFO_ENABLED` | `false` | Current-Info-Telegram-Antworten aktivieren; bei `research_needed` wird ohne verfügbare Current-Info fail-closed geantwortet statt auf normale KI-Antworten zurückzufallen |
 | `AMO_CURRENT_INFO_TIMEOUT_SECONDS` | `8` | Frontend-Budget für Current-Info-Antworten in Sekunden, inklusive Antwortsynthese; abgelaufene Arbeit kann im Hintergrund fertig werden (zulässig: >0 bis 60) |
 | `AMO_CURRENT_INFO_LATE_SYNTHESIS_TIMEOUT_SECONDS` | `60` | Hintergrundbudget für die Synthese einer Current-Info-Antwort, die nach dem Frontend-Budget fertig wird (zulässig: >0 bis 300) |
-| `AMO_CURRENT_INFO_MAX_RESULTS` | `5` | Maximale Anzahl Current-Info-Suchergebnisse pro Telegram-Antwort |
+| `AMO_CURRENT_INFO_MAX_RESULTS` | `10` | Maximale Anzahl Current-Info-Suchergebnisse pro Telegram-Antwort |
 | `AMO_CURRENT_INFO_MAX_DOCUMENTS` | `3` | Maximale Anzahl gefolgter Dokumente pro Current-Info-Telegram-Antwort |
 | `AMO_CURRENT_INFO_MAX_SEARCH_PROVIDER_RUNS_PER_RESPONSE` | `2` | Maximale Suchprovider-Aufrufe pro Current-Info-Antwort |
 | `AMO_CURRENT_INFO_MAX_FETCH_RUNS_PER_RESPONSE` | `3` | Maximale Dokument-Fetch-Aufrufe pro Current-Info-Antwort |
@@ -640,6 +642,42 @@ GPT-Researcher ist optional und bleibt standardmäßig aus. Aktivierung braucht:
 Nach Änderungen an Abhängigkeiten oder `.env` den Bot-Prozess neu starten. `AMO_RESEARCH_FAST_MODEL`, `AMO_RESEARCH_SMART_MODEL` und `AMO_RESEARCH_STRATEGIC_MODEL` dürfen bereits einen Provider-Prefix enthalten; sonst ergänzt AMO `AMO_RESEARCH_MODEL_PROVIDER`. Leere Werte fallen auf die Ollama-Modelle zurück. Wenn dadurch kein vollständiges Modellset entsteht, startet die Research-Konfiguration nicht.
 
 Budget- und Safety-Grenzen bleiben in AMO gesetzt: `AMO_RESEARCH_TIMEOUT_SECONDS`, `AMO_RESEARCH_MAX_SOURCES`, `AMO_RESEARCH_MAX_CONTEXT_CHARS`, `AMO_RESEARCH_DEEP_*` und `AMO_RESEARCH_REPORT_WORDS` begrenzen Laufzeit, Quellen, Kontext und Berichtslänge. Deep Research wird pro Anfrage über AMO-Metadaten/Auto-Routing gewählt (`report_type=deep_research`); die Modellauswahl nutzt weiterhin nur `AMO_RESEARCH_FAST_MODEL`, `AMO_RESEARCH_SMART_MODEL` und `AMO_RESEARCH_STRATEGIC_MODEL`. GPT-Researcher- oder Current-Info-Ausfälle werden fail-closed behandelt: Bei `research_needed` erfindet der Bot keine aktuellen Fakten aus Trainingswissen, sondern meldet fehlende/verfehlte Recherche. Wenn GPT-Researcher für normale Webresearch-Pfade verfügbar ist und fehlschlägt, fällt AMO nur auf den normalen Current-Info-Pfad zurück; snippet-only/no-scrape-Evidenz wird nicht als verifiziert bewertet.
+
+### GPT-Researcher Role Skills (optional)
+
+GPT-Researcher unterstützt rollenspezifische Skill-Dateien für die drei LLM-Stufen (fast, smart, strategic). Diese Dateien können bei der Recherche spezialisierte Anweisungen bereitstellen (z.B. Domain-Expertise, Zitierstile, Ausgabeformate). Die Skills werden beim Bot-Start geladen und an GPT-Researcher übergeben.
+
+**Verzeichnisstruktur:**
+```
+skills/gpt_researcher/
+├── fast/SKILL.md      # Für schnelle/initial Retrieval- und Planungsaufgaben
+├── smart/SKILL.md     # Für evidenzbasierte Synthese
+└── strategic/SKILL.md # Für hochwertige, strategische Analyse
+```
+
+**Konfigurationsvariablen:**
+
+| Variable | Standard | Beschreibung |
+|----------|----------|--------------|
+| `AMO_RESEARCH_ROLE_SKILLS_DIR` | *(leer)* | Basisverzeichnis für alle Skill-Dateien. Die einzelnen Pfade werden daraus abgeleitet (`{DIR}/fast/SKILL.md` usw.), falls nicht explizit überschrieben. |
+| `AMO_RESEARCH_FAST_SKILL_PATH` | `skills/gpt_researcher/fast/SKILL.md` | Pfad zur Skill-Datei für die "fast"-Stufe |
+| `AMO_RESEARCH_SMART_SKILL_PATH` | `skills/gpt_researcher/smart/SKILL.md` | Pfad zur Skill-Datei für die "smart"-Stufe |
+| `AMO_RESEARCH_STRATEGIC_SKILL_PATH` | `skills/gpt_researcher/strategic/SKILL.md` | Pfad zur Skill-Datei für die "strategic"-Stufe |
+| `AMO_RESEARCH_ROLE_SKILL_MAX_CHARS` | `2000` | Maximale Zeichen pro Skill-Datei (zulässig: 500 bis 10000) |
+
+**Beispiel-Konfiguration:**
+```ini
+# GPT-Researcher Role Skills (verwendet Standardpfade)
+AMO_RESEARCH_ROLE_SKILLS_DIR=skills/gpt_researcher
+AMO_RESEARCH_ROLE_SKILL_MAX_CHARS=2000
+
+# Oder explizite Pfade pro Stufe:
+# AMO_RESEARCH_FAST_SKILL_PATH=custom/skills/research/fast.txt
+# AMO_RESEARCH_SMART_SKILL_PATH=custom/skills/research/smart.txt
+# AMO_RESEARCH_STRATEGIC_SKILL_PATH=custom/skills/research/strategic.txt
+```
+
+> **Hinweis:** Fehlende Skill-Dateien werden ignoriert (kein Fehler). Übergroße Dateien werden auf `MAX_CHARS` gekürzt. Ungültige Pfade oder Verzeichnisse loggen Warnungen; das System fällt auf einen leeren Skill-Set zurück.
 
 ### Direkte URL-Behandlung
 

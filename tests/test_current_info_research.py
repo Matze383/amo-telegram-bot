@@ -13,12 +13,15 @@ from amo_bot.current_info.research import (
     GptResearcherProvider,
     GptResearcherProviderConfig,
     ResearchModelConfig,
+    RoleSkillConfig,
     build_gpt_researcher_provider_config_from_settings,
+    load_gpt_researcher_role_skills,
     _build_pgvector_store,
     _extract_source_urls,
     _NonEmptyVectorStore,
     _strip_searx_prefetched_content,
     _sync_pgvector_connection_url,
+    resolve_gpt_researcher_role_skill_config,
     resolve_research_embedding_config,
     resolve_research_model_config,
     _pgvector_embedding_id_notnull_remediation,
@@ -350,6 +353,7 @@ class _ContentSourceResearcher:
             {
                 "link": "https://research.example/stellantis-opel",
                 "content": "Opel is part of Stellantis; Stellantis shares trade under ticker STLA. " * 20,
+                "metadata": {"source_state": "fetched"},
             },
         )
 
@@ -443,6 +447,11 @@ class _Settings:
     amo_research_deep_breadth: int = 2
     amo_research_deep_depth: int = 2
     amo_research_deep_concurrency: int = 2
+    amo_research_role_skills_dir: str = "skills/gpt_researcher"
+    amo_research_fast_skill_path: str = ""
+    amo_research_smart_skill_path: str = ""
+    amo_research_strategic_skill_path: str = ""
+    amo_research_role_skill_max_chars: int = 12000
     amo_research_report_words: int = 700
     amo_research_vector_collection: str = "research_chunks"
     amo_searxng_url: str = "https://searx.example"
@@ -522,6 +531,144 @@ def test_build_gpt_researcher_config_from_settings_keeps_config_switchable() -> 
     assert config.embedding == "ollama:nomic-embed-text-v2-moe:latest"
     assert config.searxng_url == "https://searx.example"
     assert config.vector_collection == "research_chunks"
+    assert config.role_skills is not None
+    assert config.role_skills.skills_dir == "skills/gpt_researcher"
+
+
+def test_gpt_researcher_role_skill_loader_maps_roles_and_ignores_missing_files(tmp_path) -> None:
+    base = tmp_path / "skills" / "gpt_researcher"
+    (base / "fast").mkdir(parents=True)
+    (base / "strategic").mkdir(parents=True)
+    (base / "fast" / "SKILL.md").write_text("Fast role instruction", encoding="utf-8")
+    (base / "strategic" / "SKILL.md").write_text("Strategic role instruction", encoding="utf-8")
+
+    loaded = load_gpt_researcher_role_skills(
+        RoleSkillConfig(
+            skills_dir=str(base),
+            role_paths={},
+            max_chars=100,
+        )
+    )
+
+    assert loaded == {
+        "fast": "Fast role instruction",
+        "strategic": "Strategic role instruction",
+    }
+
+
+def test_gpt_researcher_role_skill_loader_supports_relative_configured_paths(tmp_path) -> None:
+    base = tmp_path / "role-skills"
+    (base / "custom").mkdir(parents=True)
+    (base / "custom" / "smart.md").write_text("Smart role instruction", encoding="utf-8")
+
+    loaded = load_gpt_researcher_role_skills(
+        RoleSkillConfig(
+            skills_dir=str(base),
+            role_paths={"smart": "custom/smart.md"},
+            max_chars=100,
+        )
+    )
+
+    assert loaded == {"smart": "Smart role instruction"}
+
+
+def test_gpt_researcher_role_skill_loader_rejects_external_paths(tmp_path) -> None:
+    base = tmp_path / "role-skills"
+    outside = tmp_path / "outside.md"
+    base.mkdir()
+    outside.write_text("secret-ish instruction", encoding="utf-8")
+
+    try:
+        load_gpt_researcher_role_skills(
+            RoleSkillConfig(
+                skills_dir=str(base),
+                role_paths={"fast": str(outside)},
+                max_chars=100,
+            )
+        )
+    except ValueError as exc:
+        assert "must stay under" in str(exc)
+    else:
+        raise AssertionError("external skill path was accepted")
+
+
+def test_gpt_researcher_role_skill_loader_enforces_size_limit(tmp_path) -> None:
+    base = tmp_path / "role-skills"
+    (base / "fast").mkdir(parents=True)
+    (base / "fast" / "SKILL.md").write_text("too long", encoding="utf-8")
+
+    try:
+        load_gpt_researcher_role_skills(RoleSkillConfig(skills_dir=str(base), role_paths={}, max_chars=3))
+    except ValueError as exc:
+        assert "exceeds 3 characters" in str(exc)
+    else:
+        raise AssertionError("oversized skill was accepted")
+
+
+def test_gpt_researcher_role_skills_are_injected_into_config_and_query(tmp_path) -> None:
+    _FakeResearcher.instances.clear()
+    base = tmp_path / "skills" / "gpt_researcher"
+    for role in ("fast", "smart", "strategic"):
+        (base / role).mkdir(parents=True)
+        (base / role / "SKILL.md").write_text(f"{role} role instruction", encoding="utf-8")
+
+    provider = GptResearcherProvider(
+        config=GptResearcherProviderConfig(
+            enabled=True,
+            model_config=ResearchModelConfig(
+                provider="ollama",
+                fast_llm="ollama:fast-model",
+                smart_llm="ollama:smart-model",
+                strategic_llm="ollama:strategic-model",
+            ),
+            searxng_url="https://searx.example",
+            timeout_seconds=30,
+            max_sources=2,
+            max_context_chars=500,
+            deep_breadth=1,
+            deep_depth=1,
+            deep_concurrency=1,
+            report_words=200,
+            vector_collection="research_chunks",
+            ollama_base_url="http://ollama.test:11434",
+            role_skills=RoleSkillConfig(skills_dir=str(base), role_paths={}, max_chars=100),
+        ),
+        embedding_provider=_FakeEmbeddingProvider(),
+        database_url="sqlite:///:memory:",
+        researcher_cls=_FakeResearcher,
+    )
+    request, task, query_plan = _research_request_parts("Recherchiere Rollen")
+
+    answer = provider.answer(request=request, task=task, query_plan=query_plan)
+
+    assert answer.status == "answered"
+    instance = _FakeResearcher.instances[0]
+    assert instance.config["ROLE_SKILLS"] == {
+        "fast": "fast role instruction",
+        "smart": "smart role instruction",
+        "strategic": "strategic role instruction",
+    }
+    assert instance.config["FAST_LLM_SKILL"] == "fast role instruction"
+    assert instance.config["SMART_LLM_SKILL"] == "smart role instruction"
+    assert instance.config["STRATEGIC_LLM_SKILL"] == "strategic role instruction"
+    assert "GPT-Researcher role skill instructions:" in instance.kwargs["query"]
+    assert "[fast]\nfast role instruction" in instance.kwargs["query"]
+
+
+def test_resolve_gpt_researcher_role_skill_config_uses_settings_paths() -> None:
+    resolved = resolve_gpt_researcher_role_skill_config(
+        _Settings(
+            amo_research_role_skills_dir="/tmp/research-skills",
+            amo_research_fast_skill_path="roles/fast.md",
+            amo_research_role_skill_max_chars=345,
+        )
+    )
+
+    assert resolved is not None
+    assert resolved.skills_dir == "/tmp/research-skills"
+    assert resolved.role_paths["fast"] == "roles/fast.md"
+    assert resolved.role_paths["smart"] == ""
+    assert resolved.max_chars == 345
 
 
 def test_research_embedding_config_uses_provider_model_format_and_allows_explicit_ids() -> None:
@@ -644,7 +791,9 @@ def test_gpt_researcher_provider_maps_report_sources_and_ollama_config(monkeypat
 
 def test_gpt_researcher_provider_uses_deep_research_report_type_from_metadata(caplog) -> None:
     _FakeResearcher.instances.clear()
-    request, task, query_plan = _research_request_parts("Recherchiere AMO Deep Research")
+    request, task, query_plan = _research_request_parts(
+        "erstelle mir einen ausführlichen aktuellen Bericht zu ExampleTech Partner Pläne Finanzen"
+    )
     request = CurrentInfoRequest(
         query=request.query,
         locale=request.locale,
@@ -661,6 +810,11 @@ def test_gpt_researcher_provider_uses_deep_research_report_type_from_metadata(ca
     assert answer.status == "answered"
     instance = _FakeResearcher.instances[0]
     assert instance.kwargs["report_type"] == "deep_research"
+    query = instance.kwargs["query"]
+    assert "Deep research decomposition:" in query
+    assert "Split the report into multiple focused subquestions before synthesis:" in query
+    assert "Partner strategy, partner ecosystem, partner programs, and announced plans." not in query
+    assert "financial performance, guidance, investor-relations materials" not in query
     assert answer.metadata["research_report_type"] == "deep_research"
     assert answer.metadata["deep_research"] is True
     assert answer.metadata["deep_breadth"] == 1
@@ -771,11 +925,12 @@ def test_searx_snippet_body_is_not_prefetched_content() -> None:
         {
             "href": "https://source.example/searx-snippet",
             "title": "Snippet source",
-            "snippet": long_snippet.strip(),
         }
     ]
     assert "body" not in normalized[0]
     assert "raw_content" not in normalized[0]
+    assert "content" not in normalized[0]
+    assert "snippet" not in normalized[0]
 
 
 def test_gpt_researcher_searx_snippet_url_reaches_browse_urls(monkeypatch, caplog) -> None:
@@ -824,7 +979,6 @@ def test_gpt_researcher_searx_snippet_url_reaches_browse_urls(monkeypatch, caplo
         {
             "href": source_url,
             "title": "Snippet source",
-            "snippet": long_snippet.strip(),
         },
     )
     assert _FakeSearxSearch.search is original_search
@@ -844,7 +998,7 @@ def test_gpt_researcher_searx_snippet_url_reaches_browse_urls(monkeypatch, caplo
     assert "'searx_raw_result_count': 1" in caplog.text
     assert "'searx_url_result_count': 1" in caplog.text
     assert "'searx_raw_content_or_body_present_count': 1" in caplog.text
-    assert "'searx_snippet_present_after_strip_count': 1" in caplog.text
+    assert "'searx_snippet_present_after_strip_count': 0" in caplog.text
     assert "'stage': 'browse_urls'" in caplog.text
     assert "'browse_urls_call_count': 1" in caplog.text
     assert "'browse_urls_input_url_count': 1" in caplog.text

@@ -280,14 +280,15 @@ def test_current_info_service_rejects_snippet_only_evidence_for_current_facts():
 
     answer = service.answer(CurrentInfoRequest(query="current info"))
 
-    assert answer.status == "unverified_evidence"
+    assert answer.status == "empty_evidence"
     assert answer.answer_text == ""
     assert answer.confidence == 0.0
     assert answer.evidence is not None
     assert answer.evidence.documents == ()
     assert answer.evidence.freshness == "snippet_only"
-    assert answer.evidence.chunks[0].source_url == result.url
-    assert answer.warnings == ("snippet_only_evidence",)
+    assert answer.evidence.chunks == ()
+    assert answer.sources == (result.url,)
+    assert answer.warnings == ("empty_evidence",)
 
 
 def test_current_info_service_treats_single_fetch_exception_as_non_fatal(caplog):
@@ -1316,20 +1317,21 @@ def test_current_info_service_keeps_unknown_crypto_snippets_unverified_after_sea
 
     assert answer.task is not None
     assert answer.task.domain == "crypto"
-    assert answer.status == "unverified_evidence"
+    assert answer.status == "empty_evidence"
     assert answer.answer_text == ""
     assert answer.evidence is not None
     assert answer.evidence.freshness == "snippet_only"
-    assert "snippet_only_evidence" in answer.warnings
-    assert answer.metadata["reason"] == "current_facts_need_fetched_sources"
+    assert answer.evidence.chunks == ()
+    assert answer.sources == (result.url,)
+    assert answer.warnings == ("empty_evidence",)
     assert [call.query for call in search_provider.calls] == [query]
 
 
 def test_current_info_service_does_not_treat_plain_stock_price_as_listing_query():
     result = SearchResult(
-        title="NVDA Stock Quote",
-        url="https://finance.example/nvda",
-        snippet="NVDA stock price.",
+        title="ACME Stock Quote",
+        url="https://finance.example/acme",
+        snippet="ACME stock price.",
         provider="fake_search",
         rank=1,
         host="finance.example",
@@ -1338,17 +1340,17 @@ def test_current_info_service_does_not_treat_plain_stock_price_as_listing_query(
     service = CurrentInfoService(
         search_provider=search_provider,
         fetch_provider=_FakeFetchProvider(
-            {result.url: FetchedDocument(url=result.url, title=result.title, text="NVDA stock price is 1.23.")}
+            {result.url: FetchedDocument(url=result.url, title=result.title, text="ACME stock price is 1.23.")}
         ),
         retrieval_provider=_FakeRetrievalProvider(
-            (EvidenceChunk(text="NVDA stock price is 1.23.", source_url=result.url, source_title=result.title),)
+            (EvidenceChunk(text="ACME stock price is 1.23.", source_url=result.url, source_title=result.title),)
         ),
     )
 
-    answer = service.answer(CurrentInfoRequest(query="NVDA stock price now", locale="en", domain_hint="stock"))
+    answer = service.answer(CurrentInfoRequest(query="ACME stock price now", locale="en", domain_hint="stock"))
 
     assert answer.status == "answered"
-    assert [call.query for call in search_provider.calls] == ["NVDA stock price now"]
+    assert [call.query for call in search_provider.calls] == ["ACME stock price now"]
 
 
 def test_current_info_service_blocks_single_source_finance_listing_claims_with_warning():
@@ -1656,7 +1658,7 @@ def test_current_info_service_normalizes_ranks_and_dedupes_search_candidates():
 
     answer = service.answer(CurrentInfoRequest(query="current info", max_results=3))
 
-    assert answer.status == "unverified_evidence"
+    assert answer.status == "empty_evidence"
     assert answer.search_bundle is not None
     assert [result.url for result in answer.search_bundle.results] == [
         "https://example.com/news?id=1",
@@ -1665,7 +1667,7 @@ def test_current_info_service_normalizes_ranks_and_dedupes_search_candidates():
     assert answer.search_bundle.results[0].metadata["source_type"] == "News"
     assert answer.search_bundle.results[1].metadata["source_type"] == "Official"
     assert answer.sources == ("https://example.com/news?id=1", "https://example.gov/status")
-    assert answer.warnings == ("snippet_only_evidence", "needs_independent_source")
+    assert answer.warnings == ("empty_evidence", "needs_independent_source")
 
 
 def test_current_info_service_uses_source_preference_repository_for_ranking():

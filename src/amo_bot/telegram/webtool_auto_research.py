@@ -181,6 +181,15 @@ def decide_auto_research(text: str, *, now: datetime | None = None) -> AutoResea
         return AutoResearchDecision(False, "", "timeless_or_personal", "", "")
 
     if has_temporal or has_year or has_date or has_current_year or has_sports_current_signal or has_market_current_signal:
+        if classifier_decision.should_research and _should_use_deep_research(raw, classifier_decision.signals):
+            return AutoResearchDecision(
+                True,
+                "webresearch",
+                classifier_decision.reason,
+                _sanitize_text(raw, max_len=220),
+                "",
+                "deep_research",
+            )
         reason = (
             "sports_current_info_signal"
             if has_sports_current_signal and not (has_temporal or has_year or has_date or has_current_year or has_market_current_signal)
@@ -226,13 +235,15 @@ def _is_complex_research_query(raw: str) -> bool:
         return False
     if _WEATHER_INTENT_RE.search(raw) and len(raw) < 140:
         return False
-    if _MARKET_CURRENT_SIGNAL_RE.search(raw) and _MARKET_CURRENT_INTENT_RE.search(raw) and len(raw) < 140:
+    if (
+        _MARKET_CURRENT_SIGNAL_RE.search(raw)
+        and _MARKET_CURRENT_INTENT_RE.search(raw)
+        and len(raw) < 140
+    ):
         return False
     if sports_query.has_competition(raw) and _SPORTS_CURRENT_INTENT_RE.search(raw) and len(raw) < 140:
         return False
     return True
-
-
 def _has_external_research_context(raw: str) -> bool:
     return bool(
         _URL_RE.search(raw)
@@ -250,13 +261,12 @@ def _should_use_deep_research(raw: str, signals: tuple[str, ...]) -> bool:
     """Route broad mutable company lookups to GPT-Researcher instead of one-shot search."""
 
     signal_set = set(signals)
-    if "lookup_intent" not in signal_set:
-        return False
-
     broad_company_facets = {"finance_or_market", "organization_relationship", "organization_role"}
     matched_facets = signal_set & broad_company_facets
     if len(matched_facets) >= 2:
-        return True
+        return bool(signal_set & {"lookup_intent", "named_entity", "temporal_current"})
+    if "lookup_intent" not in signal_set:
+        return False
 
     has_list_shape = bool(re.search(r"\b(?:und|and)\b|[,;/]", raw, re.IGNORECASE))
     return has_list_shape and bool(matched_facets)

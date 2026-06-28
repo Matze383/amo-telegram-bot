@@ -652,7 +652,7 @@ def test_current_info_insufficient_answer_labels_sources_as_candidates_in_englis
     text = Dispatcher._format_current_info_insufficient_answer(answer=answer, locale="en")
 
     assert text == (
-        "The available sources and candidates are not sufficient to answer this reliably.\n\n"
+        "I found source candidates, but no sufficiently fetchable page evidence for a reliable answer.\n\n"
         "Sources/candidates considered:\n"
         "1. https://search.example/result"
     )
@@ -694,7 +694,7 @@ def test_current_info_mutable_fact_queries_are_marked_gpt_researcher_only() -> N
         "Welche Firmen gehören aktuell zu OpenAI und Microsoft?",
         "Welche Änderungen gab es in der Stripe API?",
         "Was kostet ChatGPT Pro heute?",
-        "Was sind die neuesten News zu Nvidia?",
+        "Was sind die neuesten News zu ExampleTech?",
         "Wer ist aktuell CEO von OpenAI?",
     )
     for index, query in enumerate(queries, start=1):

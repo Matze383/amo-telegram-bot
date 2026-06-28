@@ -178,7 +178,7 @@ _TEST_CRYPTO_FALLBACK = ProviderDefinition(
 
 def test_domain_classifier_routes_problem_prompts():
     assert classify_evidence_domain("Wie stehen die Gruppen der Fußball WM?") == "sports"
-    assert classify_evidence_domain("Was macht die Nvidia Aktie?") == "stock"
+    assert classify_evidence_domain("Was macht die ExampleTech Aktie?") == "stock"
     assert classify_evidence_domain("ETH kurs jetzt") == "crypto"
     assert classify_evidence_domain("Wie ist das Wetter morgen in Berlin?") == "weather"
     assert classify_evidence_domain("aktuelle News zu OpenAI") == "news"
@@ -672,7 +672,7 @@ def test_unknown_crypto_asset_does_not_poison_provider_health():
 def test_pipeline_allows_stock_quote_built_in_web_research_without_structured_provider():
     pipeline = WebEvidencePipeline()
 
-    stock = pipeline.evaluate(query="Was macht die Nvidia Aktie?", locale="de")
+    stock = pipeline.evaluate(query="Was macht die ExampleTech Aktie?", locale="de")
     sports = pipeline.evaluate(query="Wie stehen die Gruppen der Fußball WM?", locale="de")
 
     assert stock.status == "needs_profiled_web_research"
@@ -698,9 +698,9 @@ def test_finance_quote_profile_uses_db_ranked_source_strategy(tmp_path):
     profile = build_domain_research_profile(
         session_factory=session_factory,
         domain="stock",
-        query="NVDA stock price now",
+        query="ACME stock price now",
     )
-    result = WebEvidencePipeline(session_factory=session_factory).evaluate(query="NVDA stock price now", locale="en")
+    result = WebEvidencePipeline(session_factory=session_factory).evaluate(query="ACME stock price now", locale="en")
 
     assert profile.usable is True
     assert profile.need == "finance_quote"
@@ -735,7 +735,7 @@ def test_finance_profile_ranking_adjusts_from_db_health(tmp_path):
     profile = build_domain_research_profile(
         session_factory=session_factory,
         domain="stock",
-        query="NVDA stock price now",
+        query="ACME stock price now",
     )
 
     assert profile.usable is True
@@ -754,7 +754,7 @@ def test_finance_research_profile_is_distinct_from_live_quote(tmp_path):
     )
 
     result = WebEvidencePipeline(session_factory=session_factory).evaluate(
-        query="Nvidia fundamentals filings and dividend research",
+        query="ExampleCorp fundamentals filings and dividend research",
         locale="en",
     )
 
@@ -867,7 +867,7 @@ def test_finance_quote_without_quote_profile_uses_generic_verified_web_research(
         source_type="official_filings",
     )
 
-    result = WebEvidencePipeline(session_factory=session_factory).evaluate(query="NVDA stock price now", locale="en")
+    result = WebEvidencePipeline(session_factory=session_factory).evaluate(query="ACME stock price now", locale="en")
 
     assert result.status == "needs_profiled_web_research"
     assert "Need: finance_quote" in result.text
@@ -889,7 +889,7 @@ def test_finance_research_without_research_profile_uses_generic_checked_web_rese
     )
 
     result = WebEvidencePipeline(session_factory=session_factory).evaluate(
-        query="Nvidia fundamentals filings and dividend research",
+        query="ExampleCorp fundamentals filings and dividend research",
         locale="en",
     )
 
@@ -1194,7 +1194,7 @@ def test_domain_profile_source_unavailable_fails_closed_from_db_state(tmp_path):
         disabled = session.scalar(select(ResearchProvider).where(ResearchProvider.provider_name == "disabled_finance_quote"))
         assert disabled is not None and disabled.enabled is False
 
-    result = WebEvidencePipeline(session_factory=session_factory).evaluate(query="NVDA stock price now", locale="en")
+    result = WebEvidencePipeline(session_factory=session_factory).evaluate(query="ACME stock price now", locale="en")
 
     assert result.status == "needs_profiled_web_research"
     assert result.warnings == (
@@ -1209,8 +1209,8 @@ def test_autoresearch_stock_does_not_use_search_snippet_numbers(monkeypatch):
         allowed=True,
         decision="allow",
         reason="search_completed",
-        text="Nvidia stock is 999 USD in search snippet",
-        sources=("https://finance.example/nvda",),
+        text="ACME stock is 999 USD in search snippet",
+        sources=("https://finance.example/acme",),
         hosts=("finance.example",),
         error=None,
     )
@@ -1225,7 +1225,7 @@ def test_autoresearch_stock_does_not_use_search_snippet_numbers(monkeypatch):
     d.ai_service.ask = _ask
     asyncio.run(
         d._maybe_handle_ai_autoreply(
-            message=_mk_message("@amo_bot Was macht die Nvidia Aktie?", reply_to_is_bot=False, reply_to_user_is_bot=False, reply_to_username=""),
+            message=_mk_message("@amo_bot Was macht die ExampleTech Aktie?", reply_to_is_bot=False, reply_to_user_is_bot=False, reply_to_username=""),
             role=Role.ADMIN,
             bot_username="amo_bot",
             from_parsed_update=True,

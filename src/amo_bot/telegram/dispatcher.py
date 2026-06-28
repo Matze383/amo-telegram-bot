@@ -198,7 +198,7 @@ class Dispatcher:
     current_info_timeout_seconds: float = 8.0
     current_info_research_timeout_seconds: float = 360.0
     current_info_late_synthesis_timeout_seconds: float = 60.0
-    current_info_max_results: int = 5
+    current_info_max_results: int = 10
     current_info_max_documents: int = 3
     live_edit_adapter: TelegramLiveEditAdapter | None = None
     restart_terminator: Callable[[], None] = _terminate_current_process
@@ -2584,11 +2584,34 @@ class Dispatcher:
         sources = tuple(dict.fromkeys(source for source in answer.sources if source))[
             :CURRENT_INFO_SYNTHESIS_MAX_SOURCE_COUNT
         ]
+        warnings = set(answer.warnings)
+        if answer.evidence is not None:
+            warnings.update(answer.evidence.warnings)
+        missing_fetch_evidence = bool(
+            warnings
+            & {
+                "empty_evidence",
+                "snippet_only_evidence",
+                "empty_scraped_source_docs",
+                "no_fetched_source_docs",
+                "source_validation_empty",
+                "unfetched_source_urls",
+                "unfetched_chunk_evidence",
+            }
+        )
         if locale == "en":
-            body = "The available sources and candidates are not sufficient to answer this reliably."
+            body = (
+                "The available sources and candidates are not sufficient to answer this reliably."
+                if not missing_fetch_evidence
+                else "I found source candidates, but no sufficiently fetchable page evidence for a reliable answer."
+            )
             label = "Sources/candidates considered"
         else:
-            body = "Die verfügbaren Quellen und Kandidaten reichen nicht aus, um das verlässlich zu beantworten."
+            body = (
+                "Die verfügbaren Quellen und Kandidaten reichen nicht aus, um das verlässlich zu beantworten."
+                if not missing_fetch_evidence
+                else "Ich habe Quellenkandidaten gefunden, aber keine ausreichend abrufbare Seitenevidenz für eine verlässliche Antwort."
+            )
             label = "Berücksichtigte Quellen/Kandidaten"
         if not sources:
             return body

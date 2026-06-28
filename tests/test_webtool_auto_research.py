@@ -157,12 +157,13 @@ def test_auto_research_routes_complex_research_prompts_to_webresearch():
         "Analysiere Vor- und Nachteile von GPT Researcher im Vergleich zu einfacher Websuche.",
         "Was spricht dafür und dagegen, pgvector für Research-Kontexte zu nutzen?",
         "Latest developments on local LLM research tools with sources",
+        "erstelle mir einen ausführlichen aktuellen Bericht zu ExampleTech Partner Pläne Finanzen",
     ]
     for prompt in prompts:
         d = decide_auto_research(prompt)
         assert d.enabled is True, prompt
         assert d.capability == "webresearch"
-        assert d.reason == "complex_research_signal"
+        assert d.reason in {"complex_research_signal", "semantic_current_data_required"}
         assert d.research_report_type == "deep_research"
 
 
@@ -239,7 +240,6 @@ def test_auto_research_uses_generic_current_data_classifier_for_category_prompts
         "Ist die Playstation Portal heute bei Saturn lieferbar?",
         "Welche Bürgeramt Termine gibt es heute in Berlin?",
         "What is the current OpenAI API status?",
-        "Welche Relevanz hat die Robert Bosch GmbH am Finanzmarkt, welche Partner hat sie und wie ist die Rating-/Anleihe-Situation?",
         "Welche Änderungen gab es in der Telegram Bot API?",
         "Welche Lieferanten hat Apple Inc?",
         "Welche Ratings hat Volkswagen AG?",
@@ -257,6 +257,18 @@ def test_auto_research_uses_generic_current_data_classifier_for_category_prompts
             "semantic_current_data_required",
             "semantic_uncertain_external_lookup",
         }
+
+
+def test_auto_research_routes_multi_facet_company_research_to_webresearch():
+    d = decide_auto_research(
+        "Welche Relevanz hat die Robert Bosch GmbH am Finanzmarkt, "
+        "welche Partner hat sie und wie ist die Rating-/Anleihe-Situation?"
+    )
+
+    assert d.enabled is True
+    assert d.capability == "webresearch"
+    assert d.reason == "semantic_current_data_required"
+    assert d.research_report_type == "deep_research"
 
 
 def test_auto_research_triggers_on_lookup_intent_named_entity_mutable_facts():

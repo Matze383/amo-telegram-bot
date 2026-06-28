@@ -305,6 +305,7 @@ def test_search_searxng_json_parses_results(monkeypatch):
     assert len(results) == 2
     assert results[0].title == "Bitcoin Price Live"
     assert results[0].url == "https://example.com/btc"
+    assert [result.snippet for result in results] == ["", ""]
 
 
 def test_coreplugin_adapter_prefers_searxng_when_configured(monkeypatch):

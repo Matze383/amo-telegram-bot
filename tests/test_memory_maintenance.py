@@ -221,7 +221,7 @@ def test_aggregate_recent_messages_excludes_bot_and_meta_rows_from_content_diges
     ts = datetime(2026, 5, 14, 0, 1, tzinfo=UTC)
 
     repo.append_message(scope_type=cfg.scope_type, chat_id=cfg.chat_id, topic_id=cfg.topic_id, user_id=cfg.user_id, message_text="normal user asks about ChatGPT", telegram_author_user_id=1, source="user", created_at=ts)
-    repo.append_message(scope_type=cfg.scope_type, chat_id=cfg.chat_id, topic_id=cfg.topic_id, user_id=cfg.user_id, message_text="Nvidia bot answer should not be digested", telegram_author_user_id=2, source="assistant", telegram_author_is_bot=True, created_at=ts)
+    repo.append_message(scope_type=cfg.scope_type, chat_id=cfg.chat_id, topic_id=cfg.topic_id, user_id=cfg.user_id, message_text="ExampleTech bot answer should not be digested", telegram_author_user_id=2, source="assistant", telegram_author_is_bot=True, created_at=ts)
     repo.append_message(scope_type=cfg.scope_type, chat_id=cfg.chat_id, topic_id=cfg.topic_id, user_id=cfg.user_id, message_text="local commit 5fb83d9 fix: reduce off-topic memory recall drift", telegram_author_user_id=1, source="user", created_at=ts)
 
     result = repo.aggregate_recent_messages_to_daily_memory(scope_type=cfg.scope_type, chat_id=cfg.chat_id, topic_id=cfg.topic_id, user_id=cfg.user_id, now=ts)
@@ -231,7 +231,7 @@ def test_aggregate_recent_messages_excludes_bot_and_meta_rows_from_content_diges
     assert row is not None
     assert "- normal user asks about ChatGPT" in row.summary_text
     assert "eligible_content_messages=1" in row.summary_text
-    assert "Nvidia" not in row.summary_text
+    assert "ExampleTech" not in row.summary_text
     assert "local commit" not in row.summary_text
 
 
@@ -240,7 +240,7 @@ def test_aggregate_recent_messages_skips_daily_digest_when_no_eligible_content()
     cfg = repo.upsert_config(scope_type="topic", chat_id=-6107, topic_id=101, memory_retention_days=30)
     ts = datetime(2026, 5, 14, 0, 1, tzinfo=UTC)
 
-    repo.append_message(scope_type=cfg.scope_type, chat_id=cfg.chat_id, topic_id=cfg.topic_id, user_id=cfg.user_id, message_text="Nvidia bot answer should not be digested", telegram_author_user_id=2, source="assistant", telegram_author_is_bot=True, created_at=ts)
+    repo.append_message(scope_type=cfg.scope_type, chat_id=cfg.chat_id, topic_id=cfg.topic_id, user_id=cfg.user_id, message_text="ExampleTech bot answer should not be digested", telegram_author_user_id=2, source="assistant", telegram_author_is_bot=True, created_at=ts)
     repo.append_message(scope_type=cfg.scope_type, chat_id=cfg.chat_id, topic_id=cfg.topic_id, user_id=cfg.user_id, message_text="pytest tests/test_ai_router.py -q PASS", telegram_author_user_id=1, source="user", created_at=ts)
 
     result = repo.aggregate_recent_messages_to_daily_memory(scope_type=cfg.scope_type, chat_id=cfg.chat_id, topic_id=cfg.topic_id, user_id=cfg.user_id, now=ts)
