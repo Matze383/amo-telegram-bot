@@ -645,7 +645,19 @@ Budget and safety boundaries stay controlled by AMO: `AMO_RESEARCH_TIMEOUT_SECON
 
 ### GPT-Researcher Role Skills (optional)
 
-GPT-Researcher supports role-specific skill files for the three LLM stages (fast, smart, strategic). These files can provide specialized instructions during research (e.g., domain expertise, citation styles, output formats). Skills are loaded at bot startup and passed to GPT-Researcher.
+GPT-Researcher supports role-specific skill files for the three LLM stages (fast, smart, strategic). These files can provide specialized instructions during research (e.g., domain expertise, citation styles, output formats). Skills are loaded at bot startup and injected directly into GPT-Researcher LLM calls:
+
+- **fast** → Into the system instructions of FAST_LLM calls
+- **smart** → Into the system instructions of SMART_LLM calls
+- **strategic** → Into the system instructions of STRATEGIC_LLM calls
+
+This prompt-injection mechanism replaces the previous fallback path via query templates. The old GPT-Researcher configuration fields `ROLE_SKILLS`, `FAST_LLM_SKILL`, etc. are now legacy-compatible metadata only and no longer the primary mechanism.
+
+**Upgrade Risk:** This mechanism patches internal GPT-Researcher modules (v0.15) via a runtime hook. When upgrading GPT-Researcher, verify internal module paths and call-sites as these may change.
+
+**Logging/Monitoring:** For verification after restart or live testing, the following structured logs are written (no skill contents, metadata only):
+- `gpt_researcher_role_skill_roles` — The loaded skill roles (fast, smart, strategic)
+- `gpt_researcher_role_skill_count` — Number of injected skills per role
 
 **Directory structure:**
 ```

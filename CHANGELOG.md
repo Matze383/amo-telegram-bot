@@ -2,7 +2,7 @@
 
 ---
 
-## [Unreleased] – Current-Info Response Strategy Routing
+## [Unreleased] – Current-Info Response Strategy Routing + GPT-Researcher Role Skill Prompt Injection
 
 **Datum / Date:** 2026-06-26
 
@@ -16,6 +16,11 @@ Der MainBot routet Auto-Antworten vor der normalen KI-Synthese über eine Respon
 - **Fail-closed:** Wenn Current-Info nötig, aber nicht verfügbar oder nicht belastbar ist, antwortet der Bot ehrlich unsicher statt aus Trainingswissen zu raten.
 - **Draft Guard:** KI-Entwürfe mit "keine Live-Daten", "Wissensstand" oder "Trainingsdaten" bei Current-Info-Fragen werden verworfen und über Current-Info bzw. Fail-closed behandelt.
 
+#### Neu
+- **GPT-Researcher Role Skill Prompt Injection:** Role Skills werden jetzt direkt in GPT-Researcher LLM-Calls injiziert (fast/FAST_LLM, smart/SMART_LLM, strategic/STRATEGIC_LLM). Die alten `ROLE_SKILLS`-Felder sind nur noch Legacy-kompatible Metadaten.
+- **Upgrade-Risiko:** Interne GPT-Researcher-Module (v0.15) werden über Runtime-Hook gepatched. Bei GPT-Researcher-Upgrade müssen Modulpfade/Call-Sites geprüft werden.
+- **Monitoring:** Neue strukturierte Logs `gpt_researcher_role_skill_roles` und `gpt_researcher_role_skill_count` (keine Skill-Inhalte, nur Metadaten).
+
 ### 🇬🇧 English
 
 #### Overview
@@ -25,6 +30,11 @@ MainBot now routes auto replies through a response strategy (`direct_answer`, `r
 - **Current-Info Gate:** `research_needed` requests use Current-Info/GPT-Researcher before normal LLM answers.
 - **Fail-closed:** When Current-Info is required but unavailable or insufficiently evidenced, the bot responds honestly with uncertainty instead of guessing from training knowledge.
 - **Draft Guard:** AI drafts that mention "no live data", "knowledge cutoff", or "training data" for Current-Info questions are discarded and handled through Current-Info or fail-closed behavior.
+
+#### Added
+- **GPT-Researcher Role Skill Prompt Injection:** Role Skills are now injected directly into GPT-Researcher LLM calls (fast/FAST_LLM, smart/SMART_LLM, strategic/STRATEGIC_LLM). The old `ROLE_SKILLS` fields are now legacy-compatible metadata only.
+- **Upgrade Risk:** Internal GPT-Researcher modules (v0.15) are patched via runtime hook. When upgrading GPT-Researcher, verify module paths/call-sites.
+- **Monitoring:** New structured logs `gpt_researcher_role_skill_roles` and `gpt_researcher_role_skill_count` (no skill contents, metadata only).
 
 ---
 

@@ -645,7 +645,19 @@ Budget- und Safety-Grenzen bleiben in AMO gesetzt: `AMO_RESEARCH_TIMEOUT_SECONDS
 
 ### GPT-Researcher Role Skills (optional)
 
-GPT-Researcher unterstützt rollenspezifische Skill-Dateien für die drei LLM-Stufen (fast, smart, strategic). Diese Dateien können bei der Recherche spezialisierte Anweisungen bereitstellen (z.B. Domain-Expertise, Zitierstile, Ausgabeformate). Die Skills werden beim Bot-Start geladen und an GPT-Researcher übergeben.
+GPT-Researcher unterstützt rollenspezifische Skill-Dateien für die drei LLM-Stufen (fast, smart, strategic). Diese Dateien können bei der Recherche spezialisierte Anweisungen bereitstellen (z.B. Domain-Expertise, Zitierstile, Ausgabeformate). Die Skills werden beim Bot-Start geladen und direkt in die GPT-Researcher LLM-Calls injiziert:
+
+- **fast** → In die System-Instructions der FAST_LLM Calls
+- **smart** → In die System-Instructions der SMART_LLM Calls
+- **strategic** → In die System-Instructions der STRATEGIC_LLM Calls
+
+Dieser Prompt-Injection-Mechanismus ersetzt den früheren Fallback-Pfad über Query-Templates. Die alten Konfigurationsfelder `ROLE_SKILLS`, `FAST_LLM_SKILL` usw. in GPT-Researcher sind nur noch Legacy-kompatible Metadaten und nicht mehr der primäre Mechanismus.
+
+**Upgrade-Risiko:** Dieser Mechanismus patched interne GPT-Researcher-Module (v0.15) über einen Runtime-Hook. Bei einem Upgrade von GPT-Researcher müssen die internen Modulpfade und Call-Sites geprüft werden, da sich diese ändern können.
+
+**Logging/Monitoring:** Zur Verifikation nach Restart oder Live-Test werden folgende strukturierte Logs geschrieben (keine Skill-Inhalte, nur Metadaten):
+- `gpt_researcher_role_skill_roles` — Die geladenen Skill-Rollen (fast, smart, strategic)
+- `gpt_researcher_role_skill_count` — Anzahl der injizierten Skills pro Rolle
 
 **Verzeichnisstruktur:**
 ```

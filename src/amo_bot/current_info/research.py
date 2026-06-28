@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import importlib
 import inspect
 import json
@@ -45,6 +46,33 @@ logger = logging.getLogger(__name__)
 GPT_RESEARCHER_SKILL_ROLES: tuple[str, ...] = ("fast", "smart", "strategic")
 DEFAULT_GPT_RESEARCHER_SKILLS_DIR = Path(__file__).resolve().parents[3] / "skills" / "gpt_researcher"
 DEFAULT_GPT_RESEARCHER_SKILL_MAX_CHARS = 12000
+_KNOWN_LLM_PROVIDERS = {
+    "openai",
+    "anthropic",
+    "azure_openai",
+    "cohere",
+    "google_vertexai",
+    "google_genai",
+    "fireworks",
+    "ollama",
+    "together",
+    "mistralai",
+    "huggingface",
+    "groq",
+    "bedrock",
+    "dashscope",
+    "xai",
+    "deepseek",
+    "litellm",
+    "gigachat",
+    "openrouter",
+    "vllm_openai",
+    "aimlapi",
+    "netmind",
+    "forge",
+    "avian",
+    "minimax",
+}
 
 
 class ResearchProviderError(RuntimeError):
@@ -92,6 +120,11 @@ class GptResearcherProviderConfig:
     ollama_num_ctx: int | None = None
     embedding: str = "openai:text-embedding-3-small"
     role_skills: RoleSkillConfig | None = None
+
+
+_GPT_RESEARCHER_ROLE_SKILL_PROMPT_CONTEXT: contextvars.ContextVar[
+    tuple[ResearchModelConfig, Mapping[str, str]] | None
+] = contextvars.ContextVar("amo_gpt_researcher_role_skill_prompt_context", default=None)
 
 
 class AmoLangChainEmbeddings:
@@ -376,11 +409,15 @@ class GptResearcherProvider:
                 }
             ), _temporary_gpt_researcher_searx_snippet_adapter(
                 emit=emit_searx_debug
-            ), _temporary_gpt_researcher_browser_activity_probe(emit=emit_browser_debug):
+            ), _temporary_gpt_researcher_browser_activity_probe(
+                emit=emit_browser_debug
+            ), _temporary_gpt_researcher_role_skill_prompt_adapter(
+                model_config=self._config.model_config,
+                role_skills=loaded_role_skills,
+            ):
                 researcher_query = _gpt_researcher_query(
                     request=request,
                     task=task,
-                    role_skills=loaded_role_skills,
                 )
                 self._log_lifecycle(
                     event="current_info.GptResearcherInput",
@@ -918,33 +955,7 @@ def _embedding_id(*, provider: str, model: str) -> str:
 def _llm_id(*, provider: str, model: str) -> str:
     model = model.strip()
     explicit_provider = model.split(":", 1)[0].casefold() if ":" in model else ""
-    if explicit_provider in {
-        "openai",
-        "anthropic",
-        "azure_openai",
-        "cohere",
-        "google_vertexai",
-        "google_genai",
-        "fireworks",
-        "ollama",
-        "together",
-        "mistralai",
-        "huggingface",
-        "groq",
-        "bedrock",
-        "dashscope",
-        "xai",
-        "deepseek",
-        "litellm",
-        "gigachat",
-        "openrouter",
-        "vllm_openai",
-        "aimlapi",
-        "netmind",
-        "forge",
-        "avian",
-        "minimax",
-    }:
+    if explicit_provider in _KNOWN_LLM_PROVIDERS:
         return model
     return f"{provider}:{model}"
 
@@ -955,6 +966,123 @@ def _load_gpt_researcher_class() -> Any:
     except Exception as exc:
         raise ResearchProviderUnavailable("gpt-researcher is not installed") from exc
     return GPTResearcher
+
+
+@contextmanager
+def _temporary_gpt_researcher_role_skill_prompt_adapter(
+    *,
+    model_config: ResearchModelConfig,
+    role_skills: Mapping[str, str],
+):
+    """Inject role SKILL.md content into GPT-Researcher LLM messages by LLM role."""
+
+    if not role_skills:
+        yield
+        return
+
+    context_token = _GPT_RESEARCHER_ROLE_SKILL_PROMPT_CONTEXT.set((model_config, dict(role_skills)))
+    restores: list[Callable[[], None]] = []
+    for module_name in (
+        "gpt_researcher.actions.agent_creator",
+        "gpt_researcher.actions.query_processing",
+        "gpt_researcher.actions.report_generation",
+        "gpt_researcher.agent",
+        "gpt_researcher.skills.deep_research",
+    ):
+        try:
+            module = importlib.import_module(module_name)
+        except Exception:
+            continue
+        original = getattr(module, "create_chat_completion", None)
+        if original is None or getattr(original, "_amo_role_skill_prompt_adapter", False):
+            continue
+        wrapped = _role_skill_create_chat_completion_wrapper(original=original)
+        try:
+            setattr(module, "create_chat_completion", wrapped)
+        except Exception:
+            continue
+        restores.append(_restore_attr(module, "create_chat_completion", original))
+
+    try:
+        yield
+    finally:
+        _GPT_RESEARCHER_ROLE_SKILL_PROMPT_CONTEXT.reset(context_token)
+        for restore in reversed(restores):
+            restore()
+
+
+def _role_skill_create_chat_completion_wrapper(
+    *,
+    original: Callable[..., Any],
+) -> Callable[..., Any]:
+    async def create_chat_completion_with_role_skill(*args: Any, **kwargs: Any) -> Any:
+        context = _GPT_RESEARCHER_ROLE_SKILL_PROMPT_CONTEXT.get()
+        if context is not None:
+            model_config, role_skills = context
+            role = _role_for_llm_call(
+                model=str(kwargs.get("model") or ""),
+                llm_provider=str(kwargs.get("llm_provider") or ""),
+                model_config=model_config,
+            )
+            if role:
+                kwargs["messages"] = _inject_role_skill_messages(
+                    messages=kwargs.get("messages"),
+                    role=role,
+                    role_skills=role_skills,
+                )
+        return await original(*args, **kwargs)
+
+    create_chat_completion_with_role_skill._amo_role_skill_prompt_adapter = True  # type: ignore[attr-defined]
+    return create_chat_completion_with_role_skill
+
+
+def _role_for_llm_call(*, model: str, llm_provider: str, model_config: ResearchModelConfig) -> str:
+    normalized = _llm_id(provider=llm_provider, model=model) if llm_provider and model else model
+    configured = {
+        "fast": model_config.fast_llm,
+        "smart": model_config.smart_llm,
+        "strategic": model_config.strategic_llm,
+    }
+    for role, llm_id in configured.items():
+        if normalized == llm_id or (model and model == _llm_model_part(llm_id)):
+            return role
+    return ""
+
+
+def _llm_model_part(llm_id: str) -> str:
+    provider, _, model = llm_id.partition(":")
+    if provider and model and provider.casefold() in _KNOWN_LLM_PROVIDERS:
+        return model
+    return llm_id
+
+
+def _inject_role_skill_messages(
+    *,
+    messages: Any,
+    role: str,
+    role_skills: Mapping[str, str],
+) -> Any:
+    skill = str(role_skills.get(role) or "").strip()
+    if not skill or not isinstance(messages, list):
+        return messages
+    instruction = _format_single_role_skill_instruction(role=role, content=skill)
+    injected = [dict(message) if isinstance(message, Mapping) else message for message in messages]
+    for message in injected:
+        if not isinstance(message, dict) or str(message.get("role") or "") != "system":
+            continue
+        content = str(message.get("content") or "")
+        if instruction in content:
+            return injected
+        message["content"] = f"{content.rstrip()}\n\n{instruction}" if content.strip() else instruction
+        return injected
+    return [{"role": "system", "content": instruction}, *injected]
+
+
+def _format_single_role_skill_instruction(*, role: str, content: str) -> str:
+    return (
+        f"AMO GPT-Researcher {role.upper()} role skill instructions from SKILL.md:\n"
+        f"{content.strip()}"
+    )
 
 
 @contextmanager
@@ -1542,7 +1670,6 @@ def _gpt_researcher_query(
     *,
     request: CurrentInfoRequest,
     task: TaskSpec,
-    role_skills: Mapping[str, str] | None = None,
 ) -> str:
     sections = [
         "Current date/time context for this research run:",
@@ -1555,13 +1682,6 @@ def _gpt_researcher_query(
             (
                 "Deep research decomposition:",
                 _deep_research_decomposition(),
-            )
-        )
-    if role_skills:
-        sections.extend(
-            (
-                "GPT-Researcher role skill instructions:",
-                _format_role_skill_instructions(role_skills),
             )
         )
     sections.append(
@@ -1588,15 +1708,6 @@ def _deep_research_decomposition() -> str:
             "6. Final synthesis with clear confidence boundaries.",
         )
     )
-
-
-def _format_role_skill_instructions(role_skills: Mapping[str, str]) -> str:
-    parts: list[str] = []
-    for role in GPT_RESEARCHER_SKILL_ROLES:
-        content = str(role_skills.get(role) or "").strip()
-        if content:
-            parts.append(f"[{role}]\n{content}")
-    return "\n\n".join(parts)
 
 
 def _current_time_context_for_request(request: CurrentInfoRequest) -> str:

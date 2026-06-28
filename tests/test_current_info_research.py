@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -18,6 +19,9 @@ from amo_bot.current_info.research import (
     load_gpt_researcher_role_skills,
     _build_pgvector_store,
     _extract_source_urls,
+    _inject_role_skill_messages,
+    _role_for_llm_call,
+    _temporary_gpt_researcher_role_skill_prompt_adapter,
     _NonEmptyVectorStore,
     _strip_searx_prefetched_content,
     _sync_pgvector_connection_url,
@@ -605,7 +609,7 @@ def test_gpt_researcher_role_skill_loader_enforces_size_limit(tmp_path) -> None:
         raise AssertionError("oversized skill was accepted")
 
 
-def test_gpt_researcher_role_skills_are_injected_into_config_and_query(tmp_path) -> None:
+def test_gpt_researcher_role_skills_are_loaded_into_config_without_query_fallback(tmp_path, caplog) -> None:
     _FakeResearcher.instances.clear()
     base = tmp_path / "skills" / "gpt_researcher"
     for role in ("fast", "smart", "strategic"):
@@ -639,7 +643,8 @@ def test_gpt_researcher_role_skills_are_injected_into_config_and_query(tmp_path)
     )
     request, task, query_plan = _research_request_parts("Recherchiere Rollen")
 
-    answer = provider.answer(request=request, task=task, query_plan=query_plan)
+    with caplog.at_level(logging.INFO, logger="amo_bot.current_info.research"):
+        answer = provider.answer(request=request, task=task, query_plan=query_plan)
 
     assert answer.status == "answered"
     instance = _FakeResearcher.instances[0]
@@ -651,8 +656,118 @@ def test_gpt_researcher_role_skills_are_injected_into_config_and_query(tmp_path)
     assert instance.config["FAST_LLM_SKILL"] == "fast role instruction"
     assert instance.config["SMART_LLM_SKILL"] == "smart role instruction"
     assert instance.config["STRATEGIC_LLM_SKILL"] == "strategic role instruction"
-    assert "GPT-Researcher role skill instructions:" in instance.kwargs["query"]
-    assert "[fast]\nfast role instruction" in instance.kwargs["query"]
+    assert "GPT-Researcher role skill instructions:" not in instance.kwargs["query"]
+    assert "fast role instruction" not in instance.kwargs["query"]
+    assert "smart role instruction" not in instance.kwargs["query"]
+    assert "strategic role instruction" not in instance.kwargs["query"]
+    assert "'gpt_researcher_role_skill_roles': ('fast', 'smart', 'strategic')" in caplog.text
+    assert "'gpt_researcher_role_skill_count': 3" in caplog.text
+    assert "fast role instruction" not in caplog.text
+    assert "smart role instruction" not in caplog.text
+    assert "strategic role instruction" not in caplog.text
+
+
+def test_gpt_researcher_role_skill_prompt_adapter_maps_llm_roles_to_system_messages() -> None:
+    model_config = ResearchModelConfig(
+        provider="ollama",
+        fast_llm="ollama:fast-model",
+        smart_llm="ollama:smart-model",
+        strategic_llm="ollama:strategic-model",
+    )
+    role_skills = {
+        "fast": "fast role instruction",
+        "smart": "smart role instruction",
+        "strategic": "strategic role instruction",
+    }
+
+    assert _role_for_llm_call(model="fast-model", llm_provider="ollama", model_config=model_config) == "fast"
+    assert _role_for_llm_call(model="smart-model", llm_provider="ollama", model_config=model_config) == "smart"
+    assert (
+        _role_for_llm_call(model="strategic-model", llm_provider="ollama", model_config=model_config)
+        == "strategic"
+    )
+
+    smart_messages = _inject_role_skill_messages(
+        messages=[
+            {"role": "system", "content": "You write concise reports."},
+            {"role": "user", "content": "Write the report."},
+        ],
+        role="smart",
+        role_skills=role_skills,
+    )
+    assert smart_messages[0]["role"] == "system"
+    assert "You write concise reports." in smart_messages[0]["content"]
+    assert "AMO GPT-Researcher SMART role skill instructions from SKILL.md:" in smart_messages[0]["content"]
+    assert "smart role instruction" in smart_messages[0]["content"]
+    assert "fast role instruction" not in smart_messages[0]["content"]
+    assert "strategic role instruction" not in smart_messages[0]["content"]
+    assert smart_messages[1]["content"] == "Write the report."
+
+    strategic_messages = _inject_role_skill_messages(
+        messages=[{"role": "user", "content": "Generate search queries."}],
+        role="strategic",
+        role_skills=role_skills,
+    )
+    assert strategic_messages[0] == {
+        "role": "system",
+        "content": (
+            "AMO GPT-Researcher STRATEGIC role skill instructions from SKILL.md:\n"
+            "strategic role instruction"
+        ),
+    }
+    assert strategic_messages[1]["content"] == "Generate search queries."
+
+    fast_messages = _inject_role_skill_messages(
+        messages=[{"role": "user", "content": "Triage this source."}],
+        role="fast",
+        role_skills=role_skills,
+    )
+    assert "fast role instruction" in fast_messages[0]["content"]
+    assert "smart role instruction" not in fast_messages[0]["content"]
+    assert "strategic role instruction" not in fast_messages[0]["content"]
+
+
+def test_gpt_researcher_role_skill_prompt_adapter_patches_gpt_researcher_llm_calls(monkeypatch) -> None:
+    model_config = ResearchModelConfig(
+        provider="ollama",
+        fast_llm="ollama:fast-model",
+        smart_llm="ollama:smart-model",
+        strategic_llm="ollama:strategic-model",
+    )
+    captured: list[dict[str, object]] = []
+
+    async def fake_create_chat_completion(**kwargs):
+        captured.append(kwargs)
+        return '["example query"]'
+
+    query_processing = types.ModuleType("gpt_researcher.actions.query_processing")
+    query_processing.create_chat_completion = fake_create_chat_completion
+    monkeypatch.setitem(sys.modules, "gpt_researcher.actions.query_processing", query_processing)
+
+    with _temporary_gpt_researcher_role_skill_prompt_adapter(
+        model_config=model_config,
+        role_skills={
+            "fast": "fast role instruction",
+            "smart": "smart role instruction",
+            "strategic": "strategic role instruction",
+        },
+    ):
+        asyncio.run(
+            query_processing.create_chat_completion(
+                model="strategic-model",
+                llm_provider="ollama",
+                messages=[{"role": "user", "content": "Generate search queries."}],
+            )
+        )
+
+    assert len(captured) == 1
+    messages = captured[0]["messages"]
+    assert isinstance(messages, list)
+    assert messages[0]["role"] == "system"
+    assert "AMO GPT-Researcher STRATEGIC role skill instructions from SKILL.md:" in messages[0]["content"]
+    assert "strategic role instruction" in messages[0]["content"]
+    assert "fast role instruction" not in messages[0]["content"]
+    assert "smart role instruction" not in messages[0]["content"]
 
 
 def test_resolve_gpt_researcher_role_skill_config_uses_settings_paths() -> None:
