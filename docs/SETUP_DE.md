@@ -367,6 +367,8 @@ venv/bin/python -m amo_bot.main --serve
 | Variable | Standard | Beschreibung |
 |----------|----------|--------------|
 | `AMO_TELEGRAM_QUEUE_IDLE_SLEEP_SECONDS` | `0.1` | Pausenzeit für Idle-Queue-Worker (Sekunden) |
+| `AMO_DB_POOL_SIZE` | `1` | PostgreSQL-Verbindungen, die pro Prozess gehalten werden |
+| `AMO_DB_MAX_OVERFLOW` | `1` | Zusätzliche temporäre PostgreSQL-Verbindungen pro Prozess |
 
 ### Bekannte Einschränkungen (Queue-Modus)
 

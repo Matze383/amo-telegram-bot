@@ -231,6 +231,8 @@ venv/bin/python -m amo_bot.main --serve
 
 **Environment variables:**
 - `AMO_TELEGRAM_QUEUE_IDLE_SLEEP_SECONDS` — Idle sleep time for workers
+- `AMO_DB_POOL_SIZE` — PostgreSQL connections kept per process (default: `1`)
+- `AMO_DB_MAX_OVERFLOW` — Additional temporary PostgreSQL connections per process (default: `1`)
 
 **Queue mode limitations:**
 - Text/markup outbox path only (no `send_photo`/`send_document` in queue worker)
