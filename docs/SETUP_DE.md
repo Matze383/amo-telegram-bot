@@ -312,7 +312,7 @@ WEBUI_SESSION_TTL_SECONDS=3600
 # WEBUI_LOGIN_DELAY_MAX_SECONDS=2.0
 
 # Optional: Queue-Runtime
-# AMO_TELEGRAM_QUEUE_IDLE_SLEEP_SECONDS=0.1  # Pausenzeit für Idle-Queue-Worker
+# AMO_TELEGRAM_QUEUE_IDLE_SLEEP_SECONDS=1.0  # Pausenzeit für Idle-Queue-Worker
 ```
 
 > **Config-Priorität:** Beim lokalen Start überschreibt `.env` Shell-Umgebungsvariablen. Setze `AMO_ENV_OVERRIDE=0`, um dies zu deaktivieren.
@@ -366,7 +366,7 @@ venv/bin/python -m amo_bot.main --serve
 
 | Variable | Standard | Beschreibung |
 |----------|----------|--------------|
-| `AMO_TELEGRAM_QUEUE_IDLE_SLEEP_SECONDS` | `0.1` | Pausenzeit für Idle-Queue-Worker (Sekunden) |
+| `AMO_TELEGRAM_QUEUE_IDLE_SLEEP_SECONDS` | `1.0` | Pausenzeit für Idle-Queue-Worker (Sekunden) |
 | `AMO_DB_POOL_SIZE` | `1` | PostgreSQL-Verbindungen, die pro Prozess gehalten werden |
 | `AMO_DB_MAX_OVERFLOW` | `1` | Zusätzliche temporäre PostgreSQL-Verbindungen pro Prozess |
 

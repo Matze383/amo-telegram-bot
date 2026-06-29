@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     poll_limit: int = Field(default=100, alias="POLL_LIMIT")
     poll_retry_max_seconds: int = Field(default=30, alias="POLL_RETRY_MAX_SECONDS")
     amo_telegram_queue_idle_sleep_seconds: float = Field(
-        default=0.1,
+        default=1.0,
         alias="AMO_TELEGRAM_QUEUE_IDLE_SLEEP_SECONDS",
         ge=0.05,
         le=30.0,
