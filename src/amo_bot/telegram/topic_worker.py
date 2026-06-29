@@ -115,7 +115,13 @@ class TopicWorker:
             TelegramIncomingQueueRepository(session).complete(item.id, worker_id=self.worker_id)
         return True
 
-    async def run_forever(self, *, idle_sleep_seconds: float = 0.2, stop_event: asyncio.Event | None = None) -> None:
+    async def run_forever(
+        self,
+        *,
+        idle_sleep_seconds: float = 0.2,
+        stop_event: asyncio.Event | None = None,
+        should_stop: Callable[[], bool] | None = None,
+    ) -> None:
         assert self.worker_id is not None
         while stop_event is None or not stop_event.is_set():
             with create_session_factory(self.database_url)() as session:
@@ -127,6 +133,8 @@ class TopicWorker:
                     status="running",
                 )
             processed = await self.process_one()
+            if should_stop is not None and should_stop():
+                return
             if not processed:
                 await asyncio.sleep(max(0.05, idle_sleep_seconds))
 

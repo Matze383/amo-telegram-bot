@@ -185,6 +185,8 @@ class TelegramIncomingQueueRepository:
                 update(TelegramIncomingQueue)
                 .where(
                     TelegramIncomingQueue.id == candidate.id,
+                    TelegramIncomingQueue.chat_id == chat_id,
+                    TelegramIncomingQueue.topic_id == topic_id,
                     TelegramIncomingQueue.attempts == candidate.attempts,
                     or_(
                         TelegramIncomingQueue.status == "queued",

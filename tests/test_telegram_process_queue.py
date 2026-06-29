@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
 
+from amo_bot.auth.roles import Role
 from amo_bot.db.base import create_session_factory
 from amo_bot.db.init_db import init_db
 from amo_bot.db.models import TelegramIncomingQueue, TelegramOutgoingQueue, TelegramQueueFailure
@@ -12,6 +13,9 @@ from amo_bot.db.telegram_queue import TelegramIncomingQueueRepository, TelegramO
 from amo_bot.telegram.fake_telegram import FakeTelegramClient
 from amo_bot.telegram.outbox_sender import OutboxSender
 from amo_bot.telegram.supervisor import ManagedProcess, TelegramProcessSupervisor, get_spawn_context, topic_process_name
+from amo_bot.telegram.commands import create_builtin_registry
+from amo_bot.telegram.dispatcher import Dispatcher
+from amo_bot.telegram.role_resolver import InMemoryRoleResolver
 from amo_bot.telegram.topic_worker import QueueBackedTelegramSender, TopicWorker
 
 
@@ -175,6 +179,49 @@ def test_topic_worker_enqueues_reply_with_job_topic_and_trigger_correlation(tmp_
         assert outbox.topic_id == 77
         assert outbox.trigger_message_id == 555
         assert outbox.job_id == "in-1-11"
+
+
+def test_topic_worker_restart_command_completes_incoming_before_runtime_restart(tmp_path) -> None:
+    url = _db_url(tmp_path)
+    init_db(url)
+    factory = create_session_factory(url)
+
+    with factory() as session:
+        TelegramIncomingQueueRepository(session).enqueue_update(
+            _text_update(update_id=21, chat_id=99, topic_id=None, message_id=7001, text="/restart")
+        )
+
+    restart_requests: list[bool] = []
+
+    def _dispatcher_factory(sender: QueueBackedTelegramSender) -> Dispatcher:
+        return Dispatcher(
+            command_registry=create_builtin_registry(database_url=url),
+            role_resolver=InMemoryRoleResolver({42: Role.OWNER}),
+            send_text=sender.send_text,
+            bot_username="AMO_bot",
+            restart_terminator=lambda: restart_requests.append(True),
+        )
+
+    worker = TopicWorker(
+        database_url=url,
+        chat_id=99,
+        topic_id=None,
+        dispatcher_factory=_dispatcher_factory,
+        worker_id="topic:99:root:test",
+    )
+
+    assert asyncio.run(worker.process_one()) is True
+
+    assert restart_requests == [True]
+    with factory() as session:
+        assert session.scalar(select(TelegramIncomingQueue)) is None
+        outbox = session.scalar(select(TelegramOutgoingQueue))
+        assert outbox is not None
+        assert outbox.chat_id == 99
+        assert outbox.topic_id is None
+        assert outbox.trigger_message_id == 7001
+        assert outbox.text == "Restart wird ausgelöst."
+        assert outbox.job_id == "in-1-21"
 
 
 def test_outbox_sender_sends_in_order_as_reply_and_deletes_only_after_ok(tmp_path) -> None:

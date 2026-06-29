@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import signal
 import threading
 from argparse import ArgumentParser
 from typing import Any
@@ -380,14 +381,21 @@ def run_queue_topic_worker_process(chat_id: int, topic_id: int | None, *, idle_s
     init_db(settings.database_url)
     session_factory = create_session_factory(settings.database_url)
     tg = TelegramClient(token=settings.bot_token, base_url=settings.telegram_api_base)
+    restart_requested = False
+
+    def request_runtime_restart() -> None:
+        nonlocal restart_requested
+        restart_requested = True
 
     def dispatcher_factory(sender: QueueBackedTelegramSender) -> Dispatcher:
-        return _build_queue_worker_dispatcher(
+        dispatcher = _build_queue_worker_dispatcher(
             settings=settings,
             session_factory=session_factory,
             tg=tg,
             sender=sender,
         )
+        dispatcher.restart_terminator = request_runtime_restart
+        return dispatcher
 
     worker = TopicWorker(
         database_url=settings.database_url,
@@ -399,8 +407,11 @@ def run_queue_topic_worker_process(chat_id: int, topic_id: int | None, *, idle_s
     asyncio.run(
         worker.run_forever(
             idle_sleep_seconds=idle_sleep_seconds or settings.amo_telegram_queue_idle_sleep_seconds,
+            should_stop=lambda: restart_requested,
         )
     )
+    if restart_requested:
+        os.kill(os.getppid(), signal.SIGTERM)
 
 
 def _known_topic_processes(settings) -> list[ManagedProcess]:
