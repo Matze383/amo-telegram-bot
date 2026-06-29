@@ -440,7 +440,7 @@ def test_main_wires_scheduled_plugin_executor_timeout(monkeypatch) -> None:
     monkeypatch.setattr("amo_bot.main.run_polling", _fake_run_polling)
 
     try:
-        run([])
+        run(["--runtime", "polling"])
     except _StopRun:
         pass
 

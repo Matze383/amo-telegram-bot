@@ -710,6 +710,101 @@ class TopicRecentMessage(Base):
     )
 
 
+class TelegramIncomingQueue(Base):
+    __tablename__ = "telegram_incoming_queue"
+    __table_args__ = (
+        UniqueConstraint("telegram_update_id", name="uq_telegram_incoming_queue_update_id"),
+        Index("ix_telegram_incoming_queue_scope_status", "chat_id", "topic_id", "status", "id"),
+        Index("ix_telegram_incoming_queue_lease", "status", "locked_until"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    schema_version: Mapped[str] = mapped_column(String(32), nullable=False, default="telegram_queue_v1", server_default="telegram_queue_v1")
+    telegram_update_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    chat_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    topic_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    message_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    update_kind: Mapped[str] = mapped_column(String(64), nullable=False, default="unknown", server_default="unknown")
+    payload_json: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="queued", server_default="queued")
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    locked_by: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_error: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+
+class TelegramOutgoingQueue(Base):
+    __tablename__ = "telegram_outgoing_queue"
+    __table_args__ = (
+        Index("ix_telegram_outgoing_queue_status_order", "status", "id"),
+        Index("ix_telegram_outgoing_queue_lease", "status", "locked_until"),
+        Index("ix_telegram_outgoing_queue_correlation", "job_id", "chat_id", "topic_id", "trigger_message_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    schema_version: Mapped[str] = mapped_column(String(32), nullable=False, default="telegram_queue_v1", server_default="telegram_queue_v1")
+    job_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    chat_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    topic_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    trigger_message_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    sent_message_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    parse_mode: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    reply_markup_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="queued", server_default="queued")
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    locked_by: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_error: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    not_before: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+
+class TelegramQueueFailure(Base):
+    __tablename__ = "telegram_queue_failures"
+    __table_args__ = (
+        Index("ix_telegram_queue_failures_source", "queue_name", "queue_row_id"),
+        Index("ix_telegram_queue_failures_created", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    queue_name: Mapped[str] = mapped_column(String(64), nullable=False)
+    queue_row_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    job_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    chat_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    topic_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    trigger_message_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    error: Mapped[str] = mapped_column(String(512), nullable=False)
+    payload_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class TelegramProcessHealth(Base):
+    __tablename__ = "telegram_process_health"
+    __table_args__ = (
+        UniqueConstraint("process_name", name="uq_telegram_process_health_name"),
+        Index("ix_telegram_process_health_kind", "process_kind", "status"),
+        Index("ix_telegram_process_health_heartbeat", "last_heartbeat_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    process_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    process_kind: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="starting", server_default="starting")
+    pid: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    chat_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    topic_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    last_heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_error: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    metrics_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}", server_default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+
 class ImageAnalyzeTopicPolicy(Base):
     __tablename__ = "image_analyze_topic_policies"
     __table_args__ = (UniqueConstraint("chat_id", "message_thread_id", name="uq_image_analyze_topic_policy"),)

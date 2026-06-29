@@ -43,7 +43,7 @@ def test_main_wires_plugin_command_executor_into_dispatcher(monkeypatch, tmp_pat
     monkeypatch.setattr(main_module, "run_polling", _fake_run_polling)
 
     try:
-        main_module.run()
+        main_module.run(["--runtime", "polling"])
     except _StopRunPolling:
         pass
 

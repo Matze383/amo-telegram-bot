@@ -217,7 +217,7 @@ def test_main_runtime_wires_session_factory_into_web_evidence_pipeline(monkeypat
     monkeypatch.setattr(main_module, "run_polling", _fake_run_polling)
 
     try:
-        main_module.run([])
+        main_module.run(["--runtime", "polling"])
     except _StopFlow:
         pass
 
@@ -287,7 +287,7 @@ def test_main_runtime_wires_current_info_when_enabled(monkeypatch, tmp_path):
     )
 
     try:
-        main_module.run([])
+        main_module.run(["--runtime", "polling"])
     except _StopFlow:
         pass
 
@@ -352,7 +352,7 @@ def test_main_runtime_wires_current_info_with_gpt_researcher_without_search_brok
     )
 
     try:
-        main_module.run([])
+        main_module.run(["--runtime", "polling"])
     except _StopFlow:
         pass
 

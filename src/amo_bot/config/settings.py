@@ -18,6 +18,13 @@ class Settings(BaseSettings):
     poll_timeout_seconds: int = Field(default=30, alias="POLL_TIMEOUT_SECONDS")
     poll_limit: int = Field(default=100, alias="POLL_LIMIT")
     poll_retry_max_seconds: int = Field(default=30, alias="POLL_RETRY_MAX_SECONDS")
+    amo_telegram_runtime: str = Field(default="queue", alias="AMO_TELEGRAM_RUNTIME")
+    amo_telegram_queue_idle_sleep_seconds: float = Field(
+        default=0.1,
+        alias="AMO_TELEGRAM_QUEUE_IDLE_SLEEP_SECONDS",
+        ge=0.05,
+        le=30.0,
+    )
     offset_state_file: str = Field(default=".state/offset.json", alias="OFFSET_STATE_FILE")
     bot_pid_file: str = Field(default=".state/amo_bot.pid", alias="BOT_PID_FILE")
 
@@ -285,6 +292,11 @@ class Settings(BaseSettings):
             raise ValueError("WEBUI_LOGIN_DELAY_MAX_SECONDS must be >= WEBUI_LOGIN_DELAY_BASE_SECONDS")
 
         provider = self.ai_provider.strip().casefold()
+        runtime = self.amo_telegram_runtime.strip().casefold()
+        if runtime not in {"polling", "queue"}:
+            raise ValueError("AMO_TELEGRAM_RUNTIME must be one of: polling, queue")
+        self.amo_telegram_runtime = runtime
+
         if provider not in {"openai", "ollama", "anthropic", "google", "openrouter", "groq", "mistral", "xai", "deepseek", "together", "fireworks", "amazon-bedrock", "litellm", "lmstudio", "vllm", "sglang"}:
             raise ValueError("AI_PROVIDER must be one of: openai, ollama, anthropic, google, openrouter, groq, mistral, xai, deepseek, together, fireworks, amazon-bedrock, litellm, lmstudio, vllm, sglang")
 

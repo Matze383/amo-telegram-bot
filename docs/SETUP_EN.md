@@ -310,6 +310,10 @@ WEBUI_SESSION_TTL_SECONDS=3600
 # Security settings (Block 2 - Login Protection)
 # WEBUI_LOGIN_DELAY_BASE_SECONDS=0.25
 # WEBUI_LOGIN_DELAY_MAX_SECONDS=2.0
+
+# Optional: Runtime mode (default: queue)
+# AMO_TELEGRAM_RUNTIME=queue  # queue by default; polling is an explicit fallback
+# AMO_TELEGRAM_QUEUE_IDLE_SLEEP_SECONDS=0.1  # Idle sleep time for queue workers
 ```
 
 > **Config Priority:** When starting locally, `.env` overrides shell environment variables. Set `AMO_ENV_OVERRIDE=0` to disable this behavior.
@@ -350,6 +354,49 @@ The bot uses structured logging with configurable output format and filtering.
 | `LOG_FILE` | *(none)* | Optional file path for log output (default: stderr only) |
 | `LOG_DEBUG_SCOPES` | *(none)* | Comma-separated component names to force DEBUG level (e.g., `ai.router,plugin.runtime`) |
 | `LOG_INCLUDE_PRIVATE_IDS` | `0` | Set to `1`/`true`/`yes` to include unmasked IDs in structured logs. **Privacy warning:** Enabling this may expose sensitive identifiers in log files. |
+
+---
+
+## Runtime Modes
+
+The regular bot start uses the multi-process queue runtime with worker supervisor.
+
+| Mode | Description | Default |
+|------|-------------|---------|
+| **Queue** | Multi-process queue runtime with worker supervisor | ✅ Default |
+| **Polling** | Classic polling mode (legacy) | Explicit fallback |
+
+### Queue Mode (Default)
+
+The queue mode uses a multi-process architecture with a supervisor that manages sender, known topic workers, and the poller. Dead processes are automatically restarted, and topic workers are automatically started for incoming scopes from the queue.
+
+**Start:**
+```bash
+venv/bin/python -m amo_bot.main
+
+# With WebUI + Queue:
+venv/bin/python -m amo_bot.main --serve
+```
+
+### Explicit Legacy Fallback
+
+The polling runtime is retained only as an explicit fallback.
+
+```bash
+AMO_TELEGRAM_RUNTIME=polling venv/bin/python -m amo_bot.main
+```
+
+### Configuration Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `AMO_TELEGRAM_RUNTIME` | `queue` | Runtime mode: `queue` by default; `polling` only as explicit fallback |
+| `AMO_TELEGRAM_QUEUE_IDLE_SLEEP_SECONDS` | `0.1` | Idle sleep time for queue workers (seconds) |
+
+### Known Limitations (Queue Mode)
+
+- **Text/Markup Outbox Only:** The queue worker currently supports only the text/markup output path (`send_photo`/`send_document` unavailable)
+- **No Live Restart:** No live Telegram restart possible (new start required)
 
 ---
 

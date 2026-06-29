@@ -95,6 +95,34 @@ python main.py
 - Telegram Bot Token von [@BotFather](https://t.me/BotFather)
 - Optional: Lokale [Ollama](https://ollama.com/)-Instanz, OpenAI API-Key, Anthropic API-Key, Google/Gemini API-Key, OpenRouter API-Key, [Groq](https://groq.com/) API-Key, Mistral API-Key, xAI API-Key, DeepSeek API-Key, Together API-Key, Fireworks API-Key, AWS-Credentials für Amazon Bedrock, LM Studio, vLLM oder SGLang für KI-Funktionen
 
+### Start-Modi / Runtime-Modi
+
+Der normale Bot-Start nutzt die Multi-Prozess Queue-Runtime mit Worker-Supervisor.
+
+| Modus | Beschreibung | Standard |
+|-------|--------------|----------|
+| **Queue** | Multi-Prozess Queue-Runtime mit Worker-Supervisor | ✅ Standard |
+| **Polling** | Klassischer Polling-Modus (Legacy) | Expliziter Fallback |
+
+**Queue-Modus (Standard):**
+```bash
+venv/bin/python -m amo_bot.main
+venv/bin/python -m amo_bot.main --serve
+```
+
+**Expliziter Legacy-Fallback:**
+```bash
+AMO_TELEGRAM_RUNTIME=polling venv/bin/python -m amo_bot.main
+```
+
+**Umgebungsvariablen:**
+- `AMO_TELEGRAM_RUNTIME=queue|polling` — Standard: `queue`
+- `AMO_TELEGRAM_QUEUE_IDLE_SLEEP_SECONDS` — Pausenzeit für Idle-Worker
+
+**Queue-Modus Einschränkungen:**
+- Nur Text/Markup Outbox-Pfad (keine `send_photo`/`send_document` im Queue-Worker)
+- Kein Live-Telegram-Restart (neuer Start erforderlich)
+
 ### Dokumentation
 
 | Dokument | Inhalt |
@@ -193,6 +221,34 @@ python main.py
 - Windows, macOS or Linux
 - Telegram Bot Token from [@BotFather](https://t.me/BotFather)
 - Optional: Local [Ollama](https://ollama.com/) instance, OpenAI API key, Anthropic API key, Google/Gemini API key, OpenRouter API key, [Groq](https://groq.com/) API key, Mistral API key, xAI API key, DeepSeek API key, Together API key, Fireworks API key, AWS credentials for Amazon Bedrock, LM Studio, vLLM, or SGLang for AI features
+
+### Runtime Modes
+
+The regular bot start uses the multi-process queue runtime with worker supervisor.
+
+| Mode | Description | Default |
+|------|-------------|---------|
+| **Queue** | Multi-process queue runtime with worker supervisor | ✅ Default |
+| **Polling** | Classic polling mode (legacy) | Explicit fallback |
+
+**Queue mode (Default):**
+```bash
+venv/bin/python -m amo_bot.main
+venv/bin/python -m amo_bot.main --serve
+```
+
+**Explicit legacy fallback:**
+```bash
+AMO_TELEGRAM_RUNTIME=polling venv/bin/python -m amo_bot.main
+```
+
+**Environment variables:**
+- `AMO_TELEGRAM_RUNTIME=queue|polling` — Default: `queue`
+- `AMO_TELEGRAM_QUEUE_IDLE_SLEEP_SECONDS` — Idle sleep time for workers
+
+**Queue mode limitations:**
+- Text/markup outbox path only (no `send_photo`/`send_document` in queue worker)
+- No live Telegram restart (new start required)
 
 ### Documentation
 

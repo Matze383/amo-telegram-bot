@@ -106,10 +106,32 @@ def test_run_stop_cli_does_not_validate_full_settings(monkeypatch, tmp_path, cap
     assert capsys.readouterr().out.strip() == f"checked {pid_path}"
 
 
-def test_run_serve_mode_starts_webui_and_runs_polling(monkeypatch, tmp_path) -> None:
+def test_run_default_starts_queue_runtime_without_legacy_polling(monkeypatch, tmp_path) -> None:
+    _set_env(monkeypatch, tmp_path)
+    pid_path = tmp_path / "amo_bot.pid"
+    queue_calls: list[str] = []
+
+    async def _fake_run_polling(*args, **kwargs):  # noqa: ANN002,ANN003
+        raise AssertionError("legacy run_polling must not be called by default")
+
+    def _fake_run_queue_runtime(settings) -> None:  # noqa: ANN001
+        assert pid_path.exists()
+        queue_calls.append(settings.database_url)
+
+    monkeypatch.setattr(main_module, "run_polling", _fake_run_polling)
+    monkeypatch.setattr(main_module, "_run_queue_runtime", _fake_run_queue_runtime)
+
+    main_module.run([])
+
+    assert queue_calls == [f"sqlite:///{tmp_path / 'bot.db'}"]
+    assert not pid_path.exists()
+
+
+def test_run_serve_mode_starts_webui_and_queue_by_default(monkeypatch, tmp_path) -> None:
     _set_env(monkeypatch, tmp_path, webui_host="0.0.0.0")
     pid_path = tmp_path / "amo_bot.pid"
     app = _DummyApp()
+    queue_calls: list[str] = []
     threading_calls: list[dict[str, object]] = []
 
     class _DummyThread:
@@ -128,23 +150,18 @@ def test_run_serve_mode_starts_webui_and_runs_polling(monkeypatch, tmp_path) -> 
         def start(self) -> None:
             self._call["started"] = True
 
-    polling_call = {"created": False, "awaited": False}
-
     async def _fake_run_polling(*args, **kwargs):  # noqa: ANN002,ANN003
+        raise AssertionError("legacy run_polling must not be called by --serve default")
+
+    def _fake_run_queue_runtime(settings) -> None:  # noqa: ANN001
         assert pid_path.exists()
-        polling_call["created"] = True
-        polling_call["awaited"] = True
-
-    real_asyncio_run = asyncio.run
-
-    def _fake_asyncio_run(coro):  # noqa: ANN001
-        return real_asyncio_run(coro)
+        queue_calls.append(settings.database_url)
 
     monkeypatch.setattr(main_module, "create_flask_app", lambda **kwargs: app)
     monkeypatch.setattr(main_module, "Dispatcher", _StubDispatcher)
     monkeypatch.setattr(main_module.threading, "Thread", _DummyThread)
     monkeypatch.setattr(main_module, "run_polling", _fake_run_polling)
-    monkeypatch.setattr(main_module.asyncio, "run", _fake_asyncio_run)
+    monkeypatch.setattr(main_module, "_run_queue_runtime", _fake_run_queue_runtime)
 
     main_module.run(["--serve"])
 
@@ -156,7 +173,100 @@ def test_run_serve_mode_starts_webui_and_runs_polling(monkeypatch, tmp_path) -> 
     assert threading_calls[0]["daemon"] is True
     assert threading_calls[0]["name"] == "flask-webui"
     assert threading_calls[0]["started"] is True
-    assert polling_call == {"created": True, "awaited": True}
+    assert queue_calls == [f"sqlite:///{tmp_path / 'bot.db'}"]
+    assert not pid_path.exists()
+
+
+def test_run_queue_runtime_env_starts_supervisor_without_legacy_polling(monkeypatch, tmp_path) -> None:
+    _set_env(monkeypatch, tmp_path)
+    monkeypatch.setenv("AMO_TELEGRAM_RUNTIME", "queue")
+    pid_path = tmp_path / "amo_bot.pid"
+    queue_calls: list[str] = []
+
+    class _DummyDispatcher:
+        def __init__(self, **kwargs) -> None:  # noqa: ANN003
+            pass
+
+    async def _fake_run_polling(*args, **kwargs):  # noqa: ANN002,ANN003
+        raise AssertionError("legacy run_polling must not be called in queue runtime")
+
+    monkeypatch.setattr(main_module, "Dispatcher", _DummyDispatcher)
+    monkeypatch.setattr(main_module, "run_polling", _fake_run_polling)
+    monkeypatch.setattr(main_module, "_run_queue_runtime", lambda settings: queue_calls.append(settings.database_url))
+
+    main_module.run([])
+
+    assert queue_calls == [f"sqlite:///{tmp_path / 'bot.db'}"]
+    assert not pid_path.exists()
+
+
+def test_run_queue_runtime_cli_overrides_polling_env(monkeypatch, tmp_path) -> None:
+    _set_env(monkeypatch, tmp_path)
+    monkeypatch.setenv("AMO_TELEGRAM_RUNTIME", "polling")
+    queue_calls: list[str] = []
+
+    class _DummyDispatcher:
+        def __init__(self, **kwargs) -> None:  # noqa: ANN003
+            pass
+
+    async def _fake_run_polling(*args, **kwargs):  # noqa: ANN002,ANN003
+        raise AssertionError("legacy run_polling must not be called when --runtime queue is explicit")
+
+    monkeypatch.setattr(main_module, "Dispatcher", _DummyDispatcher)
+    monkeypatch.setattr(main_module, "run_polling", _fake_run_polling)
+    monkeypatch.setattr(main_module, "_run_queue_runtime", lambda settings: queue_calls.append(settings.amo_telegram_runtime))
+
+    main_module.run(["--runtime", "queue"])
+
+    assert queue_calls == ["polling"]
+
+
+def test_run_serve_queue_runtime_starts_webui_and_supervisor_without_legacy_polling(monkeypatch, tmp_path) -> None:
+    _set_env(monkeypatch, tmp_path, webui_host="0.0.0.0")
+    pid_path = tmp_path / "amo_bot.pid"
+    app = _DummyApp()
+    queue_calls: list[str] = []
+    threading_calls: list[dict[str, object]] = []
+
+    class _DummyThread:
+        def __init__(self, *, target, kwargs, daemon, name) -> None:  # noqa: ANN001
+            threading_calls.append(
+                {
+                    "target": target,
+                    "kwargs": kwargs,
+                    "daemon": daemon,
+                    "name": name,
+                    "started": False,
+                }
+            )
+            self._call = threading_calls[-1]
+
+        def start(self) -> None:
+            self._call["started"] = True
+
+    async def _fake_run_polling(*args, **kwargs):  # noqa: ANN002,ANN003
+        raise AssertionError("legacy run_polling must not be called for --serve --runtime queue")
+
+    def _fake_run_queue_runtime(settings) -> None:  # noqa: ANN001
+        assert pid_path.exists()
+        queue_calls.append(settings.database_url)
+
+    monkeypatch.setattr(main_module, "create_flask_app", lambda **kwargs: app)
+    monkeypatch.setattr(main_module.threading, "Thread", _DummyThread)
+    monkeypatch.setattr(main_module, "run_polling", _fake_run_polling)
+    monkeypatch.setattr(main_module, "_run_queue_runtime", _fake_run_queue_runtime)
+
+    main_module.run(["--serve", "--runtime", "queue"])
+
+    assert app.run_calls == []
+    assert len(threading_calls) == 1
+    assert threading_calls[0]["target"].__self__ is app
+    assert threading_calls[0]["target"].__name__ == "run"
+    assert threading_calls[0]["kwargs"] == {"host": "0.0.0.0", "port": 8080, "use_reloader": False}
+    assert threading_calls[0]["daemon"] is True
+    assert threading_calls[0]["name"] == "flask-webui"
+    assert threading_calls[0]["started"] is True
+    assert queue_calls == [f"sqlite:///{tmp_path / 'bot.db'}"]
     assert not pid_path.exists()
 
 
@@ -195,7 +305,7 @@ def test_run_dreaming_starts_inside_polling_event_loop(monkeypatch, tmp_path) ->
     monkeypatch.setattr(main_module, "run_polling", _fake_run_polling)
 
     try:
-        main_module.run([])
+        main_module.run(["--runtime", "polling"])
     except _StopFlow:
         pass
 
@@ -245,7 +355,7 @@ def test_run_wires_dispatcher_with_non_none_ai_service(monkeypatch, tmp_path) ->
     monkeypatch.setattr(main_module, "run_polling", _fake_run_polling)
 
     try:
-        main_module.run([])
+        main_module.run(["--runtime", "polling"])
     except _StopFlow:
         pass
 
@@ -292,7 +402,7 @@ def test_run_wires_topic_aware_send_functions(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(main_module, "run_polling", _fake_run_polling)
 
     try:
-        main_module.run([])
+        main_module.run(["--runtime", "polling"])
     except _StopFlow:
         pass
 
@@ -350,7 +460,7 @@ def test_run_wires_plugin_command_executor_reply_markup(monkeypatch, tmp_path) -
     monkeypatch.setattr(main_module, "run_polling", _fake_run_polling)
 
     try:
-        main_module.run([])
+        main_module.run(["--runtime", "polling"])
     except _StopFlow:
         pass
 

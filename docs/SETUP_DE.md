@@ -310,6 +310,10 @@ WEBUI_SESSION_TTL_SECONDS=3600
 # Sicherheitseinstellungen (Block 2 – Login-Schutz)
 # WEBUI_LOGIN_DELAY_BASE_SECONDS=0.25
 # WEBUI_LOGIN_DELAY_MAX_SECONDS=2.0
+
+# Optional: Runtime-Modus (Standard: queue)
+# AMO_TELEGRAM_RUNTIME=queue  # queue als Standard; polling ist nur expliziter Fallback
+# AMO_TELEGRAM_QUEUE_IDLE_SLEEP_SECONDS=0.1  # Pausenzeit für Idle-Queue-Worker
 ```
 
 > **Config-Priorität:** Beim lokalen Start überschreibt `.env` Shell-Umgebungsvariablen. Setze `AMO_ENV_OVERRIDE=0`, um dies zu deaktivieren.
@@ -336,6 +340,49 @@ Die WebUI enthält konfigurierbare Sicherheitsfeatures:
 |----------|----------|-----------------|--------------|
 | `WEBUI_LOGIN_DELAY_BASE_SECONDS` | `0,25` | nicht-negativ | Basisverzögerung nach erstem fehlgeschlagenen Login (Sekunden) |
 | `WEBUI_LOGIN_DELAY_MAX_SECONDS` | `2,0` | nicht-negativ, muss >= Basis sein | Maximale Verzögerung (Sekunden) |
+
+---
+
+## Runtime-Modi / Laufzeit-Modi
+
+Der normale Bot-Start nutzt die Multi-Prozess Queue-Runtime mit Worker-Supervisor.
+
+| Modus | Beschreibung | Standard |
+|-------|--------------|----------|
+| **Queue** | Multi-Prozess Queue-Runtime mit Worker-Supervisor | ✅ Standard |
+| **Polling** | Klassischer Polling-Modus (Legacy) | Expliziter Fallback |
+
+### Queue-Modus (Standard)
+
+Der Queue-Modus verwendet eine Multi-Prozess-Architektur mit einem Supervisor, der Sender, bekannte Topic-Worker und den Poller verwaltet. Tote Prozesse werden automatisch neu gestartet, und Topic-Worker werden automatisch für eingehende Scopes aus der Queue gestartet.
+
+**Starten:**
+```bash
+venv/bin/python -m amo_bot.main
+
+# Mit WebUI + Queue:
+venv/bin/python -m amo_bot.main --serve
+```
+
+### Expliziter Legacy-Fallback
+
+Die Polling-Runtime bleibt nur als expliziter Fallback erhalten.
+
+```bash
+AMO_TELEGRAM_RUNTIME=polling venv/bin/python -m amo_bot.main
+```
+
+### Konfigurationsvariablen
+
+| Variable | Standard | Beschreibung |
+|----------|----------|--------------|
+| `AMO_TELEGRAM_RUNTIME` | `queue` | Laufzeit-Modus: `queue` als Standard; `polling` nur als expliziter Fallback |
+| `AMO_TELEGRAM_QUEUE_IDLE_SLEEP_SECONDS` | `0.1` | Pausenzeit für Idle-Queue-Worker (Sekunden) |
+
+### Bekannte Einschränkungen (Queue-Modus)
+
+- **Nur Text/Markup Outbox:** Der Queue-Worker unterstützt aktuell nur den Text/Markup-Ausgabepfad (`send_photo`/`send_document` nicht verfügbar)
+- **Kein Live-Restart:** Kein Live-Telegram-Restart möglich (neuer Start erforderlich)
 
 ---
 
