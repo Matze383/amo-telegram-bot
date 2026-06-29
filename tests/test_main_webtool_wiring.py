@@ -13,10 +13,6 @@ import amo_bot.telegram.webtool_evidence as evidence_module
 from amo_bot.main import SessionBoundSourcePreferenceRepository, SessionBoundWebtoolCapabilityDispatcher
 
 
-class _StopFlow(RuntimeError):
-    pass
-
-
 class _Response:
     def __init__(self, payload):
         self._payload = payload
@@ -209,17 +205,23 @@ def test_main_runtime_wires_session_factory_into_web_evidence_pipeline(monkeypat
         def __init__(self, **kwargs) -> None:  # noqa: ANN003
             captured["dispatcher_pipeline"] = kwargs["web_evidence_pipeline"]
 
-    async def _fake_run_polling(*args, **kwargs):  # noqa: ANN002,ANN003
-        raise _StopFlow()
-
     monkeypatch.setattr(main_module, "WebEvidencePipeline", _DummyPipeline)
     monkeypatch.setattr(main_module, "Dispatcher", _DummyDispatcher)
-    monkeypatch.setattr(main_module, "run_polling", _fake_run_polling)
 
-    try:
-        main_module.run(["--runtime", "polling"])
-    except _StopFlow:
-        pass
+    settings = main_module.get_settings()
+    main_module.init_db(settings.database_url)
+    sender = main_module.QueueBackedTelegramSender(
+        database_url=settings.database_url,
+        topic_id=7,
+        trigger_message_id=42,
+        job_id="test",
+    )
+    main_module._build_queue_worker_dispatcher(
+        settings=settings,
+        session_factory=main_module.create_session_factory(settings.database_url),
+        tg=object(),  # type: ignore[arg-type]
+        sender=sender,
+    )
 
     assert captured["pipeline_session_factory"] is not None
     assert captured["dispatcher_pipeline"].__class__ is _DummyPipeline
@@ -252,11 +254,7 @@ def test_main_runtime_wires_current_info_when_enabled(monkeypatch, tmp_path):
         def __init__(self, **kwargs) -> None:  # noqa: ANN003
             captured.update(kwargs)
 
-    async def _fake_run_polling(*args, **kwargs):  # noqa: ANN002,ANN003
-        raise _StopFlow()
-
     monkeypatch.setattr(main_module, "Dispatcher", _DummyDispatcher)
-    monkeypatch.setattr(main_module, "run_polling", _fake_run_polling)
     vector_components = (object(), object(), object())
 
     monkeypatch.setattr(main_module, "build_search_broker_from_settings", lambda settings: object())
@@ -286,10 +284,20 @@ def test_main_runtime_wires_current_info_when_enabled(monkeypatch, tmp_path):
         _build_retrieval_provider,
     )
 
-    try:
-        main_module.run(["--runtime", "polling"])
-    except _StopFlow:
-        pass
+    settings = main_module.get_settings()
+    main_module.init_db(settings.database_url)
+    sender = main_module.QueueBackedTelegramSender(
+        database_url=settings.database_url,
+        topic_id=7,
+        trigger_message_id=42,
+        job_id="test",
+    )
+    main_module._build_queue_worker_dispatcher(
+        settings=settings,
+        session_factory=main_module.create_session_factory(settings.database_url),
+        tg=object(),  # type: ignore[arg-type]
+        sender=sender,
+    )
 
     assert captured["current_info_enabled"] is True
     assert captured["current_info_service"] is not None
@@ -323,11 +331,7 @@ def test_main_runtime_wires_current_info_with_gpt_researcher_without_search_brok
         def __init__(self, **kwargs) -> None:  # noqa: ANN003
             captured.update(kwargs)
 
-    async def _fake_run_polling(*args, **kwargs):  # noqa: ANN002,ANN003
-        raise _StopFlow()
-
     monkeypatch.setattr(main_module, "Dispatcher", _DummyDispatcher)
-    monkeypatch.setattr(main_module, "run_polling", _fake_run_polling)
     monkeypatch.setattr(main_module, "build_search_broker_from_settings", lambda settings: None)
     monkeypatch.setattr(
         main_module,
@@ -351,10 +355,20 @@ def test_main_runtime_wires_current_info_with_gpt_researcher_without_search_brok
         lambda settings, **kwargs: object(),
     )
 
-    try:
-        main_module.run(["--runtime", "polling"])
-    except _StopFlow:
-        pass
+    settings = main_module.get_settings()
+    main_module.init_db(settings.database_url)
+    sender = main_module.QueueBackedTelegramSender(
+        database_url=settings.database_url,
+        topic_id=7,
+        trigger_message_id=42,
+        job_id="test",
+    )
+    main_module._build_queue_worker_dispatcher(
+        settings=settings,
+        session_factory=main_module.create_session_factory(settings.database_url),
+        tg=object(),  # type: ignore[arg-type]
+        sender=sender,
+    )
 
     assert captured["current_info_enabled"] is True
     assert captured["current_info_service"] is not None

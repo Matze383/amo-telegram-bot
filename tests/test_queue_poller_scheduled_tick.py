@@ -2,7 +2,12 @@ from __future__ import annotations
 
 import asyncio
 
-from amo_bot.telegram.polling import OffsetStore, run_polling
+from sqlalchemy import select
+
+from amo_bot.db.base import create_session_factory
+from amo_bot.db.init_db import init_db
+from amo_bot.db.models import TelegramIncomingQueue
+from amo_bot.telegram.queue_poller import OffsetStore, run_queue_poller
 
 
 class _DummyTelegramClient:
@@ -17,23 +22,21 @@ class _DummyTelegramClient:
 
 
 class _SingleRestartUpdateTelegramClient:
+    def __init__(self) -> None:
+        self.calls = 0
+
     async def get_updates(self, *, offset: int, timeout: int, limit: int):
+        self.calls += 1
+        if self.calls > 1:
+            await asyncio.sleep(1)
         return [{"update_id": 268714202, "message": {"text": "/restart"}}]
 
 
-class _RestartingDispatcher:
-    def __init__(self, offset_store: OffsetStore) -> None:
-        self.offset_store = offset_store
-
-    async def handle_raw_update(self, update: object) -> None:
-        if self.offset_store.load() != 0:
-            raise SystemExit(2)
-        raise SystemExit(0)
-
-
-def test_run_polling_calls_scheduled_tick() -> None:
+def test_run_queue_poller_calls_scheduled_tick(tmp_path) -> None:
     tg = _DummyTelegramClient()
     offset_store = OffsetStore(":memory:")
+    database_url = f"sqlite:///{tmp_path / 'queue.db'}"
+    init_db(database_url)
     ticks: list[str] = []
 
     async def _tick() -> None:
@@ -41,9 +44,10 @@ def test_run_polling_calls_scheduled_tick() -> None:
 
     async def _run() -> None:
         await asyncio.wait_for(
-            run_polling(
+            run_queue_poller(
                 tg=tg,
                 offset_store=offset_store,
+                database_url=database_url,
                 timeout_seconds=1,
                 limit=1,
                 retry_max_seconds=1,
@@ -61,9 +65,11 @@ def test_run_polling_calls_scheduled_tick() -> None:
     assert len(ticks) >= 1
 
 
-def test_run_polling_swallows_scheduled_tick_errors() -> None:
+def test_run_queue_poller_swallows_scheduled_tick_errors(tmp_path) -> None:
     tg = _DummyTelegramClient()
     offset_store = OffsetStore(":memory:")
+    database_url = f"sqlite:///{tmp_path / 'queue.db'}"
+    init_db(database_url)
     tick_calls = 0
 
     async def _tick() -> None:
@@ -73,9 +79,10 @@ def test_run_polling_swallows_scheduled_tick_errors() -> None:
 
     async def _run() -> None:
         await asyncio.wait_for(
-            run_polling(
+            run_queue_poller(
                 tg=tg,
                 offset_store=offset_store,
+                database_url=database_url,
                 timeout_seconds=1,
                 limit=1,
                 retry_max_seconds=1,
@@ -93,23 +100,31 @@ def test_run_polling_swallows_scheduled_tick_errors() -> None:
     assert tick_calls >= 1
 
 
-def test_run_polling_saves_offset_after_restart_dispatch_exit(tmp_path) -> None:
+def test_run_queue_poller_saves_offset_after_enqueue(tmp_path) -> None:
     offset_store = OffsetStore(str(tmp_path / "offset.json"))
+    database_url = f"sqlite:///{tmp_path / 'queue.db'}"
+    init_db(database_url)
 
     async def _run() -> None:
-        await run_polling(
-            tg=_SingleRestartUpdateTelegramClient(),
-            offset_store=offset_store,
-            timeout_seconds=1,
-            limit=1,
-            retry_max_seconds=1,
-            dispatcher=_RestartingDispatcher(offset_store),  # type: ignore[arg-type]
+        await asyncio.wait_for(
+            run_queue_poller(
+                tg=_SingleRestartUpdateTelegramClient(),
+                offset_store=offset_store,
+                database_url=database_url,
+                timeout_seconds=1,
+                limit=1,
+                retry_max_seconds=1,
+            ),
+            timeout=0.2,
         )
 
     try:
         asyncio.run(_run())
-    except SystemExit as exc:
-        assert exc.code == 0
+    except TimeoutError:
         pass
 
     assert offset_store.load() == 268714202
+    with create_session_factory(database_url)() as session:
+        row = session.scalar(select(TelegramIncomingQueue))
+        assert row is not None
+        assert row.telegram_update_id == 268714202

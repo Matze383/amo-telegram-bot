@@ -130,7 +130,7 @@ class DreamingRuntime:
     def start(self) -> None:
         """Start the background scheduler loop.  Idempotent when already running.
 
-        Must be called from inside the asyncio event loop that owns the polling
+        Must be called from inside the asyncio event loop that owns the bot
         runtime.  This deliberately avoids creating tasks before a loop exists.
         """
         if not self._enabled:

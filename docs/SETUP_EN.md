@@ -311,8 +311,7 @@ WEBUI_SESSION_TTL_SECONDS=3600
 # WEBUI_LOGIN_DELAY_BASE_SECONDS=0.25
 # WEBUI_LOGIN_DELAY_MAX_SECONDS=2.0
 
-# Optional: Runtime mode (default: queue)
-# AMO_TELEGRAM_RUNTIME=queue  # queue by default; polling is an explicit fallback
+# Optional: Queue runtime
 # AMO_TELEGRAM_QUEUE_IDLE_SLEEP_SECONDS=0.1  # Idle sleep time for queue workers
 ```
 
@@ -364,7 +363,6 @@ The regular bot start uses the multi-process queue runtime with worker superviso
 | Mode | Description | Default |
 |------|-------------|---------|
 | **Queue** | Multi-process queue runtime with worker supervisor | ✅ Default |
-| **Polling** | Classic polling mode (legacy) | Explicit fallback |
 
 ### Queue Mode (Default)
 
@@ -378,19 +376,10 @@ venv/bin/python -m amo_bot.main
 venv/bin/python -m amo_bot.main --serve
 ```
 
-### Explicit Legacy Fallback
-
-The polling runtime is retained only as an explicit fallback.
-
-```bash
-AMO_TELEGRAM_RUNTIME=polling venv/bin/python -m amo_bot.main
-```
-
 ### Configuration Variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `AMO_TELEGRAM_RUNTIME` | `queue` | Runtime mode: `queue` by default; `polling` only as explicit fallback |
 | `AMO_TELEGRAM_QUEUE_IDLE_SLEEP_SECONDS` | `0.1` | Idle sleep time for queue workers (seconds) |
 
 ### Known Limitations (Queue Mode)
@@ -900,7 +889,7 @@ The WebUI will fail fast with a clear error if an unsafe configuration is detect
 
 ## Running the Bot
 
-### Bot Only (Polling)
+### Bot Only (Queue Runtime)
 
 **Linux / macOS:**
 
@@ -1298,7 +1287,7 @@ The WebUI access can be controlled via Telegram commands. This allows the owner 
 
 **Important:** These commands only work in **private chats** (not in groups) and only for the **owner**.
 
-For `/restart`, AMO sends an acknowledgement before the process exits. It also persists the current polling offset before restarting so the same Telegram update ID cannot trigger a restart loop after startup.
+For `/restart`, AMO sends an acknowledgement before the process exits. The queue poller also persists the current Telegram update offset so the same Telegram update ID cannot trigger a restart loop after startup.
 
 ### Access Denied Reasons
 

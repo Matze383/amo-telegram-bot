@@ -3,10 +3,6 @@ from __future__ import annotations
 from amo_bot import main as main_module
 
 
-class _StopRunPolling(RuntimeError):
-    pass
-
-
 def test_main_wires_plugin_command_executor_into_dispatcher(monkeypatch, tmp_path) -> None:
     db_path = tmp_path / "bot.db"
     offset_path = tmp_path / "offset.json"
@@ -24,30 +20,26 @@ def test_main_wires_plugin_command_executor_into_dispatcher(monkeypatch, tmp_pat
 
     captured: dict[str, object] = {}
 
-    def _fake_run_polling(
-        tg,
-        offset_store,
-        *,
-        timeout_seconds,
-        limit,
-        retry_max_seconds,
-        dispatcher,
-        scheduled_tick,
-        scheduled_tick_interval_seconds=5.0,
-    ):
-        captured["dispatcher"] = dispatcher
-        captured["scheduled_tick"] = scheduled_tick
-        captured["scheduled_tick_interval_seconds"] = scheduled_tick_interval_seconds
-        raise _StopRunPolling()
+    class _DummyDispatcher:
+        def __init__(self, **kwargs) -> None:  # noqa: ANN003
+            captured.update(kwargs)
 
-    monkeypatch.setattr(main_module, "run_polling", _fake_run_polling)
+    monkeypatch.setattr(main_module, "Dispatcher", _DummyDispatcher)
 
-    try:
-        main_module.run(["--runtime", "polling"])
-    except _StopRunPolling:
-        pass
+    settings = main_module.get_settings()
+    main_module.init_db(settings.database_url)
+    sender = main_module.QueueBackedTelegramSender(
+        database_url=settings.database_url,
+        topic_id=7,
+        trigger_message_id=42,
+        job_id="test",
+    )
+    dispatcher = main_module._build_queue_worker_dispatcher(
+        settings=settings,
+        session_factory=main_module.create_session_factory(settings.database_url),
+        tg=object(),  # type: ignore[arg-type]
+        sender=sender,
+    )
 
-    dispatcher = captured.get("dispatcher")
     assert dispatcher is not None
-    assert dispatcher.plugin_command_executor is not None
-    assert callable(captured.get("scheduled_tick"))
+    assert captured["plugin_command_executor"] is not None

@@ -2,12 +2,10 @@ from __future__ import annotations
 
 import asyncio
 
+import pytest
+
 from amo_bot import main as main_module
 from amo_bot.process_control import StopResult
-
-
-class _StopFlow(RuntimeError):
-    pass
 
 
 class _DummyApp:
@@ -33,7 +31,11 @@ def _set_env(monkeypatch, tmp_path, webui_host: str = "127.0.0.1") -> None:
     monkeypatch.setenv("AMO_PLUGIN_DIR", str(tmp_path / "plugins"))
     monkeypatch.setenv("WEBUI_OWNER_TELEGRAM_ID", "")
     monkeypatch.setenv("WEBUI_HOST", webui_host)
+    monkeypatch.setenv("DOTENV_PATH", str(tmp_path / "missing.env"))
+    monkeypatch.setenv("WEBUI_LOGIN_DELAY_BASE_SECONDS", "0.25")
+    monkeypatch.setenv("WEBUI_LOGIN_DELAY_MAX_SECONDS", "2.0")
     monkeypatch.setenv("AMO_ENV_OVERRIDE", "0")
+    monkeypatch.delenv("AMO_TELEGRAM_RUNTIME", raising=False)
 
 
 def test_run_webui_mode_starts_flask_only(monkeypatch, tmp_path) -> None:
@@ -42,11 +44,6 @@ def test_run_webui_mode_starts_flask_only(monkeypatch, tmp_path) -> None:
 
     monkeypatch.setattr(main_module, "create_flask_app", lambda **kwargs: app)
     monkeypatch.setattr(main_module, "Dispatcher", _StubDispatcher)
-
-    def _fake_run_polling(*args, **kwargs):  # noqa: ANN002,ANN003
-        raise AssertionError("run_polling must not be called in --webui mode")
-
-    monkeypatch.setattr(main_module, "run_polling", _fake_run_polling)
 
     main_module.run(["--webui"])
 
@@ -106,25 +103,63 @@ def test_run_stop_cli_does_not_validate_full_settings(monkeypatch, tmp_path, cap
     assert capsys.readouterr().out.strip() == f"checked {pid_path}"
 
 
-def test_run_default_starts_queue_runtime_without_legacy_polling(monkeypatch, tmp_path) -> None:
+def test_run_default_starts_queue_runtime(monkeypatch, tmp_path) -> None:
     _set_env(monkeypatch, tmp_path)
     pid_path = tmp_path / "amo_bot.pid"
     queue_calls: list[str] = []
-
-    async def _fake_run_polling(*args, **kwargs):  # noqa: ANN002,ANN003
-        raise AssertionError("legacy run_polling must not be called by default")
 
     def _fake_run_queue_runtime(settings) -> None:  # noqa: ANN001
         assert pid_path.exists()
         queue_calls.append(settings.database_url)
 
-    monkeypatch.setattr(main_module, "run_polling", _fake_run_polling)
     monkeypatch.setattr(main_module, "_run_queue_runtime", _fake_run_queue_runtime)
 
     main_module.run([])
 
     assert queue_calls == [f"sqlite:///{tmp_path / 'bot.db'}"]
     assert not pid_path.exists()
+
+
+@pytest.mark.parametrize("runtime_value", ["polling", "invalid"])
+def test_run_rejects_legacy_runtime_before_queue_start(monkeypatch, tmp_path, runtime_value: str) -> None:
+    _set_env(monkeypatch, tmp_path)
+    monkeypatch.setenv("AMO_TELEGRAM_RUNTIME", runtime_value)
+
+    monkeypatch.setattr(
+        main_module,
+        "_run_queue_runtime",
+        lambda settings: (_ for _ in ()).throw(AssertionError("queue runtime must not start")),  # noqa: ARG005
+    )
+    monkeypatch.setattr(
+        main_module,
+        "init_db",
+        lambda database_url: (_ for _ in ()).throw(AssertionError("init_db must not run before runtime check")),  # noqa: ARG005
+    )
+
+    with pytest.raises(RuntimeError) as exc_info:
+        main_module.run([])
+
+    message = str(exc_info.value)
+    assert "legacy polling runtime removed" in message
+    assert "only queue supported" in message
+    assert "remove variable or set queue" in message
+
+
+@pytest.mark.parametrize("runtime_value", ["queue", "", "   ", None])
+def test_run_allows_queue_or_empty_runtime_env(monkeypatch, tmp_path, runtime_value: str | None) -> None:
+    _set_env(monkeypatch, tmp_path)
+    queue_calls: list[str] = []
+
+    if runtime_value is None:
+        monkeypatch.delenv("AMO_TELEGRAM_RUNTIME", raising=False)
+    else:
+        monkeypatch.setenv("AMO_TELEGRAM_RUNTIME", runtime_value)
+
+    monkeypatch.setattr(main_module, "_run_queue_runtime", lambda settings: queue_calls.append(settings.database_url))
+
+    main_module.run([])
+
+    assert queue_calls == [f"sqlite:///{tmp_path / 'bot.db'}"]
 
 
 def test_run_serve_mode_starts_webui_and_queue_by_default(monkeypatch, tmp_path) -> None:
@@ -150,9 +185,6 @@ def test_run_serve_mode_starts_webui_and_queue_by_default(monkeypatch, tmp_path)
         def start(self) -> None:
             self._call["started"] = True
 
-    async def _fake_run_polling(*args, **kwargs):  # noqa: ANN002,ANN003
-        raise AssertionError("legacy run_polling must not be called by --serve default")
-
     def _fake_run_queue_runtime(settings) -> None:  # noqa: ANN001
         assert pid_path.exists()
         queue_calls.append(settings.database_url)
@@ -160,7 +192,6 @@ def test_run_serve_mode_starts_webui_and_queue_by_default(monkeypatch, tmp_path)
     monkeypatch.setattr(main_module, "create_flask_app", lambda **kwargs: app)
     monkeypatch.setattr(main_module, "Dispatcher", _StubDispatcher)
     monkeypatch.setattr(main_module.threading, "Thread", _DummyThread)
-    monkeypatch.setattr(main_module, "run_polling", _fake_run_polling)
     monkeypatch.setattr(main_module, "_run_queue_runtime", _fake_run_queue_runtime)
 
     main_module.run(["--serve"])
@@ -177,51 +208,7 @@ def test_run_serve_mode_starts_webui_and_queue_by_default(monkeypatch, tmp_path)
     assert not pid_path.exists()
 
 
-def test_run_queue_runtime_env_starts_supervisor_without_legacy_polling(monkeypatch, tmp_path) -> None:
-    _set_env(monkeypatch, tmp_path)
-    monkeypatch.setenv("AMO_TELEGRAM_RUNTIME", "queue")
-    pid_path = tmp_path / "amo_bot.pid"
-    queue_calls: list[str] = []
-
-    class _DummyDispatcher:
-        def __init__(self, **kwargs) -> None:  # noqa: ANN003
-            pass
-
-    async def _fake_run_polling(*args, **kwargs):  # noqa: ANN002,ANN003
-        raise AssertionError("legacy run_polling must not be called in queue runtime")
-
-    monkeypatch.setattr(main_module, "Dispatcher", _DummyDispatcher)
-    monkeypatch.setattr(main_module, "run_polling", _fake_run_polling)
-    monkeypatch.setattr(main_module, "_run_queue_runtime", lambda settings: queue_calls.append(settings.database_url))
-
-    main_module.run([])
-
-    assert queue_calls == [f"sqlite:///{tmp_path / 'bot.db'}"]
-    assert not pid_path.exists()
-
-
-def test_run_queue_runtime_cli_overrides_polling_env(monkeypatch, tmp_path) -> None:
-    _set_env(monkeypatch, tmp_path)
-    monkeypatch.setenv("AMO_TELEGRAM_RUNTIME", "polling")
-    queue_calls: list[str] = []
-
-    class _DummyDispatcher:
-        def __init__(self, **kwargs) -> None:  # noqa: ANN003
-            pass
-
-    async def _fake_run_polling(*args, **kwargs):  # noqa: ANN002,ANN003
-        raise AssertionError("legacy run_polling must not be called when --runtime queue is explicit")
-
-    monkeypatch.setattr(main_module, "Dispatcher", _DummyDispatcher)
-    monkeypatch.setattr(main_module, "run_polling", _fake_run_polling)
-    monkeypatch.setattr(main_module, "_run_queue_runtime", lambda settings: queue_calls.append(settings.amo_telegram_runtime))
-
-    main_module.run(["--runtime", "queue"])
-
-    assert queue_calls == ["polling"]
-
-
-def test_run_serve_queue_runtime_starts_webui_and_supervisor_without_legacy_polling(monkeypatch, tmp_path) -> None:
+def test_run_serve_queue_runtime_starts_webui_and_supervisor(monkeypatch, tmp_path) -> None:
     _set_env(monkeypatch, tmp_path, webui_host="0.0.0.0")
     pid_path = tmp_path / "amo_bot.pid"
     app = _DummyApp()
@@ -244,19 +231,15 @@ def test_run_serve_queue_runtime_starts_webui_and_supervisor_without_legacy_poll
         def start(self) -> None:
             self._call["started"] = True
 
-    async def _fake_run_polling(*args, **kwargs):  # noqa: ANN002,ANN003
-        raise AssertionError("legacy run_polling must not be called for --serve --runtime queue")
-
     def _fake_run_queue_runtime(settings) -> None:  # noqa: ANN001
         assert pid_path.exists()
         queue_calls.append(settings.database_url)
 
     monkeypatch.setattr(main_module, "create_flask_app", lambda **kwargs: app)
     monkeypatch.setattr(main_module.threading, "Thread", _DummyThread)
-    monkeypatch.setattr(main_module, "run_polling", _fake_run_polling)
     monkeypatch.setattr(main_module, "_run_queue_runtime", _fake_run_queue_runtime)
 
-    main_module.run(["--serve", "--runtime", "queue"])
+    main_module.run(["--serve"])
 
     assert app.run_calls == []
     assert len(threading_calls) == 1
@@ -270,141 +253,79 @@ def test_run_serve_queue_runtime_starts_webui_and_supervisor_without_legacy_poll
     assert not pid_path.exists()
 
 
-def test_run_dreaming_starts_inside_polling_event_loop(monkeypatch, tmp_path) -> None:
+def test_build_queue_worker_dispatcher_wires_non_none_ai_service(monkeypatch, tmp_path) -> None:
     _set_env(monkeypatch, tmp_path)
-    monkeypatch.setenv("DREAMING_ENABLED", "1")
-    pid_path = tmp_path / "amo_bot.pid"
-
-    lifecycle: list[tuple[str, bool]] = []
-
-    class _DummyDreamingRuntime:
-        def __init__(self, **kwargs) -> None:  # noqa: ANN003
-            self.is_running = False
-            lifecycle.append(("init", kwargs["enabled"]))
-
-        def start(self) -> None:
-            asyncio.get_running_loop()
-            self.is_running = True
-            lifecycle.append(("start", True))
-
-        async def stop(self) -> None:
-            self.is_running = False
-            lifecycle.append(("stop", False))
-
-    class _DummyDispatcher:
-        def __init__(self, **kwargs) -> None:  # noqa: ANN003
-            pass
-
-    async def _fake_run_polling(*args, **kwargs):  # noqa: ANN002,ANN003
-        assert pid_path.exists()
-        lifecycle.append(("polling", True))
-        raise _StopFlow()
-
-    monkeypatch.setattr(main_module, "DreamingRuntime", _DummyDreamingRuntime)
-    monkeypatch.setattr(main_module, "Dispatcher", _DummyDispatcher)
-    monkeypatch.setattr(main_module, "run_polling", _fake_run_polling)
-
-    try:
-        main_module.run(["--runtime", "polling"])
-    except _StopFlow:
-        pass
-
-    assert lifecycle == [("init", True), ("start", True), ("polling", True), ("stop", False)]
-    assert not pid_path.exists()
-
-
-def test_run_webui_mode_does_not_start_dreaming(monkeypatch, tmp_path) -> None:
-    _set_env(monkeypatch, tmp_path)
-    monkeypatch.setenv("DREAMING_ENABLED", "1")
-    app = _DummyApp()
-    lifecycle: list[str] = []
-
-    class _DummyDreamingRuntime:
-        def __init__(self, **kwargs) -> None:  # noqa: ANN003
-            lifecycle.append("init")
-
-        def start(self) -> None:
-            lifecycle.append("start")
-
-        async def stop(self) -> None:
-            lifecycle.append("stop")
-
-    monkeypatch.setattr(main_module, "create_flask_app", lambda **kwargs: app)
-    monkeypatch.setattr(main_module, "Dispatcher", _StubDispatcher)
-    monkeypatch.setattr(main_module, "DreamingRuntime", _DummyDreamingRuntime)
-
-    main_module.run(["--webui"])
-
-    assert lifecycle == ["init"]
-    assert app.run_calls == [("127.0.0.1", 8080, None)]
-
-
-def test_run_wires_dispatcher_with_non_none_ai_service(monkeypatch, tmp_path) -> None:
-    _set_env(monkeypatch, tmp_path)
-
     captured: dict[str, object] = {}
 
     class _DummyDispatcher:
         def __init__(self, **kwargs) -> None:  # noqa: ANN003
             captured["ai_service"] = kwargs.get("ai_service")
 
-    async def _fake_run_polling(*args, **kwargs):  # noqa: ANN002,ANN003
-        raise _StopFlow()
-
     monkeypatch.setattr(main_module, "Dispatcher", _DummyDispatcher)
-    monkeypatch.setattr(main_module, "run_polling", _fake_run_polling)
 
-    try:
-        main_module.run(["--runtime", "polling"])
-    except _StopFlow:
-        pass
+    settings = main_module.get_settings()
+    main_module.init_db(settings.database_url)
+    sender = main_module.QueueBackedTelegramSender(
+        database_url=settings.database_url,
+        topic_id=7,
+        trigger_message_id=42,
+        job_id="test",
+    )
+    main_module._build_queue_worker_dispatcher(
+        settings=settings,
+        session_factory=main_module.create_session_factory(settings.database_url),
+        tg=object(),  # type: ignore[arg-type]
+        sender=sender,
+    )
 
     assert "ai_service" in captured
     assert captured["ai_service"] is not None
 
 
-def test_run_wires_topic_aware_send_functions(monkeypatch, tmp_path) -> None:
+def test_build_queue_worker_dispatcher_wires_topic_aware_send_functions(monkeypatch, tmp_path) -> None:
     _set_env(monkeypatch, tmp_path)
 
-    class _DummyTG:
-        def __init__(self, *args, **kwargs) -> None:  # noqa: ANN002,ANN003
-            self.calls: list[dict[str, object]] = []
-
-        async def send_message(self, **kwargs):  # noqa: ANN003
-            self.calls.append(kwargs)
-            return {"ok": True}
-
     captured: dict[str, object] = {}
+    sent: list[tuple[str, int, str, int | None]] = []
 
     class _DummyPCE:
         def __init__(self, **kwargs) -> None:  # noqa: ANN003
             captured["send_message"] = kwargs["send_message"]
             captured["reply"] = kwargs["reply"]
 
-    class _DummySPE:
-        def __init__(self, **kwargs) -> None:  # noqa: ANN003
-            pass
-
-        async def run_due_once(self) -> None:
-            return None
-
     class _DummyDispatcher:
         def __init__(self, **kwargs) -> None:  # noqa: ANN003
             captured["send_text"] = kwargs["send_text"]
 
-    async def _fake_run_polling(*args, **kwargs):  # noqa: ANN002,ANN003
-        raise _StopFlow()
+    class _DummySender:
+        job_id = "job-1"
 
-    monkeypatch.setattr(main_module, "TelegramClient", _DummyTG)
+        async def send_text(self, chat_id: int, text: str, message_thread_id: int | None = None) -> object:
+            sent.append(("text", chat_id, text, message_thread_id))
+            return {"ok": True}
+
+        async def send_markup(
+            self,
+            chat_id: int,
+            text: str,
+            reply_markup: dict[str, object],
+            message_thread_id: int | None = None,
+        ) -> object:
+            sent.append(("markup", chat_id, text, message_thread_id))
+            return {"ok": True}
+
+    monkeypatch.setattr(main_module, "QueueBackedTelegramSender", lambda **kwargs: _DummySender())
     monkeypatch.setattr(main_module, "PluginCommandExecutor", _DummyPCE)
-    monkeypatch.setattr(main_module, "ScheduledPluginExecutor", _DummySPE)
     monkeypatch.setattr(main_module, "Dispatcher", _DummyDispatcher)
-    monkeypatch.setattr(main_module, "run_polling", _fake_run_polling)
 
-    try:
-        main_module.run(["--runtime", "polling"])
-    except _StopFlow:
-        pass
+    settings = main_module.get_settings()
+    main_module.init_db(settings.database_url)
+    main_module._build_queue_worker_dispatcher(
+        settings=settings,
+        session_factory=main_module.create_session_factory(settings.database_url),
+        tg=object(),  # type: ignore[arg-type]
+        sender=_DummySender(),
+    )
 
     send_text = captured["send_text"]
     send_message = captured["send_message"]
@@ -414,24 +335,14 @@ def test_run_wires_topic_aware_send_functions(monkeypatch, tmp_path) -> None:
     asyncio.run(send_message(2, "world", 951))
     asyncio.run(reply(3, 44, "reply", 123))
 
-    tg = main_module.TelegramClient()
-    # retrieve created instance via closure by replaying from captured callables
-    # call records are attached to the bound method owner
-    owner = send_text.__closure__[0].cell_contents if send_text.__closure__ else None
-    if owner is None or not hasattr(owner, "calls"):
-        owner = send_message.__closure__[0].cell_contents
-
-    assert owner.calls[0] == {"chat_id": 1, "text": "hello", "message_thread_id": 872}
-    assert owner.calls[1] == {"chat_id": 2, "text": "world", "message_thread_id": 951}
-    assert owner.calls[2] == {
-        "chat_id": 3,
-        "text": "reply",
-        "reply_to_message_id": 44,
-        "message_thread_id": 123,
-    }
+    assert sent == [
+        ("text", 1, "hello", 872),
+        ("text", 2, "world", 951),
+        ("text", 3, "reply", 123),
+    ]
 
 
-def test_run_wires_plugin_command_executor_reply_markup(monkeypatch, tmp_path) -> None:
+def test_build_queue_worker_dispatcher_wires_plugin_command_executor_reply_markup(monkeypatch, tmp_path) -> None:
     _set_env(monkeypatch, tmp_path)
 
     captured: dict[str, object] = {}
@@ -440,29 +351,27 @@ def test_run_wires_plugin_command_executor_reply_markup(monkeypatch, tmp_path) -
         def __init__(self, **kwargs) -> None:  # noqa: ANN003
             captured["reply_markup"] = kwargs.get("reply_markup")
 
-    class _DummySPE:
-        def __init__(self, **kwargs) -> None:  # noqa: ANN003
-            pass
-
-        async def run_due_once(self) -> None:
-            return None
-
     class _DummyDispatcher:
         def __init__(self, **kwargs) -> None:  # noqa: ANN003
             pass
 
-    async def _fake_run_polling(*args, **kwargs):  # noqa: ANN002,ANN003
-        raise _StopFlow()
-
     monkeypatch.setattr(main_module, "PluginCommandExecutor", _DummyPCE)
-    monkeypatch.setattr(main_module, "ScheduledPluginExecutor", _DummySPE)
     monkeypatch.setattr(main_module, "Dispatcher", _DummyDispatcher)
-    monkeypatch.setattr(main_module, "run_polling", _fake_run_polling)
 
-    try:
-        main_module.run(["--runtime", "polling"])
-    except _StopFlow:
-        pass
+    settings = main_module.get_settings()
+    main_module.init_db(settings.database_url)
+    sender = main_module.QueueBackedTelegramSender(
+        database_url=settings.database_url,
+        topic_id=7,
+        trigger_message_id=42,
+        job_id="test",
+    )
+    main_module._build_queue_worker_dispatcher(
+        settings=settings,
+        session_factory=main_module.create_session_factory(settings.database_url),
+        tg=object(),  # type: ignore[arg-type]
+        sender=sender,
+    )
 
     assert "reply_markup" in captured
     assert captured["reply_markup"] is not None

@@ -311,8 +311,7 @@ WEBUI_SESSION_TTL_SECONDS=3600
 # WEBUI_LOGIN_DELAY_BASE_SECONDS=0.25
 # WEBUI_LOGIN_DELAY_MAX_SECONDS=2.0
 
-# Optional: Runtime-Modus (Standard: queue)
-# AMO_TELEGRAM_RUNTIME=queue  # queue als Standard; polling ist nur expliziter Fallback
+# Optional: Queue-Runtime
 # AMO_TELEGRAM_QUEUE_IDLE_SLEEP_SECONDS=0.1  # Pausenzeit für Idle-Queue-Worker
 ```
 
@@ -350,7 +349,6 @@ Der normale Bot-Start nutzt die Multi-Prozess Queue-Runtime mit Worker-Superviso
 | Modus | Beschreibung | Standard |
 |-------|--------------|----------|
 | **Queue** | Multi-Prozess Queue-Runtime mit Worker-Supervisor | ✅ Standard |
-| **Polling** | Klassischer Polling-Modus (Legacy) | Expliziter Fallback |
 
 ### Queue-Modus (Standard)
 
@@ -364,19 +362,10 @@ venv/bin/python -m amo_bot.main
 venv/bin/python -m amo_bot.main --serve
 ```
 
-### Expliziter Legacy-Fallback
-
-Die Polling-Runtime bleibt nur als expliziter Fallback erhalten.
-
-```bash
-AMO_TELEGRAM_RUNTIME=polling venv/bin/python -m amo_bot.main
-```
-
 ### Konfigurationsvariablen
 
 | Variable | Standard | Beschreibung |
 |----------|----------|--------------|
-| `AMO_TELEGRAM_RUNTIME` | `queue` | Laufzeit-Modus: `queue` als Standard; `polling` nur als expliziter Fallback |
 | `AMO_TELEGRAM_QUEUE_IDLE_SLEEP_SECONDS` | `0.1` | Pausenzeit für Idle-Queue-Worker (Sekunden) |
 
 ### Bekannte Einschränkungen (Queue-Modus)
@@ -900,7 +889,7 @@ Die WebUI bricht bei unsicherer Konfiguration im Public-Modus sofort mit einer k
 
 ## Bot starten
 
-### Nur Bot (Polling)
+### Nur Bot (Queue-Runtime)
 
 **Linux / macOS:**
 
@@ -1298,7 +1287,7 @@ Der WebUI-Zugang kann über Telegram-Commands gesteuert werden. Das ermöglicht 
 
 **Wichtig:** Diese Commands funktionieren nur im **privaten Chat** (nicht in Gruppen) und nur für den **Owner**.
 
-Bei `/restart` wird vor dem Prozessende eine Ack-Nachricht gesendet. Außerdem sichert AMO den aktuellen Polling-Offset vor dem Restart, damit dieselbe Telegram-Update-ID nach dem Neustart keine Restart-Schleife auslöst.
+Bei `/restart` wird vor dem Prozessende eine Ack-Nachricht gesendet. Außerdem sichert der Queue-Poller den aktuellen Telegram-Update-Offset, damit dieselbe Telegram-Update-ID nach dem Neustart keine Restart-Schleife auslöst.
 
 ### Zugriffsverweigerungs-Gründe
 

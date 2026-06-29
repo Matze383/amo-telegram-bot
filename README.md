@@ -102,7 +102,6 @@ Der normale Bot-Start nutzt die Multi-Prozess Queue-Runtime mit Worker-Superviso
 | Modus | Beschreibung | Standard |
 |-------|--------------|----------|
 | **Queue** | Multi-Prozess Queue-Runtime mit Worker-Supervisor | ✅ Standard |
-| **Polling** | Klassischer Polling-Modus (Legacy) | Expliziter Fallback |
 
 **Queue-Modus (Standard):**
 ```bash
@@ -110,13 +109,7 @@ venv/bin/python -m amo_bot.main
 venv/bin/python -m amo_bot.main --serve
 ```
 
-**Expliziter Legacy-Fallback:**
-```bash
-AMO_TELEGRAM_RUNTIME=polling venv/bin/python -m amo_bot.main
-```
-
 **Umgebungsvariablen:**
-- `AMO_TELEGRAM_RUNTIME=queue|polling` — Standard: `queue`
 - `AMO_TELEGRAM_QUEUE_IDLE_SLEEP_SECONDS` — Pausenzeit für Idle-Worker
 
 **Queue-Modus Einschränkungen:**
@@ -229,7 +222,6 @@ The regular bot start uses the multi-process queue runtime with worker superviso
 | Mode | Description | Default |
 |------|-------------|---------|
 | **Queue** | Multi-process queue runtime with worker supervisor | ✅ Default |
-| **Polling** | Classic polling mode (legacy) | Explicit fallback |
 
 **Queue mode (Default):**
 ```bash
@@ -237,13 +229,7 @@ venv/bin/python -m amo_bot.main
 venv/bin/python -m amo_bot.main --serve
 ```
 
-**Explicit legacy fallback:**
-```bash
-AMO_TELEGRAM_RUNTIME=polling venv/bin/python -m amo_bot.main
-```
-
 **Environment variables:**
-- `AMO_TELEGRAM_RUNTIME=queue|polling` — Default: `queue`
 - `AMO_TELEGRAM_QUEUE_IDLE_SLEEP_SECONDS` — Idle sleep time for workers
 
 **Queue mode limitations:**

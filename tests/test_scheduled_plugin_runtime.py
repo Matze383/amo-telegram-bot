@@ -13,7 +13,7 @@ from amo_bot.db.repositories import PluginRepository
 from amo_bot.plugins.loader import PluginLoader
 from amo_bot.plugins.scheduled_runtime import ScheduledPluginExecutor
 from amo_bot.plugins.sandbox.types import SandboxResponse
-from amo_bot.main import run
+from amo_bot import main as main_module
 
 
 def _write_scheduled_plugin(
@@ -372,34 +372,7 @@ def test_main_wires_scheduled_plugin_executor_timeout(monkeypatch) -> None:
         poll_timeout_seconds = 5
         poll_limit = 10
         poll_retry_max_seconds = 30
-        webui_host = "127.0.0.1"
-        webui_port = 8080
-        dreaming_enabled = False
-        dreaming_interval_seconds = 300
-        dreaming_timeout_seconds = 300.0
-        dreaming_max_daily_candidates_per_scope = 3
-        dreaming_max_promotions_per_scope = 2
-        dreaming_auto_approve_mode = False
-        dreaming_window_start = "02:00"
-        dreaming_window_end = "05:00"
-        dreaming_timezone = "Europe/Berlin"
-        dreaming_max_scopes_per_batch = 3
-        dreaming_batch_pause_seconds = 300
-        dreaming_jitter_seconds = 120
-        dreaming_min_daily_memories = 1
-        dreaming_lookback_days = 7
-        memory_daily_enabled = False
-        memory_daily_interval_seconds = 21600
-        memory_daily_max_input_messages = 200
-        memory_daily_max_chars_per_message = 500
-        memory_daily_max_summary_chars = 6000
-        memory_daily_min_messages = 1
-        memory_daily_max_scopes_per_run = 10
-        amo_current_info_enabled = False
-        amo_current_info_timeout_seconds = 8.0
-        amo_current_info_late_synthesis_timeout_seconds = 60.0
-        amo_current_info_max_results = 5
-        amo_current_info_max_documents = 3
+        amo_telegram_queue_idle_sleep_seconds = 0.1
 
     class _DummyContext:
         def __enter__(self):
@@ -418,29 +391,21 @@ def test_main_wires_scheduled_plugin_executor_timeout(monkeypatch) -> None:
         async def run_due_once(self, now=None):
             return 0
 
-    async def _fake_run_polling(*args, **kwargs):
+    async def _fake_run_queue_poller(*args, **kwargs):
         raise _StopRun
 
-    monkeypatch.setattr("amo_bot.main.get_settings", lambda: _FakeSettings())
-    monkeypatch.setattr("amo_bot.main.setup_logging", lambda: None)
-    monkeypatch.setattr("amo_bot.main.init_db", lambda _db_url: None)
-    monkeypatch.setattr("amo_bot.main.create_session_factory", lambda _db_url: _fake_session_factory)
-    monkeypatch.setattr("amo_bot.main.UserRoleRepository", lambda _session: type("_Repo", (), {"bootstrap_owner_from_settings": lambda self, **kwargs: None})())
-    monkeypatch.setattr("amo_bot.main.TelegramClient", lambda **kwargs: object())
-    monkeypatch.setattr("amo_bot.main.OffsetStore", lambda _path: object())
-    monkeypatch.setattr("amo_bot.main.DBRoleResolver", lambda _sf: object())
-    monkeypatch.setattr("amo_bot.main.build_ai_provider", lambda _settings: object())
-    monkeypatch.setattr("amo_bot.main.OwnerNotifier", lambda **kwargs: object())
-    monkeypatch.setattr("amo_bot.main.create_builtin_registry", lambda **kwargs: object())
-    monkeypatch.setattr("amo_bot.main.PluginLoader", lambda _dir: object())
-    monkeypatch.setattr("amo_bot.main.PluginCommandExecutor", lambda **kwargs: object())
-    monkeypatch.setattr("amo_bot.main.ScheduledPluginExecutor", _FakeScheduledPluginExecutor)
-    monkeypatch.setattr("amo_bot.main.ChatTopicPersistenceService", lambda *args, **kwargs: object())
-    monkeypatch.setattr("amo_bot.main.Dispatcher", lambda **kwargs: object())
-    monkeypatch.setattr("amo_bot.main.run_polling", _fake_run_polling)
+    monkeypatch.setattr(main_module, "get_settings", lambda: _FakeSettings())
+    monkeypatch.setattr(main_module, "setup_logging", lambda: None)
+    monkeypatch.setattr(main_module, "init_db", lambda _db_url: None)
+    monkeypatch.setattr(main_module, "create_session_factory", lambda _db_url: _fake_session_factory)
+    monkeypatch.setattr(main_module, "TelegramClient", lambda **kwargs: object())
+    monkeypatch.setattr(main_module, "OffsetStore", lambda _path: object())
+    monkeypatch.setattr(main_module, "PluginLoader", lambda _dir: object())
+    monkeypatch.setattr(main_module, "ScheduledPluginExecutor", _FakeScheduledPluginExecutor)
+    monkeypatch.setattr(main_module, "run_queue_poller", _fake_run_queue_poller)
 
     try:
-        run(["--runtime", "polling"])
+        main_module.run_queue_poller_process()
     except _StopRun:
         pass
 
