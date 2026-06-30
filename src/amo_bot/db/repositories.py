@@ -3479,6 +3479,8 @@ class TopicRecentMessageRecord:
     user_id: int | None
     message_text: str
     telegram_message_id: int | None = None
+    reply_to_telegram_message_id: int | None = None
+    reply_to_recent_message_id: int | None = None
     telegram_author_user_id: int | None = None
     telegram_author_username: str | None = None
     telegram_author_is_bot: bool = False
@@ -5527,6 +5529,8 @@ class TopicAgentMemoryRepository:
         topic_id: int | None = None,
         user_id: int | None = None,
         telegram_message_id: int | None = None,
+        reply_to_telegram_message_id: int | None = None,
+        reply_to_recent_message_id: int | None = None,
         telegram_author_user_id: int | None = None,
         telegram_author_username: str | None = None,
         telegram_author_is_bot: bool = False,
@@ -5540,6 +5544,8 @@ class TopicAgentMemoryRepository:
             user_id=user_id,
             message_text=message_text,
             telegram_message_id=telegram_message_id,
+            reply_to_telegram_message_id=reply_to_telegram_message_id,
+            reply_to_recent_message_id=reply_to_recent_message_id,
             telegram_author_user_id=telegram_author_user_id,
             telegram_author_username=telegram_author_username,
             telegram_author_is_bot=telegram_author_is_bot,
@@ -5561,6 +5567,8 @@ class TopicAgentMemoryRepository:
         topic_id: int | None = None,
         user_id: int | None = None,
         telegram_message_id: int | None = None,
+        reply_to_telegram_message_id: int | None = None,
+        reply_to_recent_message_id: int | None = None,
         telegram_author_user_id: int | None = None,
         telegram_author_username: str | None = None,
         telegram_author_is_bot: bool = False,
@@ -5574,6 +5582,8 @@ class TopicAgentMemoryRepository:
             topic_id=topic_id,
             user_id=user_id,
             telegram_message_id=telegram_message_id,
+            reply_to_telegram_message_id=reply_to_telegram_message_id,
+            reply_to_recent_message_id=reply_to_recent_message_id,
             telegram_author_user_id=telegram_author_user_id,
             telegram_author_username=telegram_author_username,
             telegram_author_is_bot=telegram_author_is_bot,
@@ -5602,6 +5612,23 @@ class TopicAgentMemoryRepository:
             ).order_by(TopicRecentMessage.id.desc())
         )
         return self._to_recent_record(row) if row is not None else None
+
+    def get_recent_reply_parent(
+        self,
+        *,
+        scope_type: str,
+        reply_to_telegram_message_id: int,
+        chat_id: int | None = None,
+        topic_id: int | None = None,
+        user_id: int | None = None,
+    ) -> TopicRecentMessageRecord | None:
+        return self.get_recent_by_telegram_message_id(
+            scope_type=scope_type,
+            chat_id=chat_id,
+            topic_id=topic_id,
+            user_id=user_id,
+            telegram_message_id=reply_to_telegram_message_id,
+        )
 
     def update_recent_by_telegram_message_id(
         self,
@@ -5915,6 +5942,8 @@ class TopicAgentMemoryRepository:
             user_id=row.user_id,
             message_text=row.message_text,
             telegram_message_id=getattr(row, "telegram_message_id", None),
+            reply_to_telegram_message_id=getattr(row, "reply_to_telegram_message_id", None),
+            reply_to_recent_message_id=getattr(row, "reply_to_recent_message_id", None),
             telegram_author_user_id=getattr(row, "telegram_author_user_id", None),
             telegram_author_username=getattr(row, "telegram_author_username", None),
             telegram_author_is_bot=bool(getattr(row, "telegram_author_is_bot", False)),

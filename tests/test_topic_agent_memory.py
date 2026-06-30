@@ -321,6 +321,44 @@ def test_recent_messages_null_leak_prevention_between_topic_and_group() -> None:
         assert [r.message_text for r in group_rows] == ["group scoped"]
 
 
+def test_recent_messages_store_reply_link_metadata() -> None:
+    engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
+    Base.metadata.create_all(engine)
+
+    with Session(engine, future=True) as session:
+        repo = TopicAgentMemoryRepository(session)
+
+        parent = repo.append_message(
+            scope_type="topic",
+            chat_id=-777,
+            topic_id=42,
+            telegram_message_id=100,
+            message_text="parent context",
+        )
+        child = repo.append_message(
+            scope_type="topic",
+            chat_id=-777,
+            topic_id=42,
+            telegram_message_id=101,
+            reply_to_telegram_message_id=100,
+            reply_to_recent_message_id=parent.id,
+            message_text="child reply",
+        )
+
+        assert child.reply_to_telegram_message_id == 100
+        assert child.reply_to_recent_message_id == parent.id
+
+        resolved = repo.get_recent_reply_parent(
+            scope_type="topic",
+            chat_id=-777,
+            topic_id=42,
+            reply_to_telegram_message_id=100,
+        )
+        assert resolved is not None
+        assert resolved.id == parent.id
+        assert resolved.message_text == "parent context"
+
+
 def test_topic_long_memory_promotion_candidate_lifecycle_and_scope_isolation() -> None:
     engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
     Base.metadata.create_all(engine)

@@ -699,6 +699,8 @@ class TopicRecentMessage(Base):
     user_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     message_text: Mapped[str] = mapped_column(Text, nullable=False)
     telegram_message_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, index=True)
+    reply_to_telegram_message_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, index=True)
+    reply_to_recent_message_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     telegram_author_user_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     telegram_author_username: Mapped[str | None] = mapped_column(String(255), nullable=True)
     telegram_author_is_bot: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="0")
@@ -707,6 +709,7 @@ class TopicRecentMessage(Base):
 
     __table_args__ = (
         UniqueConstraint("id", name="uq_topic_recent_messages_id"),
+        Index("ix_topic_recent_messages_reply_scope", "scope_type", "chat_id", "topic_id", "user_id", "reply_to_telegram_message_id"),
     )
 
 

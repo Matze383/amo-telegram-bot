@@ -1333,6 +1333,50 @@ def test_mention_or_true_reply_triggers_and_persists_recent(tmp_path) -> None:
     assert "antwort bitte" in texts
 
 
+def test_reply_message_persists_explicit_parent_link(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'persist_reply_link.db'}"
+    init_db(db_url)
+    dispatcher = _build_dispatcher(db_url, bot_username="AmoBot")
+
+    parent_update = _mk_update(
+        update_id=211,
+        user_id=9301,
+        chat_id=-12013,
+        chat_type="supergroup",
+        title="Forum",
+        message_thread_id=701,
+        text="parent message",
+    )
+    reply_update = _mk_update(
+        update_id=212,
+        user_id=9302,
+        chat_id=-12013,
+        chat_type="supergroup",
+        title="Forum",
+        message_thread_id=701,
+        text="child reply",
+    )
+    reply_message = reply_update["message"]
+    assert isinstance(reply_message, dict)
+    reply_message["reply_to_message"] = {
+        "message_id": 311,
+        "from": {"id": 9301, "is_bot": False, "username": "u9301", "first_name": "U"},
+        "text": "parent message",
+    }
+
+    asyncio.run(dispatcher.handle_raw_update(parent_update))
+    asyncio.run(dispatcher.handle_raw_update(reply_update))
+
+    recent = sorted(
+        _recent_messages_for_scope(db_url, scope_type="topic", chat_id=-12013, topic_id=701),
+        key=lambda row: int(row.telegram_message_id or 0),
+    )
+    parent = next(row for row in recent if row.telegram_message_id == 311)
+    child = next(row for row in recent if row.telegram_message_id == 312)
+    assert child.reply_to_telegram_message_id == 311
+    assert child.reply_to_recent_message_id == parent.id
+
+
 def test_recent_scope_isolated_between_two_topics_and_group_root_and_command_skipped(tmp_path) -> None:
     db_url = f"sqlite:///{tmp_path / 'persist_recent_scope_isolation.db'}"
     init_db(db_url)

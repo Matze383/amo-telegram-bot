@@ -1309,6 +1309,7 @@ class Dispatcher:
                 bot_username=bot_username,
                 reply_to_is_bot=self._is_reply_to_current_bot(message=message, bot_username=bot_username),
                 reply_to_user_id=getattr(message, "reply_to_user_id", None),
+                reply_to_message_id=getattr(message, "reply_to_message_id", None),
             )
         else:
             with create_session_factory(self.database_url)() as session:
@@ -1336,6 +1337,7 @@ class Dispatcher:
                     bot_username=bot_username,
                     reply_to_is_bot=self._is_reply_to_current_bot(message=message, bot_username=bot_username),
                     reply_to_user_id=getattr(message, "reply_to_user_id", None),
+                    reply_to_message_id=getattr(message, "reply_to_message_id", None),
                 )
 
         allowed_reason_codes = {

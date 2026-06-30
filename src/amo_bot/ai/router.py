@@ -212,6 +212,7 @@ class AIRouter:
         bot_username: str | None = None,
         reply_to_is_bot: bool = False,
         reply_to_user_id: int | None = None,
+        reply_to_message_id: int | None = None,
     ) -> AIRouterDecision:
         _ = chat_type
 
@@ -287,6 +288,7 @@ class AIRouter:
             topic_id=scope["topic_id"] if isinstance(scope["topic_id"], int) else None,
             user_id=scope["user_id"] if isinstance(scope["user_id"], int) else None,
             limit=recent_window_size,
+            reply_to_telegram_message_id=reply_to_message_id,
         )
         user_profile_context_text, profile_error = self._read_user_profile_context_text(
             scope=scope,
@@ -933,6 +935,7 @@ class AIRouter:
         topic_id: int | None,
         user_id: int | None,
         limit: int,
+        reply_to_telegram_message_id: int | None = None,
     ) -> tuple[str, str]:
         repo = self._topic_agent_memory_repository
         if repo is None:
@@ -955,6 +958,19 @@ class AIRouter:
                 return "", ""
 
             selected_rows = self._prioritize_recent_rows(rows=rows, limit=safe_limit)
+            if isinstance(reply_to_telegram_message_id, int):
+                parent_row = repo.get_recent_reply_parent(
+                    scope_type=scope_type,
+                    chat_id=chat_id,
+                    topic_id=topic_id,
+                    user_id=user_id,
+                    reply_to_telegram_message_id=reply_to_telegram_message_id,
+                )
+                if parent_row is not None:
+                    selected_rows = self._include_reply_parent(
+                        selected_rows=selected_rows,
+                        parent_row=parent_row,
+                    )
             excluded_bot_count = sum(1 for row in rows if self._is_recent_row_bot_authored(row))
             excluded_meta_count = sum(
                 1
@@ -984,6 +1000,29 @@ class AIRouter:
             return joined[: self._MAX_SOUL_CHARS].rstrip(), ""
         except Exception:
             return "", "recent_messages_error"
+
+    @staticmethod
+    def _include_reply_parent(*, selected_rows: list[object], parent_row: object) -> list[object]:
+        parent_id = getattr(parent_row, "id", None)
+        if parent_id is not None and any(getattr(row, "id", None) == parent_id for row in selected_rows):
+            return selected_rows
+
+        parent_message_id = getattr(parent_row, "telegram_message_id", None)
+        if parent_message_id is not None and any(
+            getattr(row, "telegram_message_id", None) == parent_message_id for row in selected_rows
+        ):
+            return selected_rows
+
+        child_index = None
+        for index, row in enumerate(selected_rows):
+            if getattr(row, "reply_to_telegram_message_id", None) == parent_message_id:
+                child_index = index
+                break
+
+        updated = list(selected_rows)
+        insert_at = child_index if child_index is not None else 0
+        updated.insert(insert_at, parent_row)
+        return updated
 
     def _audit_recall(self, *, scope: dict[str, int | str | None], meta: dict[str, object]) -> None:
         repo = self._topic_agent_memory_repository

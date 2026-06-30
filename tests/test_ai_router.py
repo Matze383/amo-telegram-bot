@@ -919,6 +919,116 @@ def test_recent_context_window_size_applies_per_scope(tmp_path) -> None:
     assert topic_decision.context.recent_messages_text == "t2"
 
 
+def test_recent_context_includes_replied_to_parent_outside_window(tmp_path) -> None:
+    repo = _mk_repo(tmp_path)
+    repo.upsert_config(scope_type="topic", chat_id=-1200, topic_id=9, ai_enabled=True, recent_context_window_size=2)
+    parent = repo.append_message(
+        scope_type="topic",
+        chat_id=-1200,
+        topic_id=9,
+        telegram_message_id=100,
+        message_text="parent explanation",
+    )
+    repo.append_message(scope_type="topic", chat_id=-1200, topic_id=9, telegram_message_id=101, message_text="newer filler")
+    repo.append_message(
+        scope_type="topic",
+        chat_id=-1200,
+        topic_id=9,
+        telegram_message_id=102,
+        reply_to_telegram_message_id=100,
+        reply_to_recent_message_id=parent.id,
+        message_text="child question",
+    )
+
+    router = _mk_router(topic_agent_memory_repository=repo)
+    decision = router.decide(
+        prompt="@bot child followup",
+        chat_id=-1200,
+        topic_id=9,
+        user_id=42,
+        chat_type="supergroup",
+        bot_username="bot",
+        reply_to_message_id=100,
+    )
+
+    assert decision.context.recent_messages_text.splitlines() == [
+        "newer filler",
+        "parent explanation",
+        "child question",
+    ]
+
+
+def test_recent_context_reply_parent_is_deduplicated_when_already_in_window(tmp_path) -> None:
+    repo = _mk_repo(tmp_path)
+    repo.upsert_config(scope_type="topic", chat_id=-1201, topic_id=9, ai_enabled=True, recent_context_window_size=3)
+    parent = repo.append_message(
+        scope_type="topic",
+        chat_id=-1201,
+        topic_id=9,
+        telegram_message_id=200,
+        message_text="parent already visible",
+    )
+    repo.append_message(
+        scope_type="topic",
+        chat_id=-1201,
+        topic_id=9,
+        telegram_message_id=201,
+        reply_to_telegram_message_id=200,
+        reply_to_recent_message_id=parent.id,
+        message_text="child reply",
+    )
+
+    router = _mk_router(topic_agent_memory_repository=repo)
+    decision = router.decide(
+        prompt="@bot followup",
+        chat_id=-1201,
+        topic_id=9,
+        user_id=42,
+        chat_type="supergroup",
+        bot_username="bot",
+        reply_to_message_id=200,
+    )
+
+    lines = decision.context.recent_messages_text.splitlines()
+    assert lines == ["parent already visible", "child reply"]
+    assert lines.count("parent already visible") == 1
+
+
+def test_recent_context_reply_parent_does_not_cross_topics_with_same_telegram_id(tmp_path) -> None:
+    repo = _mk_repo(tmp_path)
+    repo.upsert_config(scope_type="topic", chat_id=-1202, topic_id=1, ai_enabled=True, recent_context_window_size=1)
+    repo.upsert_config(scope_type="topic", chat_id=-1202, topic_id=2, ai_enabled=True, recent_context_window_size=1)
+    repo.append_message(
+        scope_type="topic",
+        chat_id=-1202,
+        topic_id=2,
+        telegram_message_id=300,
+        message_text="wrong topic parent",
+    )
+    repo.append_message(
+        scope_type="topic",
+        chat_id=-1202,
+        topic_id=1,
+        telegram_message_id=301,
+        reply_to_telegram_message_id=300,
+        message_text="topic one child",
+    )
+
+    router = _mk_router(topic_agent_memory_repository=repo)
+    decision = router.decide(
+        prompt="@bot followup",
+        chat_id=-1202,
+        topic_id=1,
+        user_id=42,
+        chat_type="supergroup",
+        bot_username="bot",
+        reply_to_message_id=300,
+    )
+
+    assert decision.context.recent_messages_text == "topic one child"
+    assert "wrong topic parent" not in decision.context.recent_messages_text
+
+
 def test_recent_context_window_does_not_cross_scope_boundaries(tmp_path) -> None:
     repo = _mk_repo(tmp_path)
     repo.upsert_config(scope_type="private_user", user_id=42, ai_enabled=True, recent_context_window_size=5)

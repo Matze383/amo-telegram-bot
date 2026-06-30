@@ -318,6 +318,8 @@ def init_db(database_url: str) -> None:
                 user_id BIGINT,
                 message_text TEXT NOT NULL,
                 telegram_message_id BIGINT,
+                reply_to_telegram_message_id BIGINT,
+                reply_to_recent_message_id INTEGER,
                 telegram_author_user_id BIGINT,
                 telegram_author_username VARCHAR(255),
                 telegram_author_is_bot BOOLEAN NOT NULL DEFAULT 0,
@@ -562,6 +564,8 @@ def init_db(database_url: str) -> None:
         },
         "topic_recent_messages": {
             "telegram_message_id": "ALTER TABLE topic_recent_messages ADD COLUMN telegram_message_id BIGINT",
+            "reply_to_telegram_message_id": "ALTER TABLE topic_recent_messages ADD COLUMN reply_to_telegram_message_id BIGINT",
+            "reply_to_recent_message_id": "ALTER TABLE topic_recent_messages ADD COLUMN reply_to_recent_message_id INTEGER",
             "telegram_author_user_id": "ALTER TABLE topic_recent_messages ADD COLUMN telegram_author_user_id BIGINT",
             "telegram_author_username": "ALTER TABLE topic_recent_messages ADD COLUMN telegram_author_username VARCHAR(255)",
             "telegram_author_is_bot": "ALTER TABLE topic_recent_messages ADD COLUMN telegram_author_is_bot BOOLEAN NOT NULL DEFAULT 0",
@@ -844,6 +848,17 @@ def init_db(database_url: str) -> None:
             for column_name, ddl in migrations.items():
                 if column_name not in existing_columns:
                     connection.execute(text(ddl))
+
+        if "topic_recent_messages" in existing_tables:
+            existing_indexes = {index["name"] for index in inspector.get_indexes("topic_recent_messages")}
+            if "ix_topic_recent_messages_reply_scope" not in existing_indexes:
+                connection.execute(
+                    text(
+                        "CREATE INDEX ix_topic_recent_messages_reply_scope "
+                        "ON topic_recent_messages "
+                        "(scope_type, chat_id, topic_id, user_id, reply_to_telegram_message_id)"
+                    )
+                )
 
         if "topic_compact_states" in existing_tables:
             rows = connection.execute(

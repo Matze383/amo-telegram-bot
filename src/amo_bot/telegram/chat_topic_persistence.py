@@ -10,7 +10,15 @@ from amo_bot.ai.claims import extract_claims
 from amo_bot.ai.memory_c2_service import MemoryC2Service, MemoryScope
 from amo_bot.db.context_memory_vector import ContextMemoryVectorRepository
 from amo_bot.db.models import GROUP_CHAT_TYPES, AuditEvent, Claim
-from amo_bot.db.repositories import ClaimRepository, ChatSeenUserRepository, ChatTopicRepository, TopicAgentMemoryRepository, UserMemoryProfileRepository, UserRoleRepository
+from amo_bot.db.repositories import (
+    ClaimRepository,
+    ChatSeenUserRepository,
+    ChatTopicRepository,
+    TopicAgentMemoryRepository,
+    TopicRecentMessageRecord,
+    UserMemoryProfileRepository,
+    UserRoleRepository,
+)
 from amo_bot.telegram.owner_notify import OwnerNotifier
 from amo_bot.telegram.update_parser import TelegramMessage, TelegramUser
 
@@ -146,6 +154,24 @@ class ChatTopicPersistenceService:
                     telegram_topic_name=message.telegram_topic_name,
                 )
 
+            reply_to = message.reply_to_message
+            reply_text = (message.reply_to_message_text or "").strip()
+            reply_to_recent_message_id: int | None = None
+            if reply_to is not None and reply_text and not reply_text.startswith("/"):
+                parent_record = self._persist_recent_message(
+                    session=session,
+                    chat_type=message.chat.type,
+                    chat_id=message.chat.id,
+                    message_thread_id=message.message_thread_id,
+                    private_user_id=message.from_user.id if message.chat.type == "private" else None,
+                    message_id=reply_to.message_id,
+                    author=reply_to.from_user,
+                    text=reply_text,
+                    source="bot" if (reply_to.from_user and reply_to.from_user.is_bot) else "user",
+                    skip_existing=True,
+                )
+                reply_to_recent_message_id = parent_record.id if parent_record is not None else None
+
             text = (message.text or "").strip()
             if text and not text.startswith("/"):
                 self._persist_recent_message(
@@ -158,6 +184,8 @@ class ChatTopicPersistenceService:
                     author=message.from_user,
                     text=text,
                     source="bot" if message.from_user.is_bot else "user",
+                    reply_to_telegram_message_id=message.reply_to_message_id,
+                    reply_to_recent_message_id=reply_to_recent_message_id,
                 )
                 if not message.from_user.is_bot:
                     self._maybe_update_user_profile_from_message(
@@ -168,22 +196,6 @@ class ChatTopicPersistenceService:
                         user_id=message.from_user.id,
                         text=text,
                     )
-
-            reply_to = message.reply_to_message
-            reply_text = (message.reply_to_message_text or "").strip()
-            if reply_to is not None and reply_text and not reply_text.startswith("/"):
-                self._persist_recent_message(
-                    session=session,
-                    chat_type=message.chat.type,
-                    chat_id=message.chat.id,
-                    message_thread_id=message.message_thread_id,
-                    private_user_id=message.from_user.id if message.chat.type == "private" else None,
-                    message_id=reply_to.message_id,
-                    author=reply_to.from_user,
-                    text=reply_text,
-                    source="bot" if (reply_to.from_user and reply_to.from_user.is_bot) else "user",
-                    skip_existing=True,
-                )
 
             if existing_user is None and self._owner_notifier is not None:
                 await self._owner_notifier.notify_new_user_discovered(user=user, message=message)
@@ -336,7 +348,9 @@ class ChatTopicPersistenceService:
         text: str,
         source: str,
         skip_existing: bool = False,
-    ) -> None:
+        reply_to_telegram_message_id: int | None = None,
+        reply_to_recent_message_id: int | None = None,
+    ) -> TopicRecentMessageRecord | None:
         scope = self._recent_scope_for_message(
             chat_type=chat_type,
             chat_id=chat_id,
@@ -345,26 +359,38 @@ class ChatTopicPersistenceService:
         )
 
         if scope is None:
-            return
+            return None
 
         scope_type, scope_chat_id, topic_id, user_id = scope
         repo = TopicAgentMemoryRepository(session, vector_repository=self._context_vector_repository)
-        if skip_existing and repo.get_recent_by_telegram_message_id(
+        existing = repo.get_recent_by_telegram_message_id(
             scope_type=scope_type,
             chat_id=scope_chat_id,
             topic_id=topic_id,
             user_id=user_id,
             telegram_message_id=message_id,
-        ) is not None:
-            return
+        )
+        if skip_existing and existing is not None:
+            return existing
+        if reply_to_telegram_message_id is not None and reply_to_recent_message_id is None:
+            parent_record = repo.get_recent_reply_parent(
+                scope_type=scope_type,
+                chat_id=scope_chat_id,
+                topic_id=topic_id,
+                user_id=user_id,
+                reply_to_telegram_message_id=reply_to_telegram_message_id,
+            )
+            reply_to_recent_message_id = parent_record.id if parent_record is not None else None
 
-        repo.add_message(
+        record = repo.add_message(
             scope_type=scope_type,
             chat_id=scope_chat_id,
             topic_id=topic_id,
             user_id=user_id,
             message_text=text,
             telegram_message_id=message_id,
+            reply_to_telegram_message_id=reply_to_telegram_message_id,
+            reply_to_recent_message_id=reply_to_recent_message_id,
             telegram_author_user_id=author.id if author is not None else None,
             telegram_author_username=author.username if author is not None else None,
             telegram_author_is_bot=bool(author and author.is_bot),
@@ -380,6 +406,7 @@ class ChatTopicPersistenceService:
             source=source,
             text=text,
         )
+        return record
 
     @staticmethod
     def _recent_scope_for_message(
