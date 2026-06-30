@@ -21,6 +21,11 @@ class _FakeEmbeddingProvider:
         return tuple((float(index + 1), 0.25, 0.5) for index, _text in enumerate(texts))
 
 
+class _FailingEmbeddingProvider:
+    def embed_texts(self, texts: tuple[str, ...]) -> tuple[tuple[float, ...], ...]:
+        raise RuntimeError("provider unavailable")
+
+
 class _FakeVectorRecall:
     def __init__(self, results: tuple[ContextVectorSearchResult, ...]) -> None:
         self.results = results
@@ -202,6 +207,129 @@ def test_edited_recent_message_marks_existing_vector_pending_refresh(tmp_path: P
     assert refreshed["status"] == "pending"
     assert refreshed["embedding"] is None
     assert refreshed["text_hash"] != indexed["text_hash"]
+
+
+def test_context_vector_backfill_keeps_source_write_when_embedding_fails(tmp_path: Path) -> None:
+    factory = _factory(tmp_path)
+    vector_repo = ContextMemoryVectorRepository(session_factory=factory, embedding_model="test-embed")
+
+    with factory() as session:
+        repo = TopicAgentMemoryRepository(session, vector_repository=vector_repo)
+        recent = repo.append_message(
+            scope_type="topic",
+            chat_id=-100,
+            topic_id=4,
+            message_text="provider outage source row",
+            telegram_message_id=701,
+        )
+
+    indexed_count = vector_repo.index_pending(embedding_provider=_FailingEmbeddingProvider())
+
+    with factory() as session:
+        source_row = _row(
+            session,
+            "SELECT message_text FROM topic_recent_messages WHERE id = :source_id",
+            source_id=recent.id,
+        )
+        vector_row = _row(
+            session,
+            "SELECT status, embedding, last_error FROM context_memory_vectors WHERE source_id = :source_id",
+            source_id=recent.id,
+        )
+
+    assert indexed_count == 0
+    assert source_row is not None
+    assert source_row["message_text"] == "provider outage source row"
+    assert vector_row is not None
+    assert vector_row["status"] == "pending"
+    assert vector_row["embedding"] is None
+    assert "RuntimeError" in vector_row["last_error"]
+
+
+def test_missing_context_vectors_are_backfilled_after_provider_recovers(tmp_path: Path) -> None:
+    factory = _factory(tmp_path)
+    with factory() as session:
+        repo = TopicAgentMemoryRepository(session)
+        recent = repo.append_message(
+            scope_type="topic",
+            chat_id=-100,
+            topic_id=5,
+            message_text="missing vector source row",
+            telegram_message_id=702,
+        )
+
+    vector_repo = ContextMemoryVectorRepository(session_factory=factory, embedding_model="test-embed")
+    failed_count = vector_repo.index_pending(embedding_provider=_FailingEmbeddingProvider())
+    recovered_count = vector_repo.index_pending(embedding_provider=_FakeEmbeddingProvider())
+    duplicate_count = vector_repo.index_pending(embedding_provider=_FakeEmbeddingProvider())
+
+    with factory() as session:
+        vector_rows = list(
+            session.execute(
+                text(
+                    """
+                    SELECT status, embedding, last_error
+                    FROM context_memory_vectors
+                    WHERE source_table = :source_table AND source_id = :source_id
+                    """
+                ),
+                {"source_table": VECTOR_SOURCE_RECENT, "source_id": recent.id},
+            ).mappings()
+        )
+
+    assert failed_count == 0
+    assert recovered_count == 1
+    assert duplicate_count == 0
+    assert len(vector_rows) == 1
+    assert vector_rows[0]["status"] == "indexed"
+    assert vector_rows[0]["embedding"] is not None
+    assert vector_rows[0]["last_error"] is None
+
+
+def test_edited_recent_message_vector_is_reindexed_after_recovery(tmp_path: Path) -> None:
+    factory = _factory(tmp_path)
+    vector_repo = ContextMemoryVectorRepository(session_factory=factory, embedding_model="test-embed")
+
+    with factory() as session:
+        repo = TopicAgentMemoryRepository(session, vector_repository=vector_repo)
+        recent = repo.append_message(
+            scope_type="topic",
+            chat_id=-100,
+            topic_id=6,
+            message_text="original vector text",
+            telegram_message_id=703,
+        )
+        assert vector_repo.index_pending(embedding_provider=_FakeEmbeddingProvider()) == 1
+        original = _row(
+            session,
+            "SELECT text_hash FROM context_memory_vectors WHERE source_id = :source_id",
+            source_id=recent.id,
+        )
+
+        assert repo.update_recent_by_telegram_message_id(
+            scope_type="topic",
+            chat_id=-100,
+            topic_id=6,
+            telegram_message_id=703,
+            message_text="edited vector text",
+        )
+        session.commit()
+
+    assert vector_repo.index_pending(embedding_provider=_FailingEmbeddingProvider()) == 0
+    assert vector_repo.index_pending(embedding_provider=_FakeEmbeddingProvider()) == 1
+
+    with factory() as session:
+        refreshed = _row(
+            session,
+            "SELECT status, embedding, text_hash, last_error FROM context_memory_vectors WHERE source_id = :source_id",
+            source_id=recent.id,
+        )
+
+    assert refreshed is not None
+    assert refreshed["status"] == "indexed"
+    assert refreshed["embedding"] is not None
+    assert refreshed["last_error"] is None
+    assert refreshed["text_hash"] != original["text_hash"]
 
 
 def test_operational_queue_tables_are_not_vector_sources() -> None:

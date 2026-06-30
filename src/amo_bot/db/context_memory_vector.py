@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timezone
 from hashlib import sha256
 from typing import Any, Protocol
 
-from sqlalchemy import and_, or_, select, text
+from sqlalchemy import and_, bindparam, or_, select, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -294,32 +294,249 @@ class ContextMemoryVectorRepository:
         with self._session_factory() as session:
             if not _table_exists(session, CONTEXT_VECTOR_TABLE):
                 return 0
-            pending = list(
+            self.mark_missing_source_rows_pending(session=session, limit=safe_limit)
+            pending = self._claim_pending_rows(session, limit=safe_limit)
+            pointers = _load_source_pointers(session, pending)
+            self._delete_unresolved_claimed_rows(session, pending, pointers)
+            if not pointers:
+                session.commit()
+                return 0
+            texts = tuple(pointer.text for pointer in pointers)
+            try:
+                embeddings = embedding_provider.embed_texts(texts)
+                if len(embeddings) != len(pointers):
+                    raise RuntimeError("embedding provider returned unexpected vector count")
+            except Exception as exc:  # noqa: BLE001
+                self._release_claimed_rows(session, pending, error=exc)
+                session.commit()
+                logger.warning("context_memory_vector_backfill_failed: %s", exc.__class__.__name__)
+                return 0
+            for pointer, vector in zip(pointers, embeddings, strict=True):
+                self._upsert_embedding(session, pointer=pointer, vector=vector)
+            session.commit()
+            return len(pointers)
+
+    def mark_missing_source_rows_pending(self, *, session: Session | None = None, limit: int = 100) -> int:
+        safe_limit = max(1, min(int(limit), 1000))
+        if session is not None:
+            return self._mark_missing_source_rows_pending_in_session(session, limit=safe_limit)
+        with self._session_factory() as own_session:
+            count = self._mark_missing_source_rows_pending_in_session(own_session, limit=safe_limit)
+            own_session.commit()
+            return count
+
+    def _mark_missing_source_rows_pending_in_session(self, session: Session, *, limit: int) -> int:
+        if not _table_exists(session, CONTEXT_VECTOR_TABLE):
+            return 0
+        remaining = max(1, min(int(limit), 1000))
+        count = 0
+        for source_table, model, pointer_builder in (
+            (VECTOR_SOURCE_RECENT, TopicRecentMessage, pointer_for_recent),
+            (VECTOR_SOURCE_DAILY, TopicDailyMemory, pointer_for_daily),
+            (VECTOR_SOURCE_LONG, TopicLongMemory, pointer_for_long),
+            (VECTOR_SOURCE_RETRIEVABLE, RetrievableMemory, pointer_for_retrievable),
+        ):
+            if remaining <= 0:
+                break
+            ids = self._source_ids_missing_vector_rows(
+                session,
+                source_table=source_table,
+                limit=remaining,
+            )
+            if not ids:
+                continue
+            for row in session.scalars(select(model).where(model.id.in_(ids))):
+                pointer = pointer_builder(row)
+                if pointer is None:
+                    continue
+                self._mark_pending_in_session(
+                    session,
+                    pointer=pointer,
+                    text_hash=_hash_text(pointer.text),
+                    metadata_json=json.dumps(pointer.metadata, ensure_ascii=False, sort_keys=True),
+                )
+                count += 1
+                remaining -= 1
+                if remaining <= 0:
+                    break
+        return count
+
+    def _source_ids_missing_vector_rows(
+        self,
+        session: Session,
+        *,
+        source_table: str,
+        limit: int,
+    ) -> tuple[int, ...]:
+        text_predicate = {
+            VECTOR_SOURCE_RECENT: "source.message_text IS NOT NULL AND trim(source.message_text) <> ''",
+            VECTOR_SOURCE_DAILY: "source.summary_text IS NOT NULL AND trim(source.summary_text) <> ''",
+            VECTOR_SOURCE_LONG: "source.fact_text IS NOT NULL AND trim(source.fact_text) <> ''",
+            VECTOR_SOURCE_RETRIEVABLE: (
+                "(source.summary IS NOT NULL AND trim(source.summary) <> '') "
+                "OR (source.content IS NOT NULL AND trim(source.content) <> '')"
+            ),
+        }.get(source_table)
+        if text_predicate is None:
+            return ()
+        rows = session.execute(
+            text(
+                f"""
+                SELECT source.id
+                FROM {source_table} AS source
+                WHERE ({text_predicate})
+                  AND NOT EXISTS (
+                    SELECT 1
+                    FROM context_memory_vectors AS vectors
+                    WHERE vectors.source_table = :source_table
+                      AND vectors.source_id = source.id
+                      AND vectors.embedding_model = :embedding_model
+                )
+                ORDER BY source.id ASC
+                LIMIT :limit
+                """
+            ),
+            {
+                "source_table": source_table,
+                "embedding_model": self._embedding_model,
+                "limit": max(1, min(int(limit), 1000)),
+            },
+        )
+        return tuple(int(row_id) for row_id in rows.scalars())
+
+    def _claim_pending_rows(self, session: Session, *, limit: int) -> list[Any]:
+        self._release_stale_claims(session)
+        safe_limit = max(1, min(int(limit), 1000))
+        if session.get_bind().dialect.name == "postgresql":
+            return list(
                 session.execute(
                     text(
                         """
-                        SELECT source_table, source_id
-                        FROM context_memory_vectors
-                        WHERE embedding_model = :embedding_model
-                          AND status IN ('pending', 'stale')
-                        ORDER BY updated_at ASC, id ASC
-                        LIMIT :limit
+                        WITH claimed AS (
+                            SELECT id
+                            FROM context_memory_vectors
+                            WHERE embedding_model = :embedding_model
+                              AND status IN ('pending', 'stale')
+                            ORDER BY updated_at ASC, id ASC
+                            LIMIT :limit
+                            FOR UPDATE SKIP LOCKED
+                        )
+                        UPDATE context_memory_vectors AS vectors
+                        SET status = 'indexing',
+                            updated_at = CURRENT_TIMESTAMP
+                        FROM claimed
+                        WHERE vectors.id = claimed.id
+                        RETURNING vectors.id, vectors.source_table, vectors.source_id
                         """
                     ),
                     {"embedding_model": self._embedding_model, "limit": safe_limit},
                 ).mappings()
             )
-            pointers = _load_source_pointers(session, pending)
-            if not pointers:
-                return 0
-            texts = tuple(pointer.text for pointer in pointers)
-            embeddings = embedding_provider.embed_texts(texts)
-            if len(embeddings) != len(pointers):
-                raise RuntimeError("embedding provider returned unexpected vector count")
-            for pointer, vector in zip(pointers, embeddings, strict=True):
-                self._upsert_embedding(session, pointer=pointer, vector=vector)
-            session.commit()
-            return len(pointers)
+        pending = list(
+            session.execute(
+                text(
+                    """
+                    SELECT id, source_table, source_id
+                    FROM context_memory_vectors
+                    WHERE embedding_model = :embedding_model
+                      AND status IN ('pending', 'stale')
+                    ORDER BY updated_at ASC, id ASC
+                    LIMIT :limit
+                    """
+                ),
+                {"embedding_model": self._embedding_model, "limit": safe_limit},
+            ).mappings()
+        )
+        if not pending:
+            return []
+        session.execute(
+            text(
+                """
+                UPDATE context_memory_vectors
+                SET status = 'indexing',
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id IN :ids
+                  AND status IN ('pending', 'stale')
+                """
+            ).bindparams(bindparam("ids", expanding=True)),
+            {"ids": tuple(int(row["id"]) for row in pending)},
+        )
+        return pending
+
+    def _release_stale_claims(self, session: Session) -> None:
+        if session.get_bind().dialect.name == "postgresql":
+            session.execute(
+                text(
+                    """
+                    UPDATE context_memory_vectors
+                    SET status = 'stale',
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE embedding_model = :embedding_model
+                      AND status = 'indexing'
+                      AND updated_at < now() - interval '10 minutes'
+                    """
+                ),
+                {"embedding_model": self._embedding_model},
+            )
+            return
+        session.execute(
+            text(
+                """
+                UPDATE context_memory_vectors
+                SET status = 'stale',
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE embedding_model = :embedding_model
+                  AND status = 'indexing'
+                  AND updated_at < datetime('now', '-10 minutes')
+                """
+            ),
+            {"embedding_model": self._embedding_model},
+        )
+
+    def _release_claimed_rows(self, session: Session, pending: list[Any], *, error: Exception) -> None:
+        if not pending:
+            return
+        session.execute(
+            text(
+                """
+                UPDATE context_memory_vectors
+                SET status = 'pending',
+                    last_error = :last_error,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id IN :ids
+                  AND status = 'indexing'
+                """
+            ).bindparams(bindparam("ids", expanding=True)),
+            {
+                "ids": tuple(int(row["id"]) for row in pending),
+                "last_error": _compact_error(error),
+            },
+        )
+
+    def _delete_unresolved_claimed_rows(
+        self,
+        session: Session,
+        pending: list[Any],
+        pointers: list[ContextVectorPointer],
+    ) -> None:
+        resolved = {(pointer.source_table, pointer.source_id) for pointer in pointers}
+        unresolved_ids = tuple(
+            int(row["id"])
+            for row in pending
+            if (str(row["source_table"]), int(row["source_id"])) not in resolved
+        )
+        if not unresolved_ids:
+            return
+        session.execute(
+            text(
+                """
+                DELETE FROM context_memory_vectors
+                WHERE id IN :ids
+                  AND status = 'indexing'
+                """
+            ).bindparams(bindparam("ids", expanding=True)),
+            {"ids": unresolved_ids},
+        )
 
     def _upsert_embedding(
         self,
@@ -569,6 +786,10 @@ def _loads_metadata(value: object) -> dict[str, Any]:
 
 def _hash_text(value: str) -> str:
     return sha256(value.encode("utf-8")).hexdigest()
+
+
+def _compact_error(error: Exception) -> str:
+    return f"{error.__class__.__name__}: {str(error)}"[:512]
 
 
 def _vector_literal(vector: tuple[float, ...]) -> str:

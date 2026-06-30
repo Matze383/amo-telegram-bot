@@ -15,6 +15,7 @@ from amo_bot.config.settings import get_settings
 from amo_bot.core.logging import setup_logging, log_event
 from amo_bot.db.base import create_session_factory
 from amo_bot.db.context_memory_vector import ContextMemoryVectorRecall, ContextMemoryVectorRepository
+from amo_bot.db.context_memory_vector_runtime import ContextMemoryVectorBackfillRuntime
 from amo_bot.db.init_db import init_db
 from amo_bot.db.repositories import (
     ResearchSourceObservationRepository,
@@ -230,6 +231,21 @@ def _build_context_memory_vector_recall(
     )
 
 
+def _build_context_memory_vector_backfill_runtime(
+    settings,
+    *,
+    context_vector_repository: ContextMemoryVectorRepository | None,
+) -> ContextMemoryVectorBackfillRuntime | None:
+    if context_vector_repository is None:
+        return None
+    if not bool(getattr(settings, "amo_vector_enabled", False)):
+        return None
+    return ContextMemoryVectorBackfillRuntime(
+        repository=context_vector_repository,
+        embedding_provider=build_embedding_provider_from_settings(settings),
+    )
+
+
 def _build_queue_worker_dispatcher(
     *,
     settings,
@@ -441,12 +457,29 @@ def run_queue_worker_process(worker_index: int, *, idle_sleep_seconds: float | N
         dispatcher_factory=dispatcher_factory,
         worker_id=f"queue-worker:{worker_index}:{os.getpid()}",
     )
-    asyncio.run(
-        worker.run_forever(
-            idle_sleep_seconds=idle_sleep_seconds or settings.amo_telegram_queue_idle_sleep_seconds,
-            should_stop=lambda: restart_requested,
-        )
-    )
+
+    async def run_worker() -> None:
+        context_vector_runtime = None
+        if worker_index == 1:
+            context_vector_runtime = _build_context_memory_vector_backfill_runtime(
+                settings,
+                context_vector_repository=_build_context_memory_vector_repository(
+                    settings,
+                    session_factory=session_factory,
+                ),
+            )
+            if context_vector_runtime is not None:
+                context_vector_runtime.start()
+        try:
+            await worker.run_forever(
+                idle_sleep_seconds=idle_sleep_seconds or settings.amo_telegram_queue_idle_sleep_seconds,
+                should_stop=lambda: restart_requested,
+            )
+        finally:
+            if context_vector_runtime is not None:
+                await context_vector_runtime.stop()
+
+    asyncio.run(run_worker())
     if restart_requested:
         os.kill(os.getppid(), signal.SIGTERM)
 
