@@ -14,6 +14,7 @@ from amo_bot.ai.providers import build_ai_provider
 from amo_bot.config.settings import get_settings
 from amo_bot.core.logging import setup_logging, log_event
 from amo_bot.db.base import create_session_factory
+from amo_bot.db.context_memory_vector import ContextMemoryVectorRecall, ContextMemoryVectorRepository
 from amo_bot.db.init_db import init_db
 from amo_bot.db.repositories import (
     ResearchSourceObservationRepository,
@@ -46,6 +47,7 @@ from amo_bot.current_info import (
     build_current_info_safety_config_from_settings,
     build_current_info_vector_components_from_settings,
     build_document_fetcher_from_settings,
+    build_embedding_provider_from_settings,
     build_gpt_researcher_provider_from_settings,
     build_search_broker_from_settings,
 )
@@ -201,6 +203,33 @@ def _build_current_info_service(settings, *, session_factory):
     )
 
 
+def _build_context_memory_vector_repository(settings, *, session_factory):
+    if not bool(getattr(settings, "amo_vector_enabled", False)):
+        return None
+    embedding_model = str(getattr(settings, "amo_vector_embedding_model", "") or "").strip()
+    if not embedding_model:
+        return None
+    return ContextMemoryVectorRepository(session_factory=session_factory, embedding_model=embedding_model)
+
+
+def _build_context_memory_vector_recall(
+    settings,
+    *,
+    context_vector_repository: ContextMemoryVectorRepository | None,
+):
+    if context_vector_repository is None:
+        return None
+    if not bool(getattr(settings, "amo_vector_enabled", False)):
+        return None
+    embedding_model = str(getattr(settings, "amo_vector_embedding_model", "") or "").strip()
+    if not embedding_model:
+        return None
+    return ContextMemoryVectorRecall(
+        vector_search=context_vector_repository,
+        embedding_provider=build_embedding_provider_from_settings(settings),
+    )
+
+
 def _build_queue_worker_dispatcher(
     *,
     settings,
@@ -257,6 +286,11 @@ def _build_queue_worker_dispatcher(
     async def send_document(*args, **kwargs) -> object:  # noqa: ANN002,ANN003
         raise RuntimeError("send_document transport is not available in telegram queue worker runtime")
 
+    context_vector_repository = _build_context_memory_vector_repository(settings, session_factory=session_factory)
+    context_vector_recall = _build_context_memory_vector_recall(
+        settings,
+        context_vector_repository=context_vector_repository,
+    )
     owner_notifier = OwnerNotifier(
         owner_telegram_user_id=settings.webui_owner_telegram_id,
         send_private_text=send_text,
@@ -287,6 +321,7 @@ def _build_queue_worker_dispatcher(
         send_group_markup=send_markup,
         send_group_text=send_text,
         bot_username=settings.bot_username,
+        context_vector_repository=context_vector_repository,
     )
     return Dispatcher(
         command_registry=command_registry,
@@ -310,6 +345,7 @@ def _build_queue_worker_dispatcher(
         current_info_late_synthesis_timeout_seconds=settings.amo_current_info_late_synthesis_timeout_seconds,
         current_info_max_results=settings.amo_current_info_max_results,
         current_info_max_documents=settings.amo_current_info_max_documents,
+        context_memory_vector_recall=context_vector_recall,
         prompt_timezone=settings.dreaming_timezone,
     )
 
@@ -320,7 +356,11 @@ def run_queue_sender_process(*, idle_sleep_seconds: float | None = None) -> None
     init_db(settings.database_url)
     session_factory = create_session_factory(settings.database_url)
     tg = TelegramClient(token=settings.bot_token, base_url=settings.telegram_api_base)
-    persistence = ChatTopicPersistenceService(session_factory, bot_username=settings.bot_username)
+    persistence = ChatTopicPersistenceService(
+        session_factory,
+        bot_username=settings.bot_username,
+        context_vector_repository=_build_context_memory_vector_repository(settings, session_factory=session_factory),
+    )
     sender = OutboxSender(
         database_url=settings.database_url,
         telegram_client=tg,

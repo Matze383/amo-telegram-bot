@@ -18,6 +18,7 @@ from amo_bot.db.models import (
 
 
 POSTGRES_VECTOR_TABLE = "current_info_chunk_vectors"
+CONTEXT_MEMORY_VECTOR_TABLE = "context_memory_vectors"
 
 
 def _is_postgresql_backend(engine) -> bool:  # noqa: ANN001 - SQLAlchemy engine is runtime-typed
@@ -95,6 +96,107 @@ def _execute_postgresql_extensions_and_indexes(connection) -> None:  # noqa: ANN
         ON current_info_chunk_vectors USING hnsw (embedding vector_cosine_ops)
         """,
     )
+    connection.execute(
+        text(
+            """
+            CREATE TABLE IF NOT EXISTS context_memory_vectors (
+                id BIGSERIAL PRIMARY KEY,
+                source_table VARCHAR(64) NOT NULL,
+                source_id INTEGER NOT NULL,
+                scope_type VARCHAR(32) NOT NULL,
+                chat_id BIGINT,
+                topic_id BIGINT,
+                user_id BIGINT,
+                visibility VARCHAR(16),
+                embedding vector,
+                embedding_model VARCHAR(128) NOT NULL,
+                embedding_dimension INTEGER,
+                text_hash VARCHAR(64) NOT NULL,
+                metadata_json TEXT NOT NULL DEFAULT '{}',
+                status VARCHAR(16) NOT NULL DEFAULT 'pending',
+                last_error TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                CONSTRAINT uq_context_memory_vectors_source_model
+                    UNIQUE (source_table, source_id, embedding_model)
+            )
+            """
+        )
+    )
+    connection.execute(
+        text(
+            """
+            CREATE INDEX IF NOT EXISTS ix_context_memory_vectors_scope_status
+            ON context_memory_vectors
+                (source_table, scope_type, chat_id, topic_id, user_id, status)
+            """
+        )
+    )
+    connection.execute(
+        text(
+            """
+            CREATE INDEX IF NOT EXISTS ix_context_memory_vectors_visibility_status
+            ON context_memory_vectors
+                (source_table, visibility, chat_id, topic_id, user_id, status)
+            """
+        )
+    )
+    _execute_optional_postgresql_ddl(
+        connection,
+        """
+        CREATE INDEX IF NOT EXISTS ix_context_memory_vectors_embedding
+        ON context_memory_vectors USING hnsw (embedding vector_cosine_ops)
+        WHERE embedding IS NOT NULL AND status = 'indexed'
+        """,
+    )
+
+
+def _execute_sqlite_context_vector_ddl(connection) -> None:  # noqa: ANN001 - SQLAlchemy connection is runtime-typed
+    connection.execute(
+        text(
+            """
+            CREATE TABLE IF NOT EXISTS context_memory_vectors (
+                id INTEGER NOT NULL PRIMARY KEY,
+                source_table VARCHAR(64) NOT NULL,
+                source_id INTEGER NOT NULL,
+                scope_type VARCHAR(32) NOT NULL,
+                chat_id BIGINT,
+                topic_id BIGINT,
+                user_id BIGINT,
+                visibility VARCHAR(16),
+                embedding TEXT,
+                embedding_model VARCHAR(128) NOT NULL,
+                embedding_dimension INTEGER,
+                text_hash VARCHAR(64) NOT NULL,
+                metadata_json TEXT NOT NULL DEFAULT '{}',
+                status VARCHAR(16) NOT NULL DEFAULT 'pending',
+                last_error TEXT,
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                CONSTRAINT uq_context_memory_vectors_source_model
+                    UNIQUE (source_table, source_id, embedding_model)
+            )
+            """
+        )
+    )
+    connection.execute(
+        text(
+            """
+            CREATE INDEX IF NOT EXISTS ix_context_memory_vectors_scope_status
+            ON context_memory_vectors
+                (source_table, scope_type, chat_id, topic_id, user_id, status)
+            """
+        )
+    )
+    connection.execute(
+        text(
+            """
+            CREATE INDEX IF NOT EXISTS ix_context_memory_vectors_visibility_status
+            ON context_memory_vectors
+                (source_table, visibility, chat_id, topic_id, user_id, status)
+            """
+        )
+    )
 
 
 def _init_postgresql_extensions_and_indexes(bind) -> None:  # noqa: ANN001 - SQLAlchemy bind is runtime-typed
@@ -130,6 +232,9 @@ def init_db(database_url: str) -> None:
     Base.metadata.create_all(bind=engine)
     if _is_postgresql_backend(engine):
         _init_postgresql_extensions_and_indexes(engine)
+    else:
+        with engine.begin() as connection:
+            _execute_sqlite_context_vector_ddl(connection)
 
     inspector = inspect(engine)
 

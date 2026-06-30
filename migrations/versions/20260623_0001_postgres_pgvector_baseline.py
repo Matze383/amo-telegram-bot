@@ -81,6 +81,7 @@ def upgrade() -> None:
 def downgrade() -> None:
     bind = op.get_bind()
     if bind.dialect.name == "postgresql":
+        op.execute("DROP TABLE IF EXISTS context_memory_vectors")
         op.execute("DROP TABLE IF EXISTS current_info_chunk_vectors")
     for table_name in REVISION_OWNED_TABLES:
         table = Base.metadata.tables[table_name]

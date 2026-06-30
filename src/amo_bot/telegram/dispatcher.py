@@ -29,6 +29,7 @@ from amo_bot.core.logging import (
 )
 from amo_bot.current_info.models import CurrentInfoAnswer, CurrentInfoRequest
 from amo_bot.db.base import create_session_factory
+from amo_bot.db.context_memory_vector import ContextMemoryVectorRecall
 from amo_bot.db.repositories import (
     BotPeerRepository,
     ClaimRepository,
@@ -202,6 +203,7 @@ class Dispatcher:
     current_info_late_synthesis_timeout_seconds: float = 60.0
     current_info_max_results: int = 10
     current_info_max_documents: int = 3
+    context_memory_vector_recall: ContextMemoryVectorRecall | None = None
     live_edit_adapter: TelegramLiveEditAdapter | None = None
     restart_terminator: Callable[[], None] = _terminate_current_process
     auto_image_followup_ttl_seconds: int = 180
@@ -1311,8 +1313,14 @@ class Dispatcher:
         else:
             with create_session_factory(self.database_url)() as session:
                 router = AIRouter(
-                    topic_agent_memory_repository=TopicAgentMemoryRepository(session),
-                    retrievable_memory_repository=RetrievableMemoryRepository(session),
+                    topic_agent_memory_repository=TopicAgentMemoryRepository(
+                        session,
+                        vector_recall=self.context_memory_vector_recall,
+                    ),
+                    retrievable_memory_repository=RetrievableMemoryRepository(
+                        session,
+                        vector_recall=self.context_memory_vector_recall,
+                    ),
                     user_memory_profile_repository=UserMemoryProfileRepository(session),
                     prompt_context_doc_repository=PromptContextDocRepository(session),
                     prompt_timezone=self.prompt_timezone,

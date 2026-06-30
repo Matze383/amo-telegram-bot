@@ -8,6 +8,7 @@ from sqlalchemy.orm import sessionmaker
 
 from amo_bot.ai.claims import extract_claims
 from amo_bot.ai.memory_c2_service import MemoryC2Service, MemoryScope
+from amo_bot.db.context_memory_vector import ContextMemoryVectorRepository
 from amo_bot.db.models import GROUP_CHAT_TYPES, AuditEvent, Claim
 from amo_bot.db.repositories import ClaimRepository, ChatSeenUserRepository, ChatTopicRepository, TopicAgentMemoryRepository, UserMemoryProfileRepository, UserRoleRepository
 from amo_bot.telegram.owner_notify import OwnerNotifier
@@ -73,6 +74,7 @@ class ChatTopicPersistenceService:
         send_group_markup=None,
         send_group_text=None,
         bot_username: str | None = None,
+        context_vector_repository: ContextMemoryVectorRepository | None = None,
     ) -> None:
         self._session_factory = session_factory
         self._send_private_message = send_private_message
@@ -80,6 +82,7 @@ class ChatTopicPersistenceService:
         self._send_group_markup = send_group_markup
         self._send_group_text = send_group_text
         self._bot_username = bot_username
+        self._context_vector_repository = context_vector_repository
 
     async def persist_bot_peer_recent_message(self, message: TelegramMessage) -> None:
         with self._session_factory() as session:
@@ -222,7 +225,10 @@ class ChatTopicPersistenceService:
             scope_type, scope_chat_id, topic_id, user_id = scope
             source = "bot" if message.from_user.is_bot else "user"
             text = (message.text or "").strip()
-            updated = TopicAgentMemoryRepository(session).update_recent_by_telegram_message_id(
+            updated = TopicAgentMemoryRepository(
+                session,
+                vector_repository=self._context_vector_repository,
+            ).update_recent_by_telegram_message_id(
                 scope_type=scope_type,
                 chat_id=scope_chat_id,
                 topic_id=topic_id,
@@ -292,7 +298,10 @@ class ChatTopicPersistenceService:
             return
 
         profile_repo = UserMemoryProfileRepository(session)
-        service = MemoryC2Service(repository=TopicAgentMemoryRepository(session), profile_repository=profile_repo)
+        service = MemoryC2Service(
+            repository=TopicAgentMemoryRepository(session, vector_repository=self._context_vector_repository),
+            profile_repository=profile_repo,
+        )
         result = service.apply_profile_candidate(scope=scope, candidate=candidate)
         if not result.accepted_keys and not result.rejected_keys:
             return
@@ -339,7 +348,7 @@ class ChatTopicPersistenceService:
             return
 
         scope_type, scope_chat_id, topic_id, user_id = scope
-        repo = TopicAgentMemoryRepository(session)
+        repo = TopicAgentMemoryRepository(session, vector_repository=self._context_vector_repository)
         if skip_existing and repo.get_recent_by_telegram_message_id(
             scope_type=scope_type,
             chat_id=scope_chat_id,

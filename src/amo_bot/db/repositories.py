@@ -17,6 +17,18 @@ from sqlalchemy.orm import Session
 from amo_bot.auth.roles import Role
 from amo_bot.core.context_filters import is_bot_authored_context_record, is_obvious_meta_status_message
 from amo_bot.core.source_hosts import normalize_source_host
+from amo_bot.db.context_memory_vector import (
+    ContextMemoryVectorRecall,
+    ContextMemoryVectorRepository,
+    VECTOR_SOURCE_DAILY,
+    VECTOR_SOURCE_LONG,
+    VECTOR_SOURCE_RECENT,
+    VECTOR_SOURCE_RETRIEVABLE,
+    pointer_for_daily,
+    pointer_for_long,
+    pointer_for_recent,
+    pointer_for_retrievable,
+)
 from amo_bot.db.models import (
     AuditEvent,
     BotPeer,
@@ -4283,8 +4295,16 @@ class RetrievableMemoryRepository:
     DEFAULT_LIMIT = 5
     MAX_LIMIT = 20
 
-    def __init__(self, session: Session) -> None:
+    def __init__(
+        self,
+        session: Session,
+        *,
+        vector_repository: ContextMemoryVectorRepository | None = None,
+        vector_recall: ContextMemoryVectorRecall | None = None,
+    ) -> None:
         self._session = session
+        self._vector_repository = vector_repository
+        self._vector_recall = vector_recall
 
     def create_memory(
         self,
@@ -4329,6 +4349,8 @@ class RetrievableMemoryRepository:
             expires_at=expires_at,
         )
         self._session.add(row)
+        self._session.flush()
+        self._mark_retrievable_vector_pending(row)
         self._session.commit()
         self._session.refresh(row)
         return self._to_retrievable_record(row)
@@ -4391,6 +4413,8 @@ class RetrievableMemoryRepository:
             if expires_at is not None:
                 row.expires_at = expires_at
 
+        self._session.flush()
+        self._mark_retrievable_vector_pending(row)
         self._session.commit()
         self._session.refresh(row)
         return self._to_retrievable_record(row), created
@@ -4467,6 +4491,12 @@ class RetrievableMemoryRepository:
                 )
 
         if not dry_run:
+            self._session.flush()
+            if self._vector_repository is not None:
+                for row in self._session.scalars(
+                    select(RetrievableMemory).where(RetrievableMemory.source.in_(("daily_memory", "long_memory")))
+                ):
+                    self._mark_retrievable_vector_pending(row)
             self._session.commit()
 
         return RetrievableMemoryBackfillResult(
@@ -4503,6 +4533,8 @@ class RetrievableMemoryRepository:
             row.expires_at = expires_at
         if memory_type is not None:
             row.memory_type = self._normalize_memory_type(memory_type)
+        self._session.flush()
+        self._mark_retrievable_vector_pending(row)
         self._session.commit()
         self._session.refresh(row)
         return self._to_retrievable_record(row)
@@ -4532,6 +4564,20 @@ class RetrievableMemoryRepository:
                 query = query.where(RetrievableMemory.memory_type.in_(normalized_types))
 
         tokens = self._tokens(query_text)
+        vector_records = self._recall_memories_with_vectors(
+            query_text=query_text,
+            chat_id=chat_id,
+            message_thread_id=message_thread_id,
+            user_id=user_id,
+            safe_limit=safe_limit,
+            base_query=query,
+        )
+        if vector_records:
+            selected = vector_records[:safe_limit]
+            if mark_used:
+                self._mark_retrievable_records_used(selected, current=current)
+            return selected
+
         rows: list[RetrievableMemory]
         if tokens and self._is_mysql_backend():
             try:
@@ -4585,14 +4631,65 @@ class RetrievableMemoryRepository:
         selected = scored[:safe_limit]
 
         if mark_used and selected:
-            used_at = current
-            selected_ids = {record.id for record in selected}
-            for row in rows:
-                if row.id in selected_ids:
-                    row.last_used_at = used_at
-                    row.use_count = int(row.use_count or 0) + 1
-            self._session.commit()
+            self._mark_retrievable_records_used(selected, current=current)
         return selected
+
+    def _recall_memories_with_vectors(
+        self,
+        *,
+        query_text: str,
+        chat_id: int | None,
+        message_thread_id: int | None,
+        user_id: int | None,
+        safe_limit: int,
+        base_query,
+    ) -> list[RetrievableMemoryRecord]:
+        if self._vector_recall is None:
+            return []
+        try:
+            vector_results = self._vector_recall.search(
+                query_text=query_text,
+                source_table=VECTOR_SOURCE_RETRIEVABLE,
+                limit=safe_limit * 5,
+                chat_id=chat_id,
+                topic_id=message_thread_id,
+                user_id=user_id,
+                include_retrievable_visibility=True,
+            )
+        except Exception:
+            return []
+        if not vector_results:
+            return []
+        ids = tuple(dict.fromkeys(item.source_id for item in vector_results))
+        score_by_id = {item.source_id: item.score for item in vector_results}
+        order_by_id = {source_id: index for index, source_id in enumerate(ids)}
+        rows = list(self._session.scalars(base_query.where(RetrievableMemory.id.in_(ids)).limit(200)).all())
+        rows.sort(key=lambda row: order_by_id.get(int(row.id), len(order_by_id)))
+        return [
+            self._to_retrievable_record(row, score=round(float(score_by_id.get(int(row.id), 0.0)), 6))
+            for row in rows
+        ]
+
+    def _mark_retrievable_records_used(self, records: list[RetrievableMemoryRecord], *, current: datetime) -> None:
+        selected_ids = {record.id for record in records}
+        if not selected_ids:
+            return
+        for row in self._session.scalars(select(RetrievableMemory).where(RetrievableMemory.id.in_(selected_ids))):
+            row.last_used_at = current
+            row.use_count = int(row.use_count or 0) + 1
+        self._session.commit()
+
+    def _mark_retrievable_vector_pending(self, row: RetrievableMemory) -> None:
+        if self._vector_repository is None:
+            return
+        pointer = pointer_for_retrievable(row)
+        if pointer is None:
+            return
+        try:
+            self._vector_repository.mark_pending(pointer, session=self._session)
+        except Exception:
+            # Semantic indexing is best-effort and must not block memory writes.
+            pass
 
     @classmethod
     def _scope_filter(cls, *, chat_id: int | None, message_thread_id: int | None, user_id: int | None):  # noqa: ANN206
@@ -4844,8 +4941,16 @@ class TopicAgentMemoryRepository:
     ALLOWED_ANSWER_STATUSES = {"legacy", "approved", "rejected", "archived", "deactivated"}
     ANSWER_EFFECTIVE_STATUS = "approved"
 
-    def __init__(self, session: Session) -> None:
+    def __init__(
+        self,
+        session: Session,
+        *,
+        vector_repository: ContextMemoryVectorRepository | None = None,
+        vector_recall: ContextMemoryVectorRecall | None = None,
+    ) -> None:
         self._session = session
+        self._vector_repository = vector_repository
+        self._vector_recall = vector_recall
 
     def upsert_config(
         self,
@@ -4949,6 +5054,8 @@ class TopicAgentMemoryRepository:
 
         row.summary_text = summary_text
         row.tokens_estimate = tokens_estimate
+        self._session.flush()
+        self._mark_topic_vector_pending(row)
         self._session.commit()
         self._session.refresh(row)
         return self._to_daily_record(row)
@@ -5239,10 +5346,13 @@ class TopicAgentMemoryRepository:
         )
         self._session.add(row)
         if auto_commit:
+            self._session.flush()
+            self._mark_topic_vector_pending(row)
             self._session.commit()
             self._session.refresh(row)
         else:
             self._session.flush()
+            self._mark_topic_vector_pending(row)
         return self._to_long_record(row)
 
     def list_long_memories(
@@ -5285,6 +5395,7 @@ class TopicAgentMemoryRepository:
             row.answer_status = "deactivated"
             changed = True
         if changed:
+            self._mark_topic_vector_pending(row)
             self._session.commit()
         return True
 
@@ -5302,6 +5413,7 @@ class TopicAgentMemoryRepository:
             row.answer_status = "legacy"
             changed = True
         if changed:
+            self._mark_topic_vector_pending(row)
             self._session.commit()
         return True
 
@@ -5317,6 +5429,7 @@ class TopicAgentMemoryRepository:
             row.answer_status = "legacy"
             changed = True
         if changed:
+            self._mark_topic_vector_pending(row)
             self._session.commit()
         return True
 
@@ -5339,6 +5452,7 @@ class TopicAgentMemoryRepository:
             row.promotion_status = "none"
             changed = True
         if changed:
+            self._mark_topic_vector_pending(row)
             self._session.commit()
         return True
 
@@ -5434,6 +5548,7 @@ class TopicAgentMemoryRepository:
         )
         self._session.add(row)
         self._session.flush()
+        self._mark_topic_vector_pending(row)
         self._trim_recent_scope(scope_type=scope_type, chat_id=chat_id, topic_id=topic_id, user_id=user_id)
         return self._to_recent_record(row)
 
@@ -5521,6 +5636,7 @@ class TopicAgentMemoryRepository:
         if source is not None:
             row.source = source
         self._session.flush()
+        self._mark_topic_vector_pending(row)
         return self._to_recent_record(row)
 
     def list_recent(
@@ -5550,6 +5666,181 @@ class TopicAgentMemoryRepository:
         ).all()
         rows = list(reversed(rows))
         return [self._to_recent_record(row) for row in rows]
+
+    def recall_recent_messages(
+        self,
+        *,
+        query_text: str,
+        scope_type: str,
+        chat_id: int | None = None,
+        topic_id: int | None = None,
+        user_id: int | None = None,
+        limit: int = 20,
+    ) -> list[TopicRecentMessageRecord]:
+        ids = self._recall_topic_source_ids(
+            query_text=query_text,
+            source_table=VECTOR_SOURCE_RECENT,
+            scope_type=scope_type,
+            chat_id=chat_id,
+            topic_id=topic_id,
+            user_id=user_id,
+            limit=limit,
+        )
+        if not ids:
+            return self.list_recent(
+                scope_type=scope_type,
+                chat_id=chat_id,
+                topic_id=topic_id,
+                user_id=user_id,
+                limit=limit,
+            )
+        order_by_id = {row_id: index for index, row_id in enumerate(ids)}
+        rows = list(
+            self._session.scalars(
+                select(TopicRecentMessage).where(
+                    TopicRecentMessage.id.in_(ids),
+                    TopicRecentMessage.scope_type == scope_type,
+                    TopicRecentMessage.chat_id == chat_id,
+                    TopicRecentMessage.topic_id == topic_id,
+                    TopicRecentMessage.user_id == user_id,
+                )
+            )
+        )
+        rows.sort(key=lambda row: order_by_id.get(int(row.id), len(order_by_id)))
+        return [self._to_recent_record(row) for row in rows[: max(1, min(int(limit), 1000))]]
+
+    def recall_daily_memories(
+        self,
+        *,
+        query_text: str,
+        scope_type: str,
+        chat_id: int | None = None,
+        topic_id: int | None = None,
+        user_id: int | None = None,
+        limit: int = 30,
+    ) -> list[TopicDailyMemoryRecord]:
+        ids = self._recall_topic_source_ids(
+            query_text=query_text,
+            source_table=VECTOR_SOURCE_DAILY,
+            scope_type=scope_type,
+            chat_id=chat_id,
+            topic_id=topic_id,
+            user_id=user_id,
+            limit=limit,
+        )
+        if not ids:
+            return self.list_daily_memories(
+                scope_type=scope_type,
+                chat_id=chat_id,
+                topic_id=topic_id,
+                user_id=user_id,
+                limit=limit,
+            )
+        order_by_id = {row_id: index for index, row_id in enumerate(ids)}
+        rows = list(
+            self._session.scalars(
+                select(TopicDailyMemory).where(
+                    TopicDailyMemory.id.in_(ids),
+                    TopicDailyMemory.scope_type == scope_type,
+                    TopicDailyMemory.chat_id == chat_id,
+                    TopicDailyMemory.topic_id == topic_id,
+                    TopicDailyMemory.user_id == user_id,
+                )
+            )
+        )
+        rows.sort(key=lambda row: order_by_id.get(int(row.id), len(order_by_id)))
+        return [self._to_daily_record(row) for row in rows[: max(1, min(int(limit), 365))]]
+
+    def recall_long_memories(
+        self,
+        *,
+        query_text: str,
+        scope_type: str,
+        chat_id: int | None = None,
+        topic_id: int | None = None,
+        user_id: int | None = None,
+        active_only: bool = True,
+        answer_effective_only: bool = False,
+        limit: int = 100,
+    ) -> list[TopicLongMemoryRecord]:
+        ids = self._recall_topic_source_ids(
+            query_text=query_text,
+            source_table=VECTOR_SOURCE_LONG,
+            scope_type=scope_type,
+            chat_id=chat_id,
+            topic_id=topic_id,
+            user_id=user_id,
+            limit=limit,
+        )
+        if not ids:
+            return self.list_long_memories(
+                scope_type=scope_type,
+                chat_id=chat_id,
+                topic_id=topic_id,
+                user_id=user_id,
+                active_only=active_only,
+                answer_effective_only=answer_effective_only,
+                limit=limit,
+            )
+        query = select(TopicLongMemory).where(
+            TopicLongMemory.id.in_(ids),
+            TopicLongMemory.scope_type == scope_type,
+            TopicLongMemory.chat_id == chat_id,
+            TopicLongMemory.topic_id == topic_id,
+            TopicLongMemory.user_id == user_id,
+        )
+        if active_only:
+            query = query.where(TopicLongMemory.is_active.is_(True))
+        if answer_effective_only:
+            query = query.where(TopicLongMemory.answer_status == self.ANSWER_EFFECTIVE_STATUS)
+        order_by_id = {row_id: index for index, row_id in enumerate(ids)}
+        rows = list(self._session.scalars(query))
+        rows.sort(key=lambda row: order_by_id.get(int(row.id), len(order_by_id)))
+        return [self._to_long_record(row) for row in rows[: max(1, min(int(limit), 1000))]]
+
+    def _recall_topic_source_ids(
+        self,
+        *,
+        query_text: str,
+        source_table: str,
+        scope_type: str,
+        chat_id: int | None,
+        topic_id: int | None,
+        user_id: int | None,
+        limit: int,
+    ) -> tuple[int, ...]:
+        if self._vector_recall is None:
+            return ()
+        try:
+            results = self._vector_recall.search(
+                query_text=query_text,
+                source_table=source_table,
+                scope_type=scope_type,
+                chat_id=chat_id,
+                topic_id=topic_id,
+                user_id=user_id,
+                limit=max(1, min(int(limit), 1000)),
+            )
+        except Exception:
+            return ()
+        return tuple(dict.fromkeys(result.source_id for result in results))
+
+    def _mark_topic_vector_pending(self, row: TopicRecentMessage | TopicDailyMemory | TopicLongMemory) -> None:
+        if self._vector_repository is None:
+            return
+        if isinstance(row, TopicRecentMessage):
+            pointer = pointer_for_recent(row)
+        elif isinstance(row, TopicDailyMemory):
+            pointer = pointer_for_daily(row)
+        else:
+            pointer = pointer_for_long(row)
+        if pointer is None:
+            return
+        try:
+            self._vector_repository.mark_pending(pointer, session=self._session)
+        except Exception:
+            # Semantic enrichment must not block Telegram/context writes.
+            pass
 
     @staticmethod
     def _to_config_record(row: TopicAgentConfig) -> TopicAgentConfigRecord:
