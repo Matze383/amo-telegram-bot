@@ -289,7 +289,7 @@ def test_vector_evidence_requires_verified_database_pointer_before_it_can_become
     assert unresolved_chunks == ()
     assert "current_info_vector_unresolved_db_pointers: count=1" in caplog.text
 
-    now = datetime(2026, 6, 22, 10, 0, tzinfo=UTC)
+    now = datetime.now(UTC)
     with factory() as session:
         row = CurrentInfoDocumentCacheRepository(session).store_document(
             FetchedDocument(
