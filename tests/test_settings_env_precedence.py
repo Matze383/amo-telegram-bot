@@ -316,6 +316,12 @@ def test_vector_postgres_defaults_use_ollama_nomic_embedding_model(monkeypatch, 
     assert settings.amo_vector_provider == "postgres"
     assert settings.amo_vector_embedding_provider == "ollama"
     assert settings.amo_vector_embedding_model == "nomic-embed-text-v2-moe:latest"
+    assert settings.amo_vector_timeout_seconds == 30.0
+    assert settings.amo_vector_keep_alive == "30m"
+    assert settings.amo_vector_warmup_on_startup is False
+    assert settings.amo_context_vector_backfill_interval_seconds == 120.0
+    assert settings.amo_context_vector_backfill_empty_interval_seconds == 300.0
+    assert settings.amo_context_vector_backfill_batch_size == 100
 
 
 def test_current_info_release_defaults_and_issue_76_env_values_are_parsed(monkeypatch, tmp_path) -> None:

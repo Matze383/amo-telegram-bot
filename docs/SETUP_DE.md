@@ -651,7 +651,12 @@ Für die Extraktion von Ergebnis-Seiten bevorzugt der Dokument-Fetcher Crawlee u
 | `AMO_VECTOR_COLLECTION` | `current_info_chunks` | Nur fuer Legacy `qdrant` |
 | `AMO_VECTOR_EMBEDDING_PROVIDER` | `ollama` | Embedding-Provider für Chunk-/Query-Vektoren: `ollama` oder `openai` |
 | `AMO_VECTOR_EMBEDDING_MODEL` | `nomic-embed-text-v2-moe:latest` | Embedding-Modell für Current-Info-Vektoren |
-| `AMO_VECTOR_TIMEOUT_SECONDS` | `3` | Timeout für Vector-DB- und Embedding-Anfragen |
+| `AMO_VECTOR_TIMEOUT_SECONDS` | `30` | Timeout für Vector-DB- und Embedding-Anfragen |
+| `AMO_VECTOR_KEEP_ALIVE` | `30m` | Nur für Ollama: Keep-Alive für lokale Embedding-Anfragen |
+| `AMO_VECTOR_WARMUP_ON_STARTUP` | `false` | Optionales Warmup des Ollama-Embedding-Modells vor dem ersten Context-Vector-Backfill |
+| `AMO_CONTEXT_VECTOR_BACKFILL_INTERVAL_SECONDS` | `120` | Context-/Memory-Vector-Retry-Intervall, solange Zeilen indexiert werden |
+| `AMO_CONTEXT_VECTOR_BACKFILL_EMPTY_INTERVAL_SECONDS` | `300` | Context-/Memory-Vector-Retry-Intervall nach einem leeren Lauf |
+| `AMO_CONTEXT_VECTOR_BACKFILL_BATCH_SIZE` | `100` | Maximale Zeilen pro Single-Worker-Context-/Memory-Vector-Backfill |
 | `AMO_GPT_RESEARCHER_ENABLED` | `false` | GPT-Researcher für Deep-Research-/`research_needed`-Anfragen aktivieren |
 | `AMO_RESEARCH_MODEL_PROVIDER` | `ollama` | Provider-ID für GPT-Researcher-LLM-Namen, z.B. `ollama` |
 | `AMO_RESEARCH_FAST_MODEL` | *(leer)* | Schnelles Research-Modell; leer nutzt `OLLAMA_NON_THINKING_MODEL` oder `OLLAMA_MODEL` |

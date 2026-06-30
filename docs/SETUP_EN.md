@@ -651,7 +651,12 @@ For result-page extraction, the document fetcher prefers Crawlee and falls back 
 | `AMO_VECTOR_COLLECTION` | `current_info_chunks` | Only for legacy `qdrant` |
 | `AMO_VECTOR_EMBEDDING_PROVIDER` | `ollama` | Embedding provider for chunk/query vectors: `ollama` or `openai` |
 | `AMO_VECTOR_EMBEDDING_MODEL` | `nomic-embed-text-v2-moe:latest` | Embedding model used for Current-Info vectors |
-| `AMO_VECTOR_TIMEOUT_SECONDS` | `3` | Timeout for vector DB and embedding requests |
+| `AMO_VECTOR_TIMEOUT_SECONDS` | `30` | Timeout for vector DB and embedding requests |
+| `AMO_VECTOR_KEEP_ALIVE` | `30m` | Ollama-only keep-alive for local embedding requests |
+| `AMO_VECTOR_WARMUP_ON_STARTUP` | `false` | Optionally warm the Ollama embedding model before the first context-vector backfill pass |
+| `AMO_CONTEXT_VECTOR_BACKFILL_INTERVAL_SECONDS` | `120` | Context/memory vector retry interval while rows are indexed |
+| `AMO_CONTEXT_VECTOR_BACKFILL_EMPTY_INTERVAL_SECONDS` | `300` | Context/memory vector retry interval after an empty pass |
+| `AMO_CONTEXT_VECTOR_BACKFILL_BATCH_SIZE` | `100` | Maximum rows per single-worker context/memory vector backfill pass |
 | `AMO_GPT_RESEARCHER_ENABLED` | `false` | Enable GPT-Researcher for deep-research / `research_needed` requests |
 | `AMO_RESEARCH_MODEL_PROVIDER` | `ollama` | Provider id for GPT-Researcher LLM names, for example `ollama` |
 | `AMO_RESEARCH_FAST_MODEL` | *(empty)* | Fast research model; empty uses `OLLAMA_NON_THINKING_MODEL` or `OLLAMA_MODEL` |

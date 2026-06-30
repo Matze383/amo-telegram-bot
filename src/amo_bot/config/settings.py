@@ -245,11 +245,31 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("AMO_VECTOR_API_KEY", "QDRANT_API_KEY"),
     )
     amo_vector_collection: str = Field(default="current_info_chunks", alias="AMO_VECTOR_COLLECTION")
-    amo_vector_timeout_seconds: float = Field(default=3.0, alias="AMO_VECTOR_TIMEOUT_SECONDS", gt=0, le=30)
+    amo_vector_timeout_seconds: float = Field(default=30.0, alias="AMO_VECTOR_TIMEOUT_SECONDS", gt=0, le=120)
     amo_vector_embedding_provider: str = Field(default="ollama", alias="AMO_VECTOR_EMBEDDING_PROVIDER")
     amo_vector_embedding_model: str = Field(
         default="nomic-embed-text-v2-moe:latest",
         alias="AMO_VECTOR_EMBEDDING_MODEL",
+    )
+    amo_vector_keep_alive: str = Field(default="30m", alias="AMO_VECTOR_KEEP_ALIVE")
+    amo_vector_warmup_on_startup: bool = Field(default=False, alias="AMO_VECTOR_WARMUP_ON_STARTUP")
+    amo_context_vector_backfill_interval_seconds: float = Field(
+        default=120.0,
+        alias="AMO_CONTEXT_VECTOR_BACKFILL_INTERVAL_SECONDS",
+        gt=0,
+        le=3600,
+    )
+    amo_context_vector_backfill_empty_interval_seconds: float = Field(
+        default=300.0,
+        alias="AMO_CONTEXT_VECTOR_BACKFILL_EMPTY_INTERVAL_SECONDS",
+        gt=0,
+        le=7200,
+    )
+    amo_context_vector_backfill_batch_size: int = Field(
+        default=100,
+        alias="AMO_CONTEXT_VECTOR_BACKFILL_BATCH_SIZE",
+        ge=1,
+        le=1000,
     )
 
     webui_host: str = Field(default="127.0.0.1", alias="WEBUI_HOST")
@@ -582,6 +602,7 @@ class Settings(BaseSettings):
             raise ValueError("AMO_VECTOR_EMBEDDING_PROVIDER must be one of: ollama, openai")
         self.amo_vector_embedding_provider = embedding_provider
         self.amo_vector_embedding_model = self.amo_vector_embedding_model.strip()
+        self.amo_vector_keep_alive = self.amo_vector_keep_alive.strip()
         if self.amo_vector_enabled and self.amo_vector_provider == "qdrant" and not self.amo_vector_url:
             raise ValueError("AMO_VECTOR_URL (or QDRANT_URL) is required when AMO_VECTOR_ENABLED=true")
         if self.amo_vector_enabled and not self.amo_vector_embedding_model:

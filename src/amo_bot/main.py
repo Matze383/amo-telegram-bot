@@ -243,6 +243,10 @@ def _build_context_memory_vector_backfill_runtime(
     return ContextMemoryVectorBackfillRuntime(
         repository=context_vector_repository,
         embedding_provider=build_embedding_provider_from_settings(settings),
+        interval_seconds=float(getattr(settings, "amo_context_vector_backfill_interval_seconds", 120.0)),
+        empty_interval_seconds=float(getattr(settings, "amo_context_vector_backfill_empty_interval_seconds", 300.0)),
+        batch_size=int(getattr(settings, "amo_context_vector_backfill_batch_size", 100)),
+        warmup_on_startup=bool(getattr(settings, "amo_vector_warmup_on_startup", False)),
     )
 
 

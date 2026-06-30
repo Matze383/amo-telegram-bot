@@ -314,14 +314,18 @@ class OllamaEmbeddingProvider:
     base_url: str
     model: str
     timeout_seconds: float = 30.0
+    keep_alive: str = "30m"
 
     def embed_texts(self, texts: tuple[str, ...]) -> tuple[tuple[float, ...], ...]:
         if not texts:
             return ()
+        payload: dict[str, Any] = {"model": self.model, "input": list(texts)}
+        if self.keep_alive:
+            payload["keep_alive"] = self.keep_alive
         with httpx.Client(timeout=self.timeout_seconds) as client:
             response = client.post(
                 f"{self.base_url.rstrip('/')}/api/embed",
-                json={"model": self.model, "input": list(texts)},
+                json=payload,
             )
             if response.status_code == 404:
                 return tuple(self._embed_legacy(client, text) for text in texts)
@@ -333,14 +337,20 @@ class OllamaEmbeddingProvider:
         return tuple(_coerce_vector(item) for item in embeddings)
 
     def _embed_legacy(self, client: httpx.Client, text: str) -> tuple[float, ...]:
+        payload: dict[str, Any] = {"model": self.model, "prompt": text}
+        if self.keep_alive:
+            payload["keep_alive"] = self.keep_alive
         response = client.post(
             f"{self.base_url.rstrip('/')}/api/embeddings",
-            json={"model": self.model, "prompt": text},
+            json=payload,
         )
         response.raise_for_status()
         payload = response.json()
         embedding = payload.get("embedding") if isinstance(payload, dict) else None
         return _coerce_vector(embedding)
+
+    def warmup(self) -> None:
+        self.embed_texts(("warmup",))
 
 
 @dataclass(frozen=True, slots=True)
@@ -548,6 +558,7 @@ def build_embedding_provider_from_settings(settings: Any) -> EmbeddingProvider:
         base_url=str(getattr(settings, "ollama_base_url", "http://127.0.0.1:11434")),
         model=model,
         timeout_seconds=timeout_seconds,
+        keep_alive=str(getattr(settings, "amo_vector_keep_alive", "30m") or "").strip(),
     )
 
 

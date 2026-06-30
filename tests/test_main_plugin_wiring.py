@@ -105,6 +105,10 @@ def test_main_builds_context_memory_vector_backfill_runtime_when_vector_enabled(
     monkeypatch.setenv("WEBUI_LOGIN_DELAY_MAX_SECONDS", "1.0")
     monkeypatch.setenv("AMO_VECTOR_ENABLED", "true")
     monkeypatch.setenv("AMO_VECTOR_EMBEDDING_MODEL", "test-embed")
+    monkeypatch.setenv("AMO_VECTOR_WARMUP_ON_STARTUP", "true")
+    monkeypatch.setenv("AMO_CONTEXT_VECTOR_BACKFILL_INTERVAL_SECONDS", "90")
+    monkeypatch.setenv("AMO_CONTEXT_VECTOR_BACKFILL_EMPTY_INTERVAL_SECONDS", "240")
+    monkeypatch.setenv("AMO_CONTEXT_VECTOR_BACKFILL_BATCH_SIZE", "123")
 
     embedding_provider = object()
     monkeypatch.setattr(main_module, "build_embedding_provider_from_settings", lambda settings: embedding_provider)
@@ -125,3 +129,7 @@ def test_main_builds_context_memory_vector_backfill_runtime_when_vector_enabled(
     assert runtime is not None
     assert runtime.repository is vector_repository
     assert runtime.embedding_provider is embedding_provider
+    assert runtime.interval_seconds == 90.0
+    assert runtime.empty_interval_seconds == 240.0
+    assert runtime.batch_size == 123
+    assert runtime.warmup_on_startup is True

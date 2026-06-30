@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
+from amo_bot.current_info import vector as vector_module
 from amo_bot.current_info import (
     CurrentInfoDocumentCacheRepository,
     CurrentInfoRequest,
@@ -13,9 +14,12 @@ from amo_bot.current_info import (
     EvidenceChunk,
     FetchedDocument,
     PostgresVectorStore,
+    OllamaEmbeddingProvider,
+    OpenAIEmbeddingProvider,
     VectorChunk,
     VectorCurrentInfoRetrievalProvider,
     VectorSearchResult,
+    build_embedding_provider_from_settings,
 )
 from amo_bot.db.base import Base
 from amo_bot.db.models import CurrentInfoDocument, CurrentInfoDocumentChunk
@@ -70,6 +74,112 @@ class _FailingUpsertVectorStore(_FakeVectorStore):
     def upsert_chunks(self, chunks: tuple[VectorChunk, ...], *, session: Session | None = None) -> None:
         del chunks, session
         raise RuntimeError("vector store unavailable")
+
+
+class _FakeResponse:
+    def __init__(self, *, status_code: int, payload: dict[str, object]) -> None:
+        self.status_code = status_code
+        self._payload = payload
+
+    def raise_for_status(self) -> None:
+        if self.status_code >= 400:
+            raise RuntimeError(f"HTTP {self.status_code}")
+
+    def json(self) -> dict[str, object]:
+        return self._payload
+
+
+class _FakeHttpxClient:
+    calls: list[dict[str, object]] = []
+    statuses: list[int] = [200]
+
+    def __init__(self, *, timeout: float) -> None:
+        self.timeout = timeout
+
+    def __enter__(self) -> "_FakeHttpxClient":
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        return None
+
+    def post(self, url: str, *, json: dict[str, object], headers: dict[str, str] | None = None) -> _FakeResponse:
+        self.calls.append({"url": url, "json": json, "headers": headers, "timeout": self.timeout})
+        status = self.statuses.pop(0) if self.statuses else 200
+        if url.endswith("/api/embeddings"):
+            return _FakeResponse(status_code=status, payload={"embedding": [0.3, 0.4]})
+        return _FakeResponse(status_code=status, payload={"embeddings": [[0.1, 0.2]]})
+
+
+def test_ollama_embedding_provider_sends_keep_alive_to_embed_endpoint(monkeypatch) -> None:
+    _FakeHttpxClient.calls = []
+    _FakeHttpxClient.statuses = [200]
+    monkeypatch.setattr(vector_module.httpx, "Client", _FakeHttpxClient)
+
+    provider = OllamaEmbeddingProvider(
+        base_url="http://ollama.local:11434",
+        model="nomic-embed",
+        timeout_seconds=30.0,
+        keep_alive="30m",
+    )
+
+    assert provider.embed_texts(("context text",)) == ((0.1, 0.2),)
+
+    assert _FakeHttpxClient.calls == [
+        {
+            "url": "http://ollama.local:11434/api/embed",
+            "json": {"model": "nomic-embed", "input": ["context text"], "keep_alive": "30m"},
+            "headers": None,
+            "timeout": 30.0,
+        }
+    ]
+
+
+def test_ollama_embedding_provider_sends_keep_alive_to_legacy_endpoint(monkeypatch) -> None:
+    _FakeHttpxClient.calls = []
+    _FakeHttpxClient.statuses = [404, 200]
+    monkeypatch.setattr(vector_module.httpx, "Client", _FakeHttpxClient)
+
+    provider = OllamaEmbeddingProvider(
+        base_url="http://ollama.local:11434/",
+        model="nomic-embed",
+        timeout_seconds=30.0,
+        keep_alive="30m",
+    )
+
+    assert provider.embed_texts(("legacy text",)) == ((0.3, 0.4),)
+
+    assert _FakeHttpxClient.calls[1] == {
+        "url": "http://ollama.local:11434/api/embeddings",
+        "json": {"model": "nomic-embed", "prompt": "legacy text", "keep_alive": "30m"},
+        "headers": None,
+        "timeout": 30.0,
+    }
+
+
+def test_embedding_provider_settings_apply_keep_alive_only_to_ollama() -> None:
+    class _OllamaSettings:
+        amo_vector_embedding_provider = "ollama"
+        amo_vector_embedding_model = "nomic-embed"
+        amo_vector_timeout_seconds = 45.0
+        amo_vector_keep_alive = "1h"
+        ollama_base_url = "http://ollama.local:11434"
+
+    class _OpenAISettings:
+        amo_vector_embedding_provider = "openai"
+        amo_vector_embedding_model = "text-embedding-3-small"
+        amo_vector_timeout_seconds = 45.0
+        amo_vector_keep_alive = "1h"
+        openai_api_key = "secret"
+
+    ollama_provider = build_embedding_provider_from_settings(_OllamaSettings())
+    openai_provider = build_embedding_provider_from_settings(_OpenAISettings())
+
+    assert isinstance(ollama_provider, OllamaEmbeddingProvider)
+    assert ollama_provider.timeout_seconds == 45.0
+    assert ollama_provider.keep_alive == "1h"
+    assert isinstance(openai_provider, OpenAIEmbeddingProvider)
+    assert openai_provider.timeout_seconds == 45.0
+    assert not hasattr(openai_provider, "keep_alive")
 
 
 def test_vector_indexer_upserts_chunk_pointers_without_text_payload() -> None:
