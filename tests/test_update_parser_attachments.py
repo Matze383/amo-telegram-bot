@@ -19,6 +19,27 @@ def test_parse_text_only_has_no_attachments() -> None:
     assert update.message is not None
     assert update.message.text == "hello"
     assert update.message.attachments == ()
+    assert update.edited_message is None
+
+
+def test_parse_edited_message_uses_caption_and_thread_scope() -> None:
+    raw = _mk_base_update()
+    message = raw.pop("message")  # type: ignore[assignment]
+    assert isinstance(message, dict)
+    message.pop("text", None)
+    message["caption"] = "edited caption"
+    message["message_thread_id"] = 777
+    raw["edited_message"] = message
+
+    update = parse_update(raw)
+
+    assert update is not None
+    assert update.message is None
+    assert update.edited_message is not None
+    assert update.edited_message.message_id == 10
+    assert update.edited_message.message_thread_id == 777
+    assert update.edited_message.text == "edited caption"
+    assert update.top_level_kind == "edited_message"
 
 
 def test_parse_photo_picks_largest_variant_and_safe_fields() -> None:

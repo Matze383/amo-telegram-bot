@@ -97,6 +97,14 @@ def extract_queue_scope(raw_update: object) -> TelegramQueueScope:
             message_id=message.message_id,
             update_kind="message",
         )
+    if update.edited_message is not None:
+        message = update.edited_message
+        return TelegramQueueScope(
+            chat_id=message.chat.id,
+            topic_id=message.message_thread_id,
+            message_id=message.message_id,
+            update_kind="edited_message",
+        )
     if update.message_reaction is not None:
         reaction: TelegramReactionEvent = update.message_reaction
         return TelegramQueueScope(

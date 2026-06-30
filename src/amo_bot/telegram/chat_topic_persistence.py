@@ -8,7 +8,7 @@ from sqlalchemy.orm import sessionmaker
 
 from amo_bot.ai.claims import extract_claims
 from amo_bot.ai.memory_c2_service import MemoryC2Service, MemoryScope
-from amo_bot.db.models import GROUP_CHAT_TYPES, AuditEvent
+from amo_bot.db.models import GROUP_CHAT_TYPES, AuditEvent, Claim
 from amo_bot.db.repositories import ClaimRepository, ChatSeenUserRepository, ChatTopicRepository, TopicAgentMemoryRepository, UserMemoryProfileRepository, UserRoleRepository
 from amo_bot.telegram.owner_notify import OwnerNotifier
 from amo_bot.telegram.update_parser import TelegramMessage, TelegramUser
@@ -187,6 +187,86 @@ class ChatTopicPersistenceService:
 
             session.commit()
 
+    async def persist_edited_message(self, message: TelegramMessage) -> bool:
+        with self._session_factory() as session:
+            repo = ChatTopicRepository(session)
+            repo.upsert_chat(
+                chat_id=message.chat.id,
+                chat_type=message.chat.type,
+                title=message.chat.title,
+                username=message.chat.username,
+            )
+            if message.message_thread_id is not None:
+                repo.upsert_topic(
+                    chat_id=message.chat.id,
+                    message_thread_id=message.message_thread_id,
+                    telegram_topic_name=message.telegram_topic_name,
+                )
+
+            scope = self._recent_scope_for_message(
+                chat_type=message.chat.type,
+                chat_id=message.chat.id,
+                message_thread_id=message.message_thread_id,
+                private_user_id=message.chat.id if message.from_user.is_bot else message.from_user.id,
+            )
+            if scope is None:
+                session.commit()
+                logger.info(
+                    "edited Telegram message ignored: unsupported chat_type=%s chat_id=%s message_id=%s",
+                    message.chat.type,
+                    message.chat.id,
+                    message.message_id,
+                )
+                return False
+
+            scope_type, scope_chat_id, topic_id, user_id = scope
+            source = "bot" if message.from_user.is_bot else "user"
+            text = (message.text or "").strip()
+            updated = TopicAgentMemoryRepository(session).update_recent_by_telegram_message_id(
+                scope_type=scope_type,
+                chat_id=scope_chat_id,
+                topic_id=topic_id,
+                user_id=user_id,
+                telegram_message_id=message.message_id,
+                message_text=text,
+                telegram_author_user_id=message.from_user.id,
+                telegram_author_username=message.from_user.username,
+                telegram_author_is_bot=message.from_user.is_bot,
+                source=source,
+            )
+            if updated is None:
+                session.commit()
+                logger.info(
+                    "edited Telegram message has no stored original: chat_id=%s topic_id=%s message_id=%s",
+                    message.chat.id,
+                    message.message_thread_id,
+                    message.message_id,
+                )
+                return False
+
+            self._delete_unverified_claims_for_message(
+                session=session,
+                scope_type=scope_type,
+                chat_id=scope_chat_id,
+                topic_id=topic_id,
+                user_id=user_id,
+                source_message_id=message.message_id,
+                source=source,
+            )
+            if text:
+                self._persist_claims_from_text(
+                    session=session,
+                    scope_type=scope_type,
+                    chat_id=scope_chat_id,
+                    topic_id=topic_id,
+                    user_id=user_id,
+                    source_message_id=message.message_id,
+                    source=source,
+                    text=text,
+                )
+            session.commit()
+            return True
+
     def _maybe_update_user_profile_from_message(
         self,
         *,
@@ -248,14 +328,12 @@ class ChatTopicPersistenceService:
         source: str,
         skip_existing: bool = False,
     ) -> None:
-        scope: tuple[str, int | None, int | None, int | None] | None = None
-        if chat_type in GROUP_CHAT_TYPES:
-            if message_thread_id is not None:
-                scope = ("topic", chat_id, message_thread_id, None)
-            else:
-                scope = ("group_chat", chat_id, None, None)
-        elif chat_type == "private" and private_user_id is not None:
-            scope = ("private_user", None, None, private_user_id)
+        scope = self._recent_scope_for_message(
+            chat_type=chat_type,
+            chat_id=chat_id,
+            message_thread_id=message_thread_id,
+            private_user_id=private_user_id,
+        )
 
         if scope is None:
             return
@@ -293,6 +371,44 @@ class ChatTopicPersistenceService:
             source=source,
             text=text,
         )
+
+    @staticmethod
+    def _recent_scope_for_message(
+        *,
+        chat_type: str,
+        chat_id: int,
+        message_thread_id: int | None,
+        private_user_id: int | None,
+    ) -> tuple[str, int | None, int | None, int | None] | None:
+        if chat_type in GROUP_CHAT_TYPES:
+            if message_thread_id is not None:
+                return ("topic", chat_id, message_thread_id, None)
+            return ("group_chat", chat_id, None, None)
+        if chat_type == "private" and private_user_id is not None:
+            return ("private_user", None, None, private_user_id)
+        return None
+
+    @staticmethod
+    def _delete_unverified_claims_for_message(
+        *,
+        session,
+        scope_type: str,
+        chat_id: int | None,
+        topic_id: int | None,
+        user_id: int | None,
+        source_message_id: int,
+        source: str,
+    ) -> None:
+        source_type = "bot_claim" if source == "bot" else "user_claim"
+        session.query(Claim).filter(
+            Claim.scope_type == scope_type,
+            Claim.chat_id == chat_id,
+            Claim.topic_id == topic_id,
+            Claim.user_id == user_id,
+            Claim.source_type == source_type,
+            Claim.source_message_id == source_message_id,
+            Claim.verification_status == "unverified",
+        ).delete(synchronize_session=False)
 
     @staticmethod
     def _persist_claims_from_text(

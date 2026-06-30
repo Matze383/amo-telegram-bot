@@ -5488,6 +5488,41 @@ class TopicAgentMemoryRepository:
         )
         return self._to_recent_record(row) if row is not None else None
 
+    def update_recent_by_telegram_message_id(
+        self,
+        *,
+        scope_type: str,
+        telegram_message_id: int,
+        message_text: str,
+        chat_id: int | None = None,
+        topic_id: int | None = None,
+        user_id: int | None = None,
+        telegram_author_user_id: int | None = None,
+        telegram_author_username: str | None = None,
+        telegram_author_is_bot: bool | None = None,
+        source: str | None = None,
+    ) -> TopicRecentMessageRecord | None:
+        row = self._session.scalar(
+            select(TopicRecentMessage).where(
+                TopicRecentMessage.scope_type == scope_type,
+                TopicRecentMessage.chat_id == chat_id,
+                TopicRecentMessage.topic_id == topic_id,
+                TopicRecentMessage.user_id == user_id,
+                TopicRecentMessage.telegram_message_id == telegram_message_id,
+            ).order_by(TopicRecentMessage.id.desc())
+        )
+        if row is None:
+            return None
+        row.message_text = message_text
+        row.telegram_author_user_id = telegram_author_user_id
+        row.telegram_author_username = telegram_author_username
+        if telegram_author_is_bot is not None:
+            row.telegram_author_is_bot = bool(telegram_author_is_bot)
+        if source is not None:
+            row.source = source
+        self._session.flush()
+        return self._to_recent_record(row)
+
     def list_recent(
         self,
         *,

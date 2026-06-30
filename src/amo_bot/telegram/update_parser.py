@@ -118,6 +118,7 @@ class TelegramReactionEvent:
 class TelegramUpdate:
     update_id: int
     message: TelegramMessage | None
+    edited_message: TelegramMessage | None
     callback_query: TelegramCallbackQuery | None
     top_level_kind: str | None = None
     message_reaction: TelegramReactionEvent | None = None
@@ -407,6 +408,7 @@ def parse_update(raw: Any) -> TelegramUpdate | None:
         return None
 
     message = _parse_message(raw.get("message"))
+    edited_message = _parse_message(raw.get("edited_message"))
     callback_query = _parse_callback_query(raw.get("callback_query"))
     message_reaction = _parse_message_reaction(raw.get("message_reaction"))
 
@@ -420,6 +422,7 @@ def parse_update(raw: Any) -> TelegramUpdate | None:
     return TelegramUpdate(
         update_id=update_id,
         message=message,
+        edited_message=edited_message,
         callback_query=callback_query,
         top_level_kind=top_level_kind,
         message_reaction=message_reaction,

@@ -156,6 +156,8 @@ logger = logging.getLogger(__name__)
 class MessagePersistence(Protocol):
     async def persist_message(self, message: TelegramMessage) -> None: ...
 
+    async def persist_edited_message(self, message: TelegramMessage) -> bool: ...
+
     async def persist_bot_sent_message(
         self,
         *,
@@ -221,6 +223,10 @@ class Dispatcher:
 
         if update.message_reaction is not None:
             await self._handle_message_reaction(update.message_reaction, update_id=update.update_id)
+            return
+
+        if update.edited_message is not None:
+            await self._handle_edited_message(update.edited_message, update_id=update.update_id)
             return
 
         callback_query = update.callback_query
@@ -1192,6 +1198,31 @@ class Dispatcher:
             message_thread_id=reaction.message_thread_id,
             user_id=reaction.user_id,
             extra={"decision": "handled", "emoji_count": len(reaction.emojis), "stored_count": stored_count},
+        )
+
+    async def _handle_edited_message(self, message: TelegramMessage, *, update_id: int) -> None:
+        updated = False
+        if self.message_persistence is not None:
+            try:
+                updated = await self.message_persistence.persist_edited_message(message)
+            except Exception:
+                logger.exception("Failed to persist edited Telegram message; continuing update handling")
+
+        log_event(
+            logger,
+            logging.INFO,
+            event="telegram.edited_message.processed",
+            component=_COMPONENT,
+            update_id=update_id,
+            chat_id=message.chat.id,
+            message_id=message.message_id,
+            message_thread_id=message.message_thread_id,
+            user_id=message.from_user.id,
+            extra={
+                "updated": updated,
+                "has_text": bool((message.text or "").strip()),
+                "attachment_count": len(message.attachments),
+            },
         )
 
     def _maybe_store_learning_text_feedback(self, *, message: TelegramMessage) -> None:

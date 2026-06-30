@@ -79,6 +79,38 @@ def _mk_update(
     return {"update_id": update_id, "message": message}
 
 
+def _mk_edited_update(
+    *,
+    update_id: int,
+    original_message_id: int,
+    user_id: int,
+    chat_id: int,
+    chat_type: str,
+    title: str | None = None,
+    message_thread_id: int | None = None,
+    text: str | None = None,
+    caption: str | None = None,
+) -> dict[str, object]:
+    update = _mk_update(
+        update_id=update_id,
+        user_id=user_id,
+        chat_id=chat_id,
+        chat_type=chat_type,
+        title=title,
+        message_thread_id=message_thread_id,
+        text=text,
+    )
+    message = update.pop("message")
+    assert isinstance(message, dict)
+    message["message_id"] = original_message_id
+    if text is None:
+        message.pop("text", None)
+    if caption is not None:
+        message["caption"] = caption
+    update["edited_message"] = message
+    return update
+
+
 def _build_dispatcher(
     db_url: str,
     sent_private: list[tuple[int, str]] | None = None,
@@ -1072,6 +1104,109 @@ def test_topic_text_without_mention_or_reply_persists_recent_and_sends_no_ai_res
     assert recent[0].message_text == "ein normaler text"
     ai_replies = [m for m in sent_group_text if m[1] != "Bitte kläre Consent privat mit dem Bot."]
     assert ai_replies == []
+
+
+def test_edited_topic_message_updates_existing_recent_message_without_duplicate(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'persist_edited_topic.db'}"
+    init_db(db_url)
+    sent_group_text: list[tuple[int, str, int | None]] = []
+    dispatcher = _build_dispatcher(db_url, sent_group_text=sent_group_text)
+
+    original_update = _mk_update(
+        update_id=201,
+        user_id=9002,
+        chat_id=-12002,
+        chat_type="supergroup",
+        title="Forum",
+        message_thread_id=502,
+        text="ursprungstext",
+    )
+    asyncio.run(dispatcher.handle_raw_update(original_update))
+    original_message = original_update["message"]
+    assert isinstance(original_message, dict)
+
+    asyncio.run(
+        dispatcher.handle_raw_update(
+            _mk_edited_update(
+                update_id=202,
+                original_message_id=int(original_message["message_id"]),
+                user_id=9002,
+                chat_id=-12002,
+                chat_type="supergroup",
+                title="Forum",
+                message_thread_id=502,
+                text="editierter text",
+            )
+        )
+    )
+
+    recent = _recent_messages_for_scope(db_url, scope_type="topic", chat_id=-12002, topic_id=502)
+    assert len(recent) == 1
+    assert recent[0].telegram_message_id == original_message["message_id"]
+    assert recent[0].message_text == "editierter text"
+    ai_replies = [m for m in sent_group_text if m[1] != "Bitte kläre Consent privat mit dem Bot."]
+    assert ai_replies == []
+
+
+def test_edited_caption_updates_existing_group_recent_message(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'persist_edited_caption.db'}"
+    init_db(db_url)
+    dispatcher = _build_dispatcher(db_url)
+
+    original_update = _mk_update(
+        update_id=203,
+        user_id=9003,
+        chat_id=-12003,
+        chat_type="supergroup",
+        title="Group",
+        text="original caption",
+    )
+    asyncio.run(dispatcher.handle_raw_update(original_update))
+    original_message = original_update["message"]
+    assert isinstance(original_message, dict)
+
+    asyncio.run(
+        dispatcher.handle_raw_update(
+            _mk_edited_update(
+                update_id=204,
+                original_message_id=int(original_message["message_id"]),
+                user_id=9003,
+                chat_id=-12003,
+                chat_type="supergroup",
+                title="Group",
+                text=None,
+                caption="edited caption",
+            )
+        )
+    )
+
+    recent = _recent_messages_for_scope(db_url, scope_type="group_chat", chat_id=-12003)
+    assert len(recent) == 1
+    assert recent[0].message_text == "edited caption"
+
+
+def test_edited_message_without_stored_original_does_not_create_duplicate(tmp_path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'persist_edited_missing.db'}"
+    init_db(db_url)
+    dispatcher = _build_dispatcher(db_url)
+
+    asyncio.run(
+        dispatcher.handle_raw_update(
+            _mk_edited_update(
+                update_id=205,
+                original_message_id=99001,
+                user_id=9004,
+                chat_id=-12004,
+                chat_type="supergroup",
+                title="Forum",
+                message_thread_id=504,
+                text="edited but missing",
+            )
+        )
+    )
+
+    recent = _recent_messages_for_scope(db_url, scope_type="topic", chat_id=-12004, topic_id=504)
+    assert recent == []
 
 
 def test_enabled_topic_message_persists_recent_and_is_visible_to_daily_memory(tmp_path) -> None:

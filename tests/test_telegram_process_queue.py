@@ -35,6 +35,11 @@ def _text_update(*, update_id: int, chat_id: int, topic_id: int | None, message_
     return {"update_id": update_id, "message": message}
 
 
+def _edited_text_update(*, update_id: int, chat_id: int, topic_id: int | None, message_id: int, text: str) -> dict:
+    update = _text_update(update_id=update_id, chat_id=chat_id, topic_id=topic_id, message_id=message_id, text=text)
+    return {"update_id": update_id, "edited_message": update["message"]}
+
+
 def test_skip_locked_supports_postgresql_mysql_and_mariadb() -> None:
     class _Dialect:
         def __init__(self, name: str) -> None:
@@ -110,6 +115,26 @@ def test_incoming_queue_claim_is_topic_scoped_and_stale_lease_reclaimable(tmp_pa
         )
         assert topic_20 is not None
         assert topic_20.telegram_update_id == 2
+
+
+def test_incoming_queue_extracts_edited_message_scope(tmp_path) -> None:
+    url = _db_url(tmp_path)
+    init_db(url)
+    factory = create_session_factory(url)
+
+    with factory() as session:
+        TelegramIncomingQueueRepository(session).enqueue_update(
+            _edited_text_update(update_id=7, chat_id=-100, topic_id=44, message_id=7001, text="edited")
+        )
+
+    with factory() as session:
+        row = session.scalar(select(TelegramIncomingQueue))
+        assert row is not None
+        assert row.telegram_update_id == 7
+        assert row.chat_id == -100
+        assert row.topic_id == 44
+        assert row.message_id == 7001
+        assert row.update_kind == "edited_message"
 
 
 def test_incoming_queue_pool_claim_blocks_parallel_same_scope_and_allows_other_scopes(tmp_path) -> None:
