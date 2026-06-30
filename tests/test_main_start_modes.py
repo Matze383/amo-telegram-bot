@@ -269,6 +269,21 @@ def test_queue_runtime_builds_configured_fixed_worker_pool(monkeypatch, tmp_path
     assert [worker.args for worker in workers] == [(1,), (2,), (3,)]
 
 
+def test_queue_runtime_default_worker_pool_has_four_workers(monkeypatch, tmp_path) -> None:
+    _set_env(monkeypatch, tmp_path)
+    settings = main_module.get_settings()
+
+    workers = main_module._queue_worker_processes(settings)
+
+    assert settings.amo_telegram_queue_worker_count == 4
+    assert [worker.name for worker in workers] == [
+        "telegram-queue-worker-1",
+        "telegram-queue-worker-2",
+        "telegram-queue-worker-3",
+        "telegram-queue-worker-4",
+    ]
+
+
 def test_build_queue_worker_dispatcher_wires_non_none_ai_service(monkeypatch, tmp_path) -> None:
     _set_env(monkeypatch, tmp_path)
     captured: dict[str, object] = {}

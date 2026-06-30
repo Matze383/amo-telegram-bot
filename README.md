@@ -110,7 +110,7 @@ venv/bin/python -m amo_bot.main --serve
 ```
 
 **Umgebungsvariablen:**
-- `AMO_TELEGRAM_QUEUE_WORKER_COUNT` — Feste Anzahl eingehender Queue-Worker (Standard: `2`)
+- `AMO_TELEGRAM_QUEUE_WORKER_COUNT` — Feste Anzahl eingehender Queue-Worker (Standard: `4`)
 - `AMO_TELEGRAM_QUEUE_IDLE_SLEEP_SECONDS` — Pausenzeit für Idle-Worker
 
 **Queue-Modus Einschränkungen:**
@@ -231,7 +231,7 @@ venv/bin/python -m amo_bot.main --serve
 ```
 
 **Environment variables:**
-- `AMO_TELEGRAM_QUEUE_WORKER_COUNT` — Fixed number of incoming queue workers (default: `2`)
+- `AMO_TELEGRAM_QUEUE_WORKER_COUNT` — Fixed number of incoming queue workers (default: `4`)
 - `AMO_TELEGRAM_QUEUE_IDLE_SLEEP_SECONDS` — Idle sleep time for workers
 - `AMO_DB_POOL_SIZE` — PostgreSQL connections kept per process (default: `1`)
 - `AMO_DB_MAX_OVERFLOW` — Additional temporary PostgreSQL connections per process (default: `1`)

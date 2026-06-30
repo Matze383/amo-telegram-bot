@@ -25,7 +25,7 @@ class Settings(BaseSettings):
         le=30.0,
     )
     amo_telegram_queue_worker_count: int = Field(
-        default=2,
+        default=4,
         alias="AMO_TELEGRAM_QUEUE_WORKER_COUNT",
         ge=1,
         le=32,

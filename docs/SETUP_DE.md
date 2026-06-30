@@ -312,7 +312,7 @@ WEBUI_SESSION_TTL_SECONDS=3600
 # WEBUI_LOGIN_DELAY_MAX_SECONDS=2.0
 
 # Optional: Queue-Runtime
-# AMO_TELEGRAM_QUEUE_WORKER_COUNT=2  # Feste Anzahl eingehender Queue-Worker-Prozesse
+# AMO_TELEGRAM_QUEUE_WORKER_COUNT=4  # Feste Anzahl eingehender Queue-Worker-Prozesse
 # AMO_TELEGRAM_QUEUE_IDLE_SLEEP_SECONDS=1.0  # Pausenzeit für Idle-Queue-Worker
 ```
 
@@ -367,7 +367,7 @@ venv/bin/python -m amo_bot.main --serve
 
 | Variable | Standard | Beschreibung |
 |----------|----------|--------------|
-| `AMO_TELEGRAM_QUEUE_WORKER_COUNT` | `2` | Feste Anzahl eingehender Queue-Worker-Prozesse |
+| `AMO_TELEGRAM_QUEUE_WORKER_COUNT` | `4` | Feste Anzahl eingehender Queue-Worker-Prozesse |
 | `AMO_TELEGRAM_QUEUE_IDLE_SLEEP_SECONDS` | `1.0` | Pausenzeit für Idle-Queue-Worker (Sekunden) |
 | `AMO_DB_POOL_SIZE` | `1` | PostgreSQL-Verbindungen, die pro Prozess gehalten werden |
 | `AMO_DB_MAX_OVERFLOW` | `1` | Zusätzliche temporäre PostgreSQL-Verbindungen pro Prozess |
