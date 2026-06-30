@@ -253,6 +253,22 @@ def test_run_serve_queue_runtime_starts_webui_and_supervisor(monkeypatch, tmp_pa
     assert not pid_path.exists()
 
 
+def test_queue_runtime_builds_configured_fixed_worker_pool(monkeypatch, tmp_path) -> None:
+    _set_env(monkeypatch, tmp_path)
+    monkeypatch.setenv("AMO_TELEGRAM_QUEUE_WORKER_COUNT", "3")
+    settings = main_module.get_settings()
+
+    workers = main_module._queue_worker_processes(settings)
+
+    assert [worker.name for worker in workers] == [
+        "telegram-queue-worker-1",
+        "telegram-queue-worker-2",
+        "telegram-queue-worker-3",
+    ]
+    assert [worker.kind for worker in workers] == ["queue_worker", "queue_worker", "queue_worker"]
+    assert [worker.args for worker in workers] == [(1,), (2,), (3,)]
+
+
 def test_build_queue_worker_dispatcher_wires_non_none_ai_service(monkeypatch, tmp_path) -> None:
     _set_env(monkeypatch, tmp_path)
     captured: dict[str, object] = {}

@@ -8,11 +8,8 @@ import signal
 import time
 from typing import Callable
 
-from sqlalchemy import select
-
 from amo_bot.db.base import create_session_factory
 from amo_bot.db.init_db import init_db
-from amo_bot.db.models import TelegramIncomingQueue
 from amo_bot.db.telegram_queue import TelegramProcessHealthRepository
 
 
@@ -33,9 +30,6 @@ class ManagedProcess:
     target: ProcessTarget
     args: tuple = ()
     process: mp.Process | None = None
-
-
-TopicProcessFactory = Callable[[int, int | None], ManagedProcess]
 
 
 @dataclass(slots=True)
@@ -106,38 +100,36 @@ class TelegramProcessSupervisor:
         self,
         *,
         sender: ManagedProcess,
-        known_topics: list[ManagedProcess],
+        workers: list[ManagedProcess],
         poller: ManagedProcess,
         background: list[ManagedProcess] | None = None,
     ) -> None:
         self.register(name=sender.name, kind=sender.kind, target=sender.target, args=sender.args)
-        for topic in known_topics:
-            self.register(name=topic.name, kind=topic.kind, target=topic.target, args=topic.args)
+        for worker in workers:
+            self.register(name=worker.name, kind=worker.kind, target=worker.target, args=worker.args)
         self.register(name=poller.name, kind=poller.kind, target=poller.target, args=poller.args)
         for proc in background or []:
             self.register(name=proc.name, kind=proc.kind, target=proc.target, args=proc.args)
 
-        order = [sender.name, *(topic.name for topic in known_topics), poller.name, *((proc.name for proc in background or []))]
+        order = [sender.name, *(worker.name for worker in workers), poller.name, *((proc.name for proc in background or []))]
         self.start_registered(order)
 
     def run_runtime(
         self,
         *,
         sender: ManagedProcess,
-        known_topics: list[ManagedProcess],
+        workers: list[ManagedProcess],
         poller: ManagedProcess,
-        topic_process_factory: TopicProcessFactory,
         background: list[ManagedProcess] | None = None,
         monitor_interval_seconds: float = 2.0,
     ) -> None:
-        """Start queue runtime and keep the supervisor alive for restarts/new topics."""
+        """Start queue runtime and keep the fixed process set alive."""
 
-        self.start_runtime(sender=sender, known_topics=known_topics, poller=poller, background=background)
+        self.start_runtime(sender=sender, workers=workers, poller=poller, background=background)
         self._install_signal_handlers()
         try:
             while not self._stopping:
                 self._restart_dead_processes()
-                self._start_missing_topic_workers(topic_process_factory)
                 time.sleep(max(0.2, monitor_interval_seconds))
         finally:
             self.terminate_all()
@@ -157,35 +149,3 @@ class TelegramProcessSupervisor:
             logger.warning("restarting stopped telegram process name=%s exitcode=%s", name, process.exitcode)
             managed.process = None
             self.start_registered([name])
-
-    def _start_missing_topic_workers(self, topic_process_factory: TopicProcessFactory) -> None:
-        for chat_id, topic_id in self._queued_scopes_without_worker():
-            topic = topic_process_factory(chat_id, topic_id)
-            if topic.name in self.processes:
-                continue
-            self.register(name=topic.name, kind=topic.kind, target=topic.target, args=topic.args)
-            self.start_registered([topic.name])
-
-    def _queued_scopes_without_worker(self) -> list[tuple[int, int | None]]:
-        with create_session_factory(self.database_url)() as session:
-            rows = session.execute(
-                select(TelegramIncomingQueue.chat_id, TelegramIncomingQueue.topic_id)
-                .where(
-                    TelegramIncomingQueue.chat_id.is_not(None),
-                    TelegramIncomingQueue.status.in_(("queued", "processing")),
-                )
-                .distinct()
-            ).all()
-        scopes: list[tuple[int, int | None]] = []
-        for chat_id, topic_id in rows:
-            if chat_id is None:
-                continue
-            name = topic_process_name(chat_id=int(chat_id), topic_id=topic_id)
-            if name not in self.processes:
-                scopes.append((int(chat_id), topic_id))
-        return scopes
-
-
-def topic_process_name(*, chat_id: int, topic_id: int | None) -> str:
-    topic_label = "root" if topic_id is None else str(topic_id)
-    return f"telegram-topic-{chat_id}-{topic_label}"

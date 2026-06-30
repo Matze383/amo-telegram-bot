@@ -63,10 +63,8 @@ class QueueBackedTelegramSender:
 
 
 @dataclass(slots=True)
-class TopicWorker:
+class QueueWorker:
     database_url: str
-    chat_id: int
-    topic_id: int | None
     dispatcher_factory: Callable[[QueueBackedTelegramSender], Dispatcher]
     worker_id: str | None = None
     lease_seconds: int = DEFAULT_LEASE_SECONDS
@@ -74,19 +72,20 @@ class TopicWorker:
 
     def __post_init__(self) -> None:
         if self.worker_id is None:
-            topic_label = "none" if self.topic_id is None else str(self.topic_id)
-            self.worker_id = f"topic:{self.chat_id}:{topic_label}:{os.getpid()}"
+            self.worker_id = f"queue-worker:{os.getpid()}"
 
     async def process_one(self) -> bool:
         assert self.worker_id is not None
         with create_session_factory(self.database_url)() as session:
-            item = TelegramIncomingQueueRepository(session).claim_next_for_topic(
-                chat_id=self.chat_id,
-                topic_id=self.topic_id,
+            item = TelegramIncomingQueueRepository(session).claim_next_available(
                 worker_id=self.worker_id,
                 lease_seconds=self.lease_seconds,
                 max_attempts=self.max_attempts,
             )
+        return await self._process_claimed_item(item)
+
+    async def _process_claimed_item(self, item) -> bool:  # noqa: ANN001
+        assert self.worker_id is not None
         if item is None:
             return False
 
@@ -101,7 +100,7 @@ class TopicWorker:
         try:
             await dispatcher.handle_raw_update(raw_update)
         except Exception as exc:
-            logger.exception("topic worker failed item_id=%s", item.id)
+            logger.exception("queue worker failed item_id=%s", item.id)
             with create_session_factory(self.database_url)() as session:
                 TelegramIncomingQueueRepository(session).fail(
                     item.id,
@@ -127,9 +126,7 @@ class TopicWorker:
             with create_session_factory(self.database_url)() as session:
                 TelegramProcessHealthRepository(session).heartbeat(
                     process_name=self.worker_id,
-                    process_kind="topic",
-                    chat_id=self.chat_id,
-                    topic_id=self.topic_id,
+                    process_kind="queue_worker",
                     status="running",
                 )
             processed = await self.process_one()
@@ -137,6 +134,29 @@ class TopicWorker:
                 return
             if not processed:
                 await asyncio.sleep(max(0.05, idle_sleep_seconds))
+
+
+@dataclass(slots=True)
+class TopicWorker(QueueWorker):
+    chat_id: int = 0
+    topic_id: int | None = None
+
+    def __post_init__(self) -> None:
+        if self.worker_id is None:
+            topic_label = "root" if self.topic_id is None else str(self.topic_id)
+            self.worker_id = f"topic:{self.chat_id}:{topic_label}:{os.getpid()}"
+
+    async def process_one(self) -> bool:
+        assert self.worker_id is not None
+        with create_session_factory(self.database_url)() as session:
+            item = TelegramIncomingQueueRepository(session).claim_next_for_topic(
+                chat_id=self.chat_id,
+                topic_id=self.topic_id,
+                worker_id=self.worker_id,
+                lease_seconds=self.lease_seconds,
+                max_attempts=self.max_attempts,
+            )
+        return await self._process_claimed_item(item)
 
 
 def make_outbox_send_text(

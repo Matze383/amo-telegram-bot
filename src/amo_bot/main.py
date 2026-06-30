@@ -16,7 +16,6 @@ from amo_bot.core.logging import setup_logging, log_event
 from amo_bot.db.base import create_session_factory
 from amo_bot.db.init_db import init_db
 from amo_bot.db.repositories import (
-    ChatTopicRepository,
     ResearchSourceObservationRepository,
     ResearchSourcePreferenceRepository,
     UserRoleRepository,
@@ -34,8 +33,8 @@ from amo_bot.telegram.outbox_sender import OutboxSender
 from amo_bot.telegram.owner_notify import OwnerNotifier
 from amo_bot.telegram.queue_poller import OffsetStore, run_queue_poller
 from amo_bot.telegram.role_resolver import DBRoleResolver
-from amo_bot.telegram.supervisor import ManagedProcess, TelegramProcessSupervisor, topic_process_name
-from amo_bot.telegram.topic_worker import QueueBackedTelegramSender, TopicWorker
+from amo_bot.telegram.supervisor import ManagedProcess, TelegramProcessSupervisor
+from amo_bot.telegram.topic_worker import QueueBackedTelegramSender, QueueWorker
 from amo_bot.webui.flask_app import create_flask_app
 from amo_bot.ai.webtool_dispatcher import WebtoolCapabilityDispatcher
 from amo_bot.ai.webtool_provider_adapter import RealBrowserProviderAdapter, RealWebscrapeProviderAdapter, RealWebsearchProviderAdapter
@@ -375,7 +374,7 @@ def run_queue_poller_process(*, idle_sleep_seconds: float | None = None) -> None
     )
 
 
-def run_queue_topic_worker_process(chat_id: int, topic_id: int | None, *, idle_sleep_seconds: float | None = None) -> None:
+def run_queue_worker_process(worker_index: int, *, idle_sleep_seconds: float | None = None) -> None:
     settings = get_settings()
     setup_logging()
     init_db(settings.database_url)
@@ -397,12 +396,10 @@ def run_queue_topic_worker_process(chat_id: int, topic_id: int | None, *, idle_s
         dispatcher.restart_terminator = request_runtime_restart
         return dispatcher
 
-    worker = TopicWorker(
+    worker = QueueWorker(
         database_url=settings.database_url,
-        chat_id=chat_id,
-        topic_id=topic_id,
         dispatcher_factory=dispatcher_factory,
-        worker_id=f"topic:{chat_id}:{'root' if topic_id is None else topic_id}:{os.getpid()}",
+        worker_id=f"queue-worker:{worker_index}:{os.getpid()}",
     )
     asyncio.run(
         worker.run_forever(
@@ -414,26 +411,16 @@ def run_queue_topic_worker_process(chat_id: int, topic_id: int | None, *, idle_s
         os.kill(os.getppid(), signal.SIGTERM)
 
 
-def _known_topic_processes(settings) -> list[ManagedProcess]:
-    init_db(settings.database_url)
-    with create_session_factory(settings.database_url)() as session:
-        repo = ChatTopicRepository(session)
-        processes: list[ManagedProcess] = []
-        for chat in repo.list_chats():
-            processes.append(_topic_process(chat.chat_id, None, settings))
-            for topic in repo.list_topics(chat.chat_id):
-                if topic.enabled:
-                    processes.append(_topic_process(chat.chat_id, topic.message_thread_id, settings))
-        return processes
-
-
-def _topic_process(chat_id: int, topic_id: int | None, settings) -> ManagedProcess:
-    return ManagedProcess(
-        name=topic_process_name(chat_id=chat_id, topic_id=topic_id),
-        kind="topic",
-        target=run_queue_topic_worker_process,
-        args=(chat_id, topic_id),
-    )
+def _queue_worker_processes(settings) -> list[ManagedProcess]:
+    return [
+        ManagedProcess(
+            name=f"telegram-queue-worker-{index}",
+            kind="queue_worker",
+            target=run_queue_worker_process,
+            args=(index,),
+        )
+        for index in range(1, settings.amo_telegram_queue_worker_count + 1)
+    ]
 
 
 def _run_queue_runtime(settings) -> None:
@@ -451,9 +438,8 @@ def _run_queue_runtime(settings) -> None:
 
     supervisor.run_runtime(
         sender=sender,
-        known_topics=_known_topic_processes(settings),
+        workers=_queue_worker_processes(settings),
         poller=poller,
-        topic_process_factory=lambda chat_id, topic_id: _topic_process(chat_id, topic_id, settings),
     )
 
 

@@ -7,9 +7,9 @@ import os
 import uuid
 from typing import Any
 
-from sqlalchemy import and_, or_, select, update
+from sqlalchemy import and_, exists, or_, select, update
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, aliased
 
 from amo_bot.db.models import (
     TelegramIncomingQueue,
@@ -213,6 +213,88 @@ class TelegramIncomingQueueRepository:
             self._session.rollback()
         return None
 
+    def claim_next_available(
+        self,
+        *,
+        worker_id: str,
+        lease_seconds: int = DEFAULT_LEASE_SECONDS,
+        max_attempts: int = DEFAULT_MAX_ATTEMPTS,
+    ) -> IncomingQueueItem | None:
+        for _ in range(CLAIM_RACE_RETRIES):
+            now = _now()
+            lease_until = now + timedelta(seconds=max(1, lease_seconds))
+            active = aliased(TelegramIncomingQueue)
+            active_scope_exists = exists(
+                select(active.id).where(
+                    self._same_scope(active, TelegramIncomingQueue),
+                    active.status == "processing",
+                    active.locked_until.is_not(None),
+                    active.locked_until > now,
+                )
+            )
+            query = (
+                select(TelegramIncomingQueue)
+                .where(
+                    TelegramIncomingQueue.attempts < max_attempts,
+                    ~active_scope_exists,
+                    or_(
+                        TelegramIncomingQueue.status == "queued",
+                        and_(
+                            TelegramIncomingQueue.status == "processing",
+                            TelegramIncomingQueue.locked_until.is_not(None),
+                            TelegramIncomingQueue.locked_until <= now,
+                        ),
+                    ),
+                )
+                .order_by(TelegramIncomingQueue.id.asc())
+                .limit(1)
+            )
+            if _supports_skip_locked(self._session):
+                query = query.with_for_update(skip_locked=True)
+            candidate = self._session.scalar(query)
+            if candidate is None:
+                return None
+
+            active_for_update = aliased(TelegramIncomingQueue)
+            active_scope_exists_for_update = exists(
+                select(active_for_update.id).where(
+                    self._same_scope(active_for_update, TelegramIncomingQueue),
+                    active_for_update.status == "processing",
+                    active_for_update.locked_until.is_not(None),
+                    active_for_update.locked_until > now,
+                )
+            )
+            result = self._session.execute(
+                update(TelegramIncomingQueue)
+                .where(
+                    TelegramIncomingQueue.id == candidate.id,
+                    TelegramIncomingQueue.attempts == candidate.attempts,
+                    ~active_scope_exists_for_update,
+                    or_(
+                        TelegramIncomingQueue.status == "queued",
+                        and_(
+                            TelegramIncomingQueue.status == "processing",
+                            TelegramIncomingQueue.locked_until.is_not(None),
+                            TelegramIncomingQueue.locked_until <= now,
+                        ),
+                    ),
+                )
+                .values(
+                    status="processing",
+                    locked_by=worker_id,
+                    locked_until=lease_until,
+                    attempts=candidate.attempts + 1,
+                    last_error=None,
+                )
+                .execution_options(synchronize_session=False)
+            )
+            if result.rowcount == 1:
+                self._session.commit()
+                self._session.refresh(candidate)
+                return self._to_incoming_item(candidate)
+            self._session.rollback()
+        return None
+
     def heartbeat(self, item_id: int, *, worker_id: str, lease_seconds: int = DEFAULT_LEASE_SECONDS) -> bool:
         result = self._session.execute(
             update(TelegramIncomingQueue)
@@ -283,6 +365,13 @@ class TelegramIncomingQueueRepository:
             payload=json.loads(row.payload_json),
             attempts=row.attempts,
             locked_by=row.locked_by,
+        )
+
+    @staticmethod
+    def _same_scope(left, right):  # noqa: ANN001
+        return and_(
+            or_(left.chat_id == right.chat_id, and_(left.chat_id.is_(None), right.chat_id.is_(None))),
+            or_(left.topic_id == right.topic_id, and_(left.topic_id.is_(None), right.topic_id.is_(None))),
         )
 
 

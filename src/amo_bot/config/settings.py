@@ -24,6 +24,12 @@ class Settings(BaseSettings):
         ge=0.05,
         le=30.0,
     )
+    amo_telegram_queue_worker_count: int = Field(
+        default=2,
+        alias="AMO_TELEGRAM_QUEUE_WORKER_COUNT",
+        ge=1,
+        le=32,
+    )
     offset_state_file: str = Field(default=".state/offset.json", alias="OFFSET_STATE_FILE")
     bot_pid_file: str = Field(default=".state/amo_bot.pid", alias="BOT_PID_FILE")
 

@@ -312,6 +312,7 @@ WEBUI_SESSION_TTL_SECONDS=3600
 # WEBUI_LOGIN_DELAY_MAX_SECONDS=2.0
 
 # Optional: Queue runtime
+# AMO_TELEGRAM_QUEUE_WORKER_COUNT=2  # Fixed incoming queue worker processes
 # AMO_TELEGRAM_QUEUE_IDLE_SLEEP_SECONDS=1.0  # Idle sleep time for queue workers
 ```
 
@@ -358,15 +359,15 @@ The bot uses structured logging with configurable output format and filtering.
 
 ## Runtime Modes
 
-The regular bot start uses the multi-process queue runtime with worker supervisor.
+The regular bot start uses the multi-process queue runtime with a fixed worker pool.
 
 | Mode | Description | Default |
 |------|-------------|---------|
-| **Queue** | Multi-process queue runtime with worker supervisor | ✅ Default |
+| **Queue** | Multi-process queue runtime with fixed worker pool | ✅ Default |
 
 ### Queue Mode (Default)
 
-The queue mode uses a multi-process architecture with a supervisor that manages sender, known topic workers, and the poller. Dead processes are automatically restarted, and topic workers are automatically started for incoming scopes from the queue.
+The queue mode uses a multi-process architecture with a supervisor that manages sender, a fixed incoming queue worker pool, and the poller. Dead processes are automatically restarted. Incoming queue workers claim jobs across all chats/topics while the queue lease prevents parallel processing of the same conversation scope.
 
 **Start:**
 ```bash
@@ -380,6 +381,7 @@ venv/bin/python -m amo_bot.main --serve
 
 | Variable | Default | Description |
 |----------|---------|-------------|
+| `AMO_TELEGRAM_QUEUE_WORKER_COUNT` | `2` | Fixed number of incoming queue worker processes |
 | `AMO_TELEGRAM_QUEUE_IDLE_SLEEP_SECONDS` | `1.0` | Idle sleep time for queue workers (seconds) |
 | `AMO_DB_POOL_SIZE` | `1` | PostgreSQL connections kept per process |
 | `AMO_DB_MAX_OVERFLOW` | `1` | Additional temporary PostgreSQL connections per process |

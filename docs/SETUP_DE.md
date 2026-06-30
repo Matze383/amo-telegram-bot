@@ -312,6 +312,7 @@ WEBUI_SESSION_TTL_SECONDS=3600
 # WEBUI_LOGIN_DELAY_MAX_SECONDS=2.0
 
 # Optional: Queue-Runtime
+# AMO_TELEGRAM_QUEUE_WORKER_COUNT=2  # Feste Anzahl eingehender Queue-Worker-Prozesse
 # AMO_TELEGRAM_QUEUE_IDLE_SLEEP_SECONDS=1.0  # Pausenzeit für Idle-Queue-Worker
 ```
 
@@ -344,15 +345,15 @@ Die WebUI enthält konfigurierbare Sicherheitsfeatures:
 
 ## Runtime-Modi / Laufzeit-Modi
 
-Der normale Bot-Start nutzt die Multi-Prozess Queue-Runtime mit Worker-Supervisor.
+Der normale Bot-Start nutzt die Multi-Prozess Queue-Runtime mit festem Worker-Pool.
 
 | Modus | Beschreibung | Standard |
 |-------|--------------|----------|
-| **Queue** | Multi-Prozess Queue-Runtime mit Worker-Supervisor | ✅ Standard |
+| **Queue** | Multi-Prozess Queue-Runtime mit festem Worker-Pool | ✅ Standard |
 
 ### Queue-Modus (Standard)
 
-Der Queue-Modus verwendet eine Multi-Prozess-Architektur mit einem Supervisor, der Sender, bekannte Topic-Worker und den Poller verwaltet. Tote Prozesse werden automatisch neu gestartet, und Topic-Worker werden automatisch für eingehende Scopes aus der Queue gestartet.
+Der Queue-Modus verwendet eine Multi-Prozess-Architektur mit einem Supervisor, der Sender, einen festen eingehenden Queue-Worker-Pool und den Poller verwaltet. Tote Prozesse werden automatisch neu gestartet. Eingehende Queue-Worker claimen Jobs aus allen Chats/Topics; die Queue-Lease verhindert parallele Verarbeitung desselben Conversation-Scopes.
 
 **Starten:**
 ```bash
@@ -366,6 +367,7 @@ venv/bin/python -m amo_bot.main --serve
 
 | Variable | Standard | Beschreibung |
 |----------|----------|--------------|
+| `AMO_TELEGRAM_QUEUE_WORKER_COUNT` | `2` | Feste Anzahl eingehender Queue-Worker-Prozesse |
 | `AMO_TELEGRAM_QUEUE_IDLE_SLEEP_SECONDS` | `1.0` | Pausenzeit für Idle-Queue-Worker (Sekunden) |
 | `AMO_DB_POOL_SIZE` | `1` | PostgreSQL-Verbindungen, die pro Prozess gehalten werden |
 | `AMO_DB_MAX_OVERFLOW` | `1` | Zusätzliche temporäre PostgreSQL-Verbindungen pro Prozess |

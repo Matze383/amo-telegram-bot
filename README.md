@@ -97,11 +97,11 @@ python main.py
 
 ### Start-Modi / Runtime-Modi
 
-Der normale Bot-Start nutzt die Multi-Prozess Queue-Runtime mit Worker-Supervisor.
+Der normale Bot-Start nutzt die Multi-Prozess Queue-Runtime mit festem Worker-Pool.
 
 | Modus | Beschreibung | Standard |
 |-------|--------------|----------|
-| **Queue** | Multi-Prozess Queue-Runtime mit Worker-Supervisor | ✅ Standard |
+| **Queue** | Multi-Prozess Queue-Runtime mit festem Worker-Pool | ✅ Standard |
 
 **Queue-Modus (Standard):**
 ```bash
@@ -110,6 +110,7 @@ venv/bin/python -m amo_bot.main --serve
 ```
 
 **Umgebungsvariablen:**
+- `AMO_TELEGRAM_QUEUE_WORKER_COUNT` — Feste Anzahl eingehender Queue-Worker (Standard: `2`)
 - `AMO_TELEGRAM_QUEUE_IDLE_SLEEP_SECONDS` — Pausenzeit für Idle-Worker
 
 **Queue-Modus Einschränkungen:**
@@ -217,11 +218,11 @@ python main.py
 
 ### Runtime Modes
 
-The regular bot start uses the multi-process queue runtime with worker supervisor.
+The regular bot start uses the multi-process queue runtime with a fixed worker pool.
 
 | Mode | Description | Default |
 |------|-------------|---------|
-| **Queue** | Multi-process queue runtime with worker supervisor | ✅ Default |
+| **Queue** | Multi-process queue runtime with fixed worker pool | ✅ Default |
 
 **Queue mode (Default):**
 ```bash
@@ -230,6 +231,7 @@ venv/bin/python -m amo_bot.main --serve
 ```
 
 **Environment variables:**
+- `AMO_TELEGRAM_QUEUE_WORKER_COUNT` — Fixed number of incoming queue workers (default: `2`)
 - `AMO_TELEGRAM_QUEUE_IDLE_SLEEP_SECONDS` — Idle sleep time for workers
 - `AMO_DB_POOL_SIZE` — PostgreSQL connections kept per process (default: `1`)
 - `AMO_DB_MAX_OVERFLOW` — Additional temporary PostgreSQL connections per process (default: `1`)
